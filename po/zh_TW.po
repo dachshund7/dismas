@@ -1,0 +1,508 @@
+# Chinese (Taiwan) translation for amberol.
+# Copyright (C) 2026 amberol's COPYRIGHT HOLDER
+# This file is distributed under the same license as the amberol package.
+# A-Lang <alang.hsu@gmail.com>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: amberol main\n"
+"Report-Msgid-Bugs-To: https://gitlab.gnome.org/World/amberol/-/issues/\n"
+"POT-Creation-Date: 2026-07-08 19:26+0000\n"
+"PO-Revision-Date: 2026-09-29 22:38+0800\n"
+"Last-Translator: Cheng-Chia Tseng <zerngjia@gmail.com>\n"
+"Language-Team: Chinese (Taiwan)\n"
+"Language: zh_TW\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Poedit 3.9\n"
+
+#: data/io.bassi.Amberol.desktop.in.in:2
+#: data/io.bassi.Amberol.metainfo.xml.in.in:6
+msgid "Amberol"
+msgstr "Amberol"
+
+#: data/io.bassi.Amberol.desktop.in.in:3
+msgid "Music Player"
+msgstr "音樂播放器"
+
+#. Translators: Search terms to find this application. Do NOT translate or localize the semicolons! The list MUST also end with a semicolon!
+#: data/io.bassi.Amberol.desktop.in.in:11
+msgid "music;player;media;audio;playlist;"
+msgstr "音樂;播放器;媒體;音訊;播放清單;music;player;media;audio;playlist;"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:7
+msgid "Plays music, and nothing else"
+msgstr "播放音樂，僅此而已"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:9
+msgid ""
+"Amberol is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Amberol is the music player "
+"you are looking for."
+msgstr ""
+"Amberol 是一款謙遜樸實的音樂播放器。如果您只想播放本機系統上的音樂，那麼 "
+"Amberol 就是您正在尋找的音樂播放器。"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:14
+msgid "Current features:"
+msgstr "目前的功能："
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:16
+msgid "adaptive UI"
+msgstr "自適應介面"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:17
+msgid "UI recoloring using the album art"
+msgstr "使用專輯封面為介面重新配色"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:18
+msgid "drag and drop support to queue songs"
+msgstr "支援拖放以將歌曲加入佇列"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:19
+msgid "shuffle and repeat"
+msgstr "隨機播放與重複播放"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:20
+msgid "MPRIS integration"
+msgstr "MPRIS 整合"
+
+#: data/io.bassi.Amberol.metainfo.xml.in.in:48
+#: data/io.bassi.Amberol.metainfo.xml.in.in:50
+msgid "Emmanuele Bassi"
+msgstr "Emmanuele Bassi"
+
+#: src/gtk/playback-control.blp:21
+msgid "Play the Previous Song"
+msgstr "播放上一首歌曲"
+
+#: src/gtk/playback-control.blp:28
+msgctxt "a11y"
+msgid "Skip backwards"
+msgstr "向後跳轉"
+
+#: src/gtk/playback-control.blp:36
+msgid "Toggle Play"
+msgstr "切換播放"
+
+#: src/gtk/playback-control.blp:44
+msgctxt "a11y"
+msgid "Toggle play"
+msgstr "切換播放"
+
+#: src/gtk/playback-control.blp:52
+msgid "Play the Next Song"
+msgstr "播放下一首歌曲"
+
+#: src/gtk/playback-control.blp:59
+msgctxt "a11y"
+msgid "Skip forward"
+msgstr "向前跳轉"
+
+#: src/gtk/playback-control.blp:79
+msgid "Toggle Playlist"
+msgstr "切換播放清單"
+
+#: src/gtk/playback-control.blp:86
+msgctxt "a11y"
+msgid "Toggle playlist"
+msgstr "切換播放清單"
+
+#: src/gtk/playback-control.blp:94
+msgid "Shuffle the Playlist"
+msgstr "隨機播放清單"
+
+#: src/gtk/playback-control.blp:97
+msgctxt "a11y"
+msgid "Shuffle"
+msgstr "隨機播放"
+
+#: src/gtk/playback-control.blp:116
+msgid "Enable Repeat"
+msgstr "啟用重複播放"
+
+#: src/gtk/playback-control.blp:123
+msgctxt "a11y"
+msgid "Repeat"
+msgstr "重複播放"
+
+#: src/gtk/playback-control.blp:133
+msgid "Main Menu"
+msgstr "主選單"
+
+#: src/gtk/playback-control.blp:141
+msgctxt "a11y"
+msgid "Primary menu"
+msgstr "主要選單"
+
+#: src/gtk/playback-control.blp:152
+msgid "Copy"
+msgstr "複製"
+
+#: src/gtk/playback-control.blp:157
+msgid "Open Directory"
+msgstr "開啟資料夾"
+
+#: src/gtk/playback-control.blp:164
+msgid "Add _Song"
+msgstr "新增歌曲(_S)"
+
+#: src/gtk/playback-control.blp:169
+msgid "Add _Folder"
+msgstr "新增資料夾(_F)"
+
+#: src/gtk/playback-control.blp:174
+msgid "Clear"
+msgstr "清除"
+
+#: src/gtk/playback-control.blp:181
+msgid "_Match Cover Art"
+msgstr "比對封面(_M)"
+
+#: src/gtk/playback-control.blp:186
+msgid "_Background Playback"
+msgstr "背景播放(_B)"
+
+#: src/gtk/playback-control.blp:193
+msgid "_ReplayGain"
+msgstr "_ReplayGain"
+
+#: src/gtk/playback-control.blp:196
+msgctxt "replaygain-menu"
+msgid "_Album"
+msgstr "專輯(_A)"
+
+#: src/gtk/playback-control.blp:202
+msgctxt "replaygain-menu"
+msgid "_Song"
+msgstr "歌曲(_S)"
+
+#: src/gtk/playback-control.blp:208
+msgctxt "replaygain-menu"
+msgid "_Disabled"
+msgstr "停用(_D)"
+
+#: src/gtk/playback-control.blp:217
+msgid "_Keyboard Shortcuts"
+msgstr "鍵盤快捷鍵(_K)"
+
+#: src/gtk/playback-control.blp:222
+msgid "_About Amberol"
+msgstr "關於 _Amberol"
+
+#: src/gtk/playback-control.blp:227
+msgid "_Quit"
+msgstr "退出(_Q)"
+
+#: src/gtk/playlist-view.blp:16
+msgid "Search Songs in the Playlist"
+msgstr "搜尋播放清單中的歌曲"
+
+#: src/gtk/playlist-view.blp:25
+msgid "Playlist"
+msgstr "播放清單"
+
+#: src/gtk/playlist-view.blp:47
+msgid "Close the Playlist"
+msgstr "關閉播放清單"
+
+#: src/gtk/playlist-view.blp:55
+msgid "Select Songs in the Playlist"
+msgstr "選取播放清單中的歌曲"
+
+#: src/gtk/playlist-view.blp:62
+msgid "Search songs"
+msgstr "搜尋歌曲"
+
+#: src/gtk/playlist-view.blp:66
+msgctxt "a11y"
+msgid "Search"
+msgstr "搜尋"
+
+#: src/gtk/playlist-view.blp:67
+msgctxt "a11y"
+msgid "Type to search songs"
+msgstr "輸入以搜尋歌曲"
+
+#: src/gtk/playlist-view.blp:110
+msgid "Select All Songs"
+msgstr "選取所有歌曲"
+
+#: src/gtk/playlist-view.blp:123
+msgid "Remove Selected Songs"
+msgstr "移除選取的歌曲"
+
+#: src/gtk/queue-row.blp:27
+msgctxt "a11y"
+msgid "No cover available"
+msgstr "沒有可用的封面"
+
+#: src/gtk/queue-row.blp:81
+msgctxt "a11y"
+msgid "Currently playing"
+msgstr "目前正在播放"
+
+#: src/gtk/shortcuts-dialog.blp:10
+msgctxt "shortcut window"
+msgid "General"
+msgstr "一般"
+
+#: src/gtk/shortcuts-dialog.blp:13
+msgctxt "shortcut window"
+msgid "Toggle primary menu"
+msgstr "切換主要選單"
+
+#: src/gtk/shortcuts-dialog.blp:18
+msgctxt "shortcut window"
+msgid "Copy song details to the clipboard"
+msgstr "複製歌曲詳細資訊到剪貼簿"
+
+#: src/gtk/shortcuts-dialog.blp:23
+msgctxt "shortcut window"
+msgid "Show shortcuts"
+msgstr "顯示快捷鍵"
+
+#: src/gtk/shortcuts-dialog.blp:28
+msgctxt "shortcut window"
+msgid "Quit"
+msgstr "退出"
+
+#: src/gtk/shortcuts-dialog.blp:34
+msgctxt "shortcut window"
+msgid "Playlist"
+msgstr "播放清單"
+
+#: src/gtk/shortcuts-dialog.blp:37
+msgctxt "shortcut window"
+msgid "Add a song to the playlist"
+msgstr "新增歌曲到播放清單"
+
+#: src/gtk/shortcuts-dialog.blp:42
+msgctxt "shortcut window"
+msgid "Add a folder to the playlist"
+msgstr "新增資料夾到播放清單"
+
+#: src/gtk/shortcuts-dialog.blp:47
+msgctxt "shortcut window"
+msgid "Clear the playlist"
+msgstr "清除播放清單"
+
+#: src/gtk/shortcuts-dialog.blp:52
+msgctxt "shortcut window"
+msgid "Toggle the playlist pane"
+msgstr "切換播放清單面板"
+
+#: src/gtk/shortcuts-dialog.blp:57
+msgctxt "shortcut window"
+msgid "Search the playlist"
+msgstr "搜尋播放清單"
+
+#: src/gtk/shortcuts-dialog.blp:62
+msgctxt "shortcut window"
+msgid "Toggle shuffling songs"
+msgstr "切換隨機播放歌曲"
+
+#: src/gtk/shortcuts-dialog.blp:68
+msgctxt "shortcut window"
+msgid "Playback"
+msgstr "播放"
+
+#: src/gtk/shortcuts-dialog.blp:71
+msgctxt "shortcut window"
+msgid "Toggle play/pause"
+msgstr "切換播放/暫停"
+
+#: src/gtk/shortcuts-dialog.blp:76
+msgctxt "shortcut window"
+msgid "Previous song"
+msgstr "上一首歌曲"
+
+#: src/gtk/shortcuts-dialog.blp:81
+msgctxt "shortcut window"
+msgid "Next song"
+msgstr "下一首歌曲"
+
+#: src/gtk/shortcuts-dialog.blp:86
+msgctxt "shortcut window"
+msgid "Seek backwards in the current song"
+msgstr "在目前歌曲中向後搜尋"
+
+#: src/gtk/shortcuts-dialog.blp:91
+msgctxt "shortcut window"
+msgid "Seek forward in the current song"
+msgstr "在目前歌曲中向前搜尋"
+
+#: src/gtk/window.blp:15
+msgid "Drop a song to add it to the playlist"
+msgstr "拖放一首歌曲以新增至播放清單"
+
+#: src/gtk/window.blp:39
+msgid ""
+"Select a file or a folder, or drag files from your file manager to the "
+"application window to add songs to the playlist"
+msgstr ""
+"選取檔案或資料夾，或從您的檔案管理員拖曳檔案到應用程式視窗，以將歌曲新增至播"
+"放清單"
+
+#: src/gtk/window.blp:48
+msgid "Restore Playlist"
+msgstr "還原播放清單"
+
+#: src/gtk/window.blp:58
+msgid "Add Folder"
+msgstr "新增資料夾"
+
+#: src/gtk/window.blp:67
+msgid "Add Song"
+msgstr "新增歌曲"
+
+#: src/gtk/window.blp:128
+msgctxt "a11y"
+msgid "Elapsed time"
+msgstr "已播放時間"
+
+#: src/gtk/window.blp:142
+msgctxt "a11y"
+msgid "Remaining time"
+msgstr "剩餘時間"
+
+#. Translators: Replace "translator-credits" with your names, one name per line
+#: src/application.rs:243
+msgid "translator-credits"
+msgstr "Alang Hsu <alang.hsu@gmail.com>, 2026."
+
+#: src/application.rs:255
+msgid "Amberol needs to run in the background to play music"
+msgstr "Amberol 需要在背景執行才能播放音樂"
+
+#: src/audio/inhibit_controller.rs:40
+msgid "Playback in progress"
+msgstr "播放進行中"
+
+#: src/audio/song.rs:341
+msgid "Unknown artist"
+msgstr "未知藝術家"
+
+#: src/audio/song.rs:348
+msgid "Unknown title"
+msgstr "未知標題"
+
+#: src/audio/song.rs:355
+msgid "Unknown album"
+msgstr "未知專輯"
+
+#: src/cover_picture.rs:75
+msgid "Cover image"
+msgstr "封面圖片"
+
+#: src/playback_control.rs:115
+msgid "Do Not Repeat"
+msgstr "不重複播放"
+
+#: src/playback_control.rs:119
+msgid "Repeat All Songs"
+msgstr "重複播放所有歌曲"
+
+#: src/playback_control.rs:123
+msgid "Repeat the Current Song"
+msgstr "重複播放目前歌曲"
+
+#: src/window.rs:149
+msgid "Audio files"
+msgstr "音訊檔案"
+
+#: src/window.rs:159
+msgid "_Add Song"
+msgstr "新增歌曲(_A)"
+
+#: src/window.rs:163
+msgid "Open File"
+msgstr "開啟檔案"
+
+#: src/window.rs:168 src/window.rs:190 src/window.rs:1487
+msgid "Unable to access files"
+msgstr "無法存取檔案"
+
+#: src/window.rs:182
+msgid "_Add Folder"
+msgstr "新增資料夾(_A)"
+
+#: src/window.rs:185
+msgid "Open Folder"
+msgstr "開啟資料夾"
+
+#: src/window.rs:512
+msgid "No available song found"
+msgstr "找不到可用的歌曲"
+
+#: src/window.rs:574
+msgid "No songs found"
+msgstr "找不到任何歌曲"
+
+#: src/window.rs:607
+msgid "Added a new song"
+msgstr "已新增一首新歌曲"
+
+#: src/window.rs:608
+msgid "Play"
+msgstr "播放"
+
+#. Translators: the `{}` must be left unmodified;
+#. it will be expanded to the number of songs added
+#. to the playlist
+#: src/window.rs:617
+#, rust-format
+msgid "Added one song"
+msgid_plural "Added {} songs"
+msgstr[0] "已新增 {} 首歌曲"
+
+#: src/window.rs:1247
+msgid "Unable to access dropped files"
+msgstr "無法存取拖放的檔案"
+
+#: src/window.rs:1341
+#, rust-format
+msgid "{} minute"
+msgid_plural "{} minutes"
+msgstr[0] "{} 分鐘"
+
+#: src/window.rs:1352
+#, rust-format
+msgid "{hours} hour {minutes} remaining"
+msgid_plural "{hours} hours {minutes} remaining"
+msgstr[0] "剩下 {hours} 小時 {minutes} 分鐘"
+
+#. Translators: the '{}' must be left unmodified, and
+#. it will be replaced by the number of minutes remaining
+#. in the playlist
+#: src/window.rs:1362
+#, rust-format
+msgid "{} minute remaining"
+msgid_plural "{} minutes remaining"
+msgstr[0] "剩餘 {} 分鐘"
+
+#: src/window.rs:1466
+msgid "No song selected"
+msgstr "未選取任何歌曲"
+
+#. Translators: The '{}' must be left unmodified, and
+#. it is expanded to the number of songs selected
+#: src/window.rs:1471
+#, rust-format
+msgid "{} song selected"
+msgid_plural "{} songs selected"
+msgstr[0] "已選取 {} 首歌曲"
+
+#. Translators: `{title}` and `{artist}` must be left
+#. untranslated; they will expand to the title and
+#. artist of the currently playing song, respectively
+#: src/window.rs:1527
+#, rust-format
+msgid "Currently playing “{title}” by “{artist}”"
+msgstr "目前正在播放「{title}」，演出者是「{artist}」"
+
+#: src/window.rs:1564
+msgid "Unable to open folder"
+msgstr "無法開啟資料夾"
