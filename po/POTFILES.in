@@ -8,7 +8,7 @@ src/gtk/shortcuts-dialog.blp
 src/gtk/window.blp
 src/application.rs
 src/audio/inhibit_controller.rs
-src/audio/song.rs
+src/audio/track.rs
 src/cover_picture.rs
 src/playback_control.rs
 src/window.rs

@@ -54,8 +54,8 @@ pub use gst_backend::GstBackend;
 mod player;
 mod queue;
 mod shuffle;
-mod song;
 mod state;
+mod track;
 mod waveform_generator;
 
 pub use player::{
@@ -63,6 +63,6 @@ pub use player::{
 };
 pub use queue::Queue;
 pub use shuffle::ShuffleListModel;
-pub use song::Song;
 pub use state::PlayerState;
+pub use track::Track;
 pub use waveform_generator::WaveformGenerator;

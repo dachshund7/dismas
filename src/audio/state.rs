@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 
 use gtk::{gdk, glib, prelude::*, subclass::prelude::*};
 
-use crate::audio::{PlaybackState, Song};
+use crate::audio::{PlaybackState, Track};
 
 mod imp {
     use glib::{
@@ -20,7 +20,7 @@ mod imp {
     pub struct PlayerState {
         pub playback_state: Cell<PlaybackState>,
         pub position: Cell<u64>,
-        pub current_song: RefCell<Option<Song>>,
+        pub current_track: RefCell<Option<Track>>,
         pub volume: Cell<f64>,
     }
 
@@ -33,7 +33,7 @@ mod imp {
             Self {
                 playback_state: Cell::new(PlaybackState::Stopped),
                 position: Cell::new(0),
-                current_song: RefCell::new(None),
+                current_track: RefCell::new(None),
                 volume: Cell::new(1.0),
             }
         }
@@ -45,7 +45,9 @@ mod imp {
                 vec![
                     ParamSpecBoolean::builder("playing").read_only().build(),
                     ParamSpecUInt64::builder("position").read_only().build(),
-                    ParamSpecObject::builder::<Song>("song").read_only().build(),
+                    ParamSpecObject::builder::<Track>("track")
+                        .read_only()
+                        .build(),
                     ParamSpecString::builder("title").read_only().build(),
                     ParamSpecString::builder("artist").read_only().build(),
                     ParamSpecString::builder("album").read_only().build(),
@@ -69,10 +71,10 @@ mod imp {
             match pspec.name() {
                 "playing" => obj.playing().to_value(),
                 "position" => obj.position().to_value(),
-                "song" => self.current_song.borrow().to_value(),
+                "track" => self.current_track.borrow().to_value(),
                 "volume" => obj.volume().to_value(),
 
-                // These are proxies for Song properties
+                // These are proxies for Track properties
                 "title" => obj.title().to_value(),
                 "artist" => obj.artist().to_value(),
                 "album" => obj.album().to_value(),
@@ -86,7 +88,7 @@ mod imp {
 
 // PlayerState is a GObject that we can use to bind to
 // widgets and other objects; it contains the current
-// state of the audio player: song metadata, playback
+// state of the audio player: track metadata, playback
 // position and duration, etc.
 glib::wrapper! {
     pub struct PlayerState(ObjectSubclass<imp::PlayerState>);
@@ -94,40 +96,40 @@ glib::wrapper! {
 
 impl PlayerState {
     pub fn title(&self) -> Option<String> {
-        if let Some(song) = &*self.imp().current_song.borrow() {
-            return Some(song.title());
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return Some(track.title());
         }
 
         None
     }
 
     pub fn artist(&self) -> Option<String> {
-        if let Some(song) = &*self.imp().current_song.borrow() {
-            return Some(song.artist());
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return Some(track.artist());
         }
 
         None
     }
 
     pub fn album(&self) -> Option<String> {
-        if let Some(song) = &*self.imp().current_song.borrow() {
-            return Some(song.album());
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return Some(track.album());
         }
 
         None
     }
 
     pub fn duration(&self) -> u64 {
-        if let Some(song) = &*self.imp().current_song.borrow() {
-            return song.duration();
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return track.duration();
         }
 
         0
     }
 
     pub fn cover(&self) -> Option<gdk::Texture> {
-        if let Some(song) = &*self.imp().current_song.borrow() {
-            return song.cover_texture();
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return track.cover_texture();
         }
 
         None
@@ -148,14 +150,14 @@ impl PlayerState {
         false
     }
 
-    pub fn current_song(&self) -> Option<Song> {
-        (*self.imp().current_song.borrow()).as_ref().cloned()
+    pub fn current_track(&self) -> Option<Track> {
+        (*self.imp().current_track.borrow()).as_ref().cloned()
     }
 
-    pub fn set_current_song(&self, song: Option<Song>) {
-        self.imp().current_song.replace(song);
+    pub fn set_current_track(&self, track: Option<Track>) {
+        self.imp().current_track.replace(track);
         self.imp().position.replace(0);
-        self.notify("song");
+        self.notify("track");
         self.notify("title");
         self.notify("artist");
         self.notify("album");

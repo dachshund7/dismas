@@ -7,8 +7,8 @@ A small and simple sound and music player that is well integrated with GNOME.
 
 Amberol aspires to be as small, unintrusive, and simple as possible. It does
 not manage your music collection; it does not let you manage playlists, smart
-or otherwise; it does not let you edit the metadata for your songs; it does
-not show you lyrics for your songs, or the Wikipedia page for your bands.
+or otherwise; it does not let you edit the metadata for your tracks; it does
+not show you lyrics for your tracks, or the Wikipedia page for your bands.
 
 Amberol plays music, and nothing else.
 
@@ -73,7 +73,7 @@ Why is it called "Amberol"?
 The name comes from the the [Blue Amberol
 Records](https://en.wikipedia.org/wiki/Blue_Amberol_Records), a type of cylinder
 records made of (blue) nitrocellulose, capable of playback durations of around
-four minutes, just about the length of the average song since 1990.
+four minutes, just about the length of the average track since 1990.
 
 Copyright and licensing
 -----------------------

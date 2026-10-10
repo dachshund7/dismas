@@ -9,7 +9,7 @@ use gtk::{gdk, gio, glib, prelude::*};
 use log::{debug, warn};
 
 use crate::{
-    audio::{Queue, Song},
+    audio::{Queue, Track},
     config::APPLICATION_ID,
 };
 
@@ -165,7 +165,7 @@ fn load_files_from_folder_internal(
 
     // gio::FileEnumerator has no guaranteed order, so we should
     // rely on the basename being formatted in a way that gives us an
-    // implicit order; if anything, this will queue songs in the same
+    // implicit order; if anything, this will queue tracks in the same
     // order in which they appear in the directory when browsing its
     // contents
     files.sort_by(|a, b| cmp_two_files(Some(base), a, b));
@@ -247,13 +247,13 @@ pub fn store_playlist(queue: &Queue) {
     let pls = glib::KeyFile::new();
     pls.set_string("playlist", "X-GNOME-Title", "Amberol's current playlist");
 
-    pls.set_int64("playlist", "NumberOfEntries", queue.n_songs() as i64);
+    pls.set_int64("playlist", "NumberOfEntries", queue.n_tracks() as i64);
 
     let model = queue.model();
     for i in 0..model.n_items() {
         let item = model.item(i).unwrap();
-        let song = item.downcast_ref::<Song>().unwrap();
-        let path = song.file().path().expect("Unknown file");
+        let track = item.downcast_ref::<Track>().unwrap();
+        let path = track.file().path().expect("Unknown file");
         let path_str = path.to_string_lossy();
         pls.set_value("playlist", &format!("File{i}"), &path_str);
     }
@@ -270,7 +270,7 @@ pub fn store_playlist(queue: &Queue) {
     }
 }
 
-pub fn load_cached_songs() -> Option<Vec<gio::File>> {
+pub fn load_cached_tracks() -> Option<Vec<gio::File>> {
     let mut pls_cache = glib::user_cache_dir();
     pls_cache.push("amberol");
     pls_cache.push("playlists");

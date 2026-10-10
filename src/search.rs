@@ -15,7 +15,7 @@ mod imp {
     };
     use once_cell::sync::Lazy;
 
-    use crate::audio::Song;
+    use crate::audio::Track;
 
     #[derive(Default)]
     pub struct FuzzyFilter {
@@ -54,11 +54,11 @@ mod imp {
             gtk::FilterMatch::Some
         }
 
-        fn match_(&self, song: &glib::Object) -> bool {
-            let song = song.downcast_ref::<Song>().unwrap();
+        fn match_(&self, track: &glib::Object) -> bool {
+            let track = track.downcast_ref::<Track>().unwrap();
 
             if let Some(search) = self.search.borrow().as_ref() {
-                let key = song.search_key();
+                let key = track.search_key();
                 let matcher = SkimMatcherV2::default();
                 matcher.fuzzy_match(&key, search).is_some() || search.is_empty()
             } else {

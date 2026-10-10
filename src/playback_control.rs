@@ -116,11 +116,11 @@ impl PlaybackControl {
             }
             RepeatMode::RepeatAll => {
                 repeat_button.set_icon_name("media-playlist-repeat-symbolic");
-                repeat_button.set_tooltip_text(Some(&i18n("Repeat All Songs")));
+                repeat_button.set_tooltip_text(Some(&i18n("Repeat All Tracks")));
             }
             RepeatMode::RepeatOne => {
                 repeat_button.set_icon_name("media-playlist-repeat-song-symbolic");
-                repeat_button.set_tooltip_text(Some(&i18n("Repeat the Current Song")));
+                repeat_button.set_tooltip_text(Some(&i18n("Repeat the Current Track")));
             }
         }
     }

@@ -15,7 +15,7 @@
     <ul>
       <li>adaptive UI</li>
       <li>UI recoloring using the album art</li>
-      <li>drag and drop support to queue songs</li>
+      <li>drag and drop support to queue tracks</li>
       <li>shuffle and repeat</li>
       <li>MPRIS integration</li>
     </ul>

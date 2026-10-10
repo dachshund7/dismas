@@ -65,7 +65,7 @@ mod imp {
 
             obj.set_accels_for_action("app.quit", &["<primary>q"]);
 
-            obj.set_accels_for_action("queue.add-song", &["<primary>s"]);
+            obj.set_accels_for_action("queue.add-track", &["<primary>s"]);
             obj.set_accels_for_action("queue.add-folder", &["<primary>a"]);
             obj.set_accels_for_action("queue.clear", &["<primary>L"]);
             obj.set_accels_for_action("queue.toggle", &["F9"]);

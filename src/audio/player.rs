@@ -16,7 +16,7 @@ use crate::{
     application::ApplicationAction,
     audio::{
         Controller, CoverCache, GstBackend, InhibitController, MprisController, PlayerState, Queue,
-        Song, WaveformGenerator,
+        Track, WaveformGenerator,
     },
 };
 
@@ -197,8 +197,8 @@ impl AudioPlayer {
     }
 
     fn set_playback_state(&self, state: PlaybackState) {
-        if let Some(current_song) = self.state.current_song() {
-            debug!("Current song: {}", current_song.uri());
+        if let Some(current_track) = self.state.current_track() {
+            debug!("Current track: {}", current_track.uri());
 
             self.state.set_playback_state(&state);
 
@@ -212,18 +212,18 @@ impl AudioPlayer {
                 PlaybackState::Stopped => self.backend.stop(),
             }
         } else {
-            debug!("Getting the next song");
-            if let Some(next_song) = self.queue.next_song() {
-                debug!("Next song: {}", next_song.uri());
+            debug!("Getting the next track");
+            if let Some(next_track) = self.queue.next_track() {
+                debug!("Next track: {}", next_track.uri());
 
                 for c in &self.controllers {
-                    c.set_song(&next_song);
+                    c.set_track(&next_track);
                 }
 
-                next_song.set_playing(true);
+                next_track.set_playing(true);
 
-                self.backend.set_song_uri(Some(&next_song.uri()));
-                self.state.set_current_song(Some(next_song));
+                self.backend.set_track_uri(Some(&next_track.uri()));
+                self.state.set_current_track(Some(next_track));
                 self.state.set_playback_state(&state);
 
                 for c in &self.controllers {
@@ -236,9 +236,9 @@ impl AudioPlayer {
                     PlaybackState::Stopped => self.backend.stop(),
                 }
             } else {
-                debug!("No songs left");
-                self.backend.set_song_uri(None);
-                self.state.set_current_song(None);
+                debug!("No tracks left");
+                self.backend.set_track_uri(None);
+                self.state.set_current_track(None);
                 self.state.set_playback_state(&PlaybackState::Stopped);
 
                 for c in &self.controllers {
@@ -285,25 +285,25 @@ impl AudioPlayer {
             return;
         }
 
-        if let Some(current_song) = self.state.current_song() {
-            // We only skip to the previous song if we are
+        if let Some(current_track) = self.state.current_track() {
+            // We only skip to the previous track if we are
             // within a seek backward step, otherwise we just
-            // restart the song
+            // restart the track
             if self.state.position() >= 10 {
                 self.backend.seek_start();
                 return;
             }
 
-            if self.queue.is_first_song() {
+            if self.queue.is_first_track() {
                 return;
             }
 
-            debug!("Marking '{}' as not playing", current_song.uri());
-            current_song.set_playing(false);
+            debug!("Marking '{}' as not playing", current_track.uri());
+            current_track.set_playing(false);
         }
 
-        if let Some(prev_song) = self.queue.previous_song() {
-            debug!("Playing previous: {}", prev_song.uri());
+        if let Some(prev_track) = self.queue.previous_track() {
+            debug!("Playing previous: {}", prev_track.uri());
 
             let was_playing = self.state.playing();
             if was_playing {
@@ -311,16 +311,16 @@ impl AudioPlayer {
             }
 
             for c in &self.controllers {
-                c.set_song(&prev_song);
+                c.set_track(&prev_track);
             }
 
-            self.backend.set_song_uri(Some(&prev_song.uri()));
+            self.backend.set_track_uri(Some(&prev_track.uri()));
             self.backend.seek_start();
 
-            debug!("Marking '{}' as playing", prev_song.uri());
-            prev_song.set_playing(true);
+            debug!("Marking '{}' as playing", prev_track.uri());
+            prev_track.set_playing(true);
 
-            self.state.set_current_song(Some(prev_song));
+            self.state.set_current_track(Some(prev_track));
 
             if was_playing {
                 self.set_playback_state(PlaybackState::Playing);
@@ -333,12 +333,12 @@ impl AudioPlayer {
             return;
         }
 
-        if let Some(current_song) = self.state.current_song() {
-            current_song.set_playing(false);
+        if let Some(current_track) = self.state.current_track() {
+            current_track.set_playing(false);
         }
 
-        if let Some(next_song) = self.queue.next_song() {
-            debug!("Playing next (skip-next): {}", next_song.uri());
+        if let Some(next_track) = self.queue.next_track() {
+            debug!("Playing next (skip-next): {}", next_track.uri());
 
             let was_playing = self.state.playing();
             if was_playing {
@@ -346,15 +346,15 @@ impl AudioPlayer {
             }
 
             for c in &self.controllers {
-                c.set_song(&next_song);
+                c.set_track(&next_track);
             }
 
-            self.backend.set_song_uri(Some(&next_song.uri()));
+            self.backend.set_track_uri(Some(&next_track.uri()));
             self.backend.seek_start();
 
-            next_song.set_playing(true);
+            next_track.set_playing(true);
 
-            self.state.set_current_song(Some(next_song));
+            self.state.set_current_track(Some(next_track));
 
             if was_playing {
                 self.set_playback_state(PlaybackState::Playing);
@@ -370,38 +370,38 @@ impl AudioPlayer {
             return;
         }
 
-        if Some(pos) == self.queue.current_song_index() {
+        if Some(pos) == self.queue.current_track_index() {
             return;
         }
 
-        if let Some(current_song) = self.state.current_song() {
-            current_song.set_playing(false);
+        if let Some(current_track) = self.state.current_track() {
+            current_track.set_playing(false);
         }
 
-        if let Some(song) = self.queue.skip_song(pos) {
-            debug!("Playing next (skip-to): {}", song.uri());
+        if let Some(track) = self.queue.skip_track(pos) {
+            debug!("Playing next (skip-to): {}", track.uri());
             let was_playing = self.state.playing();
             if was_playing {
                 self.set_playback_state(PlaybackState::Paused);
             }
 
             for c in &self.controllers {
-                c.set_song(&song);
+                c.set_track(&track);
             }
 
-            self.backend.set_song_uri(Some(&song.uri()));
+            self.backend.set_track_uri(Some(&track.uri()));
             self.backend.seek_start();
 
-            song.set_playing(true);
+            track.set_playing(true);
 
-            self.state.set_current_song(Some(song));
+            self.state.set_current_track(Some(track));
 
             if was_playing {
                 self.set_playback_state(PlaybackState::Playing);
             }
         } else {
-            self.backend.set_song_uri(None);
-            self.state.set_current_song(None);
+            self.backend.set_track_uri(None);
+            self.state.set_current_track(None);
             self.set_playback_state(PlaybackState::Stopped);
         }
     }
@@ -465,8 +465,8 @@ impl AudioPlayer {
         &self.waveform_generator
     }
 
-    pub fn set_current_song(&self, song: Option<Song>) {
-        self.state.set_current_song(song);
+    pub fn set_current_track(&self, track: Option<Track>) {
+        self.state.set_current_track(track);
     }
 
     fn update_position(&self, position: u64, notify: bool) {
@@ -518,22 +518,22 @@ impl AudioPlayer {
 
     pub fn clear_queue(&self) {
         self.stop();
-        self.state.set_current_song(None);
+        self.state.set_current_track(None);
         self.queue.clear();
 
         let mut cover_cache = CoverCache::global().lock().unwrap();
         cover_cache.clear();
     }
 
-    pub fn remove_song(&self, song: &Song) {
-        if song.playing() {
+    pub fn remove_track(&self, track: &Track) {
+        if track.playing() {
             self.skip_next();
         }
 
-        self.queue.remove_song(song);
+        self.queue.remove_track(track);
 
         if self.queue.is_empty() {
-            self.state.set_current_song(None);
+            self.state.set_current_track(None);
         }
     }
 

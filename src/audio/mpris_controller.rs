@@ -13,14 +13,14 @@ use log::error;
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time};
 
 use crate::{
-    audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Song},
+    audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Track},
     config::APPLICATION_ID,
 };
 
 #[derive(Debug)]
 pub struct MprisController {
     mpris: Rc<OnceCell<Player>>,
-    song: RefCell<Option<Song>>,
+    track: RefCell<Option<Track>>,
 }
 
 impl MprisController {
@@ -58,25 +58,25 @@ impl MprisController {
 
         Self {
             mpris,
-            song: RefCell::new(None),
+            track: RefCell::new(None),
         }
     }
 
     fn update_metadata(&self) {
         let mut metadata = Metadata::new();
 
-        if let Some(song) = self.song.take() {
-            metadata.set_artist(Some(vec![song.artist()]));
-            metadata.set_title(Some(song.title()));
-            metadata.set_album(Some(song.album()));
+        if let Some(track) = self.track.take() {
+            metadata.set_artist(Some(vec![track.artist()]));
+            metadata.set_title(Some(track.title()));
+            metadata.set_album(Some(track.album()));
 
-            let length = Time::from_secs(song.duration() as i64);
+            let length = Time::from_secs(track.duration() as i64);
             metadata.set_length(Some(length));
 
             // MPRIS should really support passing a bytes buffer for
             // the cover art, instead of requiring this ridiculous
             // charade
-            if let Some(cache) = song.cover_cache() {
+            if let Some(cache) = track.cover_cache() {
                 let file = gio::File::for_path(cache);
                 match file.query_info(
                     "standard::type",
@@ -90,7 +90,7 @@ impl MprisController {
                 }
             }
 
-            self.song.replace(Some(song));
+            self.track.replace(Some(track));
         }
 
         glib::spawn_future_local(clone!(
@@ -131,8 +131,8 @@ impl Controller for MprisController {
         ));
     }
 
-    fn set_song(&self, song: &Song) {
-        self.song.replace(Some(song.clone()));
+    fn set_track(&self, track: &Track) {
+        self.track.replace(Some(track.clone()));
         self.update_metadata();
     }
 

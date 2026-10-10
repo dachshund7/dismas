@@ -138,26 +138,26 @@ impl ShuffleListModel {
 
     pub fn reshuffle(&self, anchor: u32) {
         if let Some(ref model) = *self.imp().model.borrow() {
-            let n_songs = model.n_items();
+            let n_tracks = model.n_items();
             let mut rng = rand::rng();
 
             let positions: Vec<u32> = if anchor == 0 {
                 let mut before: Vec<u32> = vec![0];
-                let mut after: Vec<u32> = (1..n_songs).collect();
+                let mut after: Vec<u32> = (1..n_tracks).collect();
                 after.shuffle(&mut rng);
 
                 before.extend(after);
                 before
-            } else if anchor == n_songs - 1 {
-                let mut before: Vec<u32> = (0..n_songs - 1).collect();
-                let after: Vec<u32> = vec![n_songs - 1];
+            } else if anchor == n_tracks - 1 {
+                let mut before: Vec<u32> = (0..n_tracks - 1).collect();
+                let after: Vec<u32> = vec![n_tracks - 1];
                 before.shuffle(&mut rng);
 
                 before.extend(after);
                 before
             } else {
                 let mut before: Vec<u32> = (0..anchor).collect();
-                let mut after: Vec<u32> = (anchor + 1..n_songs).collect();
+                let mut after: Vec<u32> = (anchor + 1..n_tracks).collect();
                 after.shuffle(&mut rng);
 
                 before.push(anchor);

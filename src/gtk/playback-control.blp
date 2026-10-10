@@ -18,7 +18,7 @@ template $AmberolPlaybackControl: Widget {
         icon-name: "media-skip-backward-symbolic";
         action-name: "win.previous";
         valign: center;
-        tooltip-text: _("Play the Previous Song");
+        tooltip-text: _("Play the Previous Track");
 
         styles [
           "circular",
@@ -49,7 +49,7 @@ template $AmberolPlaybackControl: Widget {
         icon-name: "media-skip-forward-symbolic";
         action-name: "win.next";
         valign: center;
-        tooltip-text: _("Play the Next Song");
+        tooltip-text: _("Play the Next Track");
 
         styles [
           "circular",
@@ -161,8 +161,8 @@ menu primary_menu {
 
   section {
     item {
-      label: _("Add _Song");
-      action: "queue.add-song";
+      label: _("Add _Track");
+      action: "queue.add-track";
     }
 
     item {
@@ -199,7 +199,7 @@ menu primary_menu {
       }
 
       item {
-        label: C_("replaygain-menu", "_Song");
+        label: C_("replaygain-menu", "_Track");
         action: "win.replaygain";
         target: "track";
       }

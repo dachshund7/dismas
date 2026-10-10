@@ -15,7 +15,7 @@ use gtk::{gdk, gio, glib, prelude::*, CompositeTemplate};
 use log::debug;
 
 use crate::{
-    audio::{AudioPlayer, RepeatMode, ReplayGainMode, Song},
+    audio::{AudioPlayer, RepeatMode, ReplayGainMode, Track},
     config::APPLICATION_ID,
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
@@ -23,9 +23,9 @@ use crate::{
     playlist_view::PlaylistView,
     queue_row::QueueRow,
     search::FuzzyFilter,
-    song_cover::SongCover,
-    song_details::SongDetails,
     sort::FuzzySorter,
+    track_cover::TrackCover,
+    track_details::TrackDetails,
     utils,
     volume_control::VolumeControl,
     waveform_view::WaveformView,
@@ -57,9 +57,9 @@ mod imp {
         #[template_child]
         pub status_page: TemplateChild<adw::StatusPage>,
         #[template_child]
-        pub song_cover: TemplateChild<SongCover>,
+        pub track_cover: TemplateChild<TrackCover>,
         #[template_child]
-        pub song_details: TemplateChild<SongDetails>,
+        pub track_details: TemplateChild<TrackDetails>,
         #[template_child]
         pub waveform_view: TemplateChild<WaveformView>,
         #[template_child]
@@ -90,9 +90,9 @@ mod imp {
 
         pub notify_playing_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_position_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_song_id: RefCell<Option<glib::SignalHandlerId>>,
+        pub notify_track_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_cover_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_nsongs_id: RefCell<Option<glib::SignalHandlerId>>,
+        pub notify_ntracks_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_current_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_peaks_id: RefCell<Option<glib::SignalHandlerId>>,
     }
@@ -142,8 +142,8 @@ mod imp {
                     p.toggle_repeat_mode();
                 }
             });
-            klass.install_action_async("queue.add-song", None, |win, _, _| async move {
-                debug!("Window::win.add-song()");
+            klass.install_action_async("queue.add-track", None, |win, _, _| async move {
+                debug!("Window::win.add-track()");
                 let filters = gio::ListStore::new::<gtk::FileFilter>();
                 let filter = gtk::FileFilter::new();
                 gtk::FileFilter::set_name(&filter, Some(&i18n("Audio files")));
@@ -156,7 +156,7 @@ mod imp {
                 };
 
                 let dialog = gtk::FileDialog::builder()
-                    .accept_label(&i18n("_Add Song"))
+                    .accept_label(&i18n("_Add Track"))
                     .filters(&filters)
                     .initial_folder(&gio::File::for_path(&xdg_music))
                     .modal(true)
@@ -199,11 +199,11 @@ mod imp {
             });
             klass.install_action("win.copy", None, move |win, _, _| {
                 debug!("Window::win.copy()");
-                win.copy_song();
+                win.copy_track();
             });
             klass.install_action_async("win.open-directory", None, async move |win, _, _| {
                 debug!("Window::win.open-directory()");
-                win.open_song_directory().await
+                win.open_track_directory().await
             });
             klass.install_action("queue.clear", None, move |win, _, _| {
                 debug!("Window::queue.clear()");
@@ -235,8 +235,8 @@ mod imp {
 
         fn new() -> Self {
             Self {
-                song_details: TemplateChild::default(),
-                song_cover: TemplateChild::default(),
+                track_details: TemplateChild::default(),
+                track_cover: TemplateChild::default(),
                 split_view: TemplateChild::default(),
                 toast_overlay: TemplateChild::default(),
                 drag_overlay: TemplateChild::default(),
@@ -259,9 +259,9 @@ mod imp {
                 settings: utils::settings_manager(),
                 notify_playing_id: RefCell::new(None),
                 notify_position_id: RefCell::new(None),
-                notify_song_id: RefCell::new(None),
+                notify_track_id: RefCell::new(None),
                 notify_cover_id: RefCell::new(None),
-                notify_nsongs_id: RefCell::new(None),
+                notify_ntracks_id: RefCell::new(None),
                 notify_current_id: RefCell::new(None),
                 notify_peaks_id: RefCell::new(None),
             }
@@ -448,11 +448,11 @@ impl Window {
             if let Some(player) = self.player() {
                 let queue = player.queue();
                 let state = player.state();
-                let reset_song = queue.is_first_song() && !state.playing();
+                let reset_track = queue.is_first_track() && !state.playing();
 
                 queue.set_shuffled(shuffled);
 
-                if reset_song {
+                if reset_track {
                     player.skip_to(0);
                 }
             }
@@ -472,7 +472,7 @@ impl Window {
             if !selection {
                 if let Some(player) = self.player() {
                     let queue = player.queue();
-                    queue.unselect_all_songs();
+                    queue.unselect_all_tracks();
                 }
             }
 
@@ -502,21 +502,21 @@ impl Window {
     }
 
     fn restore_playlist(&self) {
-        if let Some(songs) = utils::load_cached_songs() {
-            self.queue_songs(songs);
+        if let Some(tracks) = utils::load_cached_tracks() {
+            self.queue_tracks(tracks);
         }
     }
 
-    fn queue_songs(&self, queue: Vec<gio::File>) {
+    fn queue_tracks(&self, queue: Vec<gio::File>) {
         if queue.is_empty() {
-            self.add_toast(i18n("No available song found"));
+            self.add_toast(i18n("No available track found"));
             return;
         }
 
         self.switch_mode(WindowMode::MainView);
 
         // Disable actions on the queue; loading is "atomic"
-        self.action_set_enabled("queue.add-song", false);
+        self.action_set_enabled("queue.add-track", false);
         self.action_set_enabled("queue.add-folder", false);
         self.action_set_enabled("queue.clear", false);
 
@@ -526,11 +526,11 @@ impl Window {
         // Begin the trace
         let now = Instant::now();
 
-        // Turn the list of files into songs one at a time into the main loop
+        // Turn the list of files into tracks one at a time into the main loop
         let n_files = queue.len() as u32;
 
         let mut files = queue.into_iter();
-        let mut songs = Vec::new();
+        let mut tracks = Vec::new();
         let mut cur_file: u32 = 0;
         let mut duplicates: u32 = 0;
 
@@ -544,13 +544,13 @@ impl Window {
                     .next()
                     .map(|f| {
                         win.imp().playlist_view.update_loading(cur_file, n_files);
-                        if let Ok(s) = Song::from_uri(f.uri().as_str()) {
+                        if let Ok(s) = Track::from_uri(f.uri().as_str()) {
                             if let Some(player) = win.player() {
                                 let queue = player.queue();
                                 if queue.contains(&s) {
                                     duplicates += 1;
                                 } else {
-                                    songs.push(s);
+                                    tracks.push(s);
                                     cur_file += 1;
                                 }
                             }
@@ -565,13 +565,13 @@ impl Window {
                         );
 
                         // Re-enable the actions
-                        win.action_set_enabled("queue.add-song", true);
+                        win.action_set_enabled("queue.add-track", true);
                         win.action_set_enabled("queue.add-folder", true);
                         win.action_set_enabled("queue.clear", true);
 
-                        if songs.is_empty() {
+                        if tracks.is_empty() {
                             if duplicates == 0 {
-                                win.add_toast(i18n("No songs found"));
+                                win.add_toast(i18n("No tracks found"));
                             }
                         } else if let Some(player) = win.player() {
                             let queue = player.queue();
@@ -580,7 +580,7 @@ impl Window {
                             win.imp().playlist_view.end_loading();
 
                             // Bulk add to avoid hammering the UI with list model updates
-                            queue.add_songs(&songs);
+                            queue.add_tracks(&tracks);
 
                             // Store the current state of the playlist
                             utils::store_playlist(queue);
@@ -588,36 +588,36 @@ impl Window {
                             debug!(
                                 "Queue was empty: {}, new size: {}",
                                 was_empty,
-                                queue.n_songs()
+                                queue.n_tracks()
                             );
                             if was_empty {
                                 player.skip_to(0);
                             }
 
-                            // Allow jumping to the song we just added
-                            if songs.len() == 1 {
-                                // If we added a single song, and the queue was empty, we
+                            // Allow jumping to the track we just added
+                            if tracks.len() == 1 {
+                                // If we added a single track, and the queue was empty, we
                                 // dispense with the pleasantries and we start playing
                                 // immediately; otherwise, we let the user choose whether
-                                // to jump to the newly added song
+                                // to jump to the newly added track
                                 if was_empty {
                                     player.play();
                                 } else {
                                     win.add_skip_to_toast(
-                                        i18n("Added a new song"),
+                                        i18n("Added a new track"),
                                         i18n("Play"),
-                                        queue.n_songs() - 1,
+                                        queue.n_tracks() - 1,
                                     );
                                 }
                             } else {
                                 let msg = ni18n_f(
                                     // Translators: the `{}` must be left unmodified;
-                                    // it will be expanded to the number of songs added
+                                    // it will be expanded to the number of tracks added
                                     // to the playlist
-                                    "Added one song",
-                                    "Added {} songs",
-                                    songs.len() as u32,
-                                    &[&songs.len().to_string()],
+                                    "Added one track",
+                                    "Added {} tracks",
+                                    tracks.len() as u32,
+                                    &[&tracks.len().to_string()],
                                 );
 
                                 win.add_toast(msg);
@@ -660,7 +660,7 @@ impl Window {
             }
         }
 
-        self.queue_songs(queue);
+        self.queue_tracks(queue);
     }
 
     // Bind the PlayerState to the UI
@@ -699,18 +699,18 @@ impl Window {
             imp.notify_position_id.replace(Some(notify_position_id));
 
             // Update the UI
-            self.update_song();
-            let notify_song_id = state.connect_notify_local(
-                Some("song"),
+            self.update_track();
+            let notify_track_id = state.connect_notify_local(
+                Some("track"),
                 clone!(
                     #[weak(rename_to = win)]
                     self,
                     move |_, _| {
-                        win.update_song();
+                        win.update_track();
                     }
                 ),
             );
-            imp.notify_song_id.replace(Some(notify_song_id));
+            imp.notify_track_id.replace(Some(notify_track_id));
 
             // Update the cover, if any is available
             self.update_cover();
@@ -726,17 +726,17 @@ impl Window {
             );
             imp.notify_cover_id.replace(Some(notify_cover_id));
 
-            // Bind the song properties to the UI
+            // Bind the track properties to the UI
             state
-                .bind_property("title", &imp.song_details.get().title_label(), "label")
+                .bind_property("title", &imp.track_details.get().title_label(), "label")
                 .sync_create()
                 .build();
             state
-                .bind_property("artist", &imp.song_details.get().artist_label(), "label")
+                .bind_property("artist", &imp.track_details.get().artist_label(), "label")
                 .sync_create()
                 .build();
             state
-                .bind_property("album", &imp.song_details.get().album_label(), "label")
+                .bind_property("album", &imp.track_details.get().album_label(), "label")
                 .sync_create()
                 .build();
             state
@@ -760,7 +760,7 @@ impl Window {
             if let Some(id) = self.imp().notify_position_id.take() {
                 state.disconnect(id);
             }
-            if let Some(id) = self.imp().notify_song_id.take() {
+            if let Some(id) = self.imp().notify_track_id.take() {
                 state.disconnect(id);
             }
             if let Some(id) = self.imp().notify_cover_id.take() {
@@ -774,26 +774,26 @@ impl Window {
         if let Some(player) = self.player() {
             let queue = player.queue();
 
-            let notify_nsongs_id = queue.connect_notify_local(
-                Some("n-songs"),
+            let notify_ntracks_id = queue.connect_notify_local(
+                Some("n-tracks"),
                 clone!(
                     #[weak(rename_to = win)]
                     self,
                     move |queue, _| {
-                        debug!("queue.n_songs() = {}", queue.n_songs());
+                        debug!("queue.n_tracks() = {}", queue.n_tracks());
                         if queue.is_empty() {
                             win.set_initial_state();
                             win.reset_queue();
                         } else {
                             win.action_set_enabled("queue.toggle", true);
-                            win.action_set_enabled("queue.shuffle", queue.n_songs() > 1);
+                            win.action_set_enabled("queue.shuffle", queue.n_tracks() > 1);
 
                             win.action_set_enabled("win.play", true);
                             win.action_set_enabled("win.previous", true);
-                            win.action_set_enabled("win.next", queue.n_songs() > 1);
+                            win.action_set_enabled("win.next", queue.n_tracks() > 1);
                         }
 
-                        if queue.n_songs() == 1 {
+                        if queue.n_tracks() == 1 {
                             if let Some(p) = win.player() {
                                 p.skip_next();
                             }
@@ -803,7 +803,9 @@ impl Window {
                     }
                 ),
             );
-            self.imp().notify_nsongs_id.replace(Some(notify_nsongs_id));
+            self.imp()
+                .notify_ntracks_id
+                .replace(Some(notify_ntracks_id));
 
             queue.connect_notify_local(
                 Some("repeat-mode"),
@@ -824,7 +826,7 @@ impl Window {
                     #[weak(rename_to = win)]
                     self,
                     move |queue, _| {
-                        if queue.is_last_song() {
+                        if queue.is_last_track() {
                             match queue.repeat_mode() {
                                 RepeatMode::Consecutive => {
                                     win.action_set_enabled("win.next", false);
@@ -848,7 +850,7 @@ impl Window {
     fn unbind_queue(&self) {
         if let Some(player) = self.player() {
             let queue = player.queue();
-            if let Some(id) = self.imp().notify_nsongs_id.take() {
+            if let Some(id) = self.imp().notify_ntracks_id.take() {
                 queue.disconnect(id);
             }
             if let Some(id) = self.imp().notify_current_id.take() {
@@ -894,7 +896,7 @@ impl Window {
                     debug!("New position: {}", position);
                     if let Some(player) = win.player() {
                         let state = player.state();
-                        if state.current_song().is_some() {
+                        if state.current_track().is_some() {
                             player.seek_position_rel(position);
                             player.play();
                         }
@@ -932,15 +934,15 @@ impl Window {
                         if let Some(ref model) = *win.imp().playlist_filtermodel.borrow() {
                             for idx in 0..model.n_items() {
                                 let item = model.item(idx).unwrap();
-                                let song = item.downcast_ref::<Song>().unwrap();
-                                song.set_selected(true);
+                                let track = item.downcast_ref::<Track>().unwrap();
+                                track.set_selected(true);
                             }
                         }
                     } else if let Some(player) = win.player() {
                         let queue = player.queue();
-                        for idx in 0..queue.n_songs() {
-                            let song = queue.song_at(idx).unwrap();
-                            song.set_selected(true);
+                        for idx in 0..queue.n_tracks() {
+                            let track = queue.track_at(idx).unwrap();
+                            track.set_selected(true);
                         }
                     }
                 }
@@ -955,18 +957,18 @@ impl Window {
                 move |_| {
                     if let Some(player) = win.player() {
                         let queue = player.queue();
-                        let mut remove_songs: Vec<Song> = Vec::new();
-                        // Collect all songs to be removed first, since we can't
+                        let mut remove_tracks: Vec<Track> = Vec::new();
+                        // Collect all tracks to be removed first, since we can't
                         // remove objects from the model while we're iterating it
-                        for idx in 0..queue.n_songs() {
-                            let song = queue.song_at(idx).unwrap();
-                            if song.selected() {
-                                remove_songs.push(song);
+                        for idx in 0..queue.n_tracks() {
+                            let track = queue.track_at(idx).unwrap();
+                            if track.selected() {
+                                remove_tracks.push(track);
                             }
                         }
 
-                        for song in remove_songs {
-                            win.remove_song(&song);
+                        for track in remove_tracks {
+                            win.remove_track(&track);
                         }
 
                         // Store the current state of the playlist
@@ -1001,7 +1003,7 @@ impl Window {
                     );
                     if let Some(player) = this.player() {
                         let state = player.state();
-                        this.update_style(state.current_song().as_ref());
+                        this.update_style(state.current_track().as_ref());
                     }
                 }
             ),
@@ -1040,10 +1042,10 @@ impl Window {
             let queue = player.queue();
             self.action_set_enabled("win.play", !queue.is_empty());
             self.action_set_enabled("win.previous", !queue.is_empty());
-            self.action_set_enabled("win.next", !queue.is_last_song());
+            self.action_set_enabled("win.next", !queue.is_last_track());
 
             self.action_set_enabled("queue.toggle", !queue.is_empty());
-            self.action_set_enabled("queue.shuffle", queue.n_songs() > 1);
+            self.action_set_enabled("queue.shuffle", queue.n_tracks() > 1);
             self.action_set_enabled("win.replaygain", player.replaygain_available());
 
             let replaygain = self.imp().settings.enum_("replay-gain").into();
@@ -1118,29 +1120,29 @@ impl Window {
                     .build();
 
                 list_item
-                    .bind_property("item", &row, "song")
+                    .bind_property("item", &row, "track")
                     .sync_create()
                     .build();
 
                 list_item
                     .property_expression("item")
-                    .chain_property::<Song>("artist")
-                    .bind(&row, "song-artist", gtk::Widget::NONE);
+                    .chain_property::<Track>("artist")
+                    .bind(&row, "track-artist", gtk::Widget::NONE);
                 list_item
                     .property_expression("item")
-                    .chain_property::<Song>("title")
-                    .bind(&row, "song-title", gtk::Widget::NONE);
+                    .chain_property::<Track>("title")
+                    .bind(&row, "track-title", gtk::Widget::NONE);
                 list_item
                     .property_expression("item")
-                    .chain_property::<Song>("cover")
-                    .bind(&row, "song-cover", gtk::Widget::NONE);
+                    .chain_property::<Track>("cover")
+                    .bind(&row, "track-cover", gtk::Widget::NONE);
                 list_item
                     .property_expression("item")
-                    .chain_property::<Song>("playing")
+                    .chain_property::<Track>("playing")
                     .bind(&row, "playing", gtk::Widget::NONE);
                 list_item
                     .property_expression("item")
-                    .chain_property::<Song>("selected")
+                    .chain_property::<Track>("selected")
                     .bind(&row, "selected", gtk::Widget::NONE);
             }
         ));
@@ -1166,11 +1168,11 @@ impl Window {
                 #[weak]
                 selection,
                 move |_, pos| {
-                    let song = selection
+                    let track = selection
                         .upcast::<gio::ListModel>()
                         .item(pos)
                         .unwrap()
-                        .downcast::<Song>()
+                        .downcast::<Track>()
                         .unwrap();
 
                     if let Some(player) = win.player() {
@@ -1179,8 +1181,8 @@ impl Window {
                         let mut real_pos = None;
                         for i in 0..queue.model().n_items() {
                             if let Some(item) = queue.model().item(i) {
-                                let s = item.downcast::<Song>().unwrap();
-                                if s.equals(&song) {
+                                let s = item.downcast::<Track>().unwrap();
+                                if s.equals(&track) {
                                     real_pos = Some(i);
                                     break;
                                 }
@@ -1189,8 +1191,8 @@ impl Window {
 
                         if let Some(real_pos) = real_pos {
                             if win.playlist_selection() {
-                                queue.select_song_at(real_pos);
-                            } else if queue.current_song_index() != Some(real_pos) {
+                                queue.select_track_at(real_pos);
+                            } else if queue.current_track_index() != Some(real_pos) {
                                 player.skip_to(real_pos);
                                 player.play();
                             } else if !player.state().playing() {
@@ -1278,41 +1280,41 @@ impl Window {
     fn update_position_labels(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
-            if state.current_song().is_some() {
+            if state.current_track().is_some() {
                 let elapsed = state.position();
                 let duration = state.duration();
                 let remaining = duration.checked_sub(elapsed).unwrap_or_default();
-                self.set_song_time(Some(elapsed), Some(remaining));
+                self.set_track_time(Some(elapsed), Some(remaining));
 
                 let position = state.position() as f64 / state.duration() as f64;
-                self.set_song_position(position);
+                self.set_track_position(position);
             } else {
-                self.set_song_time(None, None);
-                self.set_song_position(0.0);
+                self.set_track_time(None, None);
+                self.set_track_position(0.0);
             }
         }
     }
 
-    fn update_song(&self) {
+    fn update_track(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
-            self.scroll_playlist_to_song();
+            self.scroll_playlist_to_track();
             self.update_playlist_time();
-            self.update_title(state.current_song().as_ref());
-            self.update_style(state.current_song().as_ref());
+            self.update_title(state.current_track().as_ref());
+            self.update_style(state.current_track().as_ref());
         }
     }
 
     fn update_cover(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
-            let song_cover = self.imp().song_cover.get();
+            let track_cover = self.imp().track_cover.get();
             if let Some(cover) = state.cover() {
-                song_cover.album_image().set_cover(Some(&cover));
-                song_cover.show_cover_image(true);
+                track_cover.album_image().set_cover(Some(&cover));
+                track_cover.show_cover_image(true);
             } else {
-                song_cover.album_image().set_cover(None);
-                song_cover.show_cover_image(false);
+                track_cover.album_image().set_cover(None);
+                track_cover.show_cover_image(false);
             }
         }
     }
@@ -1320,13 +1322,13 @@ impl Window {
     fn update_playlist_time(&self) {
         if let Some(player) = self.player() {
             let queue = player.queue();
-            let n_songs = queue.n_songs();
-            if let Some(current) = queue.current_song_index() {
+            let n_tracks = queue.n_tracks();
+            if let Some(current) = queue.current_track_index() {
                 let mut remaining_time = 0;
-                for pos in 0..n_songs {
-                    let song = queue.song_at(pos).unwrap();
+                for pos in 0..n_tracks {
+                    let track = queue.track_at(pos).unwrap();
                     if pos >= current {
-                        remaining_time += song.duration();
+                        remaining_time += track.duration();
                     }
                 }
 
@@ -1383,10 +1385,10 @@ impl Window {
         }
     }
 
-    fn scroll_playlist_to_song(&self) {
+    fn scroll_playlist_to_track(&self) {
         let queue_view = self.imp().playlist_view.queue_view();
         if let Some(player) = self.player() {
-            if let Some(current_idx) = player.queue().current_song_index() {
+            if let Some(current_idx) = player.queue().current_track_index() {
                 debug!("Scrolling playlist to {}", current_idx);
                 queue_view
                     .upcast_ref::<gtk::Widget>()
@@ -1403,7 +1405,7 @@ impl Window {
         }
     }
 
-    fn update_style(&self, song: Option<&Song>) {
+    fn update_style(&self, track: Option<&Track>) {
         let imp = self.imp();
 
         if !imp.settings.boolean("enable-recoloring") {
@@ -1412,8 +1414,8 @@ impl Window {
             return;
         }
 
-        if let Some(song) = song {
-            if let Some(bg_colors) = song.cover_palette() {
+        if let Some(track) = track {
+            if let Some(bg_colors) = track.cover_palette() {
                 let mut css = String::new();
 
                 css.push_str(":root {");
@@ -1449,9 +1451,9 @@ impl Window {
         self.action_set_enabled("win.enable-recoloring", false);
     }
 
-    fn update_title(&self, song: Option<&Song>) {
-        if let Some(song) = song {
-            self.set_title(Some(&format!("{} - {}", song.artist(), song.title())));
+    fn update_title(&self, track: Option<&Track>) {
+        if let Some(track) = track {
+            self.set_title(Some(&format!("{} - {}", track.artist(), track.title())));
         } else {
             self.set_title(Some("Amberol"));
         }
@@ -1460,16 +1462,16 @@ impl Window {
     fn update_selected_count(&self) {
         if let Some(player) = self.player() {
             let queue = player.queue();
-            let n_selected = queue.n_selected_songs();
+            let n_selected = queue.n_selected_tracks();
 
             let selected_str = if n_selected == 0 {
-                i18n("No song selected")
+                i18n("No track selected")
             } else {
                 ni18n_f(
                     // Translators: The '{}' must be left unmodified, and
-                    // it is expanded to the number of songs selected
-                    "{} song selected",
-                    "{} songs selected",
+                    // it is expanded to the number of tracks selected
+                    "{} track selected",
+                    "{} tracks selected",
                     n_selected,
                     &[&n_selected.to_string()],
                 )
@@ -1495,9 +1497,9 @@ impl Window {
         self.add_files_to_queue(model.upcast_ref::<gio::ListModel>());
     }
 
-    pub fn remove_song(&self, song: &Song) {
+    pub fn remove_track(&self, track: &Track) {
         if let Some(p) = self.player() {
-            p.remove_song(song);
+            p.remove_track(track);
         }
         self.update_selected_count();
         self.update_playlist_time();
@@ -1516,28 +1518,28 @@ impl Window {
         self.imp().toast_overlay.add_toast(toast);
     }
 
-    fn copy_song(&self) {
+    fn copy_track(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
-            if let Some(song) = state.current_song() {
+            if let Some(track) = state.current_track() {
                 let s = i18n_k(
                     // Translators: `{title}` and `{artist}` must be left
                     // untranslated; they will expand to the title and
-                    // artist of the currently playing song, respectively
+                    // artist of the currently playing track, respectively
                     "Currently playing “{title}” by “{artist}”",
-                    &[("title", &song.title()), ("artist", &song.artist())],
+                    &[("title", &track.title()), ("artist", &track.artist())],
                 );
                 self.clipboard().set_text(&s);
             }
         }
     }
 
-    async fn open_song_directory(&self) {
+    async fn open_track_directory(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
 
-            if let Some(song) = state.current_song() {
-                let file = song.file();
+            if let Some(track) = state.current_track() {
+                let file = track.file();
 
                 match file
                     .query_info_future(
@@ -1605,7 +1607,7 @@ impl Window {
         self.imp().replaygain_mode.get()
     }
 
-    pub fn set_song_time(&self, elapsed: Option<u64>, remaining: Option<u64>) {
+    pub fn set_track_time(&self, elapsed: Option<u64>, remaining: Option<u64>) {
         if let Some(elapsed) = elapsed {
             self.imp()
                 .elapsed_label
@@ -1623,7 +1625,7 @@ impl Window {
         }
     }
 
-    pub fn set_song_position(&self, position: f64) {
+    pub fn set_track_position(&self, position: f64) {
         self.imp().waveform_view.set_position(position);
     }
 }

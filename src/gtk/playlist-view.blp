@@ -13,7 +13,7 @@ template $AmberolPlaylistView: Widget {
         icon-name: "system-search-symbolic";
         action-name: "queue.search";
         valign: center;
-        tooltip-text: _("Search Songs in the Playlist");
+        tooltip-text: _("Search Tracks in the Playlist");
       }
 
       title-widget: Box queue_length_box {
@@ -52,19 +52,19 @@ template $AmberolPlaylistView: Widget {
         icon-name: "selection-mode-symbolic";
         action-name: "queue.select";
         valign: center;
-        tooltip-text: _("Select Songs in the Playlist");
+        tooltip-text: _("Select Tracks in the Playlist");
       }
     }
 
     [top]
     SearchBar playlist_searchbar {
       child: SearchEntry playlist_searchentry {
-        placeholder-text: _("Search songs");
+        placeholder-text: _("Search tracks");
         hexpand: true;
 
         accessibility {
           label: C_("a11y", "Search");
-          description: C_("a11y", "Type to search songs");
+          description: C_("a11y", "Type to search tracks");
         }
       };
     }
@@ -107,7 +107,7 @@ template $AmberolPlaylistView: Widget {
 
       Button queue_select_all_button {
         icon-name: "edit-select-all-symbolic";
-        tooltip-text: _("Select All Songs");
+        tooltip-text: _("Select All Tracks");
       }
 
       [center]
@@ -120,7 +120,7 @@ template $AmberolPlaylistView: Widget {
       [end]
       Button queue_remove_button {
         icon-name: "app-remove-symbolic";
-        tooltip-text: _("Remove Selected Songs");
+        tooltip-text: _("Remove Selected Tracks");
       }
     }
 

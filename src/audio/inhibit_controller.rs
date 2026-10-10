@@ -7,7 +7,7 @@ use gtk::{gio, prelude::*};
 use log::debug;
 
 use crate::{
-    audio::{Controller, PlaybackState, RepeatMode, Song},
+    audio::{Controller, PlaybackState, RepeatMode, Track},
     i18n::i18n,
 };
 
@@ -53,7 +53,7 @@ impl Controller for InhibitController {
         }
     }
 
-    fn set_song(&self, _song: &Song) {}
+    fn set_track(&self, _track: &Track) {}
     fn set_position(&self, _position: u64, _notify: bool) {}
     fn set_repeat_mode(&self, _mode: RepeatMode) {}
 }

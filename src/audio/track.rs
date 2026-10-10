@@ -26,7 +26,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct SongData {
+pub struct TrackData {
     artist: Option<String>,
     title: Option<String>,
     album: Option<String>,
@@ -37,7 +37,7 @@ pub struct SongData {
     file: gio::File,
 }
 
-impl SongData {
+impl TrackData {
     pub fn artist(&self) -> Option<&str> {
         self.artist.as_deref()
     }
@@ -94,14 +94,14 @@ impl SongData {
 
         let (mime_type, _) = gio::content_type_guess(Some(&path), None);
         if !mime_type.starts_with("audio") || mime_type.ends_with("x-mpegurl") {
-            return SongData::default();
+            return TrackData::default();
         }
 
         let file_probe = match Probe::open(&path) {
             Ok(p) => p,
             Err(e) => {
                 warn!("Unable to open file {:?}: {}", path, e);
-                return SongData::default();
+                return TrackData::default();
             }
         };
 
@@ -110,12 +110,12 @@ impl SongData {
                 Ok(f) => f,
                 Err(e) => {
                     warn!("Unable to read parsed file {:?}: {}", path, e);
-                    return SongData::default();
+                    return TrackData::default();
                 }
             },
             Err(e) => {
                 warn!("Unable to parse file type {:?}: {}", path, e);
-                return SongData::default();
+                return TrackData::default();
             }
         };
 
@@ -182,13 +182,13 @@ impl SongData {
         let duration = properties.duration().as_secs();
 
         debug!(
-            "Song {:?} ('{:?}') loading time: {} ms",
+            "Track {:?} ('{:?}') loading time: {} ms",
             &uuid,
             &title,
             now.elapsed().as_millis()
         );
 
-        SongData {
+        TrackData {
             artist,
             title,
             album,
@@ -209,9 +209,9 @@ impl SongData {
     }
 }
 
-impl Default for SongData {
+impl Default for TrackData {
     fn default() -> Self {
-        SongData {
+        TrackData {
             artist: Some("Invalid Artist".to_string()),
             title: Some("Invalid Title".to_string()),
             album: Some("Invalid Album".to_string()),
@@ -228,19 +228,19 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct Song {
-        pub data: RefCell<SongData>,
+    pub struct Track {
+        pub data: RefCell<TrackData>,
         pub playing: Cell<bool>,
         pub selected: Cell<bool>,
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for Song {
-        const NAME: &'static str = "AmberolSong";
-        type Type = super::Song;
+    impl ObjectSubclass for Track {
+        const NAME: &'static str = "AmberolTrack";
+        type Type = super::Track;
     }
 
-    impl ObjectImpl for Song {
+    impl ObjectImpl for Track {
         fn properties() -> &'static [ParamSpec] {
             static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
                 vec![
@@ -264,7 +264,7 @@ mod imp {
                 "uri" => {
                     let obj = self.obj();
                     if let Ok(p) = value.get::<&str>() {
-                        self.data.replace(SongData::from_uri(p));
+                        self.data.replace(TrackData::from_uri(p));
                         obj.notify("artist");
                         obj.notify("title");
                         obj.notify("album");
@@ -302,18 +302,18 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Song(ObjectSubclass<imp::Song>);
+    pub struct Track(ObjectSubclass<imp::Track>);
 }
 
-impl Song {
+impl Track {
     pub fn new(uri: &str) -> Self {
         glib::Object::builder::<Self>().property("uri", uri).build()
     }
 
-    pub fn from_uri(uri: &str) -> Result<Song, &'static str> {
-        let res = Song::new(uri);
-        if res.equals(&Song::default()) {
-            Err("Invalid song")
+    pub fn from_uri(uri: &str) -> Result<Track, &'static str> {
+        let res = Track::new(uri);
+        if res.equals(&Track::default()) {
+            Err("Invalid track")
         } else {
             Ok(res)
         }
@@ -415,17 +415,17 @@ impl Song {
     }
 }
 
-impl Default for Song {
+impl Default for Track {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl Display for Song {
+impl Display for Track {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
-            "Song {{ uuid: {}, uri: {}, artist: '{}', title: '{}' }}",
+            "Track {{ uuid: {}, uri: {}, artist: '{}', title: '{}' }}",
             self.uuid().unwrap(),
             self.uri(),
             self.artist(),

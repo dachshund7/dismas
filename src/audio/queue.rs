@@ -5,7 +5,7 @@ use std::cell::Cell;
 
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
 
-use crate::audio::{CoverCache, RepeatMode, ShuffleListModel, Song};
+use crate::audio::{CoverCache, RepeatMode, ShuffleListModel, Track};
 
 mod imp {
     use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, ParamSpecUInt, Value};
@@ -28,7 +28,7 @@ mod imp {
         type Type = super::Queue;
 
         fn new() -> Self {
-            let store = gio::ListStore::new::<Song>();
+            let store = gio::ListStore::new::<Track>();
             let model = ShuffleListModel::new(Some(&store));
 
             Self {
@@ -45,13 +45,13 @@ mod imp {
         fn properties() -> &'static [ParamSpec] {
             static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
                 vec![
-                    ParamSpecObject::builder::<Song>("current")
+                    ParamSpecObject::builder::<Track>("current")
                         .read_only()
                         .build(),
                     ParamSpecEnum::builder::<RepeatMode>("repeat-mode")
                         .read_only()
                         .build(),
-                    ParamSpecUInt::builder("n-songs").read_only().build(),
+                    ParamSpecUInt::builder("n-tracks").read_only().build(),
                 ]
             });
 
@@ -60,9 +60,9 @@ mod imp {
 
         fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
             match pspec.name() {
-                "current" => self.obj().current_song().to_value(),
+                "current" => self.obj().current_track().to_value(),
                 "repeat-mode" => self.repeat_mode.get().to_value(),
-                "n-songs" => self.store.n_items().to_value(),
+                "n-tracks" => self.store.n_items().to_value(),
                 _ => unimplemented!(),
             }
         }
@@ -80,7 +80,7 @@ impl Default for Queue {
 }
 
 impl Queue {
-    pub fn n_songs(&self) -> u32 {
+    pub fn n_tracks(&self) -> u32 {
         self.imp().model.n_items()
     }
 
@@ -92,27 +92,27 @@ impl Queue {
         self.imp().model.as_ref()
     }
 
-    pub fn song_at(&self, pos: u32) -> Option<Song> {
-        if let Some(song) = self.imp().model.item(pos) {
-            return Some(song.downcast::<Song>().unwrap());
+    pub fn track_at(&self, pos: u32) -> Option<Track> {
+        if let Some(track) = self.imp().model.item(pos) {
+            return Some(track.downcast::<Track>().unwrap());
         }
 
         None
     }
 
-    pub fn current_song(&self) -> Option<Song> {
+    pub fn current_track(&self) -> Option<Track> {
         if let Some(pos) = self.imp().current_pos.get() {
-            return self.song_at(pos);
+            return self.track_at(pos);
         }
 
         None
     }
 
-    pub fn set_current_song(&self, song: Option<Song>) {
-        if let Some(song) = song {
-            for i in 0..self.n_songs() {
-                let s = self.song_at(i).unwrap();
-                if song.equals(&s) {
+    pub fn set_current_track(&self, track: Option<Track>) {
+        if let Some(track) = track {
+            for i in 0..self.n_tracks() {
+                let s = self.track_at(i).unwrap();
+                if track.equals(&s) {
                     self.imp().current_pos.replace(Some(i));
                     self.notify("current");
                     return;
@@ -124,50 +124,50 @@ impl Queue {
         }
     }
 
-    pub fn current_song_index(&self) -> Option<u32> {
+    pub fn current_track_index(&self) -> Option<u32> {
         self.imp().current_pos.get()
     }
 
-    pub fn add_song(&self, song: &Song) -> bool {
-        if !song.equals(&Song::default()) {
-            // Add song to the backing store
-            self.imp().store.append(song);
-            self.notify("n-songs");
+    pub fn add_track(&self, track: &Track) -> bool {
+        if !track.equals(&Track::default()) {
+            // Add track to the backing store
+            self.imp().store.append(track);
+            self.notify("n-tracks");
             true
         } else {
             false
         }
     }
 
-    pub fn add_songs(&self, songs: &[impl IsA<glib::Object>]) {
+    pub fn add_tracks(&self, tracks: &[impl IsA<glib::Object>]) {
         self.imp()
             .store
-            .splice(self.imp().model.n_items(), 0, songs);
-        self.notify("n-songs");
+            .splice(self.imp().model.n_items(), 0, tracks);
+        self.notify("n-tracks");
     }
 
-    pub fn remove_song(&self, song: &Song) {
+    pub fn remove_track(&self, track: &Track) {
         let was_shuffled = self.imp().model.shuffled();
-        let n_songs = self.n_songs();
-        for pos in 0..n_songs {
+        let n_tracks = self.n_tracks();
+        for pos in 0..n_tracks {
             let s = self
                 .imp()
                 .store
                 .item(pos)
                 .unwrap()
-                .downcast::<Song>()
+                .downcast::<Track>()
                 .unwrap();
-            if s.equals(song) {
+            if s.equals(track) {
                 self.imp().store.remove(pos);
                 break;
             }
         }
 
-        if n_songs != self.n_songs() {
+        if n_tracks != self.n_tracks() {
             if was_shuffled {
                 self.imp().model.reshuffle(0);
             }
-            self.notify("n-songs");
+            self.notify("n-tracks");
         }
 
         if self.is_empty() {
@@ -181,61 +181,61 @@ impl Queue {
 
         self.imp().current_pos.replace(None);
         self.imp().store.remove_all();
-        self.notify("n-songs");
+        self.notify("n-tracks");
     }
 
-    pub fn skip_song(&self, pos: u32) -> Option<Song> {
+    pub fn skip_track(&self, pos: u32) -> Option<Track> {
         self.imp().current_pos.replace(Some(pos));
         self.notify("current");
-        self.song_at(pos)
+        self.track_at(pos)
     }
 
-    pub fn previous_song(&self) -> Option<Song> {
+    pub fn previous_track(&self) -> Option<Track> {
         if let Some(current_pos) = self.imp().current_pos.get() {
             if current_pos > 0 {
                 let prev = current_pos - 1;
                 self.imp().current_pos.replace(Some(prev));
                 self.notify("current");
-                return self.song_at(current_pos - 1);
+                return self.track_at(current_pos - 1);
             }
         }
 
         None
     }
 
-    pub fn next_song(&self) -> Option<Song> {
+    pub fn next_track(&self) -> Option<Track> {
         let store = &self.imp().model;
 
-        let n_songs = store.n_items();
-        if n_songs == 0 {
+        let n_tracks = store.n_items();
+        if n_tracks == 0 {
             return None;
         }
 
         let repeat_mode = self.imp().repeat_mode.get();
-        if let Some(current) = self.current_song_index() {
+        if let Some(current) = self.current_track_index() {
             let next: Option<u32> = match repeat_mode {
-                RepeatMode::Consecutive if current < n_songs - 1 => Some(current + 1),
-                RepeatMode::Consecutive if current == n_songs - 1 => None,
+                RepeatMode::Consecutive if current < n_tracks - 1 => Some(current + 1),
+                RepeatMode::Consecutive if current == n_tracks - 1 => None,
                 RepeatMode::RepeatOne => Some(current),
-                RepeatMode::RepeatAll if current < n_songs - 1 => Some(current + 1),
-                RepeatMode::RepeatAll if current == n_songs - 1 => Some(0),
+                RepeatMode::RepeatAll if current < n_tracks - 1 => Some(current + 1),
+                RepeatMode::RepeatAll if current == n_tracks - 1 => Some(0),
                 _ => None,
             };
 
             if let Some(next) = next {
                 self.imp().current_pos.replace(Some(next));
                 self.notify("current");
-                self.song_at(next)
+                self.track_at(next)
             } else {
                 self.imp().current_pos.replace(None);
                 self.notify("current");
                 None
             }
         } else {
-            // Return the first song
+            // Return the first track
             self.imp().current_pos.replace(Some(0));
             self.notify("current");
-            self.song_at(0)
+            self.track_at(0)
         }
     }
 
@@ -250,7 +250,7 @@ impl Queue {
         }
     }
 
-    pub fn is_first_song(&self) -> bool {
+    pub fn is_first_track(&self) -> bool {
         if let Some(current_pos) = self.imp().current_pos.get() {
             return current_pos == 0;
         }
@@ -258,7 +258,7 @@ impl Queue {
         false
     }
 
-    pub fn is_last_song(&self) -> bool {
+    pub fn is_last_track(&self) -> bool {
         let n_items = self.imp().model.n_items();
 
         if let Some(current_pos) = self.imp().current_pos.get() {
@@ -280,34 +280,34 @@ impl Queue {
                 let current_pos = self.imp().current_pos.get().unwrap_or(0);
                 self.imp().model.reshuffle(current_pos);
             } else {
-                let current_pos = self.current_song_index().unwrap_or(0);
-                let current_song = self.song_at(current_pos);
+                let current_pos = self.current_track_index().unwrap_or(0);
+                let current_track = self.track_at(current_pos);
                 self.imp().model.unshuffle();
-                self.set_current_song(current_song);
+                self.set_current_track(current_track);
             }
         }
     }
 
-    pub fn select_song_at(&self, index: u32) {
-        if let Some(song) = self.imp().model.item(index) {
-            let song = song.downcast_ref::<Song>().unwrap();
-            let is_selected = !song.selected();
-            song.set_selected(is_selected);
+    pub fn select_track_at(&self, index: u32) {
+        if let Some(track) = self.imp().model.item(index) {
+            let track = track.downcast_ref::<Track>().unwrap();
+            let is_selected = !track.selected();
+            track.set_selected(is_selected);
         }
     }
 
-    pub fn unselect_all_songs(&self) {
+    pub fn unselect_all_tracks(&self) {
         for i in 0..self.imp().store.n_items() {
-            let song = self.imp().store.item(i).unwrap();
-            song.downcast_ref::<Song>().unwrap().set_selected(false);
+            let track = self.imp().store.item(i).unwrap();
+            track.downcast_ref::<Track>().unwrap().set_selected(false);
         }
     }
 
-    pub fn n_selected_songs(&self) -> u32 {
+    pub fn n_selected_tracks(&self) -> u32 {
         let mut count = 0;
         for i in 0..self.imp().store.n_items() {
-            let song = self.imp().store.item(i).unwrap();
-            if song.downcast_ref::<Song>().unwrap().selected() {
+            let track = self.imp().store.item(i).unwrap();
+            if track.downcast_ref::<Track>().unwrap().selected() {
                 count += 1;
             }
         }
@@ -315,10 +315,10 @@ impl Queue {
         count
     }
 
-    pub fn contains(&self, s: &Song) -> bool {
+    pub fn contains(&self, s: &Track) -> bool {
         for i in 0..self.imp().store.n_items() {
-            let song = self.imp().store.item(i).unwrap();
-            if song.downcast_ref::<Song>().unwrap().equals(s) {
+            let track = self.imp().store.item(i).unwrap();
+            if track.downcast_ref::<Track>().unwrap().equals(s) {
                 return true;
             }
         }

@@ -141,7 +141,7 @@ impl GstBackend {
         ));
     }
 
-    pub fn set_song_uri(&self, uri: Option<&str>) {
+    pub fn set_track_uri(&self, uri: Option<&str>) {
         self.gst_player.set_uri(uri);
     }
 

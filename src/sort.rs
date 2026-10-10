@@ -15,7 +15,7 @@ mod imp {
     };
     use once_cell::sync::Lazy;
 
-    use crate::{audio::Song, utils::cmp_two_files};
+    use crate::{audio::Track, utils::cmp_two_files};
 
     #[derive(Default)]
     pub struct FuzzySorter {
@@ -51,8 +51,8 @@ mod imp {
 
     impl SorterImpl for FuzzySorter {
         fn compare(&self, item1: &glib::Object, item2: &glib::Object) -> gtk::Ordering {
-            let item1 = item1.downcast_ref::<Song>().unwrap();
-            let item2 = item2.downcast_ref::<Song>().unwrap();
+            let item1 = item1.downcast_ref::<Track>().unwrap();
+            let item2 = item2.downcast_ref::<Track>().unwrap();
 
             if let Some(search) = self.search.borrow().as_ref() {
                 let matcher = SkimMatcherV2::default();

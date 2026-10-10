@@ -16,7 +16,7 @@ QA Plan
   - Shuffle
   - Repeat: all, one, continuous
   - Select
-  - Remove song
+  - Remove track
   - Remove all
   - Toggle playlist
 

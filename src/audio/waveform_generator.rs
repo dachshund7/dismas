@@ -8,7 +8,7 @@ use gst::prelude::*;
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
 use log::{debug, warn};
 
-use crate::audio::{Controller, PlaybackState, RepeatMode, Song};
+use crate::audio::{Controller, PlaybackState, RepeatMode, Track};
 
 mod imp {
     use glib::{ParamSpec, ParamSpecBoolean, Value};
@@ -18,7 +18,7 @@ mod imp {
 
     #[derive(Debug, Default)]
     pub struct WaveformGenerator {
-        pub song: RefCell<Option<Song>>,
+        pub track: RefCell<Option<Track>>,
         pub peaks: RefCell<Option<Vec<(f64, f64)>>>,
         pub pipeline: RefCell<Option<(gst::Element, gst::bus::BusWatchGuard)>>,
     }
@@ -69,8 +69,8 @@ impl Default for WaveformGenerator {
 impl Controller for WaveformGenerator {
     fn set_playback_state(&self, _playback_state: &PlaybackState) {}
 
-    fn set_song(&self, song: &Song) {
-        self.imp().song.replace(Some(song.clone()));
+    fn set_track(&self, track: &Track) {
+        self.imp().track.replace(Some(track.clone()));
         self.load_peaks();
     }
 
@@ -89,7 +89,7 @@ impl WaveformGenerator {
 
     fn save_peaks(&self) {
         if let Some(peaks) = self.peaks() {
-            let song = match self.imp().song.borrow().as_ref() {
+            let track = match self.imp().track.borrow().as_ref() {
                 Some(s) => s.clone(),
                 None => {
                     self.notify("has-peaks");
@@ -97,7 +97,7 @@ impl WaveformGenerator {
                 }
             };
 
-            if let Some(uuid) = song.uuid() {
+            if let Some(uuid) = track.uuid() {
                 let mut cache = glib::user_cache_dir();
                 cache.push("amberol");
                 cache.push("waveforms");
@@ -144,12 +144,12 @@ impl WaveformGenerator {
     }
 
     fn load_peaks(&self) {
-        let song = match self.imp().song.borrow().as_ref() {
+        let track = match self.imp().track.borrow().as_ref() {
             Some(s) => s.clone(),
             None => return,
         };
 
-        if let Some(uuid) = song.uuid() {
+        if let Some(uuid) = track.uuid() {
             let mut cache = glib::user_cache_dir();
             cache.push("amberol");
             cache.push("waveforms");
@@ -176,7 +176,7 @@ impl WaveformGenerator {
             }
         }
 
-        let song = match self.imp().song.borrow().as_ref() {
+        let track = match self.imp().track.borrow().as_ref() {
             Some(s) => s.clone(),
             None => {
                 self.imp().peaks.replace(None);
@@ -205,7 +205,7 @@ impl WaveformGenerator {
             .unwrap()
             .by_name("uridecodebin")
             .unwrap();
-        uridecodebin.set_property("uri", song.uri());
+        uridecodebin.set_property("uri", track.uri());
 
         let fakesink = pipeline
             .downcast_ref::<gst::Bin>()

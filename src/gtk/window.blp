@@ -12,7 +12,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
 
   content: WindowHandle {
     $DragOverlay drag_overlay {
-      title: _("Drop a song to add it to the playlist");
+      title: _("Drop a track to add it to the playlist");
 
       child: Adw.ToastOverlay toast_overlay {
         child: Stack main_stack {
@@ -36,7 +36,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
                   margin-start: 12;
                   margin-end: 12;
                   title: "Amberol";
-                  description: _("Select a file or a folder, or drag files from your file manager to the application window to add songs to the playlist");
+                  description: _("Select a file or a folder, or drag files from your file manager to the application window to add tracks to the playlist");
 
                   child: Box {
                     orientation: vertical;
@@ -64,8 +64,8 @@ template $AmberolWindow: Adw.ApplicationWindow {
                     }
 
                     Button {
-                      label: _("Add Song");
-                      action-name: "queue.add-song";
+                      label: _("Add Track");
+                      action-name: "queue.add-track";
 
                       styles [
                         "pill",
@@ -100,7 +100,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
                     "main-box",
                   ]
 
-                  $AmberolSongCover song_cover {}
+                  $AmberolTrackCover track_cover {}
 
                   Box {
                     orientation: vertical;
@@ -150,7 +150,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
                     }
                   }
 
-                  $AmberolSongDetails song_details {}
+                  $AmberolTrackDetails track_details {}
 
                   $AmberolPlaybackControl playback_control {
                     halign: "center";

@@ -6,10 +6,10 @@ using Gtk 4.0;
 template $AmberolQueueRow: Widget {
   Stack row_stack {
     StackPage {
-      name: "song-details";
+      name: "track-details";
 
       child: Box {
-        Stack song_cover_stack {
+        Stack track_cover_stack {
           StackPage {
             name: "no-cover";
 
@@ -32,7 +32,7 @@ template $AmberolQueueRow: Widget {
           StackPage {
             name: "cover";
 
-            child: $AmberolCoverPicture song_cover_image {
+            child: $AmberolCoverPicture track_cover_image {
               cover-size: "1";
               halign: "center";
               valign: "center";
@@ -50,27 +50,27 @@ template $AmberolQueueRow: Widget {
           hexpand: true;
           spacing: 3;
 
-          Inscription song_title_label {
+          Inscription track_title_label {
             xalign: 0;
             text-overflow: ellipsize_end;
 
             styles [
-              "song-title",
+              "track-title",
             ]
           }
 
-          Inscription song_artist_label {
+          Inscription track_artist_label {
             xalign: 0;
             text-overflow: ellipsize_end;
 
             styles [
-              "song-artist",
+              "track-artist",
             ]
           }
         }
 
         [end]
-        Image song_playing_image {
+        Image track_playing_image {
           icon-name: "audio-only-symbolic";
           pixel-size: 16;
           halign: center;
@@ -83,7 +83,7 @@ template $AmberolQueueRow: Widget {
         }
 
         styles [
-          "song-details",
+          "track-details",
         ]
       };
     }
@@ -112,7 +112,7 @@ template $AmberolQueueRow: Widget {
             text-overflow: ellipsize_end;
 
             styles [
-              "song-title",
+              "track-title",
             ]
           }
 
@@ -121,7 +121,7 @@ template $AmberolQueueRow: Widget {
             text-overflow: ellipsize_end;
 
             styles [
-              "song-artist",
+              "track-artist",
             ]
           }
         }
@@ -136,7 +136,7 @@ template $AmberolQueueRow: Widget {
         }
 
         styles [
-          "song-details",
+          "track-details",
         ]
       };
     }

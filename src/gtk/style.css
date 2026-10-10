@@ -9,12 +9,12 @@ button.large {
   margin-right: 12px;
 }
 
-songcover {
+trackcover {
   padding-bottom: 24px;
 }
 
-songcover picture.cover,
-songcover image.card {
+trackcover picture.cover,
+trackcover image.card {
   box-shadow: 0px 1px 6px rgba(0,0,0,0.3),
               0px 2px 12px rgba(0,0,0,0.15),
               0px 6px 32px rgba(0,0,0,0.1);
@@ -27,16 +27,16 @@ image.card.small {
   background-clip: padding-box;
 }
 
-.main-window songcover picture.cover {
+.main-window trackcover picture.cover {
   background: linear-gradient(to bottom, var(--background-color-0), var(--background-color-1));
 }
 
-songdetails {
+trackdetails {
   padding-top: 12px;
   padding-bottom: 24px;
 }
 
-songdetails label.song-title {
+trackdetails label.track-title {
   /* match title-1 */
   font-size: 15pt;
   font-weight: 800;
@@ -44,9 +44,9 @@ songdetails label.song-title {
   padding-right: 12px;
 }
 
-songdetails label.song-title,
-songdetails label.song-artist,
-songdetails label.song-album {
+trackdetails label.track-title,
+trackdetails label.track-artist,
+trackdetails label.track-album {
   min-height: 1.5em;
 }
 
@@ -63,17 +63,17 @@ queuerow .currently-playing {
   font-weight: 700;
 }
 
-queuerow box.song-details {
+queuerow box.track-details {
   padding: 6px 0;
   border-spacing: 12px;
 }
 
-queuerow label.song-title {
+queuerow label.track-title {
   font-weight: 700;
   font-size: 85%;
 }
 
-queuerow label.song-artist {
+queuerow label.track-artist {
   font-size: 85%;
 }
 

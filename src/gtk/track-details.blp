@@ -3,7 +3,7 @@
 
 using Gtk 4.0;
 
-template $AmberolSongDetails: Widget {
+template $AmberolTrackDetails: Widget {
   Box {
     orientation: vertical;
     spacing: 12;
@@ -14,27 +14,27 @@ template $AmberolSongDetails: Widget {
       margin-start: 6;
       margin-end: 6;
 
-      $AmberolMarquee song_title_label {
+      $AmberolMarquee track_title_label {
         width-chars: "20";
 
         styles [
-          "song-title",
+          "track-title",
         ]
       }
 
-      $AmberolMarquee song_artist_label {
+      $AmberolMarquee track_artist_label {
         width-chars: "25";
 
         styles [
-          "song-artist",
+          "track-artist",
         ]
       }
 
-      $AmberolMarquee song_album_label {
+      $AmberolMarquee track_album_label {
         width-chars: "25";
 
         styles [
-          "song-album",
+          "track-album",
         ]
       }
     }
