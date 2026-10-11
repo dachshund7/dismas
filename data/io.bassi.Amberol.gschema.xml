@@ -21,5 +21,10 @@
 	  <key name="background-play" type="b">
 	    <default>true</default>
 	  </key>
+	  <key name="sidebar-width" type="i">
+	    <default>0</default>
+	    <summary>Width of the playlist sidebar</summary>
+	    <description>The width of the playlist sidebar, in pixels; 0 means the width is computed automatically</description>
+	  </key>
 	</schema>
 </schemalist>

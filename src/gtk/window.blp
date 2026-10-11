@@ -160,7 +160,20 @@ template $AmberolWindow: Adw.ApplicationWindow {
                 };
               };
 
-              sidebar: $AmberolPlaylistView playlist_view {};
+              sidebar: Box {
+                $AmberolPlaylistView playlist_view {
+                  hexpand: true;
+                }
+
+                Box sidebar_handle {
+                  width-request: 6;
+                  tooltip-text: _("Drag to Resize the Playlist, Double-Click to Reset");
+
+                  styles [
+                    "sidebar-handle",
+                  ]
+                }
+              };
             };
           }
         };

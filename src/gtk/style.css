@@ -103,6 +103,15 @@ dragoverlay {
   filter: blur(6px);
 }
 
+.sidebar-handle {
+  transition: background-color 150ms ease;
+}
+
+.sidebar-handle:hover,
+.sidebar-handle.dragging {
+  background-color: color-mix(in srgb, currentColor 15%, transparent);
+}
+
 .main-window {
   --sidebar-bg-color: rgb(0 0 0 / 6%);
   --sidebar-backdrop-color: rgb(0 0 0 / 3%);

@@ -211,12 +211,31 @@ impl QueueRow {
         let imp = self.imp();
         imp.track_title_label.set_text(Some(title));
         imp.selection_title_label.set_text(Some(title));
+        self.update_tooltip();
     }
 
     fn set_track_artist(&self, artist: &str) {
         let imp = self.imp();
         imp.track_artist_label.set_text(Some(artist));
         imp.selection_artist_label.set_text(Some(artist));
+        self.update_tooltip();
+    }
+
+    // Long titles get truncated in the playlist, so we show the full
+    // title and artist on hover
+    fn update_tooltip(&self) {
+        let imp = self.imp();
+        let title = imp.track_title_label.text().unwrap_or_default();
+        let artist = imp.track_artist_label.text().unwrap_or_default();
+
+        let tooltip = match (title.is_empty(), artist.is_empty()) {
+            (true, true) => None,
+            (false, true) => Some(title.to_string()),
+            (true, false) => Some(artist.to_string()),
+            (false, false) => Some(format!("{title}\n{artist}")),
+        };
+
+        self.set_tooltip_text(tooltip.as_deref());
     }
 
     fn set_track_cover(&self, cover: Option<gdk::Texture>) {
