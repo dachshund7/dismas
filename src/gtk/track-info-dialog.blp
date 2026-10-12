@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 John Hamilton
+
+using Gtk 4.0;
+using Adw 1;
+
+template $AmberolTrackInfoDialog: Adw.Dialog {
+  title: _("Track Information");
+  content-width: 480;
+  content-height: 640;
+
+  styles [
+    "track-info",
+  ]
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {}
+
+    content: Adw.PreferencesPage {
+      Adw.PreferencesGroup work_group {
+        title: _("Work");
+      }
+
+      Adw.PreferencesGroup performance_group {
+        title: _("Performance");
+      }
+
+      Adw.PreferencesGroup release_group {
+        title: _("Release");
+      }
+    };
+  };
+}

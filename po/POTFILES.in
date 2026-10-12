@@ -5,10 +5,12 @@ src/gtk/playback-control.blp
 src/gtk/playlist-view.blp
 src/gtk/queue-row.blp
 src/gtk/shortcuts-dialog.blp
+src/gtk/track-info-dialog.blp
 src/gtk/window.blp
 src/application.rs
 src/audio/inhibit_controller.rs
 src/audio/track.rs
 src/cover_picture.rs
 src/playback_control.rs
+src/track_info_dialog.rs
 src/window.rs

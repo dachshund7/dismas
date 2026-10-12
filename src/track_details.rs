@@ -16,9 +16,13 @@ mod imp {
         #[template_child]
         pub track_title_label: TemplateChild<Marquee>,
         #[template_child]
+        pub track_movement_label: TemplateChild<Marquee>,
+        #[template_child]
         pub track_artist_label: TemplateChild<Marquee>,
         #[template_child]
         pub track_album_label: TemplateChild<Marquee>,
+        #[template_child]
+        pub track_credits_label: TemplateChild<Marquee>,
     }
 
     #[glib::object_subclass]
@@ -78,5 +82,13 @@ impl TrackDetails {
 
     pub fn album_label(&self) -> Marquee {
         self.imp().track_album_label.get()
+    }
+
+    pub fn movement_label(&self) -> Marquee {
+        self.imp().track_movement_label.get()
+    }
+
+    pub fn credits_label(&self) -> Marquee {
+        self.imp().track_credits_label.get()
     }
 }

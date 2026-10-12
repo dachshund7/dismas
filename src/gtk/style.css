@@ -46,8 +46,20 @@ trackdetails label.track-title {
 
 trackdetails label.track-title,
 trackdetails label.track-artist,
-trackdetails label.track-album {
+trackdetails label.track-movement,
+trackdetails label.track-album,
+trackdetails label.track-credits {
   min-height: 1.5em;
+}
+
+trackdetails label.track-movement {
+  font-size: 110%;
+  font-weight: 600;
+}
+
+trackdetails label.track-credits {
+  font-size: 90%;
+  opacity: 0.7;
 }
 
 waveformview {
@@ -140,6 +152,28 @@ dragoverlay {
   transition-property: background;
   transition-duration: 250ms;
   transition-timing-function: ease;
+}
+
+/* The track information dialog follows the colors of the cover; the
+ * colors are defined on :root, so they are available outside of the
+ * main window as well */
+dialog.track-info.recolored {
+  --card-bg-color: color-mix(in srgb, var(--dialog-bg-color) 60%, transparent);
+}
+
+dialog.track-info.recolored sheet {
+  background: linear-gradient(127deg, color-mix(in srgb, var(--background-color-0) 55%, transparent), color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%),
+              linear-gradient(217deg, color-mix(in srgb, var(--background-color-1) 55%, transparent), color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%),
+              linear-gradient(336deg, color-mix(in srgb, var(--background-color-2) 55%, transparent), color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%),
+              var(--dialog-bg-color);
+  transition-property: background;
+  transition-duration: 250ms;
+  transition-timing-function: ease;
+}
+
+dialog.track-info.recolored headerbar {
+  background: none;
+  box-shadow: none;
 }
 
 .main-window volume > scale trough highlight {

@@ -26,6 +26,7 @@ use crate::{
     sort::FuzzySorter,
     track_cover::TrackCover,
     track_details::TrackDetails,
+    track_info_dialog::TrackInfoDialog,
     utils,
     volume_control::VolumeControl,
     waveform_view::WaveformView,
@@ -210,6 +211,10 @@ mod imp {
             klass.install_action("win.copy", None, move |win, _, _| {
                 debug!("Window::win.copy()");
                 win.copy_track();
+            });
+            klass.install_action("win.track-info", None, move |win, _, _| {
+                debug!("Window::win.track-info()");
+                win.show_track_info();
             });
             klass.install_action_async("win.open-directory", None, async move |win, _, _| {
                 debug!("Window::win.open-directory()");
@@ -943,7 +948,7 @@ impl Window {
 
             // Bind the track properties to the UI
             state
-                .bind_property("title", &imp.track_details.get().title_label(), "label")
+                .bind_property("heading", &imp.track_details.get().title_label(), "label")
                 .sync_create()
                 .build();
             state
@@ -952,6 +957,40 @@ impl Window {
                 .build();
             state
                 .bind_property("album", &imp.track_details.get().album_label(), "label")
+                .sync_create()
+                .build();
+            state
+                .bind_property(
+                    "movement",
+                    &imp.track_details.get().movement_label(),
+                    "label",
+                )
+                .sync_create()
+                .build();
+            state
+                .bind_property(
+                    "movement",
+                    &imp.track_details.get().movement_label(),
+                    "visible",
+                )
+                .transform_to(|_, movement: Option<String>| Some(movement.is_some()))
+                .sync_create()
+                .build();
+            state
+                .bind_property("credits", &imp.track_details.get().credits_label(), "label")
+                .sync_create()
+                .build();
+            // Most tracks have no credits, so we hide the line instead of
+            // leaving an empty space
+            state
+                .bind_property(
+                    "credits",
+                    &imp.track_details.get().credits_label(),
+                    "visible",
+                )
+                .transform_to(|_, credits: Option<String>| {
+                    Some(credits.is_some_and(|c| !c.is_empty()))
+                })
                 .sync_create()
                 .build();
             state
@@ -1341,12 +1380,16 @@ impl Window {
 
                 list_item
                     .property_expression("item")
-                    .chain_property::<Track>("artist")
+                    .chain_property::<Track>("row-subtitle")
                     .bind(&row, "track-artist", gtk::Widget::NONE);
                 list_item
                     .property_expression("item")
-                    .chain_property::<Track>("title")
+                    .chain_property::<Track>("row-title")
                     .bind(&row, "track-title", gtk::Widget::NONE);
+                list_item
+                    .property_expression("item")
+                    .chain_property::<Track>("row-composer")
+                    .bind(&row, "track-composer", gtk::Widget::NONE);
                 list_item
                     .property_expression("item")
                     .chain_property::<Track>("cover")
@@ -1745,6 +1788,21 @@ impl Window {
                     &[("title", &track.title()), ("artist", &track.artist())],
                 );
                 self.clipboard().set_text(&s);
+            }
+        }
+    }
+
+    fn show_track_info(&self) {
+        if let Some(player) = self.player() {
+            if let Some(track) = player.state().current_track() {
+                let dialog = TrackInfoDialog::new(&track);
+
+                // Follow the colors of the cover, like the main window
+                if self.imp().main_stack.has_css_class("main-window") {
+                    dialog.add_css_class("recolored");
+                }
+
+                adw::prelude::AdwDialogExt::present(&dialog, Some(self));
             }
         }
     }

@@ -51,6 +51,9 @@ mod imp {
                     ParamSpecString::builder("title").read_only().build(),
                     ParamSpecString::builder("artist").read_only().build(),
                     ParamSpecString::builder("album").read_only().build(),
+                    ParamSpecString::builder("credits").read_only().build(),
+                    ParamSpecString::builder("heading").read_only().build(),
+                    ParamSpecString::builder("movement").read_only().build(),
                     ParamSpecUInt64::builder("duration").read_only().build(),
                     ParamSpecObject::builder::<gdk::Texture>("cover")
                         .read_only()
@@ -78,6 +81,9 @@ mod imp {
                 "title" => obj.title().to_value(),
                 "artist" => obj.artist().to_value(),
                 "album" => obj.album().to_value(),
+                "credits" => obj.credits().to_value(),
+                "heading" => obj.heading().to_value(),
+                "movement" => obj.movement().to_value(),
                 "duration" => obj.duration().to_value(),
                 "cover" => obj.cover().to_value(),
                 _ => unimplemented!(),
@@ -114,6 +120,30 @@ impl PlayerState {
     pub fn album(&self) -> Option<String> {
         if let Some(track) = &*self.imp().current_track.borrow() {
             return Some(track.album());
+        }
+
+        None
+    }
+
+    pub fn credits(&self) -> Option<String> {
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return Some(track.credits());
+        }
+
+        None
+    }
+
+    pub fn heading(&self) -> Option<String> {
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return Some(track.heading());
+        }
+
+        None
+    }
+
+    pub fn movement(&self) -> Option<String> {
+        if let Some(track) = &*self.imp().current_track.borrow() {
+            return track.movement();
         }
 
         None
@@ -161,6 +191,9 @@ impl PlayerState {
         self.notify("title");
         self.notify("artist");
         self.notify("album");
+        self.notify("credits");
+        self.notify("heading");
+        self.notify("movement");
         self.notify("duration");
         self.notify("cover");
         self.notify("position");

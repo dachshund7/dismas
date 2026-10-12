@@ -22,6 +22,15 @@ template $AmberolTrackDetails: Widget {
         ]
       }
 
+      $AmberolMarquee track_movement_label {
+        width-chars: "25";
+        visible: false;
+
+        styles [
+          "track-movement",
+        ]
+      }
+
       $AmberolMarquee track_artist_label {
         width-chars: "25";
 
@@ -35,6 +44,15 @@ template $AmberolTrackDetails: Widget {
 
         styles [
           "track-album",
+        ]
+      }
+
+      $AmberolMarquee track_credits_label {
+        width-chars: "25";
+        visible: false;
+
+        styles [
+          "track-credits",
         ]
       }
     }

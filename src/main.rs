@@ -15,6 +15,7 @@ mod search;
 mod sort;
 mod track_cover;
 mod track_details;
+mod track_info_dialog;
 mod utils;
 mod volume_control;
 mod waveform_view;

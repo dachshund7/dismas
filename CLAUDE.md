@@ -56,6 +56,7 @@ Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-I
 - **Composite templates:** each widget is a Rust subclass (`src/*.rs`) bound to a Blueprint template in `src/gtk/*.blp`.
 - **Resources:** Meson compiles the `.blp` files to `.ui` and bundles them with CSS and icons through `src/amberol.gresource.xml`. Templates load from `/io/bassi/Amberol/<name>.ui`.
 - **Adding a widget:** update the `.blp` list in `src/gtk/meson.build`, the gresource XML and `po/POTFILES.in` together.
+- **Stale resources after editing `.blp` files:** the gresource bundle doesn't track the compiled `.ui` files, so the first `ninja` run can leave the old UI in `_build/src/amberol.gresource`. Run `ninja` a second time.
 - **Window coordination:** `window.rs` is the large coordinator. It installs `win.*` actions, handles drag-and-drop and file loading, runs search/filtering (`search.rs`, `sort.rs`), and binds `PlayerState` to the widgets.
 - **Settings:** stored through GSettings (`data/io.bassi.Amberol.gschema.xml`).
 - **Saved playlist:** kept in the user cache dir (`utils.rs`) so "Restore Playlist" can reload it.

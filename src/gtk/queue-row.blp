@@ -67,6 +67,16 @@ template $AmberolQueueRow: Widget {
               "track-artist",
             ]
           }
+
+          Inscription track_composer_label {
+            xalign: 0;
+            text-overflow: ellipsize_end;
+            visible: false;
+
+            styles [
+              "track-artist",
+            ]
+          }
         }
 
         [end]
@@ -119,6 +129,16 @@ template $AmberolQueueRow: Widget {
           Inscription selection_artist_label {
             xalign: 0;
             text-overflow: ellipsize_end;
+
+            styles [
+              "track-artist",
+            ]
+          }
+
+          Inscription selection_composer_label {
+            xalign: 0;
+            text-overflow: ellipsize_end;
+            visible: false;
 
             styles [
               "track-artist",

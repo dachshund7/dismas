@@ -14,7 +14,7 @@ use itertools::Itertools;
 use lofty::{
     prelude::{Accessor, TaggedFileExt},
     probe::Probe,
-    tag::ItemKey,
+    tag::{ItemKey, Tag},
 };
 use log::{debug, warn};
 use once_cell::sync::Lazy;
@@ -25,11 +25,130 @@ use crate::{
     i18n::i18n,
 };
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Performer {
+    pub name: String,
+    pub role: Option<String>,
+}
+
+impl Performer {
+    // MusicBrainz Picard stores performers as "Name (role)"
+    fn parse(s: &str) -> Self {
+        if let Some(name) = s.strip_suffix(')') {
+            if let Some((name, role)) = name.rsplit_once(" (") {
+                return Performer {
+                    name: name.trim().to_string(),
+                    role: Some(role.trim().to_string()),
+                };
+            }
+        }
+
+        Performer {
+            name: s.to_string(),
+            role: None,
+        }
+    }
+}
+
+// The additional credits and release information in the tags, mostly
+// relevant for classical music
+#[derive(Debug, Clone, Default)]
+pub struct TrackCredits {
+    pub work: Option<String>,
+    pub movement: Option<String>,
+    pub movement_number: Option<String>,
+    pub composers: Vec<String>,
+    pub lyricists: Vec<String>,
+    pub arrangers: Vec<String>,
+    pub conductors: Vec<String>,
+    pub performers: Vec<Performer>,
+    pub album_artist: Option<String>,
+    pub date: Option<String>,
+    pub labels: Vec<String>,
+    pub catalog_numbers: Vec<String>,
+    pub genres: Vec<String>,
+}
+
+impl TrackCredits {
+    fn from_tag(tag: &Tag) -> Self {
+        TrackCredits {
+            work: tag.get_string(ItemKey::Work).map(|s| s.to_string()),
+            movement: tag.get_string(ItemKey::Movement).map(|s| s.to_string()),
+            movement_number: tag
+                .get_string(ItemKey::MovementNumber)
+                .map(|s| s.to_string()),
+            composers: tag_strings(tag, ItemKey::Composer),
+            lyricists: tag_strings(tag, ItemKey::Lyricist),
+            arrangers: tag_strings(tag, ItemKey::Arranger),
+            conductors: tag_strings(tag, ItemKey::Conductor),
+            performers: tag_strings(tag, ItemKey::Performer)
+                .iter()
+                .map(|s| Performer::parse(s))
+                .collect(),
+            album_artist: tag.get_string(ItemKey::AlbumArtist).map(|s| s.to_string()),
+            date: tag
+                .get_string(ItemKey::RecordingDate)
+                .or_else(|| tag.get_string(ItemKey::Year))
+                .map(|s| s.to_string()),
+            labels: tag_strings(tag, ItemKey::Label),
+            catalog_numbers: tag_strings(tag, ItemKey::CatalogNumber),
+            genres: tag_strings(tag, ItemKey::Genre),
+        }
+    }
+
+    // A single line with the conductors and performers, skipping the
+    // names that are already displayed as the artist
+    // The movement, with its number if any, e.g. "2. Adagio"; only set if
+    // the track is part of a larger work, as tagged by the "Work & Movement"
+    // option of MusicBrainz Picard
+    pub fn movement_label(&self) -> Option<String> {
+        self.work.as_ref()?;
+        let movement = self.movement.as_deref()?;
+        match self.movement_number.as_deref() {
+            Some(n) if !n.is_empty() => Some(format!("{n}. {movement}")),
+            _ => Some(movement.to_string()),
+        }
+    }
+
+    pub fn summary(&self, artist: Option<&str>) -> String {
+        let conductors = self
+            .conductors
+            .iter()
+            .filter(|c| Some(c.as_str()) != artist)
+            .join(", ");
+        let performers = self
+            .performers
+            .iter()
+            .map(|p| p.name.as_str())
+            .filter(|name| Some(*name) != artist && !self.conductors.iter().any(|c| c == name))
+            .unique()
+            .join(", ");
+
+        [conductors, performers]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .join(" · ")
+    }
+}
+
+// All the values for a key, including the ones that were stored as a
+// single value separated by semicolons
+fn tag_strings(tag: &Tag, key: ItemKey) -> Vec<String> {
+    tag.get_strings(key)
+        .flat_map(|s| s.split(';'))
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unique()
+        .map(|s| s.to_string())
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct TrackData {
     artist: Option<String>,
     title: Option<String>,
     album: Option<String>,
+    credits: TrackCredits,
     cover_art: Option<CoverArt>,
     cover_uuid: Option<String>,
     uuid: Option<String>,
@@ -48,6 +167,10 @@ impl TrackData {
 
     pub fn album(&self) -> Option<&str> {
         self.album.as_deref()
+    }
+
+    pub fn credits(&self) -> &TrackCredits {
+        &self.credits
     }
 
     pub fn uuid(&self) -> Option<&str> {
@@ -124,6 +247,7 @@ impl TrackData {
         let mut artist = None;
         let mut title = None;
         let mut album = None;
+        let mut credits = TrackCredits::default();
         let mut cover_art = None;
         let mut cover_uuid = None;
         if let Some(tag) = tagged_file.primary_tag() {
@@ -131,6 +255,7 @@ impl TrackData {
             artist = Some(tag.get_strings(ItemKey::TrackArtist).join(", "));
             title = tag.title().map(|s| s.to_string());
             album = tag.album().map(|s| s.to_string());
+            credits = TrackCredits::from_tag(tag);
             if let Some(res) = cover_cache.cover_art(&path, tag) {
                 cover_art = Some(res.0);
                 cover_uuid = Some(res.1);
@@ -142,6 +267,7 @@ impl TrackData {
                 artist = Some(tag.get_strings(ItemKey::TrackArtist).join(", "));
                 title = tag.title().map(|s| s.to_string());
                 album = tag.album().map(|s| s.to_string());
+                credits = TrackCredits::from_tag(tag);
                 if let Some(res) = cover_cache.cover_art(&path, tag) {
                     cover_art = Some(res.0);
                     cover_uuid = Some(res.1);
@@ -192,6 +318,7 @@ impl TrackData {
             artist,
             title,
             album,
+            credits,
             cover_art,
             cover_uuid,
             uuid,
@@ -215,6 +342,7 @@ impl Default for TrackData {
             artist: Some("Invalid Artist".to_string()),
             title: Some("Invalid Title".to_string()),
             album: Some("Invalid Album".to_string()),
+            credits: TrackCredits::default(),
             cover_art: None,
             cover_uuid: None,
             uuid: None,
@@ -248,6 +376,12 @@ mod imp {
                     ParamSpecString::builder("artist").read_only().build(),
                     ParamSpecString::builder("title").read_only().build(),
                     ParamSpecString::builder("album").read_only().build(),
+                    ParamSpecString::builder("credits").read_only().build(),
+                    ParamSpecString::builder("heading").read_only().build(),
+                    ParamSpecString::builder("movement").read_only().build(),
+                    ParamSpecString::builder("row-title").read_only().build(),
+                    ParamSpecString::builder("row-subtitle").read_only().build(),
+                    ParamSpecString::builder("row-composer").read_only().build(),
                     ParamSpecUInt::builder("duration").read_only().build(),
                     ParamSpecObject::builder::<gdk::Texture>("cover")
                         .read_only()
@@ -268,6 +402,12 @@ mod imp {
                         obj.notify("artist");
                         obj.notify("title");
                         obj.notify("album");
+                        obj.notify("credits");
+                        obj.notify("heading");
+                        obj.notify("movement");
+                        obj.notify("row-title");
+                        obj.notify("row-subtitle");
+                        obj.notify("row-composer");
                         obj.notify("duration");
                         obj.notify("cover");
                     }
@@ -290,6 +430,12 @@ mod imp {
                 "artist" => obj.artist().to_value(),
                 "title" => obj.title().to_value(),
                 "album" => obj.album().to_value(),
+                "credits" => obj.credits().to_value(),
+                "heading" => obj.heading().to_value(),
+                "movement" => obj.movement().unwrap_or_default().to_value(),
+                "row-title" => obj.row_title().to_value(),
+                "row-subtitle" => obj.row_subtitle().to_value(),
+                "row-composer" => obj.row_composer().to_value(),
                 "duration" => obj.duration().to_value(),
                 "uri" => obj.uri().to_value(),
                 "cover" => obj.cover_texture().to_value(),
@@ -356,6 +502,16 @@ impl Track {
         }
     }
 
+    // The conductors and performers, as a single line
+    pub fn credits(&self) -> String {
+        let data = self.imp().data.borrow();
+        data.credits().summary(data.artist())
+    }
+
+    pub fn credit_details(&self) -> TrackCredits {
+        self.imp().data.borrow().credits().clone()
+    }
+
     pub fn cover_texture(&self) -> Option<gdk::Texture> {
         self.imp().data.borrow().cover_texture().cloned()
     }
@@ -406,8 +562,60 @@ impl Track {
         self.imp().data.borrow().uuid().map(|s| s.to_string())
     }
 
+    // The movement of a larger work, if the track is one
+    pub fn movement(&self) -> Option<String> {
+        self.imp().data.borrow().credits().movement_label()
+    }
+
+    // The work the movement belongs to, if the track is a movement
+    fn movement_work(&self) -> Option<String> {
+        self.movement()?;
+        self.imp().data.borrow().credits().work.clone()
+    }
+
+    // The main line in the track details: the work, for movements, and
+    // the title otherwise
+    pub fn heading(&self) -> String {
+        self.movement_work().unwrap_or_else(|| self.title())
+    }
+
+    // The lines in the playlist: the movement and the work it belongs to,
+    // as all the movements of a work share the start of their titles; or
+    // the title and the artist
+    pub fn row_title(&self) -> String {
+        self.movement().unwrap_or_else(|| self.title())
+    }
+
+    pub fn row_subtitle(&self) -> String {
+        self.movement_work().unwrap_or_else(|| self.artist())
+    }
+
+    // The third line in the playlist, only for movements, as the work
+    // replaces the artist in the second line
+    pub fn row_composer(&self) -> String {
+        if self.movement().is_none() {
+            return String::new();
+        }
+
+        let composers = self.imp().data.borrow().credits().composers.join(", ");
+        if composers.is_empty() {
+            self.artist()
+        } else {
+            composers
+        }
+    }
+
     pub fn search_key(&self) -> String {
-        format!("{} {} {}", self.artist(), self.album(), self.title())
+        let data = self.imp().data.borrow();
+        let credits = data.credits();
+        format!(
+            "{} {} {} {} {}",
+            self.artist(),
+            self.album(),
+            self.title(),
+            credits.work.as_deref().unwrap_or_default(),
+            credits.movement.as_deref().unwrap_or_default()
+        )
     }
 
     pub fn file(&self) -> gio::File {

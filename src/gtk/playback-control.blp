@@ -109,6 +109,21 @@ template $AmberolPlaybackControl: Widget {
         spacing: 12;
         margin-start: 18;
 
+        Button track_info_button {
+          icon-name: "help-about-symbolic";
+          action-name: "win.track-info";
+          valign: center;
+          tooltip-text: _("Track Information");
+
+          styles [
+            "circular",
+          ]
+
+          accessibility {
+            label: C_("a11y", "Track information");
+          }
+        }
+
         Button repeat_button {
           icon-name: "media-playlist-consecutive-symbolic";
           action-name: "queue.repeat-mode";
@@ -156,6 +171,11 @@ menu primary_menu {
     item {
       label: _("Open Directory");
       action: "win.open-directory";
+    }
+
+    item {
+      label: _("Track _Information");
+      action: "win.track-info";
     }
   }
 
