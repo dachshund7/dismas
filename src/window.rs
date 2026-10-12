@@ -30,6 +30,7 @@ use crate::{
     utils,
     volume_control::VolumeControl,
     waveform_view::WaveformView,
+    work_sections::WorkSectionModel,
 };
 
 // The width of the sidebar when the user resizes it
@@ -1407,6 +1408,9 @@ impl Window {
         imp.playlist_view
             .queue_view()
             .set_factory(Some(&factory.upcast::<gtk::ListItemFactory>()));
+        imp.playlist_view
+            .queue_view()
+            .set_header_factory(Some(&work_separator_factory()));
 
         if let Some(player) = self.player() {
             let queue = player.queue();
@@ -1416,7 +1420,8 @@ impl Window {
                 gtk::FilterListModel::new(Some(queue.model().clone()), Some(filter.clone()));
             let sorter = FuzzySorter::new();
             let sorter_model = gtk::SortListModel::new(Some(filter_model), Some(sorter.clone()));
-            let selection = gtk::NoSelection::new(Some(sorter_model.clone()));
+            let sections = WorkSectionModel::new(&sorter_model);
+            let selection = gtk::NoSelection::new(Some(sections));
             imp.playlist_view
                 .queue_view()
                 .set_model(Some(selection.upcast_ref::<gtk::SelectionModel>()));
@@ -1901,4 +1906,29 @@ impl Window {
     pub fn set_track_position(&self, position: f64) {
         self.imp().waveform_view.set_position(position);
     }
+}
+
+// The headers of the sections in the playlist: a line between each work,
+// and between a work and the tracks that are not movements around it
+fn work_separator_factory() -> gtk::ListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+
+    factory.connect_setup(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        let separator = gtk::Separator::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .css_classes(["work-separator"])
+            .build();
+        header.set_child(Some(&separator));
+    });
+
+    factory.connect_bind(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        if let Some(separator) = header.child() {
+            // Nothing to separate at the top of the playlist
+            separator.set_visible(header.start() > 0);
+        }
+    });
+
+    factory.upcast()
 }

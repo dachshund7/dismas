@@ -568,7 +568,7 @@ impl Track {
     }
 
     // The work the movement belongs to, if the track is a movement
-    fn movement_work(&self) -> Option<String> {
+    pub fn movement_work(&self) -> Option<String> {
         self.movement()?;
         self.imp().data.borrow().credits().work.clone()
     }
@@ -593,10 +593,14 @@ impl Track {
     // The third line in the playlist, only for movements, as the work
     // replaces the artist in the second line
     pub fn row_composer(&self) -> String {
-        if self.movement().is_none() {
-            return String::new();
+        match self.movement() {
+            Some(_) => self.composer(),
+            None => String::new(),
         }
+    }
 
+    // The composers, or the artist if the track has no composer
+    pub fn composer(&self) -> String {
         let composers = self.imp().data.borrow().credits().composers.join(", ");
         if composers.is_empty() {
             self.artist()

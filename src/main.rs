@@ -20,6 +20,7 @@ mod utils;
 mod volume_control;
 mod waveform_view;
 mod window;
+mod work_sections;
 
 use std::env;
 

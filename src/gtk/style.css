@@ -199,3 +199,14 @@ volume > scale trough slider { opacity: 0; }
     --scrollbar-outline-color: rgb(0 0 0 / 25%);
   }
 }
+
+/* Lines between the works in the playlist; the theme's padding of the
+ * headers is removed so that the separator is the only thing in them */
+listview.navigation-sidebar > header {
+  padding: 0;
+  min-height: 0;
+}
+
+listview.navigation-sidebar > header separator.work-separator {
+  margin: 6px 12px;
+}
