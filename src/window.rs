@@ -22,8 +22,7 @@ use crate::{
     playback_control::PlaybackControl,
     playlist_view::PlaylistView,
     queue_row::QueueRow,
-    search::FuzzyFilter,
-    sort::FuzzySorter,
+    search::SearchFilter,
     track_cover::TrackCover,
     track_details::TrackDetails,
     track_info_dialog::TrackInfoDialog,
@@ -1415,12 +1414,11 @@ impl Window {
         if let Some(player) = self.player() {
             let queue = player.queue();
 
-            let filter = FuzzyFilter::new();
+            let filter = SearchFilter::new();
             let filter_model =
                 gtk::FilterListModel::new(Some(queue.model().clone()), Some(filter.clone()));
-            let sorter = FuzzySorter::new();
-            let sorter_model = gtk::SortListModel::new(Some(filter_model), Some(sorter.clone()));
-            let sections = WorkSectionModel::new(&sorter_model);
+            // Search results keep the order of the playlist
+            let sections = WorkSectionModel::new(&filter_model);
             let selection = gtk::NoSelection::new(Some(sections));
             imp.playlist_view
                 .queue_view()
@@ -1467,16 +1465,11 @@ impl Window {
             ));
 
             imp.playlist_filtermodel
-                .replace(Some(sorter_model.upcast::<gio::ListModel>()));
+                .replace(Some(filter_model.upcast::<gio::ListModel>()));
 
             imp.playlist_view
                 .playlist_searchentry()
                 .bind_property("text", &filter, "search")
-                .sync_create()
-                .build();
-            imp.playlist_view
-                .playlist_searchentry()
-                .bind_property("text", &sorter, "search")
                 .sync_create()
                 .build();
             imp.playlist_view

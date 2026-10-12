@@ -131,6 +131,34 @@ impl TrackCredits {
     }
 }
 
+// Makes searching insensitive to case and accents, e.g. "Gemüte" becomes
+// "gemute", so it can be found by typing it without the accent
+pub fn normalize_search_text(s: &str) -> String {
+    // The compatibility decomposition splits accented letters into the
+    // letter and a combining mark, which we drop
+    let decomposed = glib::normalize(s, glib::NormalizeMode::All);
+
+    let mut res = String::with_capacity(decomposed.len());
+    for c in decomposed.chars().flat_map(char::to_lowercase) {
+        match c {
+            '\u{0300}'..='\u{036f}'
+            | '\u{1ab0}'..='\u{1aff}'
+            | '\u{1dc0}'..='\u{1dff}'
+            | '\u{20d0}'..='\u{20ff}'
+            | '\u{fe20}'..='\u{fe2f}' => (),
+            // Letters that don't decompose into a base letter
+            'ß' => res.push_str("ss"),
+            'æ' => res.push_str("ae"),
+            'œ' => res.push_str("oe"),
+            'ø' => res.push('o'),
+            'ł' => res.push('l'),
+            _ => res.push(c),
+        }
+    }
+
+    res
+}
+
 // All the values for a key, including the ones that were stored as a
 // single value separated by semicolons
 fn tag_strings(tag: &Tag, key: ItemKey) -> Vec<String> {
@@ -360,6 +388,7 @@ mod imp {
         pub data: RefCell<TrackData>,
         pub playing: Cell<bool>,
         pub selected: Cell<bool>,
+        pub search_key: std::cell::OnceCell<String>,
     }
 
     #[glib::object_subclass]
@@ -609,17 +638,26 @@ impl Track {
         }
     }
 
+    // The text that searching the playlist looks into, normalized with
+    // `normalize_search_text()`; computed once, as the tags don't change
     pub fn search_key(&self) -> String {
-        let data = self.imp().data.borrow();
-        let credits = data.credits();
-        format!(
-            "{} {} {} {} {}",
-            self.artist(),
-            self.album(),
-            self.title(),
-            credits.work.as_deref().unwrap_or_default(),
-            credits.movement.as_deref().unwrap_or_default()
-        )
+        self.imp()
+            .search_key
+            .get_or_init(|| {
+                let data = self.imp().data.borrow();
+                let credits = data.credits();
+                let key = [
+                    self.artist(),
+                    credits.composers.join(" "),
+                    self.album(),
+                    self.title(),
+                    credits.work.clone().unwrap_or_default(),
+                    credits.movement.clone().unwrap_or_default(),
+                ]
+                .join(" ");
+                normalize_search_text(&key)
+            })
+            .clone()
     }
 
     pub fn file(&self) -> gio::File {
@@ -643,5 +681,34 @@ impl Display for Track {
             self.artist(),
             self.title()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_search_text;
+
+    #[test]
+    fn search_text_ignores_case_and_accents() {
+        assert_eq!(
+            normalize_search_text("Tröste mir, Jesu, mein Gemüte"),
+            "troste mir, jesu, mein gemute"
+        );
+        assert_eq!(normalize_search_text("Antonín Dvořák"), "antonin dvorak");
+        assert_eq!(normalize_search_text("L’Étang du Parc"), "l’etang du parc");
+        assert_eq!(
+            normalize_search_text("Kantate „Ach Gott“"),
+            "kantate „ach gott“"
+        );
+    }
+
+    #[test]
+    fn search_text_expands_letters_without_decomposition() {
+        assert_eq!(normalize_search_text("Groß"), "gross");
+        assert_eq!(
+            normalize_search_text("Œuvres complètes"),
+            "oeuvres completes"
+        );
+        assert_eq!(normalize_search_text("Søren Łukasz"), "soren lukasz");
     }
 }

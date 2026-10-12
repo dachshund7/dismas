@@ -1,13 +1,21 @@
 // SPDX-FileCopyrightText: 2022  John Toohey <john_t@mailo.com>
+// SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
+
+// Filters the playlist, keeping the tracks that contain every word of the
+// search, in any of their tags; matching ignores case and accents.
+//
+// Fuzzy matching used to be used here, but the tags of classical music are
+// long enough that the letters of almost any word can be found in them, in
+// order, so most of the tracks matched any search.
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
-mod imp {
+use crate::audio::normalize_search_text;
 
+mod imp {
     use std::cell::RefCell;
 
-    use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
     use gtk::{
         glib::{self, ParamSpec, ParamSpecString, Value},
         prelude::*,
@@ -18,18 +26,20 @@ mod imp {
     use crate::audio::Track;
 
     #[derive(Default)]
-    pub struct FuzzyFilter {
+    pub struct SearchFilter {
         pub search: RefCell<Option<String>>,
+        // The normalized words of the search
+        pub words: RefCell<Vec<String>>,
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for FuzzyFilter {
-        const NAME: &'static str = "AmberolFuzzyFilter";
-        type Type = super::FuzzyFilter;
+    impl ObjectSubclass for SearchFilter {
+        const NAME: &'static str = "AmberolSearchFilter";
+        type Type = super::SearchFilter;
         type ParentType = gtk::Filter;
     }
 
-    impl ObjectImpl for FuzzyFilter {
+    impl ObjectImpl for SearchFilter {
         fn properties() -> &'static [ParamSpec] {
             static PROPERTIES: Lazy<Vec<ParamSpec>> =
                 Lazy::new(|| vec![ParamSpecString::builder("search").build()]);
@@ -47,52 +57,70 @@ mod imp {
                 _ => unimplemented!(),
             }
         }
+
+        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
+            match pspec.name() {
+                "search" => self.search.borrow().to_value(),
+                _ => unimplemented!(),
+            }
+        }
     }
 
-    impl FilterImpl for FuzzyFilter {
+    impl FilterImpl for SearchFilter {
         fn strictness(&self) -> gtk::FilterMatch {
-            gtk::FilterMatch::Some
+            if self.words.borrow().is_empty() {
+                gtk::FilterMatch::All
+            } else {
+                gtk::FilterMatch::Some
+            }
         }
 
         fn match_(&self, track: &glib::Object) -> bool {
-            let track = track.downcast_ref::<Track>().unwrap();
-
-            if let Some(search) = self.search.borrow().as_ref() {
-                let key = track.search_key();
-                let matcher = SkimMatcherV2::default();
-                matcher.fuzzy_match(&key, search).is_some() || search.is_empty()
-            } else {
-                true
+            let words = self.words.borrow();
+            if words.is_empty() {
+                return true;
             }
+
+            let track = track.downcast_ref::<Track>().unwrap();
+            let key = track.search_key();
+            words.iter().all(|word| key.contains(word.as_str()))
         }
     }
 }
 
 glib::wrapper! {
-    pub struct FuzzyFilter(ObjectSubclass<imp::FuzzyFilter>)
+    pub struct SearchFilter(ObjectSubclass<imp::SearchFilter>)
         @extends gtk::Filter;
-
 }
 
-impl Default for FuzzyFilter {
+impl Default for SearchFilter {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl FuzzyFilter {
+impl SearchFilter {
     pub fn new() -> Self {
         glib::Object::new()
     }
 
-    pub fn search(&self) -> Option<String> {
-        self.imp().search.borrow().as_ref().map(ToString::to_string)
-    }
-
     pub fn set_search(&self, search: Option<String>) {
-        if *self.imp().search.borrow() != search {
-            *self.imp().search.borrow_mut() = search.map(|x| x.to_lowercase());
-            self.changed(gtk::FilterChange::Different);
+        if *self.imp().search.borrow() == search {
+            return;
         }
+
+        let words = search
+            .as_deref()
+            .map(|s| {
+                normalize_search_text(s)
+                    .split_whitespace()
+                    .map(|w| w.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        self.imp().search.replace(search);
+        self.imp().words.replace(words);
+        self.changed(gtk::FilterChange::Different);
     }
 }
