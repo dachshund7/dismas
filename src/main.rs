@@ -24,9 +24,9 @@ mod window;
 use std::env;
 
 use config::{APPLICATION_ID, GETTEXT_PACKAGE, LOCALEDIR, PKGDATADIR, PROFILE};
-use gettextrs::{bind_textdomain_codeset, bindtextdomain, setlocale, textdomain, LocaleCategory};
+use gettextrs::{LocaleCategory, bind_textdomain_codeset, bindtextdomain, setlocale, textdomain};
 use gtk::{gio, glib, prelude::*};
-use log::{debug, error, LevelFilter};
+use log::{LevelFilter, debug, error};
 
 use self::application::Application;
 
@@ -50,9 +50,13 @@ fn main() -> glib::ExitCode {
 
     debug!("Setting up pulseaudio environment");
     let app_id = APPLICATION_ID.trim_end_matches(".Devel");
-    env::set_var("PULSE_PROP_application.icon_name", app_id);
-    env::set_var("PULSE_PROP_application.metadata().name", "Amberol");
-    env::set_var("PULSE_PROP_media.role", "music");
+    // SAFETY: we are still single-threaded at this point, as nothing that
+    // can spawn threads (GStreamer, GIO, GTK) has been initialized yet
+    unsafe {
+        env::set_var("PULSE_PROP_application.icon_name", app_id);
+        env::set_var("PULSE_PROP_application.metadata().name", "Amberol");
+        env::set_var("PULSE_PROP_media.role", "music");
+    }
 
     debug!("Loading resources");
     let resources = match env::var("MESON_DEVENV") {

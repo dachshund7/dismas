@@ -11,7 +11,7 @@ use std::{
 
 use adw::subclass::prelude::*;
 use glib::{clone, closure_local};
-use gtk::{gdk, gio, glib, graphene, prelude::*, CompositeTemplate};
+use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
 
 use crate::{
@@ -414,8 +414,8 @@ impl Window {
                 clone!(
                     #[weak(rename_to = win)]
                     self,
-                    move |gen, _| {
-                        let peaks = gen.peaks();
+                    move |generator, _| {
+                        let peaks = generator.peaks();
                         win.imp().waveform_view.set_peaks(peaks);
                     }
                 ),

@@ -6,7 +6,7 @@ use std::{cell::RefCell, rc::Rc};
 use adw::prelude::AdwDialogExt;
 use adw::subclass::prelude::*;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use ashpd::{desktop::background::Background, WindowIdentifier};
+use ashpd::{WindowIdentifier, desktop::background::Background};
 use async_channel::Receiver;
 use glib::clone;
 use gtk::{gio, glib, prelude::*};
