@@ -15,7 +15,7 @@ use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
 
 use crate::{
-    audio::{AudioPlayer, RepeatMode, ReplayGainMode, Track},
+    audio::{AudioPlayer, CoverCache, RepeatMode, ReplayGainMode, Track},
     config::APPLICATION_ID,
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
@@ -1575,11 +1575,53 @@ impl Window {
             if let Some(cover) = state.cover() {
                 track_cover.album_image().set_cover(Some(&cover));
                 track_cover.show_cover_image(true);
+
+                if let Some(track) = state.current_track() {
+                    self.load_full_cover(&track);
+                }
             } else {
                 track_cover.album_image().set_cover(None);
                 track_cover.show_cover_image(false);
             }
         }
+    }
+
+    // The cover shared by all the tracks of an album is too small for the
+    // main view, so we replace it with the full resolution cover of the
+    // current track, once it has been loaded in a separate thread
+    fn load_full_cover(&self, track: &Track) {
+        let Some(path) = track.file().path() else {
+            return;
+        };
+        let uri = track.uri();
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                let cover = gio::spawn_blocking(move || CoverCache::load_full_cover(&path))
+                    .await
+                    .ok()
+                    .flatten();
+                let Some(cover) = cover else {
+                    return;
+                };
+
+                // The track might have changed while we were loading
+                let Some(player) = win.player() else {
+                    return;
+                };
+                if player.state().current_track().map(|t| t.uri()) != Some(uri) {
+                    return;
+                }
+
+                win.imp()
+                    .track_cover
+                    .get()
+                    .album_image()
+                    .set_cover(Some(&cover.texture()));
+            }
+        ));
     }
 
     fn update_playlist_time(&self) {

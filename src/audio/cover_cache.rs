@@ -8,11 +8,34 @@ use std::{
 };
 
 use gtk::{gdk, gio, glib, prelude::*};
+use lofty::prelude::TaggedFileExt;
 use log::debug;
 use once_cell::sync::OnceCell;
 use sha2::{Digest, Sha256};
 
 use crate::utils;
+
+// The pixels of a full resolution cover; unlike GdkPixbuf, they can be
+// sent from the thread loading them to the main thread
+pub struct FullCover {
+    width: i32,
+    height: i32,
+    stride: usize,
+    has_alpha: bool,
+    pixels: glib::Bytes,
+}
+
+impl FullCover {
+    pub fn texture(&self) -> gdk::Texture {
+        let format = if self.has_alpha {
+            gdk::MemoryFormat::R8g8b8a8
+        } else {
+            gdk::MemoryFormat::R8g8b8
+        };
+
+        gdk::MemoryTexture::new(self.width, self.height, format, &self.pixels, self.stride).upcast()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct CoverArt {
@@ -64,7 +87,7 @@ impl CoverCache {
         self.entries.get(uuid)
     }
 
-    fn load_cover_art(&self, tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
+    fn load_cover_art(tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
         if let Some(picture) = tag.get_picture_type(lofty::picture::PictureType::CoverFront) {
             debug!("Found CoverFront");
             return Some(glib::Bytes::from(picture.data()));
@@ -176,7 +199,7 @@ impl CoverCache {
             None => {
                 debug!("Loading cover art for UUID: {}", &uuid);
 
-                let cover_art = self.load_cover_art(tag, path.parent());
+                let cover_art = Self::load_cover_art(tag, path.parent());
 
                 // The pixel buffer for the cover art
                 let cover_pixbuf = if let Some(ref cover_art) = cover_art {
@@ -219,6 +242,25 @@ impl CoverCache {
                 }
             }
         }
+    }
+
+    // Loads the cover art of a file again, at full resolution; this does not
+    // use the cache, and it can be called from any thread
+    pub fn load_full_cover(path: &Path) -> Option<FullCover> {
+        let tagged_file = lofty::probe::Probe::open(path).ok()?.read().ok()?;
+        let tag = tagged_file
+            .primary_tag()
+            .or_else(|| tagged_file.first_tag())?;
+        let bytes = Self::load_cover_art(tag, path.parent())?;
+        let pixbuf = utils::load_full_cover(&bytes)?;
+
+        Some(FullCover {
+            width: pixbuf.width(),
+            height: pixbuf.height(),
+            stride: pixbuf.rowstride() as usize,
+            has_alpha: pixbuf.has_alpha(),
+            pixels: pixbuf.read_pixel_bytes(),
+        })
     }
 
     pub fn clear(&mut self) {

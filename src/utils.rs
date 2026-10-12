@@ -57,11 +57,36 @@ pub fn load_cover_texture(buffer: &glib::Bytes) -> Option<gdk_pixbuf::Pixbuf> {
 
         debug!("Cover size {width} x {height} (ratio: {ratio}), scaled: {w} x {h}");
 
-        pixbuf.scale_simple(w, h, gdk_pixbuf::InterpType::Nearest)
+        pixbuf.scale_simple(w, h, gdk_pixbuf::InterpType::Bilinear)
     } else {
         warn!("Unable to load cover art");
         None
     }
+}
+
+// The cover in the main view is drawn larger than the shared cover
+// texture, so it is loaded separately for the current track; we limit its
+// size, as the original artwork can be very large, and let the renderer
+// scale it down the rest of the way
+const FULL_COVER_SIZE: i32 = 1024;
+
+pub fn load_full_cover(buffer: &glib::Bytes) -> Option<gdk_pixbuf::Pixbuf> {
+    let stream = gio::MemoryInputStream::from_bytes(buffer);
+    let pixbuf = gdk_pixbuf::Pixbuf::from_stream(&stream, gio::Cancellable::NONE).ok()?;
+
+    let width = pixbuf.width();
+    let height = pixbuf.height();
+    if width <= FULL_COVER_SIZE && height <= FULL_COVER_SIZE {
+        return Some(pixbuf);
+    }
+
+    let (w, h) = if width > height {
+        (FULL_COVER_SIZE, FULL_COVER_SIZE * height / width)
+    } else {
+        (FULL_COVER_SIZE * width / height, FULL_COVER_SIZE)
+    };
+
+    pixbuf.scale_simple(w, h, gdk_pixbuf::InterpType::Hyper)
 }
 
 pub fn cache_cover_art(uuid: &str, pixbuf: &gdk_pixbuf::Pixbuf) -> Option<PathBuf> {
