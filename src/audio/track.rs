@@ -159,6 +159,130 @@ pub fn normalize_search_text(s: &str) -> String {
     res
 }
 
+// The text of all the tags of a track, for searching the playlist; this
+// leaves out the tags that only contain identifiers, numbers or technical
+// data, as they would make short searches, like "op 29", match by accident
+fn tag_search_text(tag: &Tag) -> String {
+    let mut text = tag
+        .items()
+        .filter(|item| {
+            !matches!(
+                item.key(),
+                // The album title and artist are handled below
+                ItemKey::AlbumTitle
+                    | ItemKey::AlbumArtist
+                    | ItemKey::AlbumArtists
+                    | ItemKey::TrackNumber
+                    | ItemKey::TrackTotal
+                    | ItemKey::DiscNumber
+                    | ItemKey::DiscTotal
+                    | ItemKey::MovementNumber
+                    | ItemKey::MovementTotal
+                    | ItemKey::Isrc
+                    | ItemKey::Barcode
+                    | ItemKey::AcoustId
+                    | ItemKey::AcoustIdFingerprint
+                    | ItemKey::MusicBrainzRecordingId
+                    | ItemKey::MusicBrainzTrackId
+                    | ItemKey::MusicBrainzReleaseId
+                    | ItemKey::MusicBrainzReleaseGroupId
+                    | ItemKey::MusicBrainzArtistId
+                    | ItemKey::MusicBrainzReleaseArtistId
+                    | ItemKey::MusicBrainzWorkId
+                    | ItemKey::MusicBrainzReleaseType
+                    | ItemKey::ReplayGainAlbumGain
+                    | ItemKey::ReplayGainAlbumPeak
+                    | ItemKey::ReplayGainTrackGain
+                    | ItemKey::ReplayGainTrackPeak
+                    | ItemKey::EncoderSoftware
+                    | ItemKey::EncoderSettings
+                    | ItemKey::EncodingTime
+                    | ItemKey::TaggingTime
+                    | ItemKey::Length
+                    | ItemKey::Bpm
+                    | ItemKey::IntegerBpm
+                    | ItemKey::Popularimeter
+                    | ItemKey::FlagCompilation
+                    | ItemKey::FlagPodcast
+                    | ItemKey::AlbumTitleSortOrder
+                    | ItemKey::AlbumArtistSortOrder
+                    | ItemKey::TrackTitleSortOrder
+                    | ItemKey::TrackArtistSortOrder
+                    | ItemKey::ShowNameSortOrder
+                    | ItemKey::ComposerSortOrder
+            )
+        })
+        .filter_map(|item| item.value().text())
+        .join(" ");
+
+    let album_artist = tag.get_string(ItemKey::AlbumArtist);
+    if let Some(album_artist) = album_artist {
+        text.push(' ');
+        text.push_str(&album_artist_search_text(tag, album_artist));
+    }
+
+    if let Some(album) = tag.get_string(ItemKey::AlbumTitle) {
+        text.push(' ');
+        text.push_str(&album_title_search_text(album, album_artist));
+    }
+
+    text
+}
+
+// Album titles often list the names in the album artist, e.g. the album
+// "Lotti, Zelenka, Bach" by "Antonio Lotti, Jan Dismas Zelenka, Johann
+// Sebastian Bach; …"; searching for one of the composers would then match
+// every track of the album. Those names are already searched in the tags of
+// each track, so we leave them out of the album title
+fn album_title_search_text(album: &str, album_artist: Option<&str>) -> String {
+    let Some(album_artist) = album_artist else {
+        return album.to_string();
+    };
+
+    let names = normalize_search_text(album_artist);
+    let names: std::collections::HashSet<&str> = search_words(&names).collect();
+
+    search_words(album)
+        .filter(|word| !names.contains(normalize_search_text(word).as_str()))
+        .join(" ")
+}
+
+// The words of a text, without the punctuation around them
+fn search_words(s: &str) -> impl Iterator<Item = &str> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+}
+
+// The album artist of classical releases tagged by MusicBrainz Picard lists
+// the composers and then everyone who performs on the release, e.g.
+// "Dieterich Buxtehude; Ton Koopman, Amsterdam Baroque Choir"; so it would
+// make a search for a performer match every track of the release, even the
+// ones they don't play on. We only use it to fill in for the tags a track
+// doesn't have: the composers if it has no composer, and the performers if
+// it has no performer or conductor, as they might only be credited there
+fn album_artist_search_text(tag: &Tag, album_artist: &str) -> String {
+    let (composers, performers) = match album_artist.split_once(';') {
+        Some((composers, performers)) => (composers, performers),
+        // Without a separator, it's the artist of the whole release
+        None => ("", album_artist),
+    };
+
+    let has_composer = tag.get_string(ItemKey::Composer).is_some();
+    let has_performer = tag.get_string(ItemKey::Performer).is_some()
+        || tag.get_string(ItemKey::Conductor).is_some();
+
+    let mut text = String::new();
+    if !has_composer {
+        text.push_str(composers);
+    }
+    if !has_performer {
+        text.push(' ');
+        text.push_str(performers);
+    }
+
+    text
+}
+
 // All the values for a key, including the ones that were stored as a
 // single value separated by semicolons
 fn tag_strings(tag: &Tag, key: ItemKey) -> Vec<String> {
@@ -177,6 +301,7 @@ pub struct TrackData {
     title: Option<String>,
     album: Option<String>,
     credits: TrackCredits,
+    tag_text: String,
     cover_art: Option<CoverArt>,
     cover_uuid: Option<String>,
     uuid: Option<String>,
@@ -195,6 +320,10 @@ impl TrackData {
 
     pub fn album(&self) -> Option<&str> {
         self.album.as_deref()
+    }
+
+    pub fn tag_text(&self) -> &str {
+        &self.tag_text
     }
 
     pub fn credits(&self) -> &TrackCredits {
@@ -276,6 +405,7 @@ impl TrackData {
         let mut title = None;
         let mut album = None;
         let mut credits = TrackCredits::default();
+        let mut tag_text = String::new();
         let mut cover_art = None;
         let mut cover_uuid = None;
         if let Some(tag) = tagged_file.primary_tag() {
@@ -284,6 +414,7 @@ impl TrackData {
             title = tag.title().map(|s| s.to_string());
             album = tag.album().map(|s| s.to_string());
             credits = TrackCredits::from_tag(tag);
+            tag_text = tag_search_text(tag);
             if let Some(res) = cover_cache.cover_art(&path, tag) {
                 cover_art = Some(res.0);
                 cover_uuid = Some(res.1);
@@ -296,6 +427,7 @@ impl TrackData {
                 title = tag.title().map(|s| s.to_string());
                 album = tag.album().map(|s| s.to_string());
                 credits = TrackCredits::from_tag(tag);
+                tag_text = tag_search_text(tag);
                 if let Some(res) = cover_cache.cover_art(&path, tag) {
                     cover_art = Some(res.0);
                     cover_uuid = Some(res.1);
@@ -347,6 +479,7 @@ impl TrackData {
             title,
             album,
             credits,
+            tag_text,
             cover_art,
             cover_uuid,
             uuid,
@@ -371,6 +504,7 @@ impl Default for TrackData {
             title: Some("Invalid Title".to_string()),
             album: Some("Invalid Album".to_string()),
             credits: TrackCredits::default(),
+            tag_text: String::new(),
             cover_art: None,
             cover_uuid: None,
             uuid: None,
@@ -645,16 +779,9 @@ impl Track {
             .search_key
             .get_or_init(|| {
                 let data = self.imp().data.borrow();
-                let credits = data.credits();
-                let key = [
-                    self.artist(),
-                    credits.composers.join(" "),
-                    self.album(),
-                    self.title(),
-                    credits.work.clone().unwrap_or_default(),
-                    credits.movement.clone().unwrap_or_default(),
-                ]
-                .join(" ");
+                // The album title is in the tags, without the names that
+                // would make it match tracks by other people
+                let key = [self.artist(), self.title(), data.tag_text().to_string()].join(" ");
                 normalize_search_text(&key)
             })
             .clone()
@@ -686,7 +813,34 @@ impl Display for Track {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_search_text;
+    use super::{album_title_search_text, normalize_search_text};
+
+    #[test]
+    fn album_title_leaves_out_album_artist_names() {
+        let artist = "Antonio Lotti, Jan Dismas Zelenka, Johann Sebastian Bach; Thomas Hengelbrock, Balthasar‐Neumann‐Chor";
+        assert_eq!(
+            album_title_search_text("Lotti, Zelenka, Bach", Some(artist)),
+            ""
+        );
+        assert_eq!(
+            album_title_search_text(
+                "Images: Hommage à Marcel Tournier",
+                Some("Marcel Tournier; Emmanuel Ceysson")
+            ),
+            "Images Hommage à"
+        );
+        assert_eq!(
+            album_title_search_text(
+                "Cantatas, Volume 12",
+                Some("Johann Sebastian Bach; Ton Koopman")
+            ),
+            "Cantatas Volume 12"
+        );
+        assert_eq!(
+            album_title_search_text("Il giardino di rose", None),
+            "Il giardino di rose"
+        );
+    }
 
     #[test]
     fn search_text_ignores_case_and_accents() {
