@@ -58,10 +58,16 @@ impl TrackInfoDialog {
         let credits = track.credit_details();
         let album = track.album();
 
+        // For movements of a larger work, the title just repeats the work
+        // and the movement, so only show it for other tracks
+        let movement = track.movement();
+        let title =
+            Some(track.title()).filter(|t| movement.is_none() && credits.work.as_ref() != Some(t));
+
         let work = [
-            (i18n("Title"), vec![track.title()]),
+            (i18n("Title"), title.into_iter().collect()),
             (i18n("Work"), credits.work.clone().into_iter().collect()),
-            (i18n("Movement"), track.movement().into_iter().collect()),
+            (i18n("Movement"), movement.into_iter().collect()),
             (i18n("Composer"), credits.composers.clone()),
             (i18n("Lyricist"), credits.lyricists.clone()),
             (i18n("Arranger"), credits.arrangers.clone()),
