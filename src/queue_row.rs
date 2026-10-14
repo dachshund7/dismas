@@ -30,15 +30,11 @@ mod imp {
         #[template_child]
         pub track_artist_label: TemplateChild<gtk::Inscription>,
         #[template_child]
-        pub track_composer_label: TemplateChild<gtk::Inscription>,
-        #[template_child]
         pub track_playing_image: TemplateChild<gtk::Image>,
         #[template_child]
         pub selection_title_label: TemplateChild<gtk::Inscription>,
         #[template_child]
         pub selection_artist_label: TemplateChild<gtk::Inscription>,
-        #[template_child]
-        pub selection_composer_label: TemplateChild<gtk::Inscription>,
         #[template_child]
         pub selected_button: TemplateChild<gtk::CheckButton>,
         #[template_child]
@@ -87,7 +83,6 @@ mod imp {
                     ParamSpecObject::builder::<Track>("track").build(),
                     ParamSpecString::builder("track-artist").build(),
                     ParamSpecString::builder("track-title").build(),
-                    ParamSpecString::builder("track-composer").build(),
                     ParamSpecObject::builder::<gdk::Texture>("track-cover").build(),
                     ParamSpecBoolean::builder("playing").build(),
                     ParamSpecBoolean::builder("selection-mode").build(),
@@ -110,10 +105,6 @@ mod imp {
                 "track-title" => {
                     let p = value.get::<&str>().expect("The value needs to be a string");
                     self.obj().set_track_title(p);
-                }
-                "track-composer" => {
-                    let p = value.get::<&str>().expect("The value needs to be a string");
-                    self.obj().set_track_composer(p);
                 }
                 "track-cover" => {
                     let p = value.get::<gdk::Texture>().ok();
@@ -146,7 +137,6 @@ mod imp {
                 "track" => self.track.borrow().to_value(),
                 "track-artist" => self.track_artist_label.text().to_value(),
                 "track-title" => self.track_title_label.text().to_value(),
-                "track-composer" => self.track_composer_label.text().to_value(),
                 "track-cover" => self.track_cover_image.cover().to_value(),
                 "playing" => self.playing.get().to_value(),
                 "selection-mode" => self.selection_mode.get().to_value(),
@@ -231,33 +221,26 @@ impl QueueRow {
         self.update_tooltip();
     }
 
-    // Only movements have a third line, with the composer, as the second
-    // line shows the work instead of the artist
-    fn set_track_composer(&self, composer: &str) {
-        let imp = self.imp();
-        imp.track_composer_label.set_text(Some(composer));
-        imp.track_composer_label.set_visible(!composer.is_empty());
-        imp.selection_composer_label.set_text(Some(composer));
-        imp.selection_composer_label
-            .set_visible(!composer.is_empty());
-        self.update_tooltip();
-    }
-
     // Long titles get truncated in the playlist, so we show the full
-    // text of the row on hover
+    // text of the row on hover; for movements, that includes the work from
+    // the header of their section, which may be scrolled away
     fn update_tooltip(&self) {
         let imp = self.imp();
-        let lines = [
-            imp.track_title_label.text(),
-            imp.track_artist_label.text(),
-            imp.track_composer_label.text(),
+        let mut lines = vec![
+            imp.track_title_label.text().unwrap_or_default().to_string(),
+            imp.track_artist_label
+                .text()
+                .unwrap_or_default()
+                .to_string(),
         ];
 
+        if let Some(work) = self.track().and_then(|t| t.movement_work()) {
+            lines.insert(0, work);
+        }
+
         let tooltip = lines
-            .iter()
-            .flatten()
+            .into_iter()
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join("\n");
         self.set_tooltip_text(Some(tooltip.as_str()).filter(|s| !s.is_empty()));

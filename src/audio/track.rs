@@ -544,7 +544,6 @@ mod imp {
                     ParamSpecString::builder("movement").read_only().build(),
                     ParamSpecString::builder("row-title").read_only().build(),
                     ParamSpecString::builder("row-subtitle").read_only().build(),
-                    ParamSpecString::builder("row-composer").read_only().build(),
                     ParamSpecUInt::builder("duration").read_only().build(),
                     ParamSpecObject::builder::<gdk::Texture>("cover")
                         .read_only()
@@ -570,7 +569,6 @@ mod imp {
                         obj.notify("movement");
                         obj.notify("row-title");
                         obj.notify("row-subtitle");
-                        obj.notify("row-composer");
                         obj.notify("duration");
                         obj.notify("cover");
                     }
@@ -598,7 +596,6 @@ mod imp {
                 "movement" => obj.movement().unwrap_or_default().to_value(),
                 "row-title" => obj.row_title().to_value(),
                 "row-subtitle" => obj.row_subtitle().to_value(),
-                "row-composer" => obj.row_composer().to_value(),
                 "duration" => obj.duration().to_value(),
                 "uri" => obj.uri().to_value(),
                 "cover" => obj.cover_texture().to_value(),
@@ -742,23 +739,17 @@ impl Track {
         self.movement_work().unwrap_or_else(|| self.title())
     }
 
-    // The lines in the playlist: the movement and the work it belongs to,
-    // as all the movements of a work share the start of their titles; or
+    // The lines in the playlist: for movements, the movement and the
+    // composer, as the work is in the header of their section; otherwise
     // the title and the artist
     pub fn row_title(&self) -> String {
         self.movement().unwrap_or_else(|| self.title())
     }
 
     pub fn row_subtitle(&self) -> String {
-        self.movement_work().unwrap_or_else(|| self.artist())
-    }
-
-    // The third line in the playlist, only for movements, as the work
-    // replaces the artist in the second line
-    pub fn row_composer(&self) -> String {
         match self.movement() {
             Some(_) => self.composer(),
-            None => String::new(),
+            None => self.artist(),
         }
     }
 
