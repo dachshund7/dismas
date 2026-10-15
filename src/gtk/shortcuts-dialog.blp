@@ -62,6 +62,21 @@ Adw.ShortcutsDialog shortcuts_dialog {
             title: C_("shortcut window", "Toggle shuffling tracks");
             action-name: "queue.shuffle";
         }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Select all tracks or albums");
+            accelerator: "<primary>a";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Remove the selected tracks");
+            accelerator: "Delete";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Leave selection mode");
+            accelerator: "Escape";
+        }
     }
 
     Adw.ShortcutsSection {

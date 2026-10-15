@@ -20,7 +20,7 @@ use crate::{
     config::APPLICATION_ID,
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
-    library::Album,
+    library::{self, Album},
     library_view::LibraryView,
     playback_control::PlaybackControl,
     playlist_view::PlaylistView,
@@ -54,6 +54,14 @@ enum QueueMode {
     Restore,
     // Show the player, and play the tracks from the given one
     Play(u32),
+}
+
+// Where the menu of a track is shown
+#[derive(Clone, Copy)]
+enum TrackMenu {
+    Playlist,
+    // The tracks of an album from the grid
+    Album,
 }
 
 const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
@@ -186,6 +194,43 @@ mod imp {
                 debug!("Window::queue.clear()");
                 win.clear_queue();
             });
+            klass.install_action("queue.select-all", None, move |win, _, _| {
+                debug!("Window::queue.select-all()");
+                win.select_all();
+            });
+            klass.install_action("queue.remove-selected", None, move |win, _, _| {
+                debug!("Window::queue.remove-selected()");
+                win.remove_selected_tracks();
+            });
+            // Bindings instead of accelerators, which would take these keys
+            // from the search entries: bindings only get the keys the focused
+            // widget doesn't handle
+            klass.add_binding_action(
+                gdk::Key::a,
+                gdk::ModifierType::CONTROL_MASK,
+                "queue.select-all",
+            );
+            klass.add_binding_action(
+                gdk::Key::Delete,
+                gdk::ModifierType::empty(),
+                "queue.remove-selected",
+            );
+            klass.add_binding_action(
+                gdk::Key::KP_Delete,
+                gdk::ModifierType::empty(),
+                "queue.remove-selected",
+            );
+
+            // Esc leaves selection mode; when there is none, the key goes
+            // on to do whatever it did before
+            klass.add_binding(gdk::Key::Escape, gdk::ModifierType::empty(), |win| {
+                if win.exit_selection_mode() {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            });
+
             klass.install_property_action("queue.toggle", "playlist-visible");
             klass.install_property_action("queue.shuffle", "playlist-shuffled");
             klass.install_property_action("queue.select", "playlist-selection");
@@ -258,6 +303,10 @@ mod imp {
             if APPLICATION_ID.ends_with("Devel") {
                 self.obj().add_css_class("devel");
             }
+
+            // Only in selection mode
+            self.obj()
+                .action_set_enabled("queue.remove-selected", false);
         }
 
         fn properties() -> &'static [ParamSpec] {
@@ -676,6 +725,7 @@ impl Window {
                 .playlist_view
                 .queue_actionbar()
                 .set_revealed(selection);
+            self.action_set_enabled("queue.remove-selected", selection);
 
             self.notify("playlist-selection");
         }
@@ -699,15 +749,128 @@ impl Window {
 
     // Shows the tracks of an album in the sidebar, in place of the
     // playlist, so that it can be played or added to the playlist
-    fn show_album_tracks(&self, album: &Album) {
+    fn show_album_tracks(&self, album: &Album, search_words: &[String]) {
         let imp = self.imp();
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
             imp.sidebar_was_visible.set(self.playlist_visible());
         }
-        imp.album_tracks
-            .show_album(album, &imp.library_view.search_words());
+        imp.album_tracks.show_album(album, search_words);
         imp.sidebar_stack.set_visible_child_name("album");
         self.set_playlist_visible(true);
+    }
+
+    // Shows an album in the grid, with all its tracks in the sidebar
+    fn go_to_album(&self, album_id: &str) {
+        // Showing the grid focuses the search, so it goes first, for the
+        // album to take the focus
+        self.set_library_visible(true);
+        let Some(album) = self.imp().library_view.reveal_album(album_id) else {
+            return;
+        };
+        self.show_album_tracks(&album, &[]);
+    }
+
+    // The menu of a track, at the given point of its row
+    fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, kind: TrackMenu) {
+        let Some(track) = row.track() else {
+            return;
+        };
+        let album_id = track.file().path().and_then(|p| library::track_album(&p));
+
+        let actions = gio::SimpleActionGroup::new();
+        let go_to_album = gio::SimpleAction::new("go-to-album", None);
+        go_to_album.set_enabled(album_id.is_some());
+        go_to_album.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, _| {
+                if let Some(album_id) = &album_id {
+                    win.go_to_album(album_id);
+                }
+            }
+        ));
+        actions.add_action(&go_to_album);
+
+        let info = gio::SimpleAction::new("info", None);
+        info.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_, _| win.show_track_info_for(&track)
+        ));
+        actions.add_action(&info);
+
+        let remove = gio::SimpleAction::new("remove", None);
+        remove.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_, _| {
+                win.remove_track(&track);
+                if let Some(player) = win.player() {
+                    utils::store_playlist(player.queue());
+                }
+            }
+        ));
+        actions.add_action(&remove);
+
+        let add = gio::SimpleAction::new("add", None);
+        // Like adding the whole album, not while tracks are being added
+        add.set_enabled(self.imp().album_tracks.adding_enabled());
+        add.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_, _| win.queue_tracks(vec![track.file()], QueueMode::Add)
+        ));
+        actions.add_action(&add);
+
+        let select = gio::SimpleAction::new("select", None);
+        select.set_enabled(match kind {
+            TrackMenu::Playlist => !self.playlist_selection(),
+            TrackMenu::Album => !self.imp().album_tracks.selection_mode(),
+        });
+        select.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_, _| match kind {
+                TrackMenu::Playlist => win.toggle_playlist_track(&track),
+                TrackMenu::Album => win.imp().album_tracks.toggle_track(&track),
+            }
+        ));
+        actions.add_action(&select);
+
+        let menu = gio::Menu::new();
+        menu.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
+        menu.append(Some(&i18n("Track Information")), Some("track.info"));
+        menu.append(Some(&i18n("Select")), Some("track.select"));
+        let section = gio::Menu::new();
+        match kind {
+            TrackMenu::Playlist => {
+                section.append(Some(&i18n("Remove from Playlist")), Some("track.remove"))
+            }
+            TrackMenu::Album => section.append(Some(&i18n("Add to Playlist")), Some("track.add")),
+        }
+        menu.append_section(None, &section);
+
+        let popover = gtk::PopoverMenu::from_model(Some(&menu));
+        popover.insert_action_group("track", Some(&actions));
+        popover.set_parent(row);
+        popover.set_has_arrow(false);
+        popover.set_halign(gtk::Align::Start);
+        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        // The menu item is activated after the popover closes, so it can
+        // only go once the action ran
+        popover.connect_closed(|popover| {
+            let popover = popover.clone();
+            glib::idle_add_local_once(move || popover.unparent());
+        });
+        popover.popup();
     }
 
     // Goes back from the tracks of an album to the playlist, closing the
@@ -740,6 +903,10 @@ impl Window {
 
         let page = if visible { "library" } else { "player" };
         self.imp().content_stack.set_visible_child_name(page);
+        // Typing searches the albums right away
+        if visible {
+            self.imp().library_view.focus_search();
+        }
         self.notify("library-visible");
     }
 
@@ -760,6 +927,41 @@ impl Window {
             self.set_library_visible(true);
             self.set_playlist_visible(false);
         }
+    }
+
+    // Adds the tracks of the albums selected in the grid to the playlist,
+    // or plays them in its place; for the albums selected in a search, only
+    // the tracks that match it
+    fn queue_selected_albums(&self, play: bool) {
+        let library_view = self.imp().library_view.get();
+        let albums = library_view.selected_albums();
+        library_view.set_selection_mode(false);
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                let Ok(paths) = gio::spawn_blocking(move || {
+                    albums
+                        .iter()
+                        .flat_map(|(id, words)| library::album_tracks(id, words))
+                        .collect::<Vec<_>>()
+                })
+                .await
+                else {
+                    return;
+                };
+                let files = paths.into_iter().map(gio::File::for_path).collect();
+
+                if play {
+                    win.clear_queue();
+                    win.show_playlist_pane();
+                    win.queue_tracks(files, QueueMode::Play(0));
+                } else {
+                    win.queue_tracks(files, QueueMode::Add);
+                }
+            }
+        ));
     }
 
     // Called once the playlist of the last session, or the files the
@@ -789,12 +991,23 @@ impl Window {
                 #[weak(rename_to = win)]
                 self,
                 move |_: LibraryView, album: Album| {
-                    win.show_album_tracks(&album);
+                    win.show_album_tracks(&album, &win.imp().library_view.search_words());
                 }
             ),
         );
 
         let album_tracks = self.imp().album_tracks.get();
+        album_tracks.connect_closure(
+            "menu-requested",
+            false,
+            closure_local!(
+                #[weak(rename_to = win)]
+                self,
+                move |_: AlbumTracks, row: QueueRow, x: f64, y: f64| {
+                    win.show_track_menu(&row, x, y, TrackMenu::Album);
+                }
+            ),
+        );
         album_tracks.connect_closure(
             "back",
             false,
@@ -827,6 +1040,25 @@ impl Window {
                     win.show_playlist_pane();
                     win.queue_tracks(album_tracks.files(), QueueMode::Play(start));
                 }
+            ),
+        );
+
+        library_view.connect_closure(
+            "add-albums",
+            false,
+            closure_local!(
+                #[weak(rename_to = win)]
+                self,
+                move |_: LibraryView| win.queue_selected_albums(false)
+            ),
+        );
+        library_view.connect_closure(
+            "play-albums",
+            false,
+            closure_local!(
+                #[weak(rename_to = win)]
+                self,
+                move |_: LibraryView| win.queue_selected_albums(true)
             ),
         );
 
@@ -867,6 +1099,7 @@ impl Window {
         // Disable actions on the queue; loading is "atomic"
         self.action_set_enabled("queue.clear", false);
         self.imp().album_tracks.set_adding_enabled(false);
+        self.imp().library_view.set_adding_enabled(false);
 
         self.set_playlist_visible(true);
         self.imp().playlist_view.begin_loading();
@@ -915,6 +1148,7 @@ impl Window {
                         // Re-enable the actions
                         win.action_set_enabled("queue.clear", true);
                         win.imp().album_tracks.set_adding_enabled(true);
+                        win.imp().library_view.set_adding_enabled(true);
 
                         if tracks.is_empty() {
                             if duplicates == 0 {
@@ -1326,52 +1560,7 @@ impl Window {
             .connect_clicked(clone!(
                 #[weak(rename_to = win)]
                 self,
-                move |_| {
-                    if win.playlist_search() {
-                        if let Some(ref model) = *win.imp().playlist_filtermodel.borrow() {
-                            for idx in 0..model.n_items() {
-                                let item = model.item(idx).unwrap();
-                                let track = item.downcast_ref::<Track>().unwrap();
-                                track.set_selected(true);
-                            }
-                        }
-                    } else if let Some(player) = win.player() {
-                        let queue = player.queue();
-                        for idx in 0..queue.n_tracks() {
-                            let track = queue.track_at(idx).unwrap();
-                            track.set_selected(true);
-                        }
-                    }
-                }
-            ));
-
-        self.imp()
-            .playlist_view
-            .queue_remove_button()
-            .connect_clicked(clone!(
-                #[weak(rename_to = win)]
-                self,
-                move |_| {
-                    if let Some(player) = win.player() {
-                        let queue = player.queue();
-                        let mut remove_tracks: Vec<Track> = Vec::new();
-                        // Collect all tracks to be removed first, since we can't
-                        // remove objects from the model while we're iterating it
-                        for idx in 0..queue.n_tracks() {
-                            let track = queue.track_at(idx).unwrap();
-                            if track.selected() {
-                                remove_tracks.push(track);
-                            }
-                        }
-
-                        for track in remove_tracks {
-                            win.remove_track(&track);
-                        }
-
-                        // Store the current state of the playlist
-                        utils::store_playlist(queue);
-                    }
-                }
+                move |_| win.select_all_playlist_tracks()
             ));
 
         self.imp()
@@ -1482,6 +1671,21 @@ impl Window {
                         }
                     ),
                 );
+
+                row.connect_menu_requested(clone!(
+                    #[weak]
+                    win,
+                    move |row, x, y| win.show_track_menu(row, x, y, TrackMenu::Playlist)
+                ));
+                row.connect_select_requested(clone!(
+                    #[weak]
+                    win,
+                    move |row| {
+                        if let Some(track) = row.track() {
+                            win.toggle_playlist_track(&track);
+                        }
+                    }
+                ));
 
                 win.bind_property("playlist-selection", &row, "selection-mode")
                     .sync_create()
@@ -1882,6 +2086,99 @@ impl Window {
         self.add_files_to_queue(model.upcast_ref::<gio::ListModel>());
     }
 
+    // Selects all the tracks in the playlist, or the ones matching the
+    // search
+    fn select_all_playlist_tracks(&self) {
+        self.set_playlist_selection(true);
+        if self.playlist_search() {
+            if let Some(ref model) = *self.imp().playlist_filtermodel.borrow() {
+                for idx in 0..model.n_items() {
+                    if let Some(track) = model.item(idx).and_downcast::<Track>() {
+                        track.set_selected(true);
+                    }
+                }
+            }
+        } else if let Some(player) = self.player() {
+            let queue = player.queue();
+            for idx in 0..queue.n_tracks() {
+                queue.track_at(idx).unwrap().set_selected(true);
+            }
+        }
+        self.update_selected_count();
+    }
+
+    // Selects or unselects a track of the playlist, entering selection
+    // mode if needed
+    fn toggle_playlist_track(&self, track: &Track) {
+        if !self.playlist_selection() {
+            self.set_playlist_selection(true);
+            track.set_selected(true);
+        } else {
+            track.set_selected(!track.selected());
+        }
+        self.update_selected_count();
+    }
+
+    fn remove_selected_tracks(&self) {
+        if let Some(player) = self.player() {
+            let queue = player.queue();
+            // Collect all tracks to be removed first, since we can't
+            // remove objects from the model while we're iterating it
+            let remove_tracks: Vec<Track> = (0..queue.n_tracks())
+                .filter_map(|idx| queue.track_at(idx))
+                .filter(|track| track.selected())
+                .collect();
+
+            for track in remove_tracks {
+                self.remove_track(&track);
+            }
+
+            // Store the current state of the playlist
+            utils::store_playlist(queue);
+        }
+    }
+
+    // Leaves selection mode in the grid, the tracks of an album and the
+    // playlist; returns whether any of them was in it
+    fn exit_selection_mode(&self) -> bool {
+        let imp = self.imp();
+        let mut exited = false;
+        if imp.library_view.selection_mode() {
+            imp.library_view.set_selection_mode(false);
+            exited = true;
+        }
+        if imp.album_tracks.selection_mode() {
+            imp.album_tracks.set_selection_mode(false);
+            exited = true;
+        }
+        if self.playlist_selection() {
+            self.set_playlist_selection(false);
+            exited = true;
+        }
+        exited
+    }
+
+    // Ctrl+A selects all the items of the list with the focus: the album
+    // grid, the tracks of an album, or the playlist
+    fn select_all(&self) {
+        let imp = self.imp();
+        let focus = gtk::prelude::GtkWindowExt::focus(self);
+        let focus_in = |widget: &gtk::Widget| focus.as_ref().is_some_and(|f| f.is_ancestor(widget));
+        let sidebar_page = imp.sidebar_stack.visible_child_name();
+
+        if self.library_visible() && focus_in(imp.library_view.upcast_ref()) {
+            imp.library_view.select_all();
+        } else if focus_in(imp.album_tracks.upcast_ref()) {
+            imp.album_tracks.select_all();
+        } else if self.playlist_visible() && sidebar_page.as_deref() == Some("playlist") {
+            self.select_all_playlist_tracks();
+        } else if self.playlist_visible() && sidebar_page.as_deref() == Some("album") {
+            imp.album_tracks.select_all();
+        } else if self.library_visible() {
+            imp.library_view.select_all();
+        }
+    }
+
     pub fn remove_track(&self, track: &Track) {
         if let Some(p) = self.player() {
             p.remove_track(track);
@@ -1922,16 +2219,20 @@ impl Window {
     fn show_track_info(&self) {
         if let Some(player) = self.player() {
             if let Some(track) = player.state().current_track() {
-                let dialog = TrackInfoDialog::new(&track);
-
-                // Follow the colors of the cover, like the main window
-                if self.imp().toast_overlay.has_css_class("main-window") {
-                    dialog.add_css_class("recolored");
-                }
-
-                adw::prelude::AdwDialogExt::present(&dialog, Some(self));
+                self.show_track_info_for(&track);
             }
         }
+    }
+
+    fn show_track_info_for(&self, track: &Track) {
+        let dialog = TrackInfoDialog::new(track);
+
+        // Follow the colors of the cover, like the main window
+        if self.imp().toast_overlay.has_css_class("main-window") {
+            dialog.add_css_class("recolored");
+        }
+
+        adw::prelude::AdwDialogExt::present(&dialog, Some(self));
     }
 
     async fn open_track_directory(&self) {

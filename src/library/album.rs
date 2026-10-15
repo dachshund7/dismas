@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -23,6 +23,9 @@ mod imp {
         pub year: RefCell<Option<String>>,
         #[property(get)]
         pub cover_path: RefCell<Option<String>>,
+        // Whether the album is selected in the grid
+        #[property(get, set)]
+        pub selected: Cell<bool>,
     }
 
     #[glib::object_subclass]

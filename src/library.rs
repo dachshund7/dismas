@@ -244,6 +244,27 @@ pub fn album_tracks(album_id: &str, words: &[String]) -> Vec<PathBuf> {
     }
 }
 
+// The album of a track, if it's part of the library
+pub fn track_album(path: &Path) -> Option<String> {
+    let path = path.to_string_lossy();
+    let query = |conn: &Connection| -> rusqlite::Result<Option<String>> {
+        conn.query_row(
+            "SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL",
+            [path.as_ref()],
+            |row| row.get(0),
+        )
+        .optional()
+    };
+
+    match open().and_then(|conn| query(&conn)) {
+        Ok(album_id) => album_id,
+        Err(e) => {
+            warn!("Unable to look up the album of {path}: {e}");
+            None
+        }
+    }
+}
+
 // Updates the database with the tracks in `music_dir`; this blocks, so it
 // should be called from a separate thread
 pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {

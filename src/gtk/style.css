@@ -238,6 +238,10 @@ gridview.album-grid .album-cover {
   background-color: alpha(currentColor, 0.08);
 }
 
+gridview.album-grid .album-cover checkbutton {
+  margin: 6px;
+}
+
 gridview.album-grid label.album-title {
   font-weight: 600;
   margin-top: 3px;

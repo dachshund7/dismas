@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 
 use adw::subclass::prelude::*;
-use glib::clone;
+use glib::{clone, subclass::Signal};
 use gtk::{CompositeTemplate, gdk, gio, glib, prelude::*};
 
 use crate::{audio::Track, cover_picture::CoverPicture};
@@ -75,6 +75,20 @@ mod imp {
             self.parent_constructed();
 
             self.obj().init_widgets();
+        }
+
+        fn signals() -> &'static [Signal] {
+            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+                vec![
+                    // A right click or long press, at the given point
+                    Signal::builder("menu-requested")
+                        .param_types([f64::static_type(), f64::static_type()])
+                        .build(),
+                    // A Ctrl+click, to select the track
+                    Signal::builder("select-requested").build(),
+                ]
+            });
+            SIGNALS.as_ref()
         }
 
         fn properties() -> &'static [ParamSpec] {
@@ -197,6 +211,67 @@ impl QueueRow {
                 this.notify("selected");
             }
         ));
+
+        let click = gtk::GestureClick::builder()
+            .button(gdk::BUTTON_SECONDARY)
+            .build();
+        click.connect_pressed(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |gesture, _, x, y| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                this.emit_by_name::<()>("menu-requested", &[&x, &y]);
+            }
+        ));
+        self.add_controller(click);
+
+        let long_press = gtk::GestureLongPress::builder().touch_only(true).build();
+        long_press.connect_pressed(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |gesture, x, y| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                this.emit_by_name::<()>("menu-requested", &[&x, &y]);
+            }
+        ));
+        self.add_controller(long_press);
+
+        let ctrl_click = gtk::GestureClick::new();
+        ctrl_click.connect_pressed(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |gesture, _, _, _| {
+                if !gesture
+                    .current_event_state()
+                    .contains(gdk::ModifierType::CONTROL_MASK)
+                {
+                    return;
+                }
+                // Instead of playing the track
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                this.emit_by_name::<()>("select-requested", &[]);
+            }
+        ));
+        self.add_controller(ctrl_click);
+    }
+
+    pub fn connect_select_requested<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "select-requested",
+            false,
+            glib::closure_local!(move |row: &Self| f(row)),
+        )
+    }
+
+    pub fn connect_menu_requested<F: Fn(&Self, f64, f64) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "menu-requested",
+            false,
+            glib::closure_local!(move |row: &Self, x: f64, y: f64| f(row, x, y)),
+        )
     }
 
     fn set_playing(&self, playing: bool) {

@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 
 use crate::{
     audio::normalize_search_text,
-    i18n::i18n_k,
+    i18n::{i18n, i18n_k, ni18n_f},
     library::{self, Album, ScanEvent},
 };
 
@@ -63,8 +63,9 @@ impl TextureCache {
 mod imp {
     use super::*;
 
-    #[derive(Debug, Default, CompositeTemplate)]
+    #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[template(resource = "/io/bassi/Amberol/library-view.ui")]
+    #[properties(wrapper_type = super::LibraryView)]
     pub struct LibraryView {
         #[template_child]
         pub back_button: TemplateChild<gtk::Button>,
@@ -80,6 +81,23 @@ mod imp {
         pub update_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
         pub grid_view: TemplateChild<gtk::GridView>,
+        #[template_child]
+        pub select_all_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub selected_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub play_albums_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub add_albums_button: TemplateChild<gtk::Button>,
+
+        // Whether clicking an album selects it, instead of showing it
+        #[property(get, set = Self::set_selection_mode)]
+        pub selection_mode: Cell<bool>,
+        // The selected albums, with the words of the search each was
+        // selected in, so that only the tracks that matched it are added
+        pub selected: RefCell<HashMap<String, Vec<String>>>,
+        // Tracks are being added to the playlist
+        pub loading: Cell<bool>,
 
         pub model: RefCell<Option<gio::ListStore>>,
         pub filter: RefCell<Option<gtk::CustomFilter>>,
@@ -110,6 +128,19 @@ mod imp {
         }
     }
 
+    impl LibraryView {
+        fn set_selection_mode(&self, selection_mode: bool) {
+            if self.selection_mode.replace(selection_mode) == selection_mode {
+                return;
+            }
+            if !selection_mode {
+                self.obj().unselect_all();
+            }
+            self.obj().notify_selection_mode();
+        }
+    }
+
+    #[glib::derived_properties]
     impl ObjectImpl for LibraryView {
         fn dispose(&self) {
             while let Some(child) = self.obj().first_child() {
@@ -131,6 +162,9 @@ mod imp {
                     Signal::builder("album-activated")
                         .param_types([Album::static_type()])
                         .build(),
+                    // Add or play the tracks of the selected albums
+                    Signal::builder("add-albums").build(),
+                    Signal::builder("play-albums").build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -185,62 +219,117 @@ impl LibraryView {
     fn album_factory(&self) -> gtk::ListItemFactory {
         let factory = gtk::SignalListItemFactory::new();
 
-        factory.connect_setup(|_, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        factory.connect_setup(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, item| {
+                let item = item.downcast_ref::<gtk::ListItem>().unwrap();
 
-            let picture = gtk::Picture::builder()
-                .content_fit(gtk::ContentFit::Cover)
-                .hexpand(true)
-                .vexpand(true)
-                .build();
-            let placeholder = gtk::Image::builder()
-                .icon_name("folder-music-symbolic")
-                .pixel_size(48)
-                .hexpand(true)
-                .vexpand(true)
-                .css_classes(["dim-label"])
-                .build();
-            let cover = gtk::Overlay::builder()
-                .width_request(CELL_COVER_SIZE)
-                .height_request(CELL_COVER_SIZE)
-                .halign(gtk::Align::Center)
-                .overflow(gtk::Overflow::Hidden)
-                .css_classes(["album-cover"])
-                .child(&placeholder)
-                .build();
-            cover.add_overlay(&picture);
+                let picture = gtk::Picture::builder()
+                    .content_fit(gtk::ContentFit::Cover)
+                    .hexpand(true)
+                    .vexpand(true)
+                    .build();
+                let placeholder = gtk::Image::builder()
+                    .icon_name("folder-music-symbolic")
+                    .pixel_size(48)
+                    .hexpand(true)
+                    .vexpand(true)
+                    .css_classes(["dim-label"])
+                    .build();
+                let cover = gtk::Overlay::builder()
+                    .width_request(CELL_COVER_SIZE)
+                    .height_request(CELL_COVER_SIZE)
+                    .halign(gtk::Align::Center)
+                    .overflow(gtk::Overflow::Hidden)
+                    .css_classes(["album-cover"])
+                    .child(&placeholder)
+                    .build();
+                cover.add_overlay(&picture);
 
-            let title = gtk::Label::builder()
-                .ellipsize(gtk::pango::EllipsizeMode::End)
-                .max_width_chars(1)
-                .hexpand(true)
-                .css_classes(["album-title"])
-                .has_tooltip(true)
-                .build();
-            // The title is often ellipsized, so the tooltip shows all of it;
-            // setting the tooltip text on each bind is slow, as it also updates
-            // the accessible description, so we only fill it in when it's shown
-            title.connect_query_tooltip(|label, _, _, _, tooltip| {
-                tooltip.set_text(Some(&label.label()));
-                true
-            });
-            let artist = gtk::Label::builder()
-                .ellipsize(gtk::pango::EllipsizeMode::End)
-                .max_width_chars(1)
-                .hexpand(true)
-                .css_classes(["caption", "dim-label"])
-                .build();
+                let check = gtk::CheckButton::builder()
+                    .halign(gtk::Align::Start)
+                    .valign(gtk::Align::Start)
+                    .css_classes(["selection-mode"])
+                    .build();
+                this.bind_property("selection-mode", &check, "visible")
+                    .sync_create()
+                    .build();
+                item.property_expression("item")
+                    .chain_property::<Album>("selected")
+                    .bind(&check, "active", gtk::Widget::NONE);
+                check.connect_toggled(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    item,
+                    move |check| {
+                        let Some(album) = item.item().and_downcast::<Album>() else {
+                            return;
+                        };
+                        // Also called when the cell shows another album
+                        if album.selected() != check.is_active() {
+                            this.set_album_selected(&album, check.is_active());
+                        }
+                    }
+                ));
+                cover.add_overlay(&check);
 
-            let content = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .spacing(3)
-                .width_request(CELL_COVER_SIZE)
-                .build();
-            content.append(&cover);
-            content.append(&title);
-            content.append(&artist);
-            item.set_child(Some(&content));
-        });
+                let title = gtk::Label::builder()
+                    .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .max_width_chars(1)
+                    .hexpand(true)
+                    .css_classes(["album-title"])
+                    .has_tooltip(true)
+                    .build();
+                // The title is often ellipsized, so the tooltip shows all of it;
+                // setting the tooltip text on each bind is slow, as it also updates
+                // the accessible description, so we only fill it in when it's shown
+                title.connect_query_tooltip(|label, _, _, _, tooltip| {
+                    tooltip.set_text(Some(&label.label()));
+                    true
+                });
+                let artist = gtk::Label::builder()
+                    .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .max_width_chars(1)
+                    .hexpand(true)
+                    .css_classes(["caption", "dim-label"])
+                    .build();
+
+                let content = gtk::Box::builder()
+                    .orientation(gtk::Orientation::Vertical)
+                    .spacing(3)
+                    .width_request(CELL_COVER_SIZE)
+                    .build();
+                content.append(&cover);
+                content.append(&title);
+                content.append(&artist);
+
+                // Ctrl+click selects the album, like in the playlist
+                let click = gtk::GestureClick::new();
+                click.connect_pressed(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    item,
+                    move |gesture, _, _, _| {
+                        if !gesture
+                            .current_event_state()
+                            .contains(gdk::ModifierType::CONTROL_MASK)
+                        {
+                            return;
+                        }
+                        gesture.set_state(gtk::EventSequenceState::Claimed);
+                        if let Some(album) = item.item().and_downcast::<Album>() {
+                            this.toggle_album(&album);
+                        }
+                    }
+                ));
+                content.add_controller(click);
+
+                item.set_child(Some(&content));
+            }
+        ));
 
         factory.connect_bind(clone!(
             #[weak(rename_to = this)]
@@ -252,7 +341,11 @@ impl LibraryView {
                 };
                 let content = item.child().unwrap();
                 let cover = content.first_child().unwrap();
-                let picture = cover.last_child().and_downcast::<gtk::Picture>().unwrap();
+                let picture = cover
+                    .last_child()
+                    .and_then(|check| check.prev_sibling())
+                    .and_downcast::<gtk::Picture>()
+                    .unwrap();
                 let title = cover.next_sibling().and_downcast::<gtk::Label>().unwrap();
                 let artist = content.last_child().and_downcast::<gtk::Label>().unwrap();
 
@@ -333,7 +426,11 @@ impl LibraryView {
                     .and_then(|m| m.item(pos))
                     .and_downcast::<Album>();
                 if let Some(album) = album {
-                    this.emit_by_name::<()>("album-activated", &[&album]);
+                    if this.selection_mode() {
+                        this.toggle_album(&album);
+                    } else {
+                        this.emit_by_name::<()>("album-activated", &[&album]);
+                    }
                 }
             }
         ));
@@ -341,8 +438,43 @@ impl LibraryView {
         imp.search_entry.connect_search_changed(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.update_search()
+            move |_| {
+                // The selection was made among the albums of the previous
+                // search, so it would be confusing to keep it
+                this.set_selection_mode(false);
+                this.update_search();
+            }
         ));
+
+        // Esc clears the search, which also leaves selection mode
+        imp.search_entry.connect_stop_search(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |entry| {
+                this.set_selection_mode(false);
+                entry.set_text("");
+            }
+        ));
+
+        imp.select_all_button.connect_clicked(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.select_all()
+        ));
+
+        imp.add_albums_button.connect_clicked(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.emit_by_name::<()>("add-albums", &[])
+        ));
+
+        imp.play_albums_button.connect_clicked(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.emit_by_name::<()>("play-albums", &[])
+        ));
+
+        self.update_selection();
 
         imp.rescan_button.connect_clicked(clone!(
             #[weak(rename_to = this)]
@@ -400,6 +532,136 @@ impl LibraryView {
         self.imp().search_words.borrow().clone()
     }
 
+    // Scrolls the grid to an album, clearing the search if it hides it
+    pub fn reveal_album(&self, album_id: &str) -> Option<Album> {
+        let imp = self.imp();
+        let album = imp
+            .model
+            .borrow()
+            .as_ref()?
+            .iter::<Album>()
+            .flatten()
+            .find(|a| a.id() == album_id)?;
+
+        let hidden = imp
+            .search_matches
+            .borrow()
+            .as_ref()
+            .is_some_and(|m| !m.contains(album_id));
+        if hidden {
+            imp.search_entry.set_text("");
+            self.set_search_matches(Vec::new(), None);
+        }
+
+        let model = imp.grid_view.model()?;
+        let pos = (0..model.n_items())
+            .find(|&i| model.item(i).and_downcast::<Album>().as_ref() == Some(&album))?;
+        imp.grid_view
+            .scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
+
+        Some(album)
+    }
+
+    pub fn focus_search(&self) {
+        self.imp().search_entry.grab_focus();
+    }
+
+    fn set_album_selected(&self, album: &Album, selected: bool) {
+        album.set_selected(selected);
+        let mut map = self.imp().selected.borrow_mut();
+        if selected {
+            map.insert(album.id(), self.search_words());
+        } else {
+            map.remove(&album.id());
+        }
+        drop(map);
+        self.update_selection();
+    }
+
+    // Selects or unselects an album, entering selection mode if needed
+    fn toggle_album(&self, album: &Album) {
+        if !self.selection_mode() {
+            self.set_selection_mode(true);
+            self.set_album_selected(album, true);
+        } else {
+            self.set_album_selected(album, !album.selected());
+        }
+    }
+
+    // Selects all the albums shown by the search
+    pub fn select_all(&self) {
+        self.set_selection_mode(true);
+        let Some(model) = self.imp().grid_view.model() else {
+            return;
+        };
+        // The items of the selection model are typed as GObject, so
+        // `iter::<Album>()` would panic
+        let albums: Vec<Album> = (0..model.n_items())
+            .filter_map(|i| model.item(i).and_downcast::<Album>())
+            .collect();
+        for album in albums {
+            if !album.selected() {
+                self.set_album_selected(&album, true);
+            }
+        }
+    }
+
+    fn unselect_all(&self) {
+        if let Some(model) = self.imp().model.borrow().as_ref() {
+            for album in model.iter::<Album>().flatten() {
+                album.set_selected(false);
+            }
+        }
+        self.imp().selected.borrow_mut().clear();
+        self.update_selection();
+    }
+
+    // The selected albums, in the order of the grid, with the words of
+    // the search each was selected in
+    pub fn selected_albums(&self) -> Vec<(String, Vec<String>)> {
+        let imp = self.imp();
+        let selected = imp.selected.borrow();
+        let Some(model) = imp.model.borrow().clone() else {
+            return Vec::new();
+        };
+        model
+            .iter::<Album>()
+            .flatten()
+            .filter_map(|album| {
+                let id = album.id();
+                selected.get(&id).map(|words| (id, words.clone()))
+            })
+            .collect()
+    }
+
+    // Albums can't be added while tracks are being added to the playlist
+    pub fn set_adding_enabled(&self, enabled: bool) {
+        self.imp().loading.set(!enabled);
+        self.update_selection();
+    }
+
+    fn update_selection(&self) {
+        let imp = self.imp();
+        let n_selected = imp.selected.borrow().len() as u32;
+        let label = if n_selected == 0 {
+            i18n("No album selected")
+        } else {
+            ni18n_f(
+                // Translators: The '{}' must be left unmodified, and
+                // it is expanded to the number of albums selected
+                "{} album selected",
+                "{} albums selected",
+                n_selected,
+                &[&n_selected.to_string()],
+            )
+        };
+        imp.selected_label.set_label(&label);
+
+        let can_add = n_selected > 0 && !imp.loading.get();
+        imp.play_albums_button.set_sensitive(can_add);
+        imp.add_albums_button.set_sensitive(can_add);
+    }
+
     // Whether there is a player to go back to
     pub fn set_can_go_back(&self, can_go_back: bool) {
         self.imp().back_button.set_visible(can_go_back);
@@ -410,6 +672,17 @@ impl LibraryView {
         let imp = self.imp();
         let albums: Vec<Album> = library::albums().into_iter().map(Album::new).collect();
         debug!("Library: {} albums", albums.len());
+
+        // Keep the selection, minus the albums that are gone
+        {
+            let mut selected = imp.selected.borrow_mut();
+            let ids: HashSet<String> = albums.iter().map(|a| a.id()).collect();
+            selected.retain(|id, _| ids.contains(id));
+            for album in &albums {
+                album.set_selected(selected.contains_key(&album.id()));
+            }
+        }
+        self.update_selection();
 
         if let Some(model) = imp.model.borrow().as_ref() {
             model.splice(0, model.n_items(), &albums);

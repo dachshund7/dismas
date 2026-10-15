@@ -15,6 +15,14 @@ template $AmberolAlbumTracks: Widget {
         tooltip-text: _("Back to the Playlist");
       }
 
+      [end]
+      ToggleButton select_button {
+        icon-name: "selection-mode-symbolic";
+        active: bind template.selection-mode bidirectional;
+        valign: center;
+        tooltip-text: _("Select Tracks");
+      }
+
       title-widget: Box {
         orientation: vertical;
         valign: center;
@@ -50,6 +58,29 @@ template $AmberolAlbumTracks: Widget {
         ]
       };
     };
+
+    [bottom]
+    CenterBox {
+      visible: bind template.selection-mode;
+      margin-start: 6;
+      margin-end: 6;
+      margin-top: 6;
+
+      start-widget: Button select_all_button {
+        icon-name: "edit-select-all-symbolic";
+        tooltip-text: _("Select All Tracks");
+
+        styles [
+          "flat",
+        ]
+      };
+
+      center-widget: Label selected_label {
+        styles [
+          "caption",
+        ]
+      };
+    }
 
     [bottom]
     Box {
