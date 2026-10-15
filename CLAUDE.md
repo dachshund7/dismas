@@ -38,7 +38,7 @@ Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-I
 
 ### Audio: message passing between threads
 
-`src/audio/mod.rs` has a header comment explaining the design. GStreamer and the controllers can fire from other threads, so nothing touches the UI state directly. Everything goes through async channels:
+`src/audio.rs` has a header comment explaining the design. GStreamer and the controllers can fire from other threads, so nothing touches the UI state directly. Everything goes through async channels:
 
 - `AudioPlayer` (`audio/player.rs`) is the hub. `Application` (`application.rs`) owns it and gives it a sender for `ApplicationAction`s.
 - `GstBackend` wraps GstPlay and reports changes over a channel.

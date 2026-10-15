@@ -14,7 +14,7 @@ src/audio/inhibit_controller.rs
 src/audio/track.rs
 src/album_tracks.rs
 src/cover_picture.rs
-src/library/mod.rs
+src/library.rs
 src/library_view.rs
 src/playback_control.rs
 src/track_info_dialog.rs
