@@ -98,12 +98,17 @@ impl Window {
                         if let Some(real_pos) = real_pos {
                             if win.playlist_selection() {
                                 queue.select_track_at(real_pos);
-                            } else if queue.current_track_index() != Some(real_pos) {
+                                return;
+                            }
+                            if queue.current_track_index() != Some(real_pos) {
                                 player.skip_to(real_pos);
                                 player.play();
                             } else if !player.state().playing() {
                                 player.play();
                             }
+                            // Playing a track brings up the player in place
+                            // of the album grid
+                            win.set_library_visible(false);
                         }
                     }
                 }
