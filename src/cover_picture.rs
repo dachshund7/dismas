@@ -27,7 +27,7 @@ impl AsRef<str> for CoverSize {
 
 mod imp {
     use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, Value};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -89,7 +89,7 @@ mod imp {
         }
 
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecObject::builder::<gdk::Texture>("cover").build(),
                     ParamSpecEnum::builder::<CoverSize>("cover-size").build(),
@@ -141,15 +141,12 @@ mod imp {
                 let width = widget.width() as f64 * scale_factor;
                 let height = widget.height() as f64 * scale_factor;
                 let ratio = cover.intrinsic_aspect_ratio();
-                let w;
-                let h;
-                if ratio > 1.0 {
-                    w = width;
-                    h = width / ratio;
+
+                let (w, h) = if ratio > 1.0 {
+                    (width, width / ratio)
                 } else {
-                    w = height * ratio;
-                    h = height;
-                }
+                    (height * ratio, height)
+                };
 
                 let x = (width - w.ceil()) / 2.0;
                 let y = (height - h).floor() / 2.0;

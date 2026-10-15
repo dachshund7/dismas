@@ -9,7 +9,7 @@ use rand::prelude::*;
 
 mod imp {
     use glib::{ParamSpec, ParamSpecObject, Value};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -28,7 +28,7 @@ mod imp {
 
     impl ObjectImpl for ShuffleListModel {
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecObject::builder::<gio::ListModel>("model")
                         .explicit_notify()
@@ -75,10 +75,10 @@ mod imp {
 
         fn item(&self, position: u32) -> Option<glib::Object> {
             if let Some(ref model) = *self.model.borrow() {
-                if let Some(ref shuffle) = *self.shuffle.borrow() {
-                    if let Some(shuffled_pos) = shuffle.get(position as usize) {
-                        return model.item(*shuffled_pos);
-                    }
+                if let Some(ref shuffle) = *self.shuffle.borrow()
+                    && let Some(shuffled_pos) = shuffle.get(position as usize)
+                {
+                    return model.item(*shuffled_pos);
                 }
                 return model.item(position);
             }
@@ -117,11 +117,11 @@ impl ShuffleListModel {
                 #[strong(rename_to = this)]
                 self,
                 move |_, position, removed, added| {
-                    if let Some(ref shuffle) = *this.imp().shuffle.borrow() {
-                        if let Some(shuffled_pos) = shuffle.get(position as usize) {
-                            this.items_changed(*shuffled_pos, removed, added);
-                            return;
-                        }
+                    if let Some(ref shuffle) = *this.imp().shuffle.borrow()
+                        && let Some(shuffled_pos) = shuffle.get(position as usize)
+                    {
+                        this.items_changed(*shuffled_pos, removed, added);
+                        return;
                     }
 
                     this.items_changed(position, removed, added);

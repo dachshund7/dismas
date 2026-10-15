@@ -17,8 +17,8 @@ use lofty::{
     tag::{ItemKey, Tag},
 };
 use log::{debug, warn};
-use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
 use crate::{
     audio::cover_cache::{CoverArt, CoverCache},
@@ -34,13 +34,13 @@ pub struct Performer {
 impl Performer {
     // MusicBrainz Picard stores performers as "Name (role)"
     fn parse(s: &str) -> Self {
-        if let Some(name) = s.strip_suffix(')') {
-            if let Some((name, role)) = name.rsplit_once(" (") {
-                return Performer {
-                    name: name.trim().to_string(),
-                    role: Some(role.trim().to_string()),
-                };
-            }
+        if let Some(name) = s.strip_suffix(')')
+            && let Some((name, role)) = name.rsplit_once(" (")
+        {
+            return Performer {
+                name: name.trim().to_string(),
+                role: Some(role.trim().to_string()),
+            };
         }
 
         Performer {
@@ -479,8 +479,8 @@ impl TrackData {
 
         debug!(
             "Track {:?} ('{:?}') loading time: {} ms",
-            &uuid,
-            &title,
+            uuid,
+            title,
             now.elapsed().as_millis()
         );
 
@@ -543,7 +543,7 @@ mod imp {
 
     impl ObjectImpl for Track {
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecString::builder("uri").construct_only().build(),
                     ParamSpecString::builder("artist").read_only().build(),

@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use adw::{prelude::*, subclass::prelude::*};
 use glib::{clone, subclass::Signal};
 use gtk::{CompositeTemplate, gio, glib};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::{
     audio::Track,
@@ -106,7 +106,7 @@ mod imp {
         }
 
         fn signals() -> &'static [Signal] {
-            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+            static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
                 vec![
                     Signal::builder("back").build(),
                     Signal::builder("add").build(),

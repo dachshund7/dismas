@@ -81,7 +81,7 @@ fn main() -> glib::ExitCode {
     };
     gio::resources_register(&resources);
 
-    debug!("Setting up application (profile: {})", &PROFILE);
+    debug!("Setting up application (profile: {})", PROFILE);
     glib::set_application_name("Amberol");
     glib::set_program_name(Some("amberol"));
 

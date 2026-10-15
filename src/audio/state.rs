@@ -12,7 +12,7 @@ mod imp {
         ParamSpec, ParamSpecBoolean, ParamSpecDouble, ParamSpecObject, ParamSpecString,
         ParamSpecUInt64,
     };
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -41,7 +41,7 @@ mod imp {
 
     impl ObjectImpl for PlayerState {
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecBoolean::builder("playing").read_only().build(),
                     ParamSpecUInt64::builder("position").read_only().build(),

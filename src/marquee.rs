@@ -8,8 +8,7 @@ use gtk::gdk;
 use gtk::glib;
 use gtk::graphene;
 use gtk::gsk;
-use once_cell::sync::OnceCell;
-use std::cell::Cell;
+use std::cell::{Cell, OnceCell};
 
 const SPACING: f32 = 32.0;
 

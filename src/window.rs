@@ -68,7 +68,7 @@ const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
 
 mod imp {
     use glib::{ParamSpec, ParamSpecBoolean, ParamSpecEnum, Value};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -242,11 +242,11 @@ mod imp {
                 "win.skip-to",
                 Some(glib::VariantTy::UINT32),
                 move |win, _, param| {
-                    if let Some(pos) = param.and_then(u32::from_variant) {
-                        if let Some(player) = win.player() {
-                            player.skip_to(pos);
-                            player.play();
-                        }
+                    if let Some(pos) = param.and_then(u32::from_variant)
+                        && let Some(player) = win.player()
+                    {
+                        player.skip_to(pos);
+                        player.play();
                     }
                 },
             );
@@ -310,7 +310,7 @@ mod imp {
         }
 
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecBoolean::builder("playlist-shuffled").build(),
                     ParamSpecBoolean::builder("playlist-visible").build(),
@@ -447,10 +447,10 @@ impl Window {
     }
 
     fn unbind_waveform(&self) {
-        if let Some(player) = self.player() {
-            if let Some(id) = self.imp().notify_peaks_id.take() {
-                player.waveform_generator().disconnect(id);
-            }
+        if let Some(player) = self.player()
+            && let Some(id) = self.imp().notify_peaks_id.take()
+        {
+            player.waveform_generator().disconnect(id);
         }
     }
 
@@ -714,11 +714,9 @@ impl Window {
         let imp = self.imp();
 
         if selection != imp.playlist_selection.replace(selection) {
-            if !selection {
-                if let Some(player) = self.player() {
-                    let queue = player.queue();
-                    queue.unselect_all_tracks();
-                }
+            if !selection && let Some(player) = self.player() {
+                let queue = player.queue();
+                queue.unselect_all_tracks();
             }
 
             self.imp()
@@ -1125,15 +1123,15 @@ impl Window {
                     .next()
                     .map(|f| {
                         win.imp().playlist_view.update_loading(cur_file, n_files);
-                        if let Ok(s) = Track::from_uri(f.uri().as_str()) {
-                            if let Some(player) = win.player() {
-                                let queue = player.queue();
-                                if queue.contains(&s) {
-                                    duplicates += 1;
-                                } else {
-                                    tracks.push(s);
-                                    cur_file += 1;
-                                }
+                        if let Ok(s) = Track::from_uri(f.uri().as_str())
+                            && let Some(player) = win.player()
+                        {
+                            let queue = player.queue();
+                            if queue.contains(&s) {
+                                duplicates += 1;
+                            } else {
+                                tracks.push(s);
+                                cur_file += 1;
                             }
                         }
                     })
@@ -1240,11 +1238,11 @@ impl Window {
             ) {
                 match info.file_type() {
                     gio::FileType::Regular => {
-                        if let Some(content_type) = info.content_type() {
-                            if gio::content_type_is_mime_type(&content_type, "audio/*") {
-                                debug!("Adding file '{}' to the queue", file.uri());
-                                queue.push(file);
-                            }
+                        if let Some(content_type) = info.content_type()
+                            && gio::content_type_is_mime_type(&content_type, "audio/*")
+                        {
+                            debug!("Adding file '{}' to the queue", file.uri());
+                            queue.push(file);
                         }
                     }
                     gio::FileType::Directory => {
@@ -1424,10 +1422,10 @@ impl Window {
                             win.action_set_enabled("win.next", queue.n_tracks() > 1);
                         }
 
-                        if queue.n_tracks() == 1 {
-                            if let Some(p) = win.player() {
-                                p.skip_next();
-                            }
+                        if queue.n_tracks() == 1
+                            && let Some(p) = win.player()
+                        {
+                            p.skip_next();
                         }
 
                         win.update_playlist_time();
@@ -1829,7 +1827,7 @@ impl Window {
             if state.current_track().is_some() {
                 let elapsed = state.position();
                 let duration = state.duration();
-                let remaining = duration.checked_sub(elapsed).unwrap_or_default();
+                let remaining = duration.saturating_sub(elapsed);
                 self.set_track_time(Some(elapsed), Some(remaining));
 
                 let position = state.position() as f64 / state.duration() as f64;
@@ -1975,14 +1973,14 @@ impl Window {
 
     fn scroll_playlist_to_track(&self) {
         let queue_view = self.imp().playlist_view.queue_view();
-        if let Some(player) = self.player() {
-            if let Some(current_idx) = player.queue().current_track_index() {
-                debug!("Scrolling playlist to {}", current_idx);
-                queue_view
-                    .upcast_ref::<gtk::Widget>()
-                    .activate_action("list.scroll-to-item", Some(&current_idx.to_variant()))
-                    .expect("Failed to activate action");
-            }
+        if let Some(player) = self.player()
+            && let Some(current_idx) = player.queue().current_track_index()
+        {
+            debug!("Scrolling playlist to {}", current_idx);
+            queue_view
+                .upcast_ref::<gtk::Widget>()
+                .activate_action("list.scroll-to-item", Some(&current_idx.to_variant()))
+                .expect("Failed to activate action");
         }
     }
 
@@ -2002,36 +2000,36 @@ impl Window {
             return;
         }
 
-        if let Some(track) = track {
-            if let Some(bg_colors) = track.cover_palette() {
-                let mut css = String::new();
+        if let Some(track) = track
+            && let Some(bg_colors) = track.cover_palette()
+        {
+            let mut css = String::new();
 
-                css.push_str(":root {");
+            css.push_str(":root {");
 
-                let n_colors = bg_colors.len();
-                for (i, color) in bg_colors.iter().enumerate().take(n_colors) {
-                    let s = format!("--background-color-{}: {};", i, color);
-                    css.push_str(&s);
-                }
-
-                for i in n_colors + 1 - 1..5 {
-                    css.push_str(&format!(
-                        "--background-color-{}: var(--window-bg-color);",
-                        i
-                    ));
-                }
-
-                css.push_str("}");
-
-                imp.provider.load_from_string(&css);
-                if !imp.toast_overlay.has_css_class("main-window") {
-                    imp.toast_overlay.add_css_class("main-window");
-                }
-
-                self.action_set_enabled("win.enable-recoloring", true);
-
-                return;
+            let n_colors = bg_colors.len();
+            for (i, color) in bg_colors.iter().enumerate().take(n_colors) {
+                let s = format!("--background-color-{}: {};", i, color);
+                css.push_str(&s);
             }
+
+            for i in n_colors + 1 - 1..5 {
+                css.push_str(&format!(
+                    "--background-color-{}: var(--window-bg-color);",
+                    i
+                ));
+            }
+
+            css.push('}');
+
+            imp.provider.load_from_string(&css);
+            if !imp.toast_overlay.has_css_class("main-window") {
+                imp.toast_overlay.add_css_class("main-window");
+            }
+
+            self.action_set_enabled("win.enable-recoloring", true);
+
+            return;
         }
 
         imp.provider.load_from_string("");
@@ -2217,10 +2215,10 @@ impl Window {
     }
 
     fn show_track_info(&self) {
-        if let Some(player) = self.player() {
-            if let Some(track) = player.state().current_track() {
-                self.show_track_info_for(&track);
-            }
+        if let Some(player) = self.player()
+            && let Some(track) = player.state().current_track()
+        {
+            self.show_track_info_for(&track);
         }
     }
 
@@ -2244,7 +2242,7 @@ impl Window {
 
                 match file
                     .query_info_future(
-                        &ATTRIBUTE_HOST_PATH,
+                        ATTRIBUTE_HOST_PATH,
                         gio::FileQueryInfoFlags::NONE,
                         glib::Priority::DEFAULT,
                     )
@@ -2253,19 +2251,18 @@ impl Window {
                     Err(err) => debug!("Unable to get host-path attribute: {err}"),
                     Ok(info) => {
                         let host_path = info
-                            .attribute_as_string(&ATTRIBUTE_HOST_PATH)
+                            .attribute_as_string(ATTRIBUTE_HOST_PATH)
                             .and_then(|x| PathBuf::from_str(x.as_str()).ok());
 
                         if let Some(path) = host_path.or_else(|| file.path()) {
                             let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(path)));
-                            match launcher
+                            if let Err(_e) = launcher
                                 .open_containing_folder_future(Some(
                                     self.upcast_ref::<gtk::Window>(),
                                 ))
                                 .await
                             {
-                                Err(_e) => self.add_toast(i18n("Unable to open folder")),
-                                Ok(()) => {}
+                                self.add_toast(i18n("Unable to open folder"))
                             }
                         }
                     }

@@ -11,7 +11,7 @@ use crate::{audio::Track, cover_picture::CoverPicture};
 
 mod imp {
     use glib::{ParamSpec, ParamSpecBoolean, ParamSpecObject, ParamSpecString, Value};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -78,7 +78,7 @@ mod imp {
         }
 
         fn signals() -> &'static [Signal] {
-            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+            static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
                 vec![
                     // A right click or long press, at the given point
                     Signal::builder("menu-requested")
@@ -92,7 +92,7 @@ mod imp {
         }
 
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecObject::builder::<Track>("track").build(),
                     ParamSpecString::builder("track-artist").build(),

@@ -6,8 +6,6 @@
 // - Copyright 2022 Kavan Mevada
 // Released under the terms of the LGPL 2.0 or later
 
-#![allow(deprecated)]
-
 use std::{
     cell::{Cell, RefCell},
     ops::DivAssign,
@@ -39,7 +37,7 @@ impl DivAssign<f64> for PeakPair {
 
 mod imp {
     use glib::{ParamSpec, ParamSpecDouble, Value, subclass::Signal};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -69,7 +67,7 @@ mod imp {
 
     impl ObjectImpl for WaveformView {
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecDouble::builder("position")
                         .minimum(0.0)
@@ -97,7 +95,7 @@ mod imp {
         }
 
         fn signals() -> &'static [Signal] {
-            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+            static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
                 vec![
                     Signal::builder("position-changed")
                         .param_types([f64::static_type()])
@@ -187,8 +185,7 @@ mod imp {
             // Grab the colors
             let hc = adw::StyleManager::default().is_high_contrast();
 
-            let style_context = widget.style_context();
-            let color = style_context.color();
+            let color = widget.color();
             let empty_opacity = if hc { 0.4 } else { 0.2 };
             let hover_opacity = if hc { 0.7 } else { 0.45 };
 

@@ -10,7 +10,7 @@ use log::debug;
 
 mod imp {
     use glib::{ParamSpec, ParamSpecBoolean, ParamSpecDouble, Value, subclass::Signal};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -65,7 +65,7 @@ mod imp {
         }
 
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecDouble::builder("volume")
                         .minimum(0.0)
@@ -102,7 +102,7 @@ mod imp {
         }
 
         fn signals() -> &'static [Signal] {
-            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+            static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
                 vec![
                     Signal::builder("volume-changed")
                         .param_types([f64::static_type()])

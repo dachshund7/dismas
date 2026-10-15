@@ -4,13 +4,12 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
 };
 
 use gtk::{gdk, gio, glib, prelude::*};
 use lofty::prelude::TaggedFileExt;
 use log::debug;
-use once_cell::sync::OnceCell;
 use sha2::{Digest, Sha256};
 
 use crate::utils;
@@ -65,7 +64,7 @@ pub struct CoverCache {
 
 impl CoverCache {
     pub fn global() -> &'static Mutex<CoverCache> {
-        static CACHE: OnceCell<Mutex<CoverCache>> = OnceCell::new();
+        static CACHE: OnceLock<Mutex<CoverCache>> = OnceLock::new();
 
         CACHE.get_or_init(|| {
             let c = CoverCache::new();
@@ -115,15 +114,15 @@ impl CoverCache {
         // caches out of the water, which will slow down loading the track into the
         // playlist model
         if let Some(p) = path {
-            let ext_cover_basename = vec!["Cover", "cover", "Folder", "folder"];
-            let ext_cover_ext = vec!["jpg", "png"];
+            let ext_cover_basename = ["Cover", "cover", "Folder", "folder"];
+            let ext_cover_ext = ["jpg", "png"];
 
             let ext_covers = ext_cover_basename
                 .iter()
                 .map(|&b| {
                     ext_cover_ext
                         .iter()
-                        .map(move |&e| format!("{}.{}", &b, &e))
+                        .map(move |&e| format!("{}.{}", b, e))
                         .collect::<Vec<_>>()
                 })
                 .fold(vec![], |mut v, mut dat| {
@@ -133,7 +132,7 @@ impl CoverCache {
             for name in ext_covers {
                 let mut cover_file = PathBuf::from(p);
                 cover_file.push(name);
-                debug!("Looking for external cover file: {:?}", &cover_file);
+                debug!("Looking for external cover file: {:?}", cover_file);
 
                 let f = gio::File::for_path(&cover_file);
                 if let Ok((res, _)) = f.load_bytes(None::<&gio::Cancellable>) {
@@ -193,11 +192,11 @@ impl CoverCache {
 
         match self.lookup(&uuid) {
             Some(c) => {
-                debug!("Found cover for UUID '{}'", &uuid);
+                debug!("Found cover for UUID '{}'", uuid);
                 Some((c.clone(), uuid))
             }
             None => {
-                debug!("Loading cover art for UUID: {}", &uuid);
+                debug!("Loading cover art for UUID: {}", uuid);
 
                 let cover_art = Self::load_cover_art(tag, path.parent());
 
@@ -220,17 +219,13 @@ impl CoverCache {
                 let texture = cover_pixbuf.as_ref().map(gdk::Texture::for_pixbuf);
 
                 // The color palette we use for styling the UI
-                let palette = if let Some(ref pixbuf) = cover_pixbuf {
-                    utils::load_palette(pixbuf)
-                } else {
-                    None
-                };
+                let palette = cover_pixbuf.as_ref().and_then(utils::load_palette);
 
                 // We want both texture and palette
-                if texture.is_some() && palette.is_some() {
+                if let (Some(texture), Some(palette)) = (texture, palette) {
                     let res = CoverArt {
-                        texture: texture.unwrap(),
-                        palette: palette.unwrap(),
+                        texture,
+                        palette,
                         cache: cache_path,
                     };
 

@@ -12,7 +12,7 @@ use crate::audio::{Controller, PlaybackState, RepeatMode, Track};
 
 mod imp {
     use glib::{ParamSpec, ParamSpecBoolean, Value};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -41,8 +41,8 @@ mod imp {
         }
 
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> =
-                Lazy::new(|| vec![ParamSpecBoolean::builder("has-peaks").read_only().build()]);
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> =
+                LazyLock::new(|| vec![ParamSpecBoolean::builder("has-peaks").read_only().build()]);
 
             PROPERTIES.as_ref()
         }
@@ -114,7 +114,7 @@ impl WaveformGenerator {
                     gio::FileCreateFlags::NONE,
                     gio::Cancellable::NONE,
                     move |_| {
-                        debug!("Waveform cached at: {:?}", &cache);
+                        debug!("Waveform cached at: {:?}", cache);
                     },
                 );
             }
@@ -253,17 +253,17 @@ impl WaveformGenerator {
                             return glib::ControlFlow::Break;
                         }
                         MessageView::Element(element) => {
-                            if let Some(s) = element.structure() {
-                                if s.has_name("level") {
-                                    let peaks_array = s.get::<&glib::ValueArray>("peak").unwrap();
-                                    let v1 = peaks_array[0].get::<f64>().unwrap();
-                                    let v2 = peaks_array[1].get::<f64>().unwrap();
-                                    // Normalize peaks between 0 and 1
-                                    let peak1 = f64::powf(10.0, v1 / 20.0);
-                                    let peak2 = f64::powf(10.0, v2 / 20.0);
-                                    if let Some(ref mut peaks) = *this.imp().peaks.borrow_mut() {
-                                        peaks.push((peak1, peak2));
-                                    }
+                            if let Some(s) = element.structure()
+                                && s.has_name("level")
+                            {
+                                let peaks_array = s.get::<&glib::ValueArray>("peak").unwrap();
+                                let v1 = peaks_array[0].get::<f64>().unwrap();
+                                let v2 = peaks_array[1].get::<f64>().unwrap();
+                                // Normalize peaks between 0 and 1
+                                let peak1 = f64::powf(10.0, v1 / 20.0);
+                                let peak2 = f64::powf(10.0, v2 / 20.0);
+                                if let Some(ref mut peaks) = *this.imp().peaks.borrow_mut() {
+                                    peaks.push((peak1, peak2));
                                 }
                             }
                         }

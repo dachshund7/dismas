@@ -21,7 +21,7 @@ mod imp {
         prelude::*,
         subclass::prelude::*,
     };
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use crate::audio::Track;
 
@@ -41,8 +41,8 @@ mod imp {
 
     impl ObjectImpl for SearchFilter {
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> =
-                Lazy::new(|| vec![ParamSpecString::builder("search").build()]);
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> =
+                LazyLock::new(|| vec![ParamSpecString::builder("search").build()]);
             PROPERTIES.as_ref()
         }
 

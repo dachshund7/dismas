@@ -108,11 +108,11 @@ pub fn cache_cover_art(uuid: &str, pixbuf: &gdk_pixbuf::Pixbuf) -> Option<PathBu
     cache_dir.push("covers");
     glib::mkdir_with_parents(&cache_dir, 0o755);
 
-    cache_dir.push(format!("{}.png", &uuid));
+    cache_dir.push(format!("{}.png", uuid));
     let file = gio::File::for_path(&cache_dir);
     match file.create(gio::FileCreateFlags::NONE, gio::Cancellable::NONE) {
         Ok(stream) => {
-            debug!("Creating cover data cache at {:?}", &cache_dir);
+            debug!("Creating cover data cache at {:?}", cache_dir);
             pixbuf.save_to_streamv_async(
                 &stream,
                 "png",
@@ -248,22 +248,18 @@ pub fn cmp_two_files(base: Option<&gio::File>, a: &gio::File, b: &gio::File) -> 
 }
 
 fn cmp_like_nautilus(filename_a: &str, filename_b: &str) -> Ordering {
-    let order;
-
     let sort_last_a = filename_a.as_bytes()[0] == b'.' || filename_a.as_bytes()[0] == b'#';
     let sort_last_b = filename_b.as_bytes()[0] == b'.' || filename_b.as_bytes()[0] == b'#';
 
     if !sort_last_a && sort_last_b {
-        order = Ordering::Less;
+        Ordering::Less
     } else if sort_last_a && !sort_last_b {
-        order = Ordering::Greater;
+        Ordering::Greater
     } else {
         let key_a = glib::FilenameCollationKey::from(filename_a);
         let key_b = glib::FilenameCollationKey::from(filename_b);
-        order = key_a.partial_cmp(&key_b).unwrap();
+        key_a.partial_cmp(&key_b).unwrap()
     }
-
-    order
 }
 
 pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::File> {
@@ -303,7 +299,7 @@ pub fn store_playlist(queue: &Queue) {
 
     pls_cache.push("current.pls");
     match pls.save_to_file(&pls_cache) {
-        Ok(_) => debug!("Current playlist updated to: {:?}", &pls_cache),
+        Ok(_) => debug!("Current playlist updated to: {:?}", pls_cache),
         Err(e) => debug!("Unable to save current playlist: {e}"),
     }
 }

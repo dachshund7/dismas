@@ -66,19 +66,15 @@ impl Display for RepeatMode {
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq)]
 #[enum_type(name = "AmberolReplayGainMode")]
+#[derive(Default)]
 pub enum ReplayGainMode {
     #[enum_value(name = "album")]
     Album,
     #[enum_value(name = "track")]
     Track,
     #[enum_value(name = "off")]
+    #[default]
     Off,
-}
-
-impl Default for ReplayGainMode {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 impl From<i32> for ReplayGainMode {
@@ -478,7 +474,7 @@ impl AudioPlayer {
     }
 
     fn update_volume(&self, volume: f64) {
-        debug!("Updating volume to: {}", &volume);
+        debug!("Updating volume to: {}", volume);
         self.state.set_volume(volume);
     }
 

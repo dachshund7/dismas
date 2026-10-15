@@ -96,7 +96,7 @@ impl GstBackend {
             #[strong(rename_to = sender)]
             self.sender,
             move |_bus, msg| {
-                let Ok(play_msg) = gst_play::PlayMessage::parse(&msg) else {
+                let Ok(play_msg) = gst_play::PlayMessage::parse(msg) else {
                     return gst::BusSyncReply::Drop;
                 };
 
@@ -193,7 +193,7 @@ impl GstBackend {
             gst_audio::StreamVolumeFormat::Linear,
             volume,
         );
-        debug!("Setting volume to: {}", &linear_volume);
+        debug!("Setting volume to: {}", linear_volume);
         self.gst_player.set_volume(linear_volume);
     }
 

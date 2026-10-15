@@ -10,7 +10,7 @@ use adw::{prelude::*, subclass::prelude::*};
 use glib::{clone, subclass::Signal};
 use gtk::{CompositeTemplate, gdk, gio, glib};
 use log::debug;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::{
     audio::normalize_search_text,
@@ -24,6 +24,10 @@ const CELL_COVER_SIZE: i32 = 160;
 // The number of covers kept in memory, enough for a few screenfuls of
 // the grid; keeping all of them would take hundreds of megabytes
 const MAX_CACHED_COVERS: usize = 300;
+
+// The pictures waiting for each cover to load, as album IDs and pictures,
+// keyed by the path of the cover
+type PendingCovers = HashMap<String, Vec<(String, glib::WeakRef<gtk::Picture>)>>;
 
 // The covers loaded most recently
 #[derive(Debug, Default)]
@@ -106,7 +110,7 @@ mod imp {
         // The words of the search the matches are for
         pub search_words: RefCell<Vec<String>>,
         pub textures: RefCell<TextureCache>,
-        pub pending_covers: RefCell<HashMap<String, Vec<(String, glib::WeakRef<gtk::Picture>)>>>,
+        pub pending_covers: RefCell<super::PendingCovers>,
         pub scanning: Cell<bool>,
     }
 
@@ -157,7 +161,7 @@ mod imp {
         }
 
         fn signals() -> &'static [Signal] {
-            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+            static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
                 vec![
                     Signal::builder("album-activated")
                         .param_types([Album::static_type()])
@@ -403,10 +407,10 @@ impl LibraryView {
                 };
 
                 for (id, picture) in waiting.into_iter().flatten() {
-                    if let Some(picture) = picture.upgrade() {
-                        if picture.widget_name() == id {
-                            picture.set_paintable(Some(&texture));
-                        }
+                    if let Some(picture) = picture.upgrade()
+                        && picture.widget_name() == id
+                    {
+                        picture.set_paintable(Some(&texture));
                     }
                 }
                 imp.textures.borrow_mut().insert(path, texture);

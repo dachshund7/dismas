@@ -9,7 +9,7 @@ use crate::audio::{CoverCache, RepeatMode, ShuffleListModel, Track};
 
 mod imp {
     use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, ParamSpecUInt, Value};
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use super::*;
 
@@ -43,7 +43,7 @@ mod imp {
 
     impl ObjectImpl for Queue {
         fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
                 vec![
                     ParamSpecObject::builder::<Track>("current")
                         .read_only()
@@ -191,13 +191,13 @@ impl Queue {
     }
 
     pub fn previous_track(&self) -> Option<Track> {
-        if let Some(current_pos) = self.imp().current_pos.get() {
-            if current_pos > 0 {
-                let prev = current_pos - 1;
-                self.imp().current_pos.replace(Some(prev));
-                self.notify("current");
-                return self.track_at(current_pos - 1);
-            }
+        if let Some(current_pos) = self.imp().current_pos.get()
+            && current_pos > 0
+        {
+            let prev = current_pos - 1;
+            self.imp().current_pos.replace(Some(prev));
+            self.notify("current");
+            return self.track_at(current_pos - 1);
         }
 
         None
@@ -261,10 +261,10 @@ impl Queue {
     pub fn is_last_track(&self) -> bool {
         let n_items = self.imp().model.n_items();
 
-        if let Some(current_pos) = self.imp().current_pos.get() {
-            if n_items > 0 {
-                return current_pos == n_items - 1;
-            }
+        if let Some(current_pos) = self.imp().current_pos.get()
+            && n_items > 0
+        {
+            return current_pos == n_items - 1;
         }
 
         false
