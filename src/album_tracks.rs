@@ -175,14 +175,16 @@ impl AlbumTracks {
         self.imp().add_button.set_sensitive(enabled);
     }
 
-    pub fn show_album(&self, album: &Album) {
+    // Shows the tracks of an album that contain every search word, or all
+    // of them without any
+    pub fn show_album(&self, album: &Album, search_words: &[String]) {
         let imp = self.imp();
 
         imp.album_title.set_label(&album.title());
         imp.album_title.set_tooltip_text(Some(&album.title()));
         imp.album_artist.set_label(&album.artist());
 
-        let files: Vec<gio::File> = library::album_tracks(&album.id())
+        let files: Vec<gio::File> = library::album_tracks(&album.id(), search_words)
             .into_iter()
             .map(gio::File::for_path)
             .collect();

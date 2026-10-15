@@ -704,7 +704,8 @@ impl Window {
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
             imp.sidebar_was_visible.set(self.playlist_visible());
         }
-        imp.album_tracks.show_album(album);
+        imp.album_tracks
+            .show_album(album, &imp.library_view.search_words());
         imp.sidebar_stack.set_visible_child_name("album");
         self.set_playlist_visible(true);
     }

@@ -218,16 +218,21 @@ pub fn search_albums(words: &[String]) -> HashSet<String> {
     }
 }
 
-// The files of the tracks of an album, in order
-pub fn album_tracks(album_id: &str) -> Vec<PathBuf> {
+// The files of the tracks of an album, in order; with search words, only
+// the tracks that contain every word, as in `search_albums()`
+pub fn album_tracks(album_id: &str, words: &[String]) -> Vec<PathBuf> {
     let query = |conn: &Connection| -> rusqlite::Result<Vec<PathBuf>> {
-        let mut stmt = conn.prepare(
+        let conditions: String = words.iter().map(|_| " AND instr(search, ?) > 0").collect();
+        let mut stmt = conn.prepare(&format!(
             "SELECT path FROM tracks
-             WHERE album_id = ?1
-             ORDER BY COALESCE(disc, 0), COALESCE(track, 0), path",
-        )?;
-        stmt.query_map([album_id], |row| row.get::<_, String>(0).map(PathBuf::from))?
-            .collect()
+             WHERE album_id = ?{conditions}
+             ORDER BY COALESCE(disc, 0), COALESCE(track, 0), path"
+        ))?;
+        let params = std::iter::once(album_id).chain(words.iter().map(String::as_str));
+        stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            row.get::<_, String>(0).map(PathBuf::from)
+        })?
+        .collect()
     };
 
     match open().and_then(|conn| query(&conn)) {

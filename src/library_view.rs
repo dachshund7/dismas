@@ -85,6 +85,8 @@ mod imp {
         pub filter: RefCell<Option<gtk::CustomFilter>>,
         // The albums matching the search, if there is one
         pub search_matches: RefCell<Option<HashSet<String>>>,
+        // The words of the search the matches are for
+        pub search_words: RefCell<Vec<String>>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<HashMap<String, Vec<(String, glib::WeakRef<gtk::Picture>)>>>,
         pub scanning: Cell<bool>,
@@ -359,7 +361,7 @@ impl LibraryView {
             .collect();
 
         if words.is_empty() {
-            self.set_search_matches(None);
+            self.set_search_matches(Vec::new(), None);
             return;
         }
 
@@ -367,7 +369,11 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let Ok(matches) = gio::spawn_blocking(move || library::search_albums(&words)).await
+                let Ok((words, matches)) = gio::spawn_blocking(move || {
+                    let matches = library::search_albums(&words);
+                    (words, matches)
+                })
+                .await
                 else {
                     return;
                 };
@@ -376,16 +382,22 @@ impl LibraryView {
                 if this.imp().search_entry.text() != text {
                     return;
                 }
-                this.set_search_matches(Some(matches));
+                this.set_search_matches(words, Some(matches));
             }
         ));
     }
 
-    fn set_search_matches(&self, matches: Option<HashSet<String>>) {
+    fn set_search_matches(&self, words: Vec<String>, matches: Option<HashSet<String>>) {
+        self.imp().search_words.replace(words);
         self.imp().search_matches.replace(matches);
         if let Some(filter) = self.imp().filter.borrow().as_ref() {
             filter.changed(gtk::FilterChange::Different);
         }
+    }
+
+    // The normalized words of the search the grid is filtered by, if any
+    pub fn search_words(&self) -> Vec<String> {
+        self.imp().search_words.borrow().clone()
     }
 
     // Whether there is a player to go back to
