@@ -26,7 +26,7 @@ meson devenv -C _build ./src/amberol   # run uninstalled
 ```sh
 cargo fmt --all -- --check                  # CI runs this; CI creates an empty src/config.rs first
 cargo clippy --all-targets -- -D warnings   # CI fails on any warning
-cargo test                                  # the only unit tests are in src/i18n.rs
+cargo test                                  # unit tests are in src/i18n.rs and src/audio/track.rs
 cargo test <name>                           # a single test
 build-aux/checks.sh                         # fmt + typos (spelling, configured in .typos.toml)
 reuse lint                                  # CI checks REUSE/SPDX licensing
@@ -57,7 +57,7 @@ Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-I
 - **Resources:** Meson compiles the `.blp` files to `.ui` and bundles them with CSS and icons through `src/amberol.gresource.xml`. Templates load from `/io/bassi/Amberol/<name>.ui`.
 - **Adding a widget:** update the `.blp` list in `src/gtk/meson.build`, the gresource XML and `po/POTFILES.in` together.
 - **Stale resources after editing `.blp` files:** the gresource bundle doesn't track the compiled `.ui` files, so the first `ninja` run can leave the old UI in `_build/src/amberol.gresource`. Run `ninja` a second time.
-- **Window coordination:** `window.rs` is the large coordinator. It installs `win.*` actions, handles drag-and-drop and file loading, runs search/filtering (`search.rs`, `sort.rs`), and binds `PlayerState` to the widgets.
+- **Window coordination:** `Window` is the coordinator. `window.rs` holds its template, properties and `win.*` actions, and its methods are split by area into `window/*.rs`: `bindings.rs` (binding `PlayerState` and the queue to the widgets), `loading.rs` (opening files, drag-and-drop, restoring the playlist), `playlist.rs`, `selection.rs`, `albums.rs` (the album grid), `now_playing.rs`, `sidebar.rs` and `track_menu.rs`. Playlist search filtering is in `search.rs`.
 - **Settings:** stored through GSettings (`data/io.bassi.Amberol.gschema.xml`).
 - **Saved playlist:** kept in the user cache dir (`utils.rs`) so "Restore Playlist" can reload it.
 
