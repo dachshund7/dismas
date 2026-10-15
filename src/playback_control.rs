@@ -71,6 +71,17 @@ mod imp {
             self.parent_constructed();
 
             self.menu_button.set_primary(true);
+
+            // Clicking the button again restores the order of the playlist,
+            // so the tooltip says what the next click does
+            self.shuffle_button.connect_active_notify(|button| {
+                let tooltip = if button.is_active() {
+                    i18n("Unshuffle the Playlist")
+                } else {
+                    i18n("Shuffle the Playlist")
+                };
+                button.set_tooltip_text(Some(&tooltip));
+            });
         }
     }
 
