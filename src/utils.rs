@@ -212,44 +212,32 @@ fn load_files_from_folder_internal(
 }
 
 pub fn cmp_two_files(base: Option<&gio::File>, a: &gio::File, b: &gio::File) -> Ordering {
-    let parent_a = a.parent().unwrap();
-    let parent_b = b.parent().unwrap();
-    let parent_basename_a = if let Some(base) = base {
-        if let Some(path) = base.relative_path(&parent_a) {
-            path
-        } else {
-            parent_a.basename().unwrap()
-        }
-    } else {
-        parent_a.basename().unwrap()
+    cmp_like_nautilus(&folder_sort_name(base, a), &folder_sort_name(base, b))
+        .then_with(|| cmp_like_nautilus(&file_sort_name(a), &file_sort_name(b)))
+}
+
+// The folder of the file, relative to the base folder if it's inside it,
+// or else by its own name
+fn folder_sort_name(base: Option<&gio::File>, file: &gio::File) -> String {
+    let Some(parent) = file.parent() else {
+        return String::new();
     };
-    let parent_basename_b = if let Some(base) = base {
-        if let Some(path) = base.relative_path(&parent_b) {
-            path
-        } else {
-            parent_b.basename().unwrap()
-        }
-    } else {
-        parent_b.basename().unwrap()
-    };
-    let basename_a = a.basename().unwrap();
-    let basename_b = b.basename().unwrap();
+    base.and_then(|base| base.relative_path(&parent))
+        .or_else(|| parent.basename())
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
 
-    let mut order = cmp_like_nautilus(
-        &parent_basename_a.to_string_lossy(),
-        &parent_basename_b.to_string_lossy(),
-    );
-
-    if order.is_eq() {
-        order = cmp_like_nautilus(&basename_a.to_string_lossy(), &basename_b.to_string_lossy());
-    }
-
-    order
+// Files that aren't paths, like some GVFS locations, have no basename
+fn file_sort_name(file: &gio::File) -> String {
+    file.basename()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file.uri().to_string())
 }
 
 fn cmp_like_nautilus(filename_a: &str, filename_b: &str) -> Ordering {
-    let sort_last_a = filename_a.as_bytes()[0] == b'.' || filename_a.as_bytes()[0] == b'#';
-    let sort_last_b = filename_b.as_bytes()[0] == b'.' || filename_b.as_bytes()[0] == b'#';
+    let sort_last_a = filename_a.starts_with(['.', '#']);
+    let sort_last_b = filename_b.starts_with(['.', '#']);
 
     if !sort_last_a && sort_last_b {
         Ordering::Less
@@ -258,7 +246,7 @@ fn cmp_like_nautilus(filename_a: &str, filename_b: &str) -> Ordering {
     } else {
         let key_a = glib::FilenameCollationKey::from(filename_a);
         let key_b = glib::FilenameCollationKey::from(filename_b);
-        key_a.partial_cmp(&key_b).unwrap()
+        key_a.cmp(&key_b)
     }
 }
 
@@ -283,13 +271,12 @@ pub fn store_playlist(queue: &Queue) {
 
     pls.set_int64("playlist", "NumberOfEntries", queue.n_tracks() as i64);
 
-    let model = queue.model();
-    for i in 0..model.n_items() {
-        let item = model.item(i).unwrap();
-        let track = item.downcast_ref::<Track>().unwrap();
-        let path = track.file().path().expect("Unknown file");
-        let path_str = path.to_string_lossy();
-        pls.set_value("playlist", &format!("File{i}"), &path_str);
+    for (i, track) in queue.model().iter::<Track>().flatten().enumerate() {
+        // Loading skips the missing entries
+        let Some(path) = track.file().path() else {
+            continue;
+        };
+        pls.set_value("playlist", &format!("File{i}"), &path.to_string_lossy());
     }
 
     let mut pls_cache = glib::user_cache_dir();

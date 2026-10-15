@@ -78,22 +78,19 @@ impl Queue {
     }
 
     pub fn track_at(&self, pos: u32) -> Option<Track> {
-        if let Some(track) = self.imp().model.item(pos) {
-            return Some(track.downcast::<Track>().unwrap());
-        }
-
-        None
+        self.imp().model.item(pos).and_downcast()
     }
 
     pub fn set_current_track(&self, track: Option<Track>) {
         if let Some(track) = track {
-            for i in 0..self.n_tracks() {
-                let s = self.track_at(i).unwrap();
-                if track.equals(&s) {
-                    self.imp().current_pos.replace(Some(i));
-                    self.notify_current();
-                    return;
-                }
+            let pos = self
+                .imp()
+                .model
+                .iter::<Track>()
+                .position(|s| s.is_ok_and(|s| s.equals(&track)));
+            if let Some(pos) = pos {
+                self.imp().current_pos.replace(Some(pos as u32));
+                self.notify_current();
             }
         } else {
             self.imp().current_pos.replace(None);
@@ -126,18 +123,13 @@ impl Queue {
     pub fn remove_track(&self, track: &Track) {
         let was_shuffled = self.imp().model.shuffled();
         let n_tracks = self.n_tracks();
-        for pos in 0..n_tracks {
-            let s = self
-                .imp()
-                .store
-                .item(pos)
-                .unwrap()
-                .downcast::<Track>()
-                .unwrap();
-            if s.equals(track) {
-                self.imp().store.remove(pos);
-                break;
-            }
+        let pos = self
+            .imp()
+            .store
+            .iter::<Track>()
+            .position(|s| s.is_ok_and(|s| s.equals(track)));
+        if let Some(pos) = pos {
+            self.imp().store.remove(pos as u32);
         }
 
         if n_tracks != self.n_tracks() {
@@ -262,40 +254,31 @@ impl Queue {
     }
 
     pub fn select_track_at(&self, index: u32) {
-        if let Some(track) = self.imp().model.item(index) {
-            let track = track.downcast_ref::<Track>().unwrap();
-            let is_selected = !track.selected();
-            track.set_selected(is_selected);
+        if let Some(track) = self.track_at(index) {
+            track.set_selected(!track.selected());
         }
     }
 
     pub fn unselect_all_tracks(&self) {
-        for i in 0..self.imp().store.n_items() {
-            let track = self.imp().store.item(i).unwrap();
-            track.downcast_ref::<Track>().unwrap().set_selected(false);
+        for track in self.imp().store.iter::<Track>().flatten() {
+            track.set_selected(false);
         }
     }
 
     pub fn n_selected_tracks(&self) -> u32 {
-        let mut count = 0;
-        for i in 0..self.imp().store.n_items() {
-            let track = self.imp().store.item(i).unwrap();
-            if track.downcast_ref::<Track>().unwrap().selected() {
-                count += 1;
-            }
-        }
-
-        count
+        self.imp()
+            .store
+            .iter::<Track>()
+            .flatten()
+            .filter(Track::selected)
+            .count() as u32
     }
 
     pub fn contains(&self, s: &Track) -> bool {
-        for i in 0..self.imp().store.n_items() {
-            let track = self.imp().store.item(i).unwrap();
-            if track.downcast_ref::<Track>().unwrap().equals(s) {
-                return true;
-            }
-        }
-
-        false
+        self.imp()
+            .store
+            .iter::<Track>()
+            .flatten()
+            .any(|track| track.equals(s))
     }
 }
