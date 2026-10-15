@@ -87,7 +87,7 @@ impl Queue {
                 .imp()
                 .model
                 .iter::<Track>()
-                .position(|s| s.is_ok_and(|s| s.equals(&track)));
+                .position(|s| s.is_ok_and(|s| s == track));
             if let Some(pos) = pos {
                 self.imp().current_pos.replace(Some(pos as u32));
                 self.notify_current();
@@ -127,7 +127,7 @@ impl Queue {
             .imp()
             .store
             .iter::<Track>()
-            .position(|s| s.is_ok_and(|s| s.equals(track)));
+            .position(|s| s.is_ok_and(|s| s == *track));
         if let Some(pos) = pos {
             self.imp().store.remove(pos as u32);
         }
@@ -272,13 +272,5 @@ impl Queue {
             .flatten()
             .filter(Track::selected)
             .count() as u32
-    }
-
-    pub fn contains(&self, s: &Track) -> bool {
-        self.imp()
-            .store
-            .iter::<Track>()
-            .flatten()
-            .any(|track| track.equals(s))
     }
 }

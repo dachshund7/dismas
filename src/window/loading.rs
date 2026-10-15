@@ -67,7 +67,6 @@ impl Window {
         let mut files = queue.into_iter();
         let mut tracks = Vec::new();
         let mut cur_file: u32 = 0;
-        let mut duplicates: u32 = 0;
 
         glib::idle_add_local(clone!(
             #[weak(rename_to = win)]
@@ -79,16 +78,9 @@ impl Window {
                     .next()
                     .map(|f| {
                         win.imp().playlist_view.update_loading(cur_file, n_files);
-                        if let Ok(s) = Track::from_uri(f.uri().as_str())
-                            && let Some(player) = win.player()
-                        {
-                            let queue = player.queue();
-                            if queue.contains(&s) {
-                                duplicates += 1;
-                            } else {
-                                tracks.push(s);
-                                cur_file += 1;
-                            }
+                        if let Ok(s) = Track::from_uri(f.uri().as_str()) {
+                            tracks.push(s);
+                            cur_file += 1;
                         }
                     })
                     .map(|_| glib::ControlFlow::Continue)
@@ -105,9 +97,7 @@ impl Window {
                         win.imp().library_view.set_adding_enabled(true);
 
                         if tracks.is_empty() {
-                            if duplicates == 0 {
-                                win.add_toast(i18n("No tracks found"));
-                            }
+                            win.add_toast(i18n("No tracks found"));
                         } else if let Some(player) = win.player() {
                             let queue = player.queue();
                             let was_empty = queue.is_empty();

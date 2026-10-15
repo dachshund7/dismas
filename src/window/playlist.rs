@@ -88,7 +88,7 @@ impl Window {
                         for i in 0..queue.model().n_items() {
                             if let Some(item) = queue.model().item(i) {
                                 let s = item.downcast::<Track>().unwrap();
-                                if s.equals(&track) {
+                                if s == track {
                                     real_pos = Some(i);
                                     break;
                                 }
