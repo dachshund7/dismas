@@ -5,7 +5,7 @@ use std::cell::Cell;
 
 use adw::subclass::prelude::*;
 use glib::clone;
-use gtk::{CompositeTemplate, gio, glib, prelude::*};
+use gtk::{CompositeTemplate, glib, prelude::*};
 use log::debug;
 
 mod imp {
@@ -111,8 +111,7 @@ mod imp {
 glib::wrapper! {
     pub struct VolumeControl(ObjectSubclass<imp::VolumeControl>)
         @extends gtk::Widget,
-        @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible,
-                    gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for VolumeControl {

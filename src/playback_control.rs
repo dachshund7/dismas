@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use adw::subclass::prelude::*;
-use gtk::{CompositeTemplate, gio, glib, prelude::*};
+use gtk::{CompositeTemplate, glib, prelude::*};
 
 use crate::{audio::RepeatMode, i18n::i18n, volume_control::VolumeControl};
 
@@ -80,8 +80,7 @@ mod imp {
 glib::wrapper! {
     pub struct PlaybackControl(ObjectSubclass<imp::PlaybackControl>)
         @extends gtk::Widget,
-        @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible,
-                    gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for PlaybackControl {

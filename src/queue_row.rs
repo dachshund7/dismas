@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 
 use adw::subclass::prelude::*;
 use glib::{clone, subclass::Signal};
-use gtk::{CompositeTemplate, gdk, gio, glib, prelude::*};
+use gtk::{CompositeTemplate, gdk, glib, prelude::*};
 
 use crate::{audio::Track, cover_picture::CoverPicture};
 
@@ -169,8 +169,7 @@ mod imp {
 glib::wrapper! {
     pub struct QueueRow(ObjectSubclass<imp::QueueRow>)
         @extends gtk::Widget,
-        @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible,
-                    gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for QueueRow {

@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 
 use glib::clone;
-use gtk::{gdk, gio, glib, graphene, gsk, prelude::*, subclass::prelude::*};
+use gtk::{gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 
 use crate::i18n::i18n;
 
@@ -171,8 +171,7 @@ mod imp {
 glib::wrapper! {
     pub struct CoverPicture(ObjectSubclass<imp::CoverPicture>)
         @extends gtk::Widget,
-        @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible,
-                    gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for CoverPicture {

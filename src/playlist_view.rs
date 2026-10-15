@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use adw::subclass::prelude::*;
-use gtk::{CompositeTemplate, gio, glib, prelude::*};
+use gtk::{CompositeTemplate, glib, prelude::*};
 
 mod imp {
     use super::*;
@@ -71,8 +71,7 @@ mod imp {
 glib::wrapper! {
     pub struct PlaylistView(ObjectSubclass<imp::PlaylistView>)
         @extends gtk::Widget,
-        @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible,
-                    gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for PlaylistView {
