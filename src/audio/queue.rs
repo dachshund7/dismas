@@ -123,6 +123,7 @@ impl Queue {
     pub fn remove_track(&self, track: &Track) {
         let was_shuffled = self.imp().model.shuffled();
         let n_tracks = self.n_tracks();
+        let current = self.current();
         let pos = self
             .imp()
             .store
@@ -139,8 +140,17 @@ impl Queue {
             self.notify_n_tracks();
         }
 
-        if self.is_empty() {
-            self.imp().current_pos.replace(None);
+        // Removing a track moves the ones after it, and reshuffling moves
+        // all of them, so the current track is looked up again
+        let current_pos = current.and_then(|current| {
+            self.imp()
+                .model
+                .iter::<Track>()
+                .position(|s| s.is_ok_and(|s| s == current))
+                .map(|pos| pos as u32)
+        });
+        if current_pos != self.imp().current_pos.replace(current_pos) {
+            self.notify_current();
         }
     }
 
