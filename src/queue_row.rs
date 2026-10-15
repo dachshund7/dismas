@@ -5,9 +5,9 @@ use std::cell::{Cell, RefCell};
 
 use adw::subclass::prelude::*;
 use glib::{clone, subclass::Signal};
-use gtk::{CompositeTemplate, gdk, glib, prelude::*};
+use gtk::{CompositeTemplate, gdk, gio, glib, prelude::*};
 
-use crate::{audio::Track, cover_picture::CoverPicture};
+use crate::{application::Application, audio::Track, cover_picture::CoverPicture, i18n::pi18n};
 
 mod imp {
     use std::sync::LazyLock;
@@ -71,6 +71,9 @@ mod imp {
         pub track: RefCell<Option<Track>>,
         #[property(get, set = Self::set_playing, explicit_notify)]
         pub playing: Cell<bool>,
+        // Whether the player is paused, for the icon of the current track
+        #[property(get, set = Self::set_paused, explicit_notify)]
+        pub paused: Cell<bool>,
         #[property(get, set = Self::set_selection_mode, explicit_notify)]
         pub selection_mode: Cell<bool>,
     }
@@ -131,6 +134,14 @@ mod imp {
                 let obj = self.obj();
                 obj.update_mode();
                 obj.notify_playing();
+            }
+        }
+
+        fn set_paused(&self, paused: bool) {
+            if paused != self.paused.replace(paused) {
+                let obj = self.obj();
+                obj.update_playing_icon();
+                obj.notify_paused();
             }
         }
 
@@ -197,6 +208,15 @@ impl QueueRow {
             .bind(self, "playing", gtk::Widget::NONE);
         item.chain_property::<Track>("selected")
             .bind(self, "selected", gtk::Widget::NONE);
+
+        if let Some(app) = gio::Application::default().and_downcast::<Application>() {
+            app.player()
+                .state()
+                .bind_property("playing", self, "paused")
+                .invert_boolean()
+                .sync_create()
+                .build();
+        }
     }
 
     pub fn new() -> Self {
@@ -275,6 +295,21 @@ impl QueueRow {
             false,
             glib::closure_local!(move |row: &Self, x: f64, y: f64| f(row, x, y)),
         )
+    }
+
+    // The current track shows a pause icon while the player is paused
+    fn update_playing_icon(&self) {
+        let imp = self.imp();
+        let (icon, label) = if imp.paused.get() {
+            ("audio-paused-symbolic", pi18n("a11y", "Paused"))
+        } else {
+            ("audio-only-symbolic", pi18n("a11y", "Currently playing"))
+        };
+        for image in [&*imp.track_playing_image, &*imp.selection_playing_image] {
+            image.set_icon_name(Some(icon));
+        }
+        imp.track_playing_image
+            .update_property(&[gtk::accessible::Property::Label(&label)]);
     }
 
     fn update_mode(&self) {
