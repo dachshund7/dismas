@@ -31,6 +31,22 @@ rust-fmt:
     - cargo --version
     - cargo fmt --all -- --check
 
+rust-clippy:
+  image: fedora:latest
+  stage: "check"
+  needs: []
+  before_script:
+    - >-
+      dnf install -y cargo clippy gcc pkgconf-pkg-config
+      gtk4-devel libadwaita-devel sqlite-devel
+      gstreamer1-devel gstreamer1-plugins-base-devel
+      gstreamer1-plugins-bad-free-devel
+  script:
+    # Clippy has to compile the crate, so config.rs needs real constants
+    - sed 's/@[A-Z_]*@/""/' src/config.rs.in > src/config.rs
+    - cargo clippy --version
+    - cargo clippy --all-targets -- -D warnings
+
 reuse:
   image: fedora:latest
   stage: "check"
