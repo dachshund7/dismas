@@ -8,7 +8,6 @@ use std::{
     time::Instant,
 };
 
-use glib::{ParamSpec, ParamSpecBoolean, ParamSpecObject, ParamSpecString, ParamSpecUInt, Value};
 use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
 use itertools::Itertools;
 use lofty::{
@@ -18,7 +17,6 @@ use lofty::{
 };
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
-use std::sync::LazyLock;
 
 use crate::{
     audio::cover_cache::{CoverArt, CoverCache},
@@ -527,10 +525,31 @@ impl Default for TrackData {
 mod imp {
     use super::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, glib::Properties)]
+    #[properties(wrapper_type = super::Track)]
     pub struct Track {
+        #[property(name = "uri", get = Self::uri, type = String)]
+        #[property(name = "artist", get = Self::artist, type = String)]
+        #[property(name = "title", get = Self::title, type = String)]
+        #[property(name = "album", get = Self::album, type = String)]
+        // The conductors and performers, as a single line
+        #[property(name = "credits", get = Self::credits, type = String)]
+        // The main line in the track details: the work, for movements, and
+        // the title otherwise
+        #[property(name = "heading", get = Self::heading, type = String)]
+        // The movement of a larger work, if the track is one
+        #[property(name = "movement", get = Self::movement, nullable, type = Option<String>)]
+        // The lines in the playlist: for movements, the movement and the
+        // composer, as the work is in the header of their section; otherwise
+        // the title and the artist
+        #[property(name = "row-title", get = Self::row_title, type = String)]
+        #[property(name = "row-subtitle", get = Self::row_subtitle, type = String)]
+        #[property(name = "duration", get = Self::duration, type = u64)]
+        #[property(name = "cover", get = Self::cover, nullable, type = Option<gdk::Texture>)]
         pub data: RefCell<TrackData>,
+        #[property(get, set = Self::set_playing, explicit_notify)]
         pub playing: Cell<bool>,
+        #[property(get, set = Self::set_selected, explicit_notify)]
         pub selected: Cell<bool>,
         pub search_key: std::cell::OnceCell<String>,
     }
@@ -541,77 +560,92 @@ mod imp {
         type Type = super::Track;
     }
 
-    impl ObjectImpl for Track {
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecString::builder("uri").construct_only().build(),
-                    ParamSpecString::builder("artist").read_only().build(),
-                    ParamSpecString::builder("title").read_only().build(),
-                    ParamSpecString::builder("album").read_only().build(),
-                    ParamSpecString::builder("credits").read_only().build(),
-                    ParamSpecString::builder("heading").read_only().build(),
-                    ParamSpecString::builder("movement").read_only().build(),
-                    ParamSpecString::builder("row-title").read_only().build(),
-                    ParamSpecString::builder("row-subtitle").read_only().build(),
-                    ParamSpecUInt::builder("duration").read_only().build(),
-                    ParamSpecObject::builder::<gdk::Texture>("cover")
-                        .read_only()
-                        .build(),
-                    ParamSpecBoolean::builder("playing").build(),
-                    ParamSpecBoolean::builder("selected").build(),
-                ]
-            });
-            PROPERTIES.as_ref()
+    #[glib::derived_properties]
+    impl ObjectImpl for Track {}
+
+    impl Track {
+        fn uri(&self) -> String {
+            self.data.borrow().uri()
         }
 
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            match pspec.name() {
-                "uri" => {
-                    let obj = self.obj();
-                    if let Ok(p) = value.get::<&str>() {
-                        self.data.replace(TrackData::from_uri(p));
-                        obj.notify("artist");
-                        obj.notify("title");
-                        obj.notify("album");
-                        obj.notify("credits");
-                        obj.notify("heading");
-                        obj.notify("movement");
-                        obj.notify("row-title");
-                        obj.notify("row-subtitle");
-                        obj.notify("duration");
-                        obj.notify("cover");
-                    }
-                }
-                "playing" => {
-                    let p = value.get::<bool>().expect("Value must be a boolean");
-                    self.playing.set(p);
-                }
-                "selected" => {
-                    let p = value.get::<bool>().expect("Value must be a boolean");
-                    self.selected.set(p);
-                }
-                _ => unimplemented!(),
+        fn artist(&self) -> String {
+            match self.data.borrow().artist() {
+                Some(artist) => artist.to_string(),
+                None => i18n("Unknown artist"),
             }
         }
 
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            let obj = self.obj();
-            match pspec.name() {
-                "artist" => obj.artist().to_value(),
-                "title" => obj.title().to_value(),
-                "album" => obj.album().to_value(),
-                "credits" => obj.credits().to_value(),
-                "heading" => obj.heading().to_value(),
-                "movement" => obj.movement().unwrap_or_default().to_value(),
-                "row-title" => obj.row_title().to_value(),
-                "row-subtitle" => obj.row_subtitle().to_value(),
-                "duration" => obj.duration().to_value(),
-                "uri" => obj.uri().to_value(),
-                "cover" => obj.cover_texture().to_value(),
-                "playing" => self.playing.get().to_value(),
-                "selected" => self.selected.get().to_value(),
-                _ => unimplemented!(),
+        fn title(&self) -> String {
+            match self.data.borrow().title() {
+                Some(title) => title.to_string(),
+                None => i18n("Unknown title"),
+            }
+        }
+
+        fn album(&self) -> String {
+            match self.data.borrow().album() {
+                Some(album) => album.to_string(),
+                None => i18n("Unknown album"),
+            }
+        }
+
+        fn credits(&self) -> String {
+            let data = self.data.borrow();
+            data.credits().summary(data.artist())
+        }
+
+        fn heading(&self) -> String {
+            self.movement_work().unwrap_or_else(|| self.title())
+        }
+
+        fn movement(&self) -> Option<String> {
+            self.data.borrow().credits().movement_label()
+        }
+
+        // The work the movement belongs to, if the track is a movement
+        pub(super) fn movement_work(&self) -> Option<String> {
+            self.movement()?;
+            self.data.borrow().credits().work.clone()
+        }
+
+        fn row_title(&self) -> String {
+            self.movement().unwrap_or_else(|| self.title())
+        }
+
+        fn row_subtitle(&self) -> String {
+            match self.movement() {
+                Some(_) => self.composer(),
+                None => self.artist(),
+            }
+        }
+
+        // The composers, or the artist if the track has no composer
+        pub(super) fn composer(&self) -> String {
+            let composers = self.data.borrow().credits().composers.join(", ");
+            if composers.is_empty() {
+                self.artist()
+            } else {
+                composers
+            }
+        }
+
+        fn duration(&self) -> u64 {
+            self.data.borrow().duration()
+        }
+
+        fn cover(&self) -> Option<gdk::Texture> {
+            self.data.borrow().cover_texture().cloned()
+        }
+
+        fn set_playing(&self, playing: bool) {
+            if self.playing.replace(playing) != playing {
+                self.obj().notify_playing();
+            }
+        }
+
+        fn set_selected(&self, selected: bool) {
+            if self.selected.replace(selected) != selected {
+                self.obj().notify_selected();
             }
         }
     }
@@ -623,7 +657,9 @@ glib::wrapper! {
 
 impl Track {
     pub fn new(uri: &str) -> Self {
-        glib::Object::builder::<Self>().property("uri", uri).build()
+        let track: Self = glib::Object::new();
+        track.imp().data.replace(TrackData::from_uri(uri));
+        track
     }
 
     pub fn from_uri(uri: &str) -> Result<Track, &'static str> {
@@ -647,43 +683,8 @@ impl Track {
         }
     }
 
-    pub fn uri(&self) -> String {
-        self.imp().data.borrow().uri()
-    }
-
-    pub fn artist(&self) -> String {
-        match self.imp().data.borrow().artist() {
-            Some(artist) => artist.to_string(),
-            None => i18n("Unknown artist"),
-        }
-    }
-
-    pub fn title(&self) -> String {
-        match self.imp().data.borrow().title() {
-            Some(title) => title.to_string(),
-            None => i18n("Unknown title"),
-        }
-    }
-
-    pub fn album(&self) -> String {
-        match self.imp().data.borrow().album() {
-            Some(album) => album.to_string(),
-            None => i18n("Unknown album"),
-        }
-    }
-
-    // The conductors and performers, as a single line
-    pub fn credits(&self) -> String {
-        let data = self.imp().data.borrow();
-        data.credits().summary(data.artist())
-    }
-
     pub fn credit_details(&self) -> TrackCredits {
         self.imp().data.borrow().credits().clone()
-    }
-
-    pub fn cover_texture(&self) -> Option<gdk::Texture> {
-        self.imp().data.borrow().cover_texture().cloned()
     }
 
     pub fn cover_color(&self) -> Option<gdk::RGBA> {
@@ -702,75 +703,18 @@ impl Track {
         self.imp().data.borrow().cover_cache().cloned()
     }
 
-    pub fn duration(&self) -> u64 {
-        self.imp().data.borrow().duration()
-    }
-
-    pub fn playing(&self) -> bool {
-        self.imp().playing.get()
-    }
-
-    pub fn set_playing(&self, playing: bool) {
-        let was_playing = self.imp().playing.replace(playing);
-        if was_playing != playing {
-            self.notify("playing");
-        }
-    }
-
-    pub fn selected(&self) -> bool {
-        self.imp().selected.get()
-    }
-
-    pub fn set_selected(&self, selected: bool) {
-        let was_selected = self.imp().selected.replace(selected);
-        if was_selected != selected {
-            self.notify("selected");
-        }
-    }
-
     pub fn uuid(&self) -> Option<String> {
         self.imp().data.borrow().uuid().map(|s| s.to_string())
     }
 
-    // The movement of a larger work, if the track is one
-    pub fn movement(&self) -> Option<String> {
-        self.imp().data.borrow().credits().movement_label()
-    }
-
     // The work the movement belongs to, if the track is a movement
     pub fn movement_work(&self) -> Option<String> {
-        self.movement()?;
-        self.imp().data.borrow().credits().work.clone()
-    }
-
-    // The main line in the track details: the work, for movements, and
-    // the title otherwise
-    pub fn heading(&self) -> String {
-        self.movement_work().unwrap_or_else(|| self.title())
-    }
-
-    // The lines in the playlist: for movements, the movement and the
-    // composer, as the work is in the header of their section; otherwise
-    // the title and the artist
-    pub fn row_title(&self) -> String {
-        self.movement().unwrap_or_else(|| self.title())
-    }
-
-    pub fn row_subtitle(&self) -> String {
-        match self.movement() {
-            Some(_) => self.composer(),
-            None => self.artist(),
-        }
+        self.imp().movement_work()
     }
 
     // The composers, or the artist if the track has no composer
     pub fn composer(&self) -> String {
-        let composers = self.imp().data.borrow().credits().composers.join(", ");
-        if composers.is_empty() {
-            self.artist()
-        } else {
-            composers
-        }
+        self.imp().composer()
     }
 
     // The text that searching the playlist looks into, normalized with

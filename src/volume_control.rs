@@ -9,22 +9,35 @@ use gtk::{CompositeTemplate, gio, glib, prelude::*};
 use log::debug;
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecBoolean, ParamSpecDouble, Value, subclass::Signal};
+    use glib::subclass::Signal;
     use std::sync::LazyLock;
 
     use super::*;
 
-    #[derive(Debug, Default, CompositeTemplate)]
+    #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
+    #[properties(wrapper_type = super::VolumeControl)]
     #[template(resource = "/io/bassi/Amberol/volume-control.ui")]
     pub struct VolumeControl {
         // Template widgets
         #[template_child]
         pub volume_low_button: TemplateChild<gtk::Button>,
+        // The adjustment of the scale notifies changes to the volume
         #[template_child]
+        #[property(
+            name = "volume",
+            get = |imp: &Self| imp.volume_scale.value(),
+            set = |imp: &Self, volume: f64| imp.volume_scale.set_value(volume),
+            explicit_notify,
+            minimum = 0.0,
+            maximum = 1.0,
+            default = 1.0,
+            type = f64,
+        )]
         pub volume_scale: TemplateChild<gtk::Scale>,
         #[template_child]
         pub volume_high_image: TemplateChild<gtk::Image>,
 
+        #[property(get, set = Self::set_toggle_mute, explicit_notify)]
         pub toggle_mute: Cell<bool>,
         pub prev_volume: Cell<f64>,
     }
@@ -50,6 +63,7 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for VolumeControl {
         fn constructed(&self) {
             self.parent_constructed();
@@ -61,43 +75,6 @@ mod imp {
         fn dispose(&self) {
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
-            }
-        }
-
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecDouble::builder("volume")
-                        .minimum(0.0)
-                        .maximum(1.0)
-                        .default_value(1.0)
-                        .build(),
-                    ParamSpecBoolean::builder("toggle-mute").build(),
-                ]
-            });
-
-            PROPERTIES.as_ref()
-        }
-
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            match pspec.name() {
-                "volume" => {
-                    let v = value.get::<f64>().expect("Failed to get f64 value");
-                    self.volume_scale.set_value(v);
-                }
-                "toggle-mute" => {
-                    let v = value.get::<bool>().expect("Failed to get a boolean value");
-                    self.obj().toggle_mute(v);
-                }
-                _ => unimplemented!(),
-            }
-        }
-
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "volume" => self.volume_scale.value().to_value(),
-                "toggle-mute" => self.toggle_mute.get().to_value(),
-                _ => unimplemented!(),
             }
         }
 
@@ -115,6 +92,20 @@ mod imp {
     }
 
     impl WidgetImpl for VolumeControl {}
+
+    impl VolumeControl {
+        fn set_toggle_mute(&self, muted: bool) {
+            if muted != self.toggle_mute.replace(muted) {
+                if muted {
+                    self.prev_volume.replace(self.volume_scale.value());
+                    self.volume_scale.set_value(0.0);
+                } else {
+                    self.volume_scale.set_value(self.prev_volume.get());
+                }
+                self.obj().notify_toggle_mute();
+            }
+        }
+    }
 }
 
 glib::wrapper! {
@@ -159,7 +150,7 @@ impl VolumeControl {
                             .volume_low_button
                             .set_icon_name("audio-volume-low-symbolic");
                     }
-                    this.notify("volume");
+                    this.notify_volume();
                     this.emit_by_name::<()>("volume-changed", &[&value]);
                 }
             ),
@@ -186,21 +177,14 @@ impl VolumeControl {
         self.imp().volume_scale.add_controller(controller);
     }
 
-    fn toggle_mute(&self, muted: bool) {
-        if muted != self.imp().toggle_mute.replace(muted) {
-            if muted {
-                let prev_value = self.imp().volume_scale.value();
-                self.imp().prev_volume.replace(prev_value);
-                self.imp().volume_scale.set_value(0.0);
-            } else {
-                let prev_value = self.imp().prev_volume.get();
-                self.imp().volume_scale.set_value(prev_value);
-            }
-            self.notify("toggle-mute");
-        }
-    }
-
-    pub fn volume(&self) -> f64 {
-        self.imp().volume_scale.value()
+    pub fn connect_volume_changed<F: Fn(&Self, f64) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "volume-changed",
+            false,
+            glib::closure_local!(move |control: &Self, volume: f64| f(control, volume)),
+        )
     }
 }

@@ -8,13 +8,12 @@ use gtk::{gio, glib, prelude::*, subclass::prelude::*};
 use rand::prelude::*;
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecObject, Value};
-    use std::sync::LazyLock;
-
     use super::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, glib::Properties)]
+    #[properties(wrapper_type = super::ShuffleListModel)]
     pub struct ShuffleListModel {
+        #[property(get, set = Self::set_model, explicit_notify, nullable)]
         pub model: RefCell<Option<gio::ListModel>>,
         pub shuffle: RefCell<Option<Vec<u32>>>,
     }
@@ -26,33 +25,30 @@ mod imp {
         type Interfaces = (gio::ListModel,);
     }
 
-    impl ObjectImpl for ShuffleListModel {
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecObject::builder::<gio::ListModel>("model")
-                        .explicit_notify()
-                        .build(),
-                ]
-            });
+    #[glib::derived_properties]
+    impl ObjectImpl for ShuffleListModel {}
 
-            PROPERTIES.as_ref()
-        }
+    impl ShuffleListModel {
+        fn set_model(&self, model: Option<gio::ListModel>) {
+            if let Some(ref model) = model {
+                model.connect_items_changed(clone!(
+                    #[strong(rename_to = this)]
+                    self.obj(),
+                    move |_, position, removed, added| {
+                        if let Some(ref shuffle) = *this.imp().shuffle.borrow()
+                            && let Some(shuffled_pos) = shuffle.get(position as usize)
+                        {
+                            this.items_changed(*shuffled_pos, removed, added);
+                            return;
+                        }
 
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "model" => self.model.borrow().to_value(),
-                _ => unimplemented!(),
+                        this.items_changed(position, removed, added);
+                    }
+                ));
             }
-        }
+            self.model.replace(model);
 
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            match pspec.name() {
-                "model" => self
-                    .obj()
-                    .set_model(value.get::<gio::ListModel>().ok().as_ref()),
-                _ => unimplemented!(),
-            };
+            self.obj().notify_model();
         }
     }
 
@@ -104,34 +100,6 @@ impl ShuffleListModel {
         glib::Object::builder::<Self>()
             .property("model", model.map(|m| m.as_ref()))
             .build()
-    }
-
-    pub fn model(&self) -> Option<gio::ListModel> {
-        self.imp().model.borrow().as_ref().cloned()
-    }
-
-    pub fn set_model(&self, model: Option<&gio::ListModel>) {
-        if let Some(model) = model {
-            self.imp().model.replace(Some(model.clone()));
-            model.connect_items_changed(clone!(
-                #[strong(rename_to = this)]
-                self,
-                move |_, position, removed, added| {
-                    if let Some(ref shuffle) = *this.imp().shuffle.borrow()
-                        && let Some(shuffled_pos) = shuffle.get(position as usize)
-                    {
-                        this.items_changed(*shuffled_pos, removed, added);
-                        return;
-                    }
-
-                    this.items_changed(position, removed, added);
-                }
-            ));
-        } else {
-            self.imp().model.replace(None);
-        }
-
-        self.notify("model");
     }
 
     pub fn shuffled(&self) -> bool {

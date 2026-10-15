@@ -10,12 +10,12 @@ use gtk::{CompositeTemplate, gdk, gio, glib, prelude::*};
 use crate::{audio::Track, cover_picture::CoverPicture};
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecBoolean, ParamSpecObject, ParamSpecString, Value};
     use std::sync::LazyLock;
 
     use super::*;
 
-    #[derive(Debug, Default, CompositeTemplate)]
+    #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
+    #[properties(wrapper_type = super::QueueRow)]
     #[template(resource = "/io/bassi/Amberol/queue-row.ui")]
     pub struct QueueRow {
         // Template widgets
@@ -24,10 +24,29 @@ mod imp {
         #[template_child]
         pub track_cover_stack: TemplateChild<gtk::Stack>,
         #[template_child]
+        #[property(
+            name = "track-cover",
+            get = |imp: &Self| imp.track_cover_image.cover(),
+            set = Self::set_track_cover,
+            nullable,
+            type = Option<gdk::Texture>,
+        )]
         pub track_cover_image: TemplateChild<CoverPicture>,
         #[template_child]
+        #[property(
+            name = "track-title",
+            get = |imp: &Self| imp.track_title_label.text().unwrap_or_default().into(),
+            set = Self::set_track_title,
+            type = String,
+        )]
         pub track_title_label: TemplateChild<gtk::Inscription>,
         #[template_child]
+        #[property(
+            name = "track-artist",
+            get = |imp: &Self| imp.track_artist_label.text().unwrap_or_default().into(),
+            set = Self::set_track_artist,
+            type = String,
+        )]
         pub track_artist_label: TemplateChild<gtk::Inscription>,
         #[template_child]
         pub track_playing_image: TemplateChild<gtk::Image>,
@@ -35,13 +54,24 @@ mod imp {
         pub selection_title_label: TemplateChild<gtk::Inscription>,
         #[template_child]
         pub selection_artist_label: TemplateChild<gtk::Inscription>,
+        // The check button notifies changes to the selection
         #[template_child]
+        #[property(
+            name = "selected",
+            get = |imp: &Self| imp.selected_button.is_active(),
+            set = |imp: &Self, selected: bool| imp.selected_button.set_active(selected),
+            explicit_notify,
+            type = bool,
+        )]
         pub selected_button: TemplateChild<gtk::CheckButton>,
         #[template_child]
         pub selection_playing_image: TemplateChild<gtk::Image>,
 
+        #[property(get, set, nullable)]
         pub track: RefCell<Option<Track>>,
+        #[property(get, set = Self::set_playing, explicit_notify)]
         pub playing: Cell<bool>,
+        #[property(get, set = Self::set_selection_mode, explicit_notify)]
         pub selection_mode: Cell<bool>,
     }
 
@@ -64,6 +94,7 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for QueueRow {
         fn dispose(&self) {
             while let Some(child) = self.obj().first_child() {
@@ -90,77 +121,49 @@ mod imp {
             });
             SIGNALS.as_ref()
         }
-
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecObject::builder::<Track>("track").build(),
-                    ParamSpecString::builder("track-artist").build(),
-                    ParamSpecString::builder("track-title").build(),
-                    ParamSpecObject::builder::<gdk::Texture>("track-cover").build(),
-                    ParamSpecBoolean::builder("playing").build(),
-                    ParamSpecBoolean::builder("selection-mode").build(),
-                    ParamSpecBoolean::builder("selected").build(),
-                ]
-            });
-            PROPERTIES.as_ref()
-        }
-
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            match pspec.name() {
-                "track" => {
-                    let track = value.get::<Option<Track>>().unwrap();
-                    self.track.replace(track);
-                }
-                "track-artist" => {
-                    let p = value.get::<&str>().expect("The value needs to be a string");
-                    self.obj().set_track_artist(p);
-                }
-                "track-title" => {
-                    let p = value.get::<&str>().expect("The value needs to be a string");
-                    self.obj().set_track_title(p);
-                }
-                "track-cover" => {
-                    let p = value.get::<gdk::Texture>().ok();
-                    self.obj().set_track_cover(p);
-                }
-                "playing" => {
-                    let p = value
-                        .get::<bool>()
-                        .expect("The value needs to be a boolean");
-                    self.obj().set_playing(p);
-                }
-                "selection-mode" => {
-                    let p = value
-                        .get::<bool>()
-                        .expect("The value needs to be a boolean");
-                    self.obj().set_selection_mode(p);
-                }
-                "selected" => {
-                    let p = value
-                        .get::<bool>()
-                        .expect("The value needs to be a boolean");
-                    self.selected_button.set_active(p);
-                }
-                _ => unimplemented!(),
-            }
-        }
-
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "track" => self.track.borrow().to_value(),
-                "track-artist" => self.track_artist_label.text().to_value(),
-                "track-title" => self.track_title_label.text().to_value(),
-                "track-cover" => self.track_cover_image.cover().to_value(),
-                "playing" => self.playing.get().to_value(),
-                "selection-mode" => self.selection_mode.get().to_value(),
-                "selected" => self.selected_button.is_active().to_value(),
-                _ => unimplemented!(),
-            }
-        }
     }
 
     impl WidgetImpl for QueueRow {}
+
+    impl QueueRow {
+        fn set_playing(&self, playing: bool) {
+            if playing != self.playing.replace(playing) {
+                let obj = self.obj();
+                obj.update_mode();
+                obj.notify_playing();
+            }
+        }
+
+        fn set_selection_mode(&self, selection_mode: bool) {
+            if selection_mode != self.selection_mode.replace(selection_mode) {
+                let obj = self.obj();
+                obj.update_mode();
+                obj.notify_selection_mode();
+            }
+        }
+
+        fn set_track_title(&self, title: String) {
+            self.track_title_label.set_text(Some(&title));
+            self.selection_title_label.set_text(Some(&title));
+            self.obj().update_tooltip();
+        }
+
+        fn set_track_artist(&self, artist: String) {
+            self.track_artist_label.set_text(Some(&artist));
+            self.selection_artist_label.set_text(Some(&artist));
+            self.obj().update_tooltip();
+        }
+
+        fn set_track_cover(&self, cover: Option<gdk::Texture>) {
+            if let Some(texture) = cover {
+                self.track_cover_image.set_cover(Some(&texture));
+                self.track_cover_stack.set_visible_child_name("cover");
+            } else {
+                self.track_cover_image.set_cover(None::<&gdk::Texture>);
+                self.track_cover_stack.set_visible_child_name("no-cover");
+            }
+        }
+    }
 }
 
 glib::wrapper! {
@@ -196,6 +199,7 @@ impl QueueRow {
         item.chain_property::<Track>("selected")
             .bind(self, "selected", gtk::Widget::NONE);
     }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -208,7 +212,7 @@ impl QueueRow {
                 if let Some(ref track) = *this.imp().track.borrow() {
                     track.set_selected(button.is_active());
                 }
-                this.notify("selected");
+                this.notify_selected();
             }
         ));
 
@@ -274,20 +278,6 @@ impl QueueRow {
         )
     }
 
-    fn set_playing(&self, playing: bool) {
-        if playing != self.imp().playing.replace(playing) {
-            self.update_mode();
-            self.notify("playing");
-        }
-    }
-
-    fn set_selection_mode(&self, selection_mode: bool) {
-        if selection_mode != self.imp().selection_mode.replace(selection_mode) {
-            self.update_mode();
-            self.notify("selection-mode");
-        }
-    }
-
     fn update_mode(&self) {
         let imp = self.imp();
         if imp.selection_mode.get() {
@@ -299,20 +289,6 @@ impl QueueRow {
             let opacity = if imp.playing.get() { 1.0 } else { 0.0 };
             imp.track_playing_image.set_opacity(opacity);
         }
-    }
-
-    fn set_track_title(&self, title: &str) {
-        let imp = self.imp();
-        imp.track_title_label.set_text(Some(title));
-        imp.selection_title_label.set_text(Some(title));
-        self.update_tooltip();
-    }
-
-    fn set_track_artist(&self, artist: &str) {
-        let imp = self.imp();
-        imp.track_artist_label.set_text(Some(artist));
-        imp.selection_artist_label.set_text(Some(artist));
-        self.update_tooltip();
     }
 
     // Long titles get truncated in the playlist, so we show the full
@@ -338,20 +314,5 @@ impl QueueRow {
             .collect::<Vec<_>>()
             .join("\n");
         self.set_tooltip_text(Some(tooltip.as_str()).filter(|s| !s.is_empty()));
-    }
-
-    fn set_track_cover(&self, cover: Option<gdk::Texture>) {
-        let imp = self.imp();
-        if let Some(texture) = cover {
-            imp.track_cover_image.set_cover(Some(&texture));
-            imp.track_cover_stack.set_visible_child_name("cover");
-        } else {
-            imp.track_cover_image.set_cover(None);
-            imp.track_cover_stack.set_visible_child_name("no-cover");
-        }
-    }
-
-    pub fn track(&self) -> Option<Track> {
-        self.imp().track.borrow().clone()
     }
 }

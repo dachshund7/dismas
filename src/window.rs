@@ -10,7 +10,7 @@ use std::{
 };
 
 use adw::subclass::prelude::*;
-use glib::{clone, closure_local};
+use glib::clone;
 use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
 
@@ -30,7 +30,6 @@ use crate::{
     track_details::TrackDetails,
     track_info_dialog::TrackInfoDialog,
     utils,
-    volume_control::VolumeControl,
     waveform_view::WaveformView,
     work_sections::{WorkSectionModel, work_header_factory},
 };
@@ -67,12 +66,10 @@ enum TrackMenu {
 const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecBoolean, ParamSpecEnum, Value};
-    use std::sync::LazyLock;
-
     use super::*;
 
-    #[derive(CompositeTemplate)]
+    #[derive(CompositeTemplate, glib::Properties)]
+    #[properties(wrapper_type = super::Window)]
     #[template(resource = "/io/bassi/Amberol/window.ui")]
     pub struct Window {
         // Template widgets
@@ -110,12 +107,18 @@ mod imp {
         pub provider: gtk::CssProvider,
         pub settings: gio::Settings,
 
+        #[property(get, set = Self::set_playlist_shuffled, explicit_notify)]
         pub playlist_shuffled: Cell<bool>,
+        #[property(get, set = Self::set_playlist_visible, explicit_notify)]
         pub playlist_visible: Cell<bool>,
+        #[property(get, set = Self::set_playlist_selection, explicit_notify)]
         pub playlist_selection: Cell<bool>,
+        #[property(get, set = Self::set_playlist_search, explicit_notify)]
         pub playlist_search: Cell<bool>,
+        #[property(get, set = Self::set_replaygain_mode, explicit_notify, builder(ReplayGainMode::default()))]
         pub replaygain_mode: Cell<ReplayGainMode>,
         pub sidebar_width: Cell<i32>,
+        #[property(get, set = Self::set_library_visible, explicit_notify)]
         pub library_visible: Cell<bool>,
         // Whether the playlist might still be restored or opened at startup
         pub starting: Cell<bool>,
@@ -296,6 +299,7 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for Window {
         fn constructed(&self) {
             self.parent_constructed();
@@ -308,44 +312,97 @@ mod imp {
             self.obj()
                 .action_set_enabled("queue.remove-selected", false);
         }
+    }
 
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecBoolean::builder("playlist-shuffled").build(),
-                    ParamSpecBoolean::builder("playlist-visible").build(),
-                    ParamSpecBoolean::builder("playlist-selection").build(),
-                    ParamSpecBoolean::builder("playlist-search").build(),
-                    ParamSpecBoolean::builder("library-visible").build(),
-                    ParamSpecEnum::builder::<ReplayGainMode>("replaygain-mode").build(),
-                ]
-            });
-            PROPERTIES.as_ref()
-        }
-
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            let obj = self.obj();
-            match pspec.name() {
-                "playlist-shuffled" => obj.set_playlist_shuffled(value.get::<bool>().unwrap()),
-                "playlist-visible" => obj.set_playlist_visible(value.get::<bool>().unwrap()),
-                "playlist-selection" => obj.set_playlist_selection(value.get::<bool>().unwrap()),
-                "playlist-search" => obj.set_playlist_search(value.get::<bool>().unwrap()),
-                "library-visible" => obj.set_library_visible(value.get::<bool>().unwrap()),
-                "replaygain-mode" => obj.set_replaygain(value.get::<ReplayGainMode>().unwrap()),
-                _ => unimplemented!(),
+    impl Window {
+        fn set_playlist_visible(&self, visible: bool) {
+            if visible != self.playlist_visible.replace(visible) {
+                self.split_view.set_show_sidebar(visible);
+                self.obj().notify_playlist_visible();
             }
         }
 
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
+        fn set_playlist_shuffled(&self, shuffled: bool) {
             let obj = self.obj();
-            match pspec.name() {
-                "playlist-shuffled" => obj.playlist_shuffled().to_value(),
-                "playlist-visible" => obj.playlist_visible().to_value(),
-                "playlist-selection" => obj.playlist_selection().to_value(),
-                "playlist-search" => obj.playlist_search().to_value(),
-                "library-visible" => obj.library_visible().to_value(),
-                "replaygain-mode" => obj.replaygain().to_value(),
-                _ => unimplemented!(),
+
+            if shuffled != self.playlist_shuffled.replace(shuffled) {
+                if let Some(player) = obj.player() {
+                    let queue = player.queue();
+                    let state = player.state();
+                    let reset_track = queue.is_first_track() && !state.playing();
+
+                    queue.set_shuffled(shuffled);
+
+                    if reset_track {
+                        player.skip_to(0);
+                    }
+                }
+
+                obj.notify_playlist_shuffled();
+            }
+        }
+
+        fn set_playlist_selection(&self, selection: bool) {
+            let obj = self.obj();
+
+            if selection != self.playlist_selection.replace(selection) {
+                if !selection && let Some(player) = obj.player() {
+                    let queue = player.queue();
+                    queue.unselect_all_tracks();
+                }
+
+                self.playlist_view.queue_actionbar().set_revealed(selection);
+                obj.action_set_enabled("queue.remove-selected", selection);
+
+                obj.notify_playlist_selection();
+            }
+        }
+
+        fn set_playlist_search(&self, search: bool) {
+            let obj = self.obj();
+
+            if search != self.playlist_search.replace(search) {
+                if search {
+                    obj.set_playlist_visible(true);
+                }
+                self.playlist_view.set_search(search);
+                obj.notify_playlist_search();
+            }
+        }
+
+        fn set_library_visible(&self, visible: bool) {
+            let obj = self.obj();
+
+            if !visible && obj.queue_is_empty() {
+                // Keep the state of the action in sync with the grid, which
+                // stays up
+                obj.notify_library_visible();
+                return;
+            }
+            if visible == self.library_visible.replace(visible) {
+                return;
+            }
+
+            let page = if visible { "library" } else { "player" };
+            self.content_stack.set_visible_child_name(page);
+            // Typing searches the albums right away
+            if visible {
+                self.library_view.focus_search();
+            }
+            obj.notify_library_visible();
+        }
+
+        fn set_replaygain_mode(&self, replaygain: ReplayGainMode) {
+            if replaygain != self.replaygain_mode.replace(replaygain) {
+                let obj = self.obj();
+                if let Some(p) = obj.player() {
+                    p.set_replaygain(replaygain);
+                }
+                self.settings
+                    .set_enum("replay-gain", replaygain.into())
+                    .expect("Unable to store setting");
+
+                obj.notify_replaygain_mode();
             }
         }
     }
@@ -671,80 +728,6 @@ impl Window {
         }
     }
 
-    fn playlist_visible(&self) -> bool {
-        self.imp().playlist_visible.get()
-    }
-
-    fn set_playlist_visible(&self, visible: bool) {
-        if visible != self.imp().playlist_visible.replace(visible) {
-            self.imp().split_view.set_show_sidebar(visible);
-            self.notify("playlist-visible");
-        }
-    }
-
-    fn playlist_shuffled(&self) -> bool {
-        self.imp().playlist_shuffled.get()
-    }
-
-    fn set_playlist_shuffled(&self, shuffled: bool) {
-        let imp = self.imp();
-
-        if shuffled != imp.playlist_shuffled.replace(shuffled) {
-            if let Some(player) = self.player() {
-                let queue = player.queue();
-                let state = player.state();
-                let reset_track = queue.is_first_track() && !state.playing();
-
-                queue.set_shuffled(shuffled);
-
-                if reset_track {
-                    player.skip_to(0);
-                }
-            }
-
-            self.notify("playlist-shuffled");
-        }
-    }
-
-    fn playlist_selection(&self) -> bool {
-        self.imp().playlist_selection.get()
-    }
-
-    fn set_playlist_selection(&self, selection: bool) {
-        let imp = self.imp();
-
-        if selection != imp.playlist_selection.replace(selection) {
-            if !selection && let Some(player) = self.player() {
-                let queue = player.queue();
-                queue.unselect_all_tracks();
-            }
-
-            self.imp()
-                .playlist_view
-                .queue_actionbar()
-                .set_revealed(selection);
-            self.action_set_enabled("queue.remove-selected", selection);
-
-            self.notify("playlist-selection");
-        }
-    }
-
-    fn playlist_search(&self) -> bool {
-        self.imp().playlist_search.get()
-    }
-
-    fn set_playlist_search(&self, search: bool) {
-        let imp = self.imp();
-
-        if search != imp.playlist_search.replace(search) {
-            if search {
-                self.set_playlist_visible(true);
-            }
-            imp.playlist_view.set_search(search);
-            self.notify("playlist-search");
-        }
-    }
-
     // Shows the tracks of an album in the sidebar, in place of the
     // playlist, so that it can be played or added to the playlist
     fn show_album_tracks(&self, album: &Album, search_words: &[String]) {
@@ -884,30 +867,6 @@ impl Window {
         self.imp().sidebar_stack.set_visible_child_name("playlist");
     }
 
-    fn library_visible(&self) -> bool {
-        self.imp().library_visible.get()
-    }
-
-    fn set_library_visible(&self, visible: bool) {
-        if !visible && self.queue_is_empty() {
-            // Keep the state of the action in sync with the grid, which
-            // stays up
-            self.notify("library-visible");
-            return;
-        }
-        if visible == self.imp().library_visible.replace(visible) {
-            return;
-        }
-
-        let page = if visible { "library" } else { "player" };
-        self.imp().content_stack.set_visible_child_name(page);
-        // Typing searches the albums right away
-        if visible {
-            self.imp().library_view.focus_search();
-        }
-        self.notify("library-visible");
-    }
-
     fn queue_is_empty(&self) -> bool {
         self.player().is_none_or(|p| p.queue().is_empty())
     }
@@ -982,83 +941,55 @@ impl Window {
     fn setup_library(&self) {
         let library_view = self.imp().library_view.get();
 
-        library_view.connect_closure(
-            "album-activated",
-            false,
-            closure_local!(
-                #[weak(rename_to = win)]
-                self,
-                move |_: LibraryView, album: Album| {
-                    win.show_album_tracks(&album, &win.imp().library_view.search_words());
-                }
-            ),
-        );
+        library_view.connect_album_activated(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, album| {
+                win.show_album_tracks(album, &win.imp().library_view.search_words());
+            }
+        ));
 
         let album_tracks = self.imp().album_tracks.get();
-        album_tracks.connect_closure(
-            "menu-requested",
-            false,
-            closure_local!(
-                #[weak(rename_to = win)]
-                self,
-                move |_: AlbumTracks, row: QueueRow, x: f64, y: f64| {
-                    win.show_track_menu(&row, x, y, TrackMenu::Album);
-                }
-            ),
-        );
-        album_tracks.connect_closure(
-            "back",
-            false,
-            closure_local!(
-                #[weak(rename_to = win)]
-                self,
-                move |_: AlbumTracks| win.show_playlist()
-            ),
-        );
-        album_tracks.connect_closure(
-            "add",
-            false,
-            closure_local!(
-                #[weak(rename_to = win)]
-                self,
-                move |album_tracks: AlbumTracks| {
-                    win.show_playlist_pane();
-                    win.queue_tracks(album_tracks.files(), QueueMode::Add);
-                }
-            ),
-        );
-        album_tracks.connect_closure(
-            "play",
-            false,
-            closure_local!(
-                #[weak(rename_to = win)]
-                self,
-                move |album_tracks: AlbumTracks, start: u32| {
-                    win.clear_queue();
-                    win.show_playlist_pane();
-                    win.queue_tracks(album_tracks.files(), QueueMode::Play(start));
-                }
-            ),
-        );
+        album_tracks.connect_menu_requested(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, row, x, y| {
+                win.show_track_menu(row, x, y, TrackMenu::Album);
+            }
+        ));
+        album_tracks.connect_back(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| win.show_playlist()
+        ));
+        album_tracks.connect_add(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |album_tracks| {
+                win.show_playlist_pane();
+                win.queue_tracks(album_tracks.files(), QueueMode::Add);
+            }
+        ));
+        album_tracks.connect_play(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |album_tracks, start| {
+                win.clear_queue();
+                win.show_playlist_pane();
+                win.queue_tracks(album_tracks.files(), QueueMode::Play(start));
+            }
+        ));
 
-        library_view.connect_closure(
-            "add-albums",
-            false,
-            closure_local!(
-                #[weak(rename_to = win)]
-                self,
-                move |_: LibraryView| win.queue_selected_albums(false)
-            ),
-        );
-        library_view.connect_closure(
-            "play-albums",
-            false,
-            closure_local!(
-                #[weak(rename_to = win)]
-                self,
-                move |_: LibraryView| win.queue_selected_albums(true)
-            ),
-        );
+        library_view.connect_add_albums(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| win.queue_selected_albums(false)
+        ));
+        library_view.connect_play_albums(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| win.queue_selected_albums(true)
+        ));
 
         // Reading the albums can take a while, so we do it in the
         // background as soon as the window is up
@@ -1515,42 +1446,34 @@ impl Window {
             ),
         );
 
-        self.imp().waveform_view.connect_closure(
-            "position-changed",
-            false,
-            closure_local!(
-                #[watch(rename_to = win)]
-                self,
-                move |_wv: WaveformView, position: f64| {
-                    debug!("New position: {}", position);
-                    if let Some(player) = win.player() {
-                        let state = player.state();
-                        if state.current_track().is_some() {
-                            player.seek_position_rel(position);
-                            player.play();
-                        }
+        self.imp().waveform_view.connect_position_changed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, position| {
+                debug!("New position: {}", position);
+                if let Some(player) = win.player() {
+                    let state = player.state();
+                    if state.track().is_some() {
+                        player.seek_position_rel(position);
+                        player.play();
                     }
                 }
-            ),
-        );
+            }
+        ));
 
         self.imp()
             .playback_control
             .volume_control()
-            .connect_closure(
-                "volume-changed",
-                false,
-                closure_local!(
-                    #[watch(rename_to = win)]
-                    self,
-                    move |_vc: VolumeControl, volume: f64| {
-                        debug!("Volume changed: {}", volume);
-                        if let Some(p) = win.player() {
-                            p.set_volume(volume);
-                        }
+            .connect_volume_changed(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, volume| {
+                    debug!("Volume changed: {}", volume);
+                    if let Some(p) = win.player() {
+                        p.set_volume(volume);
                     }
-                ),
-            );
+                }
+            ));
 
         self.imp()
             .playlist_view
@@ -1587,7 +1510,7 @@ impl Window {
                     );
                     if let Some(player) = this.player() {
                         let state = player.state();
-                        this.update_style(state.current_track().as_ref());
+                        this.update_style(state.track().as_ref());
                     }
                 }
             ),
@@ -1632,7 +1555,7 @@ impl Window {
             self.action_set_enabled("win.replaygain", player.replaygain_available());
 
             let replaygain = self.imp().settings.enum_("replay-gain").into();
-            self.set_replaygain(replaygain);
+            self.set_replaygain_mode(replaygain);
 
             // Manually set player state, because set_replaygain
             // only updates player state when the value changes.
@@ -1806,7 +1729,7 @@ impl Window {
             }
         ));
 
-        self.imp().drag_overlay.set_drop_target(&drop_target);
+        self.imp().drag_overlay.set_drop_target(Some(&drop_target));
     }
 
     fn update_play_button(&self) {
@@ -1824,7 +1747,7 @@ impl Window {
     fn update_position_labels(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
-            if state.current_track().is_some() {
+            if state.track().is_some() {
                 let elapsed = state.position();
                 let duration = state.duration();
                 let remaining = duration.saturating_sub(elapsed);
@@ -1844,8 +1767,8 @@ impl Window {
             let state = player.state();
             self.scroll_playlist_to_track();
             self.update_playlist_time();
-            self.update_title(state.current_track().as_ref());
-            self.update_style(state.current_track().as_ref());
+            self.update_title(state.track().as_ref());
+            self.update_style(state.track().as_ref());
         }
     }
 
@@ -1857,11 +1780,11 @@ impl Window {
                 track_cover.album_image().set_cover(Some(&cover));
                 track_cover.show_cover_image(true);
 
-                if let Some(track) = state.current_track() {
+                if let Some(track) = state.track() {
                     self.load_full_cover(&track);
                 }
             } else {
-                track_cover.album_image().set_cover(None);
+                track_cover.album_image().set_cover(None::<&gdk::Texture>);
                 track_cover.show_cover_image(false);
             }
         }
@@ -1892,7 +1815,7 @@ impl Window {
                 let Some(player) = win.player() else {
                     return;
                 };
-                if player.state().current_track().map(|t| t.uri()) != Some(uri) {
+                if player.state().track().map(|t| t.uri()) != Some(uri) {
                     return;
                 }
 
@@ -2201,7 +2124,7 @@ impl Window {
     fn copy_track(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
-            if let Some(track) = state.current_track() {
+            if let Some(track) = state.track() {
                 let s = i18n_k(
                     // Translators: `{title}` and `{artist}` must be left
                     // untranslated; they will expand to the title and
@@ -2216,7 +2139,7 @@ impl Window {
 
     fn show_track_info(&self) {
         if let Some(player) = self.player()
-            && let Some(track) = player.state().current_track()
+            && let Some(track) = player.state().track()
         {
             self.show_track_info_for(&track);
         }
@@ -2237,7 +2160,7 @@ impl Window {
         if let Some(player) = self.player() {
             let state = player.state();
 
-            if let Some(track) = state.current_track() {
+            if let Some(track) = state.track() {
                 let file = track.file();
 
                 match file
@@ -2269,26 +2192,6 @@ impl Window {
                 }
             }
         }
-    }
-
-    pub fn set_replaygain(&self, replaygain: ReplayGainMode) {
-        let imp = self.imp();
-
-        if replaygain != imp.replaygain_mode.replace(replaygain) {
-            if let Some(p) = self.player() {
-                p.set_replaygain(replaygain);
-            }
-            self.imp()
-                .settings
-                .set_enum("replay-gain", replaygain.into())
-                .expect("Unable to store setting");
-
-            self.notify("replaygain-mode");
-        }
-    }
-
-    pub fn replaygain(&self) -> ReplayGainMode {
-        self.imp().replaygain_mode.get()
     }
 
     pub fn set_track_time(&self, elapsed: Option<u64>, remaining: Option<u64>) {

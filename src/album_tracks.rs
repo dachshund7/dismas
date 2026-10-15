@@ -144,6 +144,43 @@ impl Default for AlbumTracks {
 }
 
 impl AlbumTracks {
+    pub fn connect_back<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "back",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_add<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "add",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_play<F: Fn(&Self, u32) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "play",
+            false,
+            glib::closure_local!(move |view: &Self, start: u32| f(view, start)),
+        )
+    }
+
+    pub fn connect_menu_requested<F: Fn(&Self, &QueueRow, f64, f64) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "menu-requested",
+            false,
+            glib::closure_local!(move |view: &Self, row: &QueueRow, x: f64, y: f64| f(
+                view, row, x, y
+            )),
+        )
+    }
+
     fn setup_list(&self) {
         let imp = self.imp();
 

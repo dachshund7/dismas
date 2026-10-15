@@ -8,18 +8,20 @@ use gtk::{gio, glib, prelude::*, subclass::prelude::*};
 use crate::audio::{CoverCache, RepeatMode, ShuffleListModel, Track};
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, ParamSpecUInt, Value};
-    use std::sync::LazyLock;
-
     use super::*;
 
-    #[derive(Debug)]
+    #[derive(Debug, glib::Properties)]
+    #[properties(wrapper_type = super::Queue)]
     pub struct Queue {
         pub model: ShuffleListModel,
         pub store: gio::ListStore,
+        #[property(get, builder(RepeatMode::default()))]
         pub repeat_mode: Cell<RepeatMode>,
+        #[property(name = "current", get = Self::current, nullable, type = Option<Track>)]
         pub current_pos: Cell<Option<u32>>,
         pub shuffled: Cell<bool>,
+        #[property(name = "n-tracks", get = Self::n_tracks, type = u32)]
+        n_tracks: std::marker::PhantomData<u32>,
     }
 
     #[glib::object_subclass]
@@ -37,34 +39,21 @@ mod imp {
                 repeat_mode: Cell::new(RepeatMode::default()),
                 current_pos: Cell::new(None),
                 shuffled: Cell::new(false),
+                n_tracks: Default::default(),
             }
         }
     }
 
-    impl ObjectImpl for Queue {
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecObject::builder::<Track>("current")
-                        .read_only()
-                        .build(),
-                    ParamSpecEnum::builder::<RepeatMode>("repeat-mode")
-                        .read_only()
-                        .build(),
-                    ParamSpecUInt::builder("n-tracks").read_only().build(),
-                ]
-            });
+    #[glib::derived_properties]
+    impl ObjectImpl for Queue {}
 
-            PROPERTIES.as_ref()
+    impl Queue {
+        fn current(&self) -> Option<Track> {
+            self.obj().track_at(self.current_pos.get()?)
         }
 
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "current" => self.obj().current_track().to_value(),
-                "repeat-mode" => self.repeat_mode.get().to_value(),
-                "n-tracks" => self.store.n_items().to_value(),
-                _ => unimplemented!(),
-            }
+        fn n_tracks(&self) -> u32 {
+            self.model.n_items()
         }
     }
 }
@@ -80,10 +69,6 @@ impl Default for Queue {
 }
 
 impl Queue {
-    pub fn n_tracks(&self) -> u32 {
-        self.imp().model.n_items()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.imp().model.n_items() == 0
     }
@@ -100,27 +85,19 @@ impl Queue {
         None
     }
 
-    pub fn current_track(&self) -> Option<Track> {
-        if let Some(pos) = self.imp().current_pos.get() {
-            return self.track_at(pos);
-        }
-
-        None
-    }
-
     pub fn set_current_track(&self, track: Option<Track>) {
         if let Some(track) = track {
             for i in 0..self.n_tracks() {
                 let s = self.track_at(i).unwrap();
                 if track.equals(&s) {
                     self.imp().current_pos.replace(Some(i));
-                    self.notify("current");
+                    self.notify_current();
                     return;
                 }
             }
         } else {
             self.imp().current_pos.replace(None);
-            self.notify("current");
+            self.notify_current();
         }
     }
 
@@ -132,7 +109,7 @@ impl Queue {
         if !track.equals(&Track::default()) {
             // Add track to the backing store
             self.imp().store.append(track);
-            self.notify("n-tracks");
+            self.notify_n_tracks();
             true
         } else {
             false
@@ -143,7 +120,7 @@ impl Queue {
         self.imp()
             .store
             .splice(self.imp().model.n_items(), 0, tracks);
-        self.notify("n-tracks");
+        self.notify_n_tracks();
     }
 
     pub fn remove_track(&self, track: &Track) {
@@ -167,7 +144,7 @@ impl Queue {
             if was_shuffled {
                 self.imp().model.reshuffle(0);
             }
-            self.notify("n-tracks");
+            self.notify_n_tracks();
         }
 
         if self.is_empty() {
@@ -181,12 +158,12 @@ impl Queue {
 
         self.imp().current_pos.replace(None);
         self.imp().store.remove_all();
-        self.notify("n-tracks");
+        self.notify_n_tracks();
     }
 
     pub fn skip_track(&self, pos: u32) -> Option<Track> {
         self.imp().current_pos.replace(Some(pos));
-        self.notify("current");
+        self.notify_current();
         self.track_at(pos)
     }
 
@@ -196,7 +173,7 @@ impl Queue {
         {
             let prev = current_pos - 1;
             self.imp().current_pos.replace(Some(prev));
-            self.notify("current");
+            self.notify_current();
             return self.track_at(current_pos - 1);
         }
 
@@ -224,29 +201,25 @@ impl Queue {
 
             if let Some(next) = next {
                 self.imp().current_pos.replace(Some(next));
-                self.notify("current");
+                self.notify_current();
                 self.track_at(next)
             } else {
                 self.imp().current_pos.replace(None);
-                self.notify("current");
+                self.notify_current();
                 None
             }
         } else {
             // Return the first track
             self.imp().current_pos.replace(Some(0));
-            self.notify("current");
+            self.notify_current();
             self.track_at(0)
         }
-    }
-
-    pub fn repeat_mode(&self) -> RepeatMode {
-        self.imp().repeat_mode.get()
     }
 
     pub fn set_repeat_mode(&self, repeat_mode: RepeatMode) {
         let old_mode = self.imp().repeat_mode.replace(repeat_mode);
         if old_mode != repeat_mode {
-            self.notify("repeat-mode");
+            self.notify_repeat_mode();
         }
     }
 

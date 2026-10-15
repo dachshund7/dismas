@@ -16,17 +16,13 @@ use crate::audio::normalize_search_text;
 mod imp {
     use std::cell::RefCell;
 
-    use gtk::{
-        glib::{self, ParamSpec, ParamSpecString, Value},
-        prelude::*,
-        subclass::prelude::*,
-    };
-    use std::sync::LazyLock;
-
+    use super::*;
     use crate::audio::Track;
 
-    #[derive(Default)]
+    #[derive(Default, glib::Properties)]
+    #[properties(wrapper_type = super::SearchFilter)]
     pub struct SearchFilter {
+        #[property(get, set = Self::set_search, explicit_notify, nullable)]
         pub search: RefCell<Option<String>>,
         // The normalized words of the search
         pub words: RefCell<Vec<String>>,
@@ -39,30 +35,31 @@ mod imp {
         type ParentType = gtk::Filter;
     }
 
-    impl ObjectImpl for SearchFilter {
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> =
-                LazyLock::new(|| vec![ParamSpecString::builder("search").build()]);
-            PROPERTIES.as_ref()
-        }
+    #[glib::derived_properties]
+    impl ObjectImpl for SearchFilter {}
 
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            match pspec.name() {
-                "search" => {
-                    let p = value
-                        .get::<Option<String>>()
-                        .expect("Value must be a string");
-                    self.obj().set_search(p);
-                }
-                _ => unimplemented!(),
+    impl SearchFilter {
+        fn set_search(&self, search: Option<String>) {
+            if *self.search.borrow() == search {
+                return;
             }
-        }
 
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "search" => self.search.borrow().to_value(),
-                _ => unimplemented!(),
-            }
+            let words = search
+                .as_deref()
+                .map(|s| {
+                    normalize_search_text(s)
+                        .split_whitespace()
+                        .map(|w| w.to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            self.search.replace(search);
+            self.words.replace(words);
+
+            let obj = self.obj();
+            obj.changed(gtk::FilterChange::Different);
+            obj.notify_search();
         }
     }
 
@@ -102,25 +99,5 @@ impl Default for SearchFilter {
 impl SearchFilter {
     pub fn new() -> Self {
         glib::Object::new()
-    }
-
-    pub fn set_search(&self, search: Option<String>) {
-        if *self.imp().search.borrow() == search {
-            return;
-        }
-
-        let words = search
-            .as_deref()
-            .map(|s| {
-                normalize_search_text(s)
-                    .split_whitespace()
-                    .map(|w| w.to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        self.imp().search.replace(search);
-        self.imp().words.replace(words);
-        self.changed(gtk::FilterChange::Different);
     }
 }

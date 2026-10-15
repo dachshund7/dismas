@@ -26,9 +26,6 @@ impl AsRef<str> for CoverSize {
 }
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, Value};
-    use std::sync::LazyLock;
-
     use super::*;
 
     const LARGE_SIZE: i32 = 288;
@@ -37,9 +34,12 @@ mod imp {
     // The reference font resolution the cover sizes were designed for
     const BASE_DPI: f64 = 96.0;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, glib::Properties)]
+    #[properties(wrapper_type = super::CoverPicture)]
     pub struct CoverPicture {
+        #[property(get, set = Self::set_cover, explicit_notify, nullable)]
         pub cover: RefCell<Option<gdk::Texture>>,
+        #[property(get, set = Self::set_cover_size, explicit_notify, builder(CoverSize::default()))]
         pub cover_size: Cell<CoverSize>,
     }
 
@@ -55,6 +55,7 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for CoverPicture {
         fn constructed(&self) {
             self.parent_constructed();
@@ -86,36 +87,6 @@ mod imp {
             self.obj()
                 .upcast_ref::<gtk::Accessible>()
                 .update_property(&[(gtk::accessible::Property::Label(&i18n("Cover image")))]);
-        }
-
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecObject::builder::<gdk::Texture>("cover").build(),
-                    ParamSpecEnum::builder::<CoverSize>("cover-size").build(),
-                ]
-            });
-            PROPERTIES.as_ref()
-        }
-
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "cover" => self.cover.borrow().to_value(),
-                "cover-size" => self.cover_size.get().to_value(),
-                _ => unimplemented!(),
-            }
-        }
-
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            match pspec.name() {
-                "cover" => self
-                    .obj()
-                    .set_cover(value.get::<gdk::Texture>().ok().as_ref()),
-                "cover-size" => self
-                    .obj()
-                    .set_cover_size(value.get::<CoverSize>().expect("Required CoverSize")),
-                _ => unimplemented!(),
-            };
         }
     }
 
@@ -178,6 +149,22 @@ mod imp {
 
             dpi as f64 / 1024.0 / BASE_DPI
         }
+
+        fn set_cover(&self, cover: Option<gdk::Texture>) {
+            self.cover.replace(cover);
+
+            let obj = self.obj();
+            obj.queue_draw();
+            obj.notify_cover();
+        }
+
+        fn set_cover_size(&self, cover_size: CoverSize) {
+            self.cover_size.replace(cover_size);
+
+            let obj = self.obj();
+            obj.queue_resize();
+            obj.notify_cover_size();
+        }
     }
 }
 
@@ -197,26 +184,5 @@ impl Default for CoverPicture {
 impl CoverPicture {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn cover(&self) -> Option<gdk::Texture> {
-        (*self.imp().cover.borrow()).as_ref().cloned()
-    }
-
-    pub fn set_cover(&self, cover: Option<&gdk::Texture>) {
-        if let Some(cover) = cover {
-            self.imp().cover.replace(Some(cover.clone()));
-        } else {
-            self.imp().cover.replace(None);
-        }
-
-        self.queue_draw();
-        self.notify("cover");
-    }
-
-    pub fn set_cover_size(&self, cover_size: CoverSize) {
-        self.imp().cover_size.replace(cover_size);
-        self.queue_resize();
-        self.notify("cover-size");
     }
 }

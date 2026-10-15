@@ -11,14 +11,13 @@ use log::{debug, warn};
 use crate::audio::{Controller, PlaybackState, RepeatMode, Track};
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecBoolean, Value};
-    use std::sync::LazyLock;
-
     use super::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, glib::Properties)]
+    #[properties(wrapper_type = super::WaveformGenerator)]
     pub struct WaveformGenerator {
         pub track: RefCell<Option<Track>>,
+        #[property(name = "has-peaks", get = |imp: &Self| imp.peaks.borrow().is_some(), type = bool)]
         pub peaks: RefCell<Option<Vec<(f64, f64)>>>,
         pub pipeline: RefCell<Option<(gst::Element, gst::bus::BusWatchGuard)>>,
     }
@@ -29,6 +28,7 @@ mod imp {
         type Type = super::WaveformGenerator;
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for WaveformGenerator {
         fn dispose(&self) {
             if let Some((pipeline, _bus_watch)) = self.pipeline.take() {
@@ -37,20 +37,6 @@ mod imp {
                     Ok(_) => {}
                     Err(err) => warn!("Unable to set existing pipeline to Null state: {}", err),
                 }
-            }
-        }
-
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> =
-                LazyLock::new(|| vec![ParamSpecBoolean::builder("has-peaks").read_only().build()]);
-
-            PROPERTIES.as_ref()
-        }
-
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "has-peaks" => self.obj().peaks().is_some().to_value(),
-                _ => unimplemented!(),
             }
         }
     }
@@ -92,7 +78,7 @@ impl WaveformGenerator {
             let track = match self.imp().track.borrow().as_ref() {
                 Some(s) => s.clone(),
                 None => {
-                    self.notify("has-peaks");
+                    self.notify_has_peaks();
                     return;
                 }
             };
@@ -120,7 +106,7 @@ impl WaveformGenerator {
             }
         }
 
-        self.notify("has-peaks");
+        self.notify_has_peaks();
     }
 
     async fn load_peaks_cache(&self, cache: impl AsRef<std::path::Path>) {
@@ -130,7 +116,7 @@ impl WaveformGenerator {
                 Ok(p) => {
                     debug!("Loaded cached waveform file");
                     self.imp().peaks.replace(Some(p));
-                    self.notify("has-peaks");
+                    self.notify_has_peaks();
                 }
                 Err(err) => {
                     debug!("Could not parse cached waveform file: {}", err);
@@ -180,7 +166,7 @@ impl WaveformGenerator {
             Some(s) => s.clone(),
             None => {
                 self.imp().peaks.replace(None);
-                self.notify("has-peaks");
+                self.notify_has_peaks();
                 return;
             }
         };
@@ -195,7 +181,7 @@ impl WaveformGenerator {
             Err(err) => {
                 warn!("Unable to generate the waveform: {}", err);
                 self.imp().peaks.replace(None);
-                self.notify("has-peaks");
+                self.notify_has_peaks();
                 return;
             }
         };
@@ -285,7 +271,7 @@ impl WaveformGenerator {
                     .set_state(gst::State::Null)
                     .expect("Pipeline reset failed");
                 self.imp().peaks.replace(None);
-                self.notify("has-peaks");
+                self.notify_has_peaks();
             }
         };
     }

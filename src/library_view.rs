@@ -191,6 +191,33 @@ impl Default for LibraryView {
 }
 
 impl LibraryView {
+    pub fn connect_album_activated<F: Fn(&Self, &Album) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "album-activated",
+            false,
+            glib::closure_local!(move |view: &Self, album: &Album| f(view, album)),
+        )
+    }
+
+    pub fn connect_add_albums<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "add-albums",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_play_albums<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "play-albums",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
     fn setup_grid(&self) {
         let imp = self.imp();
 

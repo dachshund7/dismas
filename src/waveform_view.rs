@@ -36,13 +36,15 @@ impl DivAssign<f64> for PeakPair {
 }
 
 mod imp {
-    use glib::{ParamSpec, ParamSpecDouble, Value, subclass::Signal};
+    use glib::subclass::Signal;
     use std::sync::LazyLock;
 
     use super::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Default, glib::Properties)]
+    #[properties(wrapper_type = super::WaveformView)]
     pub struct WaveformView {
+        #[property(get, set = Self::set_position, explicit_notify, minimum = 0.0, maximum = 1.0)]
         pub position: Cell<f64>,
         pub hover_position: Cell<Option<f64>>,
         // left and right channel peaks, normalised between 0 and 1
@@ -65,35 +67,8 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for WaveformView {
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecDouble::builder("position")
-                        .minimum(0.0)
-                        .maximum(1.0)
-                        .default_value(0.0)
-                        .build(),
-                ]
-            });
-
-            PROPERTIES.as_ref()
-        }
-
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
-            match pspec.name() {
-                "position" => self.position.replace(value.get::<f64>().unwrap()),
-                _ => unimplemented!(),
-            };
-        }
-
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
-            match pspec.name() {
-                "position" => self.position.get().to_value(),
-                _ => unimplemented!(),
-            }
-        }
-
         fn signals() -> &'static [Signal] {
             static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
                 vec![
@@ -126,6 +101,20 @@ mod imp {
             if let Some(tick_id) = self.tick_id.replace(None) {
                 tick_id.remove();
             }
+        }
+    }
+
+    impl WaveformView {
+        fn set_position(&self, position: f64) {
+            let pos = position.clamp(0.0, 1.0);
+            if self.position.replace(pos) == pos {
+                return;
+            }
+
+            let obj = self.obj();
+            obj.update_property(&[gtk::accessible::Property::ValueNow(pos)]);
+            obj.queue_draw();
+            obj.notify_position();
         }
     }
 
@@ -561,10 +550,14 @@ impl WaveformView {
         self.queue_resize();
     }
 
-    pub fn set_position(&self, position: f64) {
-        let pos = position.clamp(0.0, 1.0);
-        self.imp().position.replace(pos);
-        self.update_property(&[gtk::accessible::Property::ValueNow(pos)]);
-        self.queue_draw();
+    pub fn connect_position_changed<F: Fn(&Self, f64) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "position-changed",
+            false,
+            glib::closure_local!(move |view: &Self, position: f64| f(view, position)),
+        )
     }
 }

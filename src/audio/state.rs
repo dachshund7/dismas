@@ -8,19 +8,27 @@ use gtk::{gdk, glib, prelude::*, subclass::prelude::*};
 use crate::audio::{PlaybackState, Track};
 
 mod imp {
-    use glib::{
-        ParamSpec, ParamSpecBoolean, ParamSpecDouble, ParamSpecObject, ParamSpecString,
-        ParamSpecUInt64,
-    };
-    use std::sync::LazyLock;
-
     use super::*;
 
-    #[derive(Debug)]
+    #[derive(Debug, glib::Properties)]
+    #[properties(wrapper_type = super::PlayerState)]
     pub struct PlayerState {
+        #[property(name = "playing", get = Self::playing, type = bool)]
         pub playback_state: Cell<PlaybackState>,
+        #[property(get)]
         pub position: Cell<u64>,
+        // These are proxies for Track properties
+        #[property(name = "track", get, nullable)]
+        #[property(name = "title", get = Self::title, nullable, type = Option<String>)]
+        #[property(name = "artist", get = Self::artist, nullable, type = Option<String>)]
+        #[property(name = "album", get = Self::album, nullable, type = Option<String>)]
+        #[property(name = "credits", get = Self::credits, nullable, type = Option<String>)]
+        #[property(name = "heading", get = Self::heading, nullable, type = Option<String>)]
+        #[property(name = "movement", get = Self::movement, nullable, type = Option<String>)]
+        #[property(name = "duration", get = Self::duration, type = u64)]
+        #[property(name = "cover", get = Self::cover, nullable, type = Option<gdk::Texture>)]
         pub current_track: RefCell<Option<Track>>,
+        #[property(get, minimum = 0.0, maximum = 1.0, default = 1.0)]
         pub volume: Cell<f64>,
     }
 
@@ -39,55 +47,50 @@ mod imp {
         }
     }
 
-    impl ObjectImpl for PlayerState {
-        fn properties() -> &'static [ParamSpec] {
-            static PROPERTIES: LazyLock<Vec<ParamSpec>> = LazyLock::new(|| {
-                vec![
-                    ParamSpecBoolean::builder("playing").read_only().build(),
-                    ParamSpecUInt64::builder("position").read_only().build(),
-                    ParamSpecObject::builder::<Track>("track")
-                        .read_only()
-                        .build(),
-                    ParamSpecString::builder("title").read_only().build(),
-                    ParamSpecString::builder("artist").read_only().build(),
-                    ParamSpecString::builder("album").read_only().build(),
-                    ParamSpecString::builder("credits").read_only().build(),
-                    ParamSpecString::builder("heading").read_only().build(),
-                    ParamSpecString::builder("movement").read_only().build(),
-                    ParamSpecUInt64::builder("duration").read_only().build(),
-                    ParamSpecObject::builder::<gdk::Texture>("cover")
-                        .read_only()
-                        .build(),
-                    ParamSpecDouble::builder("volume")
-                        .minimum(0.0)
-                        .maximum(1.0)
-                        .default_value(1.0)
-                        .read_only()
-                        .build(),
-                ]
-            });
-            PROPERTIES.as_ref()
+    #[glib::derived_properties]
+    impl ObjectImpl for PlayerState {}
+
+    impl PlayerState {
+        fn playing(&self) -> bool {
+            matches!(self.playback_state.get(), PlaybackState::Playing)
         }
 
-        fn property(&self, _id: usize, pspec: &ParamSpec) -> glib::Value {
-            let obj = self.obj();
-            match pspec.name() {
-                "playing" => obj.playing().to_value(),
-                "position" => obj.position().to_value(),
-                "track" => self.current_track.borrow().to_value(),
-                "volume" => obj.volume().to_value(),
+        fn title(&self) -> Option<String> {
+            self.current_track.borrow().as_ref().map(Track::title)
+        }
 
-                // These are proxies for Track properties
-                "title" => obj.title().to_value(),
-                "artist" => obj.artist().to_value(),
-                "album" => obj.album().to_value(),
-                "credits" => obj.credits().to_value(),
-                "heading" => obj.heading().to_value(),
-                "movement" => obj.movement().to_value(),
-                "duration" => obj.duration().to_value(),
-                "cover" => obj.cover().to_value(),
-                _ => unimplemented!(),
-            }
+        fn artist(&self) -> Option<String> {
+            self.current_track.borrow().as_ref().map(Track::artist)
+        }
+
+        fn album(&self) -> Option<String> {
+            self.current_track.borrow().as_ref().map(Track::album)
+        }
+
+        fn credits(&self) -> Option<String> {
+            self.current_track.borrow().as_ref().map(Track::credits)
+        }
+
+        fn heading(&self) -> Option<String> {
+            self.current_track.borrow().as_ref().map(Track::heading)
+        }
+
+        fn movement(&self) -> Option<String> {
+            self.current_track
+                .borrow()
+                .as_ref()
+                .and_then(Track::movement)
+        }
+
+        fn duration(&self) -> u64 {
+            self.current_track
+                .borrow()
+                .as_ref()
+                .map_or(0, Track::duration)
+        }
+
+        fn cover(&self) -> Option<gdk::Texture> {
+            self.current_track.borrow().as_ref().and_then(Track::cover)
         }
     }
 }
@@ -101,115 +104,34 @@ glib::wrapper! {
 }
 
 impl PlayerState {
-    pub fn title(&self) -> Option<String> {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return Some(track.title());
-        }
-
-        None
-    }
-
-    pub fn artist(&self) -> Option<String> {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return Some(track.artist());
-        }
-
-        None
-    }
-
-    pub fn album(&self) -> Option<String> {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return Some(track.album());
-        }
-
-        None
-    }
-
-    pub fn credits(&self) -> Option<String> {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return Some(track.credits());
-        }
-
-        None
-    }
-
-    pub fn heading(&self) -> Option<String> {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return Some(track.heading());
-        }
-
-        None
-    }
-
-    pub fn movement(&self) -> Option<String> {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return track.movement();
-        }
-
-        None
-    }
-
-    pub fn duration(&self) -> u64 {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return track.duration();
-        }
-
-        0
-    }
-
-    pub fn cover(&self) -> Option<gdk::Texture> {
-        if let Some(track) = &*self.imp().current_track.borrow() {
-            return track.cover_texture();
-        }
-
-        None
-    }
-
-    pub fn playing(&self) -> bool {
-        let playback_state = self.imp().playback_state.get();
-        matches!(playback_state, PlaybackState::Playing)
-    }
-
     pub fn set_playback_state(&self, playback_state: &PlaybackState) -> bool {
         let old_state = self.imp().playback_state.replace(*playback_state);
         if old_state != *playback_state {
-            self.notify("playing");
+            self.notify_playing();
             return true;
         }
 
         false
     }
 
-    pub fn current_track(&self) -> Option<Track> {
-        (*self.imp().current_track.borrow()).as_ref().cloned()
-    }
-
     pub fn set_current_track(&self, track: Option<Track>) {
         self.imp().current_track.replace(track);
         self.imp().position.replace(0);
-        self.notify("track");
-        self.notify("title");
-        self.notify("artist");
-        self.notify("album");
-        self.notify("credits");
-        self.notify("heading");
-        self.notify("movement");
-        self.notify("duration");
-        self.notify("cover");
-        self.notify("position");
-    }
-
-    pub fn position(&self) -> u64 {
-        self.imp().position.get()
+        self.notify_track();
+        self.notify_title();
+        self.notify_artist();
+        self.notify_album();
+        self.notify_credits();
+        self.notify_heading();
+        self.notify_movement();
+        self.notify_duration();
+        self.notify_cover();
+        self.notify_position();
     }
 
     pub fn set_position(&self, position: u64) {
         self.imp().position.replace(position);
-        self.notify("position");
-    }
-
-    pub fn volume(&self) -> f64 {
-        self.imp().volume.get()
+        self.notify_position();
     }
 
     pub fn set_volume(&self, volume: f64) {
@@ -220,7 +142,7 @@ impl PlayerState {
         let old_rounded = format!("{:.2}", old_volume);
         let new_rounded = format!("{:.2}", volume);
         if old_rounded != new_rounded {
-            self.notify("volume");
+            self.notify_volume();
         }
     }
 }

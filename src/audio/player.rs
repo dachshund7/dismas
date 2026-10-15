@@ -64,9 +64,8 @@ impl Display for RepeatMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, glib::Enum, PartialEq)]
+#[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "AmberolReplayGainMode")]
-#[derive(Default)]
 pub enum ReplayGainMode {
     #[enum_value(name = "album")]
     Album,
@@ -193,7 +192,7 @@ impl AudioPlayer {
     }
 
     fn set_playback_state(&self, state: PlaybackState) {
-        if let Some(current_track) = self.state.current_track() {
+        if let Some(current_track) = self.state.track() {
             debug!("Current track: {}", current_track.uri());
 
             self.state.set_playback_state(&state);
@@ -281,7 +280,7 @@ impl AudioPlayer {
             return;
         }
 
-        if let Some(current_track) = self.state.current_track() {
+        if let Some(current_track) = self.state.track() {
             // We only skip to the previous track if we are
             // within a seek backward step, otherwise we just
             // restart the track
@@ -329,7 +328,7 @@ impl AudioPlayer {
             return;
         }
 
-        if let Some(current_track) = self.state.current_track() {
+        if let Some(current_track) = self.state.track() {
             current_track.set_playing(false);
         }
 
@@ -370,7 +369,7 @@ impl AudioPlayer {
             return;
         }
 
-        if let Some(current_track) = self.state.current_track() {
+        if let Some(current_track) = self.state.track() {
             current_track.set_playing(false);
         }
 
