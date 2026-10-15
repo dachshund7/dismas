@@ -87,7 +87,7 @@ impl CoverCache {
         self.entries.get(uuid)
     }
 
-    fn load_cover_art(tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
+    pub fn load_cover_art(tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
         if let Some(picture) = tag.get_picture_type(lofty::picture::PictureType::CoverFront) {
             debug!("Found CoverFront");
             return Some(glib::Bytes::from(picture.data()));

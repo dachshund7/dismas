@@ -181,16 +181,6 @@ menu primary_menu {
 
   section {
     item {
-      label: _("Add _Track");
-      action: "queue.add-track";
-    }
-
-    item {
-      label: _("Add _Folder");
-      action: "queue.add-folder";
-    }
-
-    item {
       label: _("Clear");
       action: "queue.clear";
     }
@@ -205,6 +195,11 @@ menu primary_menu {
     item {
       label: _("_Background Playback");
       action: "app.background-play";
+    }
+
+    item {
+      label: _("_Restore Playlist at Startup");
+      action: "win.restore-playlist";
     }
   }
 

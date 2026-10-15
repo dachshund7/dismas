@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 John Hamilton
+
+using Gtk 4.0;
+using Adw 1;
+
+template $AmberolLibraryView: Widget {
+  Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      title-widget: Adw.WindowTitle {
+        title: _("Albums");
+      };
+
+      [start]
+      Button back_button {
+        icon-name: "go-previous-symbolic";
+        action-name: "win.browse-albums";
+        tooltip-text: _("Back to the Player");
+      }
+
+      [end]
+      Button rescan_button {
+        icon-name: "view-refresh-symbolic";
+        tooltip-text: _("Scan the Music Folder Again");
+      }
+    }
+
+    [top]
+    Adw.Clamp {
+      maximum-size: 400;
+      margin-start: 12;
+      margin-end: 12;
+      margin-bottom: 6;
+
+      child: SearchEntry search_entry {
+        placeholder-text: _("Search Albums");
+      };
+    }
+
+    content: Stack albums_stack {
+      transition-type: crossfade;
+
+      StackPage {
+        name: "scanning";
+
+        child: Adw.StatusPage {
+          icon-name: "folder-music-symbolic";
+          title: _("Scanning the Music Folder");
+
+          child: Adw.Clamp {
+            maximum-size: 300;
+
+            child: ProgressBar scan_progress {
+              show-text: true;
+            };
+          };
+        };
+      }
+
+      StackPage {
+        name: "empty";
+
+        child: Adw.StatusPage empty_page {
+          icon-name: "folder-music-symbolic";
+          title: _("No Albums");
+          description: _("Albums in your Music folder will be shown here");
+        };
+      }
+
+      StackPage {
+        name: "albums";
+
+        child: ScrolledWindow {
+          hscrollbar-policy: never;
+          vexpand: true;
+
+          // The grid view keeps cells for a number of rows of
+          // max-columns items, so a higher maximum makes scrolling
+          // slower even when there are fewer columns
+          child: GridView grid_view {
+            max-columns: 6;
+            min-columns: 2;
+            single-click-activate: true;
+
+            styles [
+              "album-grid",
+            ]
+          };
+        };
+      }
+    };
+
+    [bottom]
+    ProgressBar update_progress {
+      visible: false;
+
+      styles [
+        "osd",
+      ]
+    }
+  }
+}

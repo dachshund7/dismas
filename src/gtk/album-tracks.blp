@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 John Hamilton
+
+using Gtk 4.0;
+using Adw 1;
+
+template $AmberolAlbumTracks: Widget {
+  Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      [start]
+      Button back_button {
+        icon-name: "go-previous-symbolic";
+        valign: center;
+        tooltip-text: _("Back to the Playlist");
+      }
+
+      title-widget: Box {
+        orientation: vertical;
+        valign: center;
+
+        Label album_title {
+          ellipsize: end;
+
+          styles [
+            "heading",
+          ]
+        }
+
+        Label album_artist {
+          ellipsize: end;
+
+          styles [
+            "caption",
+          ]
+        }
+      };
+    }
+
+    content: ScrolledWindow {
+      hscrollbar-policy: never;
+      vscrollbar-policy: automatic;
+      vexpand: true;
+
+      child: ListView tracks_view {
+        single-click-activate: true;
+
+        styles [
+          "navigation-sidebar",
+        ]
+      };
+    };
+
+    [bottom]
+    Box {
+      halign: center;
+      spacing: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Button play_button {
+        label: _("Play");
+
+        styles [
+          "pill",
+          "suggested-action",
+        ]
+      }
+
+      Button add_button {
+        label: _("Add to Playlist");
+
+        styles [
+          "pill",
+        ]
+      }
+    }
+
+    styles [
+      "playlist-background",
+    ]
+  }
+}

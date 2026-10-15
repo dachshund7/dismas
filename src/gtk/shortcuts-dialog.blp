@@ -25,6 +25,11 @@ Adw.ShortcutsDialog shortcuts_dialog {
         }
 
         Adw.ShortcutsItem {
+            title: C_("shortcut window", "Toggle the album grid");
+            action-name: "win.browse-albums";
+        }
+
+        Adw.ShortcutsItem {
             title: C_("shortcut window", "Show shortcuts");
             action-name: "app.shortcuts";
         }
@@ -37,16 +42,6 @@ Adw.ShortcutsDialog shortcuts_dialog {
 
     Adw.ShortcutsSection {
         title: C_("shortcut window", "Playlist");
-
-        Adw.ShortcutsItem {
-            title: C_("shortcut window", "Add a track to the playlist");
-            action-name: "queue.add-track";
-        }
-
-        Adw.ShortcutsItem {
-            title: C_("shortcut window", "Add a folder to the playlist");
-            action-name: "queue.add-folder";
-        }
 
         Adw.ShortcutsItem {
             title: C_("shortcut window", "Clear the playlist");

@@ -162,7 +162,7 @@ pub fn normalize_search_text(s: &str) -> String {
 // The text of all the tags of a track, for searching the playlist; this
 // leaves out the tags that only contain identifiers, numbers or technical
 // data, as they would make short searches, like "op 29", match by accident
-fn tag_search_text(tag: &Tag) -> String {
+pub fn tag_search_text(tag: &Tag) -> String {
     let mut text = tag
         .items()
         .filter(|item| {

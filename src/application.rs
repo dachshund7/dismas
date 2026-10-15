@@ -65,8 +65,6 @@ mod imp {
 
             obj.set_accels_for_action("app.quit", &["<primary>q"]);
 
-            obj.set_accels_for_action("queue.add-track", &["<primary>s"]);
-            obj.set_accels_for_action("queue.add-folder", &["<primary>a"]);
             obj.set_accels_for_action("queue.clear", &["<primary>L"]);
             obj.set_accels_for_action("queue.toggle", &["F9"]);
             obj.set_accels_for_action("queue.search", &["<primary>F"]);
@@ -79,6 +77,7 @@ mod imp {
             obj.set_accels_for_action("win.play", &["<primary>p"]);
             obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
+            obj.set_accels_for_action("win.browse-albums", &["<primary>g"]);
         }
     }
 
@@ -92,17 +91,14 @@ mod imp {
         fn activate(&self) {
             debug!("Application::activate");
 
-            self.obj().present_main_window();
+            self.obj().present_main_window(true);
         }
 
         fn open(&self, files: &[gio::File], _hint: &str) {
             debug!("Application::open");
 
-            let application = self.obj();
-            application.present_main_window();
-            if let Some(window) = application.active_window() {
-                window.downcast_ref::<Window>().unwrap().open_files(files);
-            }
+            // The files take the place of the playlist of the last session
+            self.obj().present_main_window(false).open_files(files);
         }
     }
 
@@ -176,25 +172,33 @@ impl Application {
 
     fn process_action(&self, action: ApplicationAction) -> glib::ControlFlow {
         match action {
-            ApplicationAction::Present => self.present_main_window(),
-            // _ => debug!("Received action {:?}", action),
+            ApplicationAction::Present => {
+                self.present_main_window(true);
+            } // _ => debug!("Received action {:?}", action),
         }
 
         glib::ControlFlow::Continue
     }
 
-    fn present_main_window(&self) {
-        let window = if let Some(window) = self.active_window() {
-            window
-        } else {
-            let window = Window::new(self);
-            window.upcast()
+    // With `restore`, a new window restores the playlist of the last
+    // session, if the user wants it; otherwise, the caller adds tracks
+    fn present_main_window(&self, restore: bool) -> Window {
+        let window = match self.active_window().and_downcast::<Window>() {
+            Some(window) => window,
+            None => {
+                let window = Window::new(self);
+                if restore {
+                    window.restore_playlist_on_startup();
+                }
+                window
+            }
         };
 
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         self.request_background();
 
         window.present();
+        window
     }
 
     fn setup_gactions(&self) {

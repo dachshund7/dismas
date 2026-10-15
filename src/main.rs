@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+mod album_tracks;
 mod application;
 mod audio;
 mod config;
 mod cover_picture;
 mod drag_overlay;
 mod i18n;
+mod library;
+mod library_view;
 mod marquee;
 mod playback_control;
 mod playlist_view;

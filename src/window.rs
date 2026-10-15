@@ -15,10 +15,13 @@ use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
 
 use crate::{
+    album_tracks::AlbumTracks,
     audio::{AudioPlayer, CoverCache, RepeatMode, ReplayGainMode, Track},
     config::APPLICATION_ID,
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
+    library::Album,
+    library_view::LibraryView,
     playback_control::PlaybackControl,
     playlist_view::PlaylistView,
     queue_row::QueueRow,
@@ -29,7 +32,7 @@ use crate::{
     utils,
     volume_control::VolumeControl,
     waveform_view::WaveformView,
-    work_sections::WorkSectionModel,
+    work_sections::{WorkSectionModel, work_header_factory},
 };
 
 // The width of the sidebar when the user resizes it
@@ -39,9 +42,18 @@ const MIN_SIDEBAR_WIDTH: i32 = 240;
 const AUTO_SIDEBAR_WIDTH: f64 = 330.0;
 const AUTO_SIDEBAR_FRACTION: f64 = 0.4;
 
-pub enum WindowMode {
-    InitialView,
-    MainView,
+// What happens once tracks are added to the playlist
+#[derive(Clone, Copy, PartialEq)]
+enum QueueMode {
+    // Stay in the album grid, to keep browsing
+    Add,
+    // Show the player, e.g. after opening files
+    Show,
+    // Show the player, without announcing the tracks, for the playlist
+    // of the last session
+    Restore,
+    // Show the player, and play the tracks from the given one
+    Play(u32),
 }
 
 const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
@@ -61,10 +73,6 @@ mod imp {
         #[template_child]
         pub toast_overlay: TemplateChild<adw::ToastOverlay>,
         #[template_child]
-        pub main_stack: TemplateChild<gtk::Stack>,
-        #[template_child]
-        pub status_page: TemplateChild<adw::StatusPage>,
-        #[template_child]
         pub track_cover: TemplateChild<TrackCover>,
         #[template_child]
         pub track_details: TemplateChild<TrackDetails>,
@@ -81,11 +89,15 @@ mod imp {
         #[template_child]
         pub playlist_view: TemplateChild<PlaylistView>,
         #[template_child]
+        pub content_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub library_view: TemplateChild<LibraryView>,
+        #[template_child]
+        pub sidebar_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub album_tracks: TemplateChild<AlbumTracks>,
+        #[template_child]
         pub sidebar_handle: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub add_folder_button: TemplateChild<gtk::Button>,
-        #[template_child]
-        pub restore_playlist_button: TemplateChild<gtk::Button>,
 
         pub provider: gtk::CssProvider,
         pub settings: gio::Settings,
@@ -96,6 +108,11 @@ mod imp {
         pub playlist_search: Cell<bool>,
         pub replaygain_mode: Cell<ReplayGainMode>,
         pub sidebar_width: Cell<i32>,
+        pub library_visible: Cell<bool>,
+        // Whether the playlist might still be restored or opened at startup
+        pub starting: Cell<bool>,
+        // Whether the sidebar was showing before the tracks of an album
+        pub sidebar_was_visible: Cell<bool>,
 
         pub playlist_filtermodel: RefCell<Option<gio::ListModel>>,
 
@@ -153,61 +170,6 @@ mod imp {
                     p.toggle_repeat_mode();
                 }
             });
-            klass.install_action_async("queue.add-track", None, |win, _, _| async move {
-                debug!("Window::win.add-track()");
-                let filters = gio::ListStore::new::<gtk::FileFilter>();
-                let filter = gtk::FileFilter::new();
-                gtk::FileFilter::set_name(&filter, Some(&i18n("Audio files")));
-                filter.add_mime_type("audio/*");
-                filters.append(&filter);
-
-                let xdg_music = match glib::user_special_dir(glib::UserDirectory::Music) {
-                    Some(p) => p,
-                    None => glib::current_dir(),
-                };
-
-                let dialog = gtk::FileDialog::builder()
-                    .accept_label(&i18n("_Add Track"))
-                    .filters(&filters)
-                    .initial_folder(&gio::File::for_path(&xdg_music))
-                    .modal(true)
-                    .title(&i18n("Open File"))
-                    .build();
-
-                if let Ok(files) = dialog.open_multiple_future(Some(&win)).await {
-                    if files.n_items() == 0 {
-                        win.add_toast(i18n("Unable to access files"));
-                    } else {
-                        win.add_files_to_queue(&files);
-                    }
-                }
-            });
-            klass.install_action_async("queue.add-folder", None, |win, _, _| async move {
-                debug!("Window::win.add-folder()");
-                let xdg_music = match glib::user_special_dir(glib::UserDirectory::Music) {
-                    Some(p) => p,
-                    None => glib::current_dir(),
-                };
-
-                let dialog = gtk::FileDialog::builder()
-                    .accept_label(&i18n("_Add Folder"))
-                    .initial_folder(&gio::File::for_path(&xdg_music))
-                    .modal(true)
-                    .title(&i18n("Open Folder"))
-                    .build();
-
-                if let Ok(files) = dialog.select_multiple_folders_future(Some(&win)).await {
-                    if files.n_items() == 0 {
-                        win.add_toast(i18n("Unable to access files"));
-                    } else {
-                        win.add_files_to_queue(&files);
-                    }
-                }
-            });
-            klass.install_action("queue.restore-playlist", None, move |win, _, _| {
-                debug!("Window::queue.restore-playlist()");
-                win.restore_playlist();
-            });
             klass.install_action("win.copy", None, move |win, _, _| {
                 debug!("Window::win.copy()");
                 win.copy_track();
@@ -228,6 +190,7 @@ mod imp {
             klass.install_property_action("queue.shuffle", "playlist-shuffled");
             klass.install_property_action("queue.select", "playlist-selection");
             klass.install_property_action("queue.search", "playlist-search");
+            klass.install_property_action("win.browse-albums", "library-visible");
             klass.install_property_action("win.replaygain", "replaygain-mode");
 
             klass.install_action(
@@ -259,11 +222,11 @@ mod imp {
                 waveform_view: TemplateChild::default(),
                 elapsed_label: TemplateChild::default(),
                 remaining_label: TemplateChild::default(),
-                main_stack: TemplateChild::default(),
-                status_page: TemplateChild::default(),
-                add_folder_button: TemplateChild::default(),
-                restore_playlist_button: TemplateChild::default(),
                 playlist_view: TemplateChild::default(),
+                content_stack: TemplateChild::default(),
+                library_view: TemplateChild::default(),
+                sidebar_stack: TemplateChild::default(),
+                album_tracks: TemplateChild::default(),
                 sidebar_handle: TemplateChild::default(),
                 playlist_shuffled: Cell::new(false),
                 playlist_visible: Cell::new(true),
@@ -272,6 +235,9 @@ mod imp {
                 playlist_filtermodel: RefCell::default(),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
                 sidebar_width: Cell::new(0),
+                library_visible: Cell::new(false),
+                starting: Cell::new(true),
+                sidebar_was_visible: Cell::new(false),
                 provider: gtk::CssProvider::new(),
                 settings: utils::settings_manager(),
                 notify_playing_id: RefCell::new(None),
@@ -301,6 +267,7 @@ mod imp {
                     ParamSpecBoolean::builder("playlist-visible").build(),
                     ParamSpecBoolean::builder("playlist-selection").build(),
                     ParamSpecBoolean::builder("playlist-search").build(),
+                    ParamSpecBoolean::builder("library-visible").build(),
                     ParamSpecEnum::builder::<ReplayGainMode>("replaygain-mode").build(),
                 ]
             });
@@ -314,6 +281,7 @@ mod imp {
                 "playlist-visible" => obj.set_playlist_visible(value.get::<bool>().unwrap()),
                 "playlist-selection" => obj.set_playlist_selection(value.get::<bool>().unwrap()),
                 "playlist-search" => obj.set_playlist_search(value.get::<bool>().unwrap()),
+                "library-visible" => obj.set_library_visible(value.get::<bool>().unwrap()),
                 "replaygain-mode" => obj.set_replaygain(value.get::<ReplayGainMode>().unwrap()),
                 _ => unimplemented!(),
             }
@@ -326,6 +294,7 @@ mod imp {
                 "playlist-visible" => obj.playlist_visible().to_value(),
                 "playlist-selection" => obj.playlist_selection().to_value(),
                 "playlist-search" => obj.playlist_search().to_value(),
+                "library-visible" => obj.library_visible().to_value(),
                 "replaygain-mode" => obj.replaygain().to_value(),
                 _ => unimplemented!(),
             }
@@ -364,12 +333,14 @@ impl Window {
         win.setup_playlist();
         win.setup_sidebar_handle();
         win.setup_drop_target();
+        win.setup_library();
         win.setup_provider();
         win.bind_state();
         win.bind_queue();
         win.connect_signals();
         win.restore_window_state();
         win.set_initial_state();
+        win.set_default_widget(Some(&win.imp().playback_control.play_button()));
 
         win
     }
@@ -387,6 +358,8 @@ impl Window {
     }
 
     fn setup_actions(&self) {
+        self.add_action(&self.imp().settings.create_action("restore-playlist"));
+
         let enable_recoloring = self.imp().settings.boolean("enable-recoloring");
         self.add_action_entries([gio::ActionEntry::builder("enable-recoloring")
             .state(enable_recoloring.to_variant())
@@ -643,6 +616,9 @@ impl Window {
     fn clear_queue(&self) {
         if let Some(p) = self.player() {
             p.clear_queue();
+
+            // So that the playlist isn't restored at the next startup
+            utils::store_playlist(p.queue());
         }
     }
 
@@ -721,24 +697,175 @@ impl Window {
         }
     }
 
-    fn restore_playlist(&self) {
-        if let Some(tracks) = utils::load_cached_tracks() {
-            self.queue_tracks(tracks);
+    // Shows the tracks of an album in the sidebar, in place of the
+    // playlist, so that it can be played or added to the playlist
+    fn show_album_tracks(&self, album: &Album) {
+        let imp = self.imp();
+        if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
+            imp.sidebar_was_visible.set(self.playlist_visible());
+        }
+        imp.album_tracks.show_album(album);
+        imp.sidebar_stack.set_visible_child_name("album");
+        self.set_playlist_visible(true);
+    }
+
+    // Goes back from the tracks of an album to the playlist, closing the
+    // sidebar if it was opened for the album
+    fn show_playlist(&self) {
+        self.show_playlist_pane();
+        if !self.imp().sidebar_was_visible.get() {
+            self.set_playlist_visible(false);
         }
     }
 
-    fn queue_tracks(&self, queue: Vec<gio::File>) {
-        if queue.is_empty() {
-            self.add_toast(i18n("No available track found"));
+    fn show_playlist_pane(&self) {
+        self.imp().sidebar_stack.set_visible_child_name("playlist");
+    }
+
+    fn library_visible(&self) -> bool {
+        self.imp().library_visible.get()
+    }
+
+    fn set_library_visible(&self, visible: bool) {
+        if !visible && self.queue_is_empty() {
+            // Keep the state of the action in sync with the grid, which
+            // stays up
+            self.notify("library-visible");
+            return;
+        }
+        if visible == self.imp().library_visible.replace(visible) {
             return;
         }
 
-        self.switch_mode(WindowMode::MainView);
+        let page = if visible { "library" } else { "player" };
+        self.imp().content_stack.set_visible_child_name(page);
+        self.notify("library-visible");
+    }
+
+    fn queue_is_empty(&self) -> bool {
+        self.player().is_none_or(|p| p.queue().is_empty())
+    }
+
+    // With an empty playlist, there is nothing to play, so the album grid
+    // takes the place of the player, and there's no going back to it
+    fn update_library_for_queue(&self) {
+        let queue_empty = self.queue_is_empty();
+        self.imp().library_view.set_can_go_back(!queue_empty);
+
+        // At startup, the playlist is empty until it's restored, or until
+        // the files to open are added, and showing the grid in the meantime
+        // would only make it flash
+        if queue_empty && !self.imp().starting.get() {
+            self.set_library_visible(true);
+            self.set_playlist_visible(false);
+        }
+    }
+
+    // Called once the playlist of the last session, or the files the
+    // application was opened with, have been added, or there are none
+    fn end_startup(&self) {
+        let imp = self.imp();
+        if !imp.starting.replace(false) {
+            return;
+        }
+
+        // The window is already up, but nothing was shown in the meantime,
+        // so there is nothing to fade from
+        let transition = imp.content_stack.transition_type();
+        imp.content_stack
+            .set_transition_type(gtk::StackTransitionType::None);
+        self.update_library_for_queue();
+        imp.content_stack.set_transition_type(transition);
+    }
+
+    fn setup_library(&self) {
+        let library_view = self.imp().library_view.get();
+
+        library_view.connect_closure(
+            "album-activated",
+            false,
+            closure_local!(
+                #[weak(rename_to = win)]
+                self,
+                move |_: LibraryView, album: Album| {
+                    win.show_album_tracks(&album);
+                }
+            ),
+        );
+
+        let album_tracks = self.imp().album_tracks.get();
+        album_tracks.connect_closure(
+            "back",
+            false,
+            closure_local!(
+                #[weak(rename_to = win)]
+                self,
+                move |_: AlbumTracks| win.show_playlist()
+            ),
+        );
+        album_tracks.connect_closure(
+            "add",
+            false,
+            closure_local!(
+                #[weak(rename_to = win)]
+                self,
+                move |album_tracks: AlbumTracks| {
+                    win.show_playlist_pane();
+                    win.queue_tracks(album_tracks.files(), QueueMode::Add);
+                }
+            ),
+        );
+        album_tracks.connect_closure(
+            "play",
+            false,
+            closure_local!(
+                #[weak(rename_to = win)]
+                self,
+                move |album_tracks: AlbumTracks, start: u32| {
+                    win.clear_queue();
+                    win.show_playlist_pane();
+                    win.queue_tracks(album_tracks.files(), QueueMode::Play(start));
+                }
+            ),
+        );
+
+        // Reading the albums can take a while, so we do it in the
+        // background as soon as the window is up
+        library_view.start_scan();
+    }
+
+    // Restores the playlist of the last session, if the user wants it
+    pub fn restore_playlist_on_startup(&self) {
+        if self.imp().settings.boolean("restore-playlist")
+            && utils::has_cached_playlist()
+            && self.queue_is_empty()
+        {
+            self.restore_playlist();
+        } else {
+            self.end_startup();
+        }
+    }
+
+    fn restore_playlist(&self) {
+        // The saved playlist is empty after clearing the playlist
+        match utils::load_cached_tracks() {
+            Some(tracks) if !tracks.is_empty() => self.queue_tracks(tracks, QueueMode::Restore),
+            _ => self.end_startup(),
+        }
+    }
+
+    // Adds the files to the end of the playlist
+    fn queue_tracks(&self, queue: Vec<gio::File>, mode: QueueMode) {
+        let play = matches!(mode, QueueMode::Play(_));
+        if queue.is_empty() {
+            self.add_toast(i18n("No available track found"));
+            self.end_startup();
+            return;
+        }
 
         // Disable actions on the queue; loading is "atomic"
-        self.action_set_enabled("queue.add-track", false);
-        self.action_set_enabled("queue.add-folder", false);
         self.action_set_enabled("queue.clear", false);
+        self.imp().album_tracks.set_adding_enabled(false);
 
         self.set_playlist_visible(true);
         self.imp().playlist_view.begin_loading();
@@ -785,9 +912,8 @@ impl Window {
                         );
 
                         // Re-enable the actions
-                        win.action_set_enabled("queue.add-track", true);
-                        win.action_set_enabled("queue.add-folder", true);
                         win.action_set_enabled("queue.clear", true);
+                        win.imp().album_tracks.set_adding_enabled(true);
 
                         if tracks.is_empty() {
                             if duplicates == 0 {
@@ -796,6 +922,7 @@ impl Window {
                         } else if let Some(player) = win.player() {
                             let queue = player.queue();
                             let was_empty = queue.is_empty();
+                            let first_added = queue.n_tracks();
 
                             win.imp().playlist_view.end_loading();
 
@@ -810,17 +937,31 @@ impl Window {
                                 was_empty,
                                 queue.n_tracks()
                             );
-                            if was_empty {
+                            if let QueueMode::Play(start) = mode {
+                                player.skip_to(first_added + start);
+                                player.play();
+                            } else if was_empty {
                                 player.skip_to(0);
                             }
+                            if mode == QueueMode::Add {
+                                // Show where the album went, even if the
+                                // playlist was closed while adding it
+                                win.set_playlist_visible(true);
+                            } else {
+                                win.set_library_visible(false);
+                            }
 
-                            // Allow jumping to the track we just added
-                            if tracks.len() == 1 {
+                            // Restoring the playlist at startup is quiet, and
+                            // doesn't start playing
+                            if mode == QueueMode::Restore {
+                                // Nothing to announce
+                            } else if tracks.len() == 1 {
+                                // Allow jumping to the track we just added
                                 // If we added a single track, and the queue was empty, we
                                 // dispense with the pleasantries and we start playing
                                 // immediately; otherwise, we let the user choose whether
                                 // to jump to the newly added track
-                                if was_empty {
+                                if was_empty || play {
                                     player.play();
                                 } else {
                                     win.add_skip_to_toast(
@@ -844,6 +985,7 @@ impl Window {
                             }
                         }
 
+                        win.end_startup();
                         glib::ControlFlow::Break
                     })
             }
@@ -880,7 +1022,7 @@ impl Window {
             }
         }
 
-        self.queue_tracks(queue);
+        self.queue_tracks(queue, QueueMode::Show);
     }
 
     // Bind the PlayerState to the UI
@@ -1039,7 +1181,7 @@ impl Window {
                             win.set_initial_state();
                             win.reset_queue();
                         } else {
-                            win.action_set_enabled("queue.toggle", true);
+                            win.update_library_for_queue();
                             win.action_set_enabled("queue.shuffle", queue.n_tracks() > 1);
 
                             win.action_set_enabled("win.play", true);
@@ -1298,7 +1440,6 @@ impl Window {
             self.action_set_enabled("win.previous", !queue.is_empty());
             self.action_set_enabled("win.next", !queue.is_last_track());
 
-            self.action_set_enabled("queue.toggle", !queue.is_empty());
             self.action_set_enabled("queue.shuffle", queue.n_tracks() > 1);
             self.action_set_enabled("win.replaygain", player.replaygain_available());
 
@@ -1314,35 +1455,7 @@ impl Window {
                 .set_repeat_mode(queue.repeat_mode());
             self.set_playlist_shuffled(queue.is_shuffled());
 
-            // Manually update the icon on the initial empty state
-            // to avoid generating the UI definition file at build
-            // time
-            self.imp().status_page.set_icon_name(Some(APPLICATION_ID));
-
-            if utils::has_cached_playlist() {
-                self.imp().restore_playlist_button.set_visible(true);
-                self.imp()
-                    .restore_playlist_button
-                    .add_css_class("suggested-action");
-                self.imp()
-                    .add_folder_button
-                    .remove_css_class("suggested-action");
-            } else {
-                self.imp().restore_playlist_button.set_visible(false);
-                self.imp()
-                    .restore_playlist_button
-                    .remove_css_class("suggested-action");
-                self.imp()
-                    .add_folder_button
-                    .add_css_class("suggested-action");
-            }
-
-            let state = player.state();
-            if state.playing() || !queue.is_empty() {
-                self.switch_mode(WindowMode::MainView);
-            } else {
-                self.switch_mode(WindowMode::InitialView);
-            }
+            self.update_library_for_queue();
         }
     }
 
@@ -1373,31 +1486,7 @@ impl Window {
                     .sync_create()
                     .build();
 
-                list_item
-                    .bind_property("item", &row, "track")
-                    .sync_create()
-                    .build();
-
-                list_item
-                    .property_expression("item")
-                    .chain_property::<Track>("row-subtitle")
-                    .bind(&row, "track-artist", gtk::Widget::NONE);
-                list_item
-                    .property_expression("item")
-                    .chain_property::<Track>("row-title")
-                    .bind(&row, "track-title", gtk::Widget::NONE);
-                list_item
-                    .property_expression("item")
-                    .chain_property::<Track>("cover")
-                    .bind(&row, "track-cover", gtk::Widget::NONE);
-                list_item
-                    .property_expression("item")
-                    .chain_property::<Track>("playing")
-                    .bind(&row, "playing", gtk::Widget::NONE);
-                list_item
-                    .property_expression("item")
-                    .chain_property::<Track>("selected")
-                    .bind(&row, "selected", gtk::Widget::NONE);
+                row.bind_list_item(list_item);
             }
         ));
         imp.playlist_view
@@ -1704,7 +1793,7 @@ impl Window {
 
         if !imp.settings.boolean("enable-recoloring") {
             imp.provider.load_from_string("");
-            imp.main_stack.remove_css_class("main-window");
+            imp.toast_overlay.remove_css_class("main-window");
             return;
         }
 
@@ -1730,8 +1819,8 @@ impl Window {
                 css.push_str("}");
 
                 imp.provider.load_from_string(&css);
-                if !imp.main_stack.has_css_class("main-window") {
-                    imp.main_stack.add_css_class("main-window");
+                if !imp.toast_overlay.has_css_class("main-window") {
+                    imp.toast_overlay.add_css_class("main-window");
                 }
 
                 self.action_set_enabled("win.enable-recoloring", true);
@@ -1741,7 +1830,7 @@ impl Window {
         }
 
         imp.provider.load_from_string("");
-        imp.main_stack.remove_css_class("main-window");
+        imp.toast_overlay.remove_css_class("main-window");
         self.action_set_enabled("win.enable-recoloring", false);
     }
 
@@ -1781,6 +1870,7 @@ impl Window {
     pub fn open_files(&self, files: &[gio::File]) {
         if files.is_empty() {
             self.add_toast(i18n("Unable to access files"));
+            self.end_startup();
             return;
         }
 
@@ -1834,7 +1924,7 @@ impl Window {
                 let dialog = TrackInfoDialog::new(&track);
 
                 // Follow the colors of the cover, like the main window
-                if self.imp().main_stack.has_css_class("main-window") {
+                if self.imp().toast_overlay.has_css_class("main-window") {
                     dialog.add_css_class("recolored");
                 }
 
@@ -1882,20 +1972,6 @@ impl Window {
         }
     }
 
-    pub fn switch_mode(&self, mode: WindowMode) {
-        let stack = self.imp().main_stack.get();
-        match mode {
-            WindowMode::InitialView => {
-                stack.set_visible_child_name("initial-view");
-                self.set_default_widget(Some(&self.imp().add_folder_button.get()));
-            }
-            WindowMode::MainView => {
-                stack.set_visible_child_name("main-view");
-                self.set_default_widget(Some(&self.imp().playback_control.play_button()));
-            }
-        };
-    }
-
     pub fn set_replaygain(&self, replaygain: ReplayGainMode) {
         let imp = self.imp();
 
@@ -1937,55 +2013,4 @@ impl Window {
     pub fn set_track_position(&self, position: f64) {
         self.imp().waveform_view.set_position(position);
     }
-}
-
-// The headers of the sections in the playlist: a line between each section,
-// followed by the name of the work for the movements of a work
-fn work_header_factory() -> gtk::ListItemFactory {
-    let factory = gtk::SignalListItemFactory::new();
-
-    factory.connect_setup(|_, item| {
-        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
-
-        let separator = gtk::Separator::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .css_classes(["work-separator"])
-            .build();
-        let work_label = gtk::Label::builder()
-            .xalign(0.0)
-            .wrap(true)
-            .wrap_mode(gtk::pango::WrapMode::WordChar)
-            .css_classes(["work-title"])
-            .build();
-
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .build();
-        content.append(&separator);
-        content.append(&work_label);
-        header.set_child(Some(&content));
-    });
-
-    factory.connect_bind(|_, item| {
-        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
-        let Some(content) = header.child() else {
-            return;
-        };
-        let separator = content.first_child().unwrap();
-        let work_label = content.last_child().and_downcast::<gtk::Label>().unwrap();
-
-        // Nothing to separate at the top of the playlist
-        separator.set_visible(header.start() > 0);
-
-        let work = header
-            .item()
-            .and_downcast::<Track>()
-            .and_then(|t| t.movement_work());
-        work_label.set_visible(work.is_some());
-        work_label.set_label(work.as_deref().unwrap_or_default());
-
-        content.set_visible(separator.is_visible() || work_label.is_visible());
-    });
-
-    factory.upcast()
 }

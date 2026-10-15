@@ -1,0 +1,616 @@
+// SPDX-FileCopyrightText: 2026  John Hamilton
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! The albums in the Music folder
+//!
+//! Reading the tags of every track takes a while, so they are kept in an
+//! SQLite database in the user data directory, and only the files that
+//! changed since the last scan are read again. The scan runs in a separate
+//! thread, and reports its progress over a channel; the UI reads the albums
+//! back from the database once it's done.
+
+mod album;
+
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    time::{Instant, UNIX_EPOCH},
+};
+
+pub use album::Album;
+use async_channel::Sender;
+use gtk::{gio, glib, prelude::*};
+use itertools::Itertools;
+use lofty::{
+    config::ParseOptions,
+    prelude::{Accessor, TaggedFileExt},
+    probe::Probe,
+    tag::{ItemKey, Tag},
+};
+use log::{debug, warn};
+use rusqlite::{Connection, OptionalExtension, params};
+use sha2::{Digest, Sha256};
+
+use crate::{
+    audio::{CoverCache, normalize_search_text, tag_search_text},
+    i18n::i18n,
+    utils,
+};
+
+// Bump when the schema or the way the tags are read changes, so that
+// the whole library is read again
+const SCHEMA_VERSION: i32 = 3;
+
+// The size of the covers in the grid, accounting for HiDPI
+const THUMBNAIL_SIZE: i32 = 256;
+
+pub enum ScanEvent {
+    // The number of files read so far, out of the files that changed
+    Progress(usize, usize),
+    Finished,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlbumInfo {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub year: Option<String>,
+    pub cover: Option<String>,
+}
+
+// The tags we keep for each track
+#[derive(Default)]
+struct TrackTags {
+    album_id: Option<String>,
+    album: Option<String>,
+    album_artist: Option<String>,
+    artist: Option<String>,
+    artist_sort: Option<String>,
+    year: Option<String>,
+    disc: Option<u32>,
+    track: Option<u32>,
+    title: Option<String>,
+    // The text that searching looks into, as in the playlist
+    search: Option<String>,
+}
+
+// The XDG Music folder; without a user-dirs.dirs file, GLib doesn't know
+// about one, so we look for the usual "Music" folder in the home directory
+pub fn music_dir() -> Option<PathBuf> {
+    glib::user_special_dir(glib::UserDirectory::Music)
+        .filter(|dir| *dir != glib::home_dir())
+        .or_else(|| Some(glib::home_dir().join("Music")))
+        .filter(|dir| dir.is_dir())
+}
+
+fn data_dir() -> PathBuf {
+    let mut dir = glib::user_data_dir();
+    dir.push("amberol");
+    dir
+}
+
+fn covers_dir() -> PathBuf {
+    let mut dir = glib::user_cache_dir();
+    dir.push("amberol");
+    dir.push("album-covers");
+    dir
+}
+
+fn open() -> rusqlite::Result<Connection> {
+    let dir = data_dir();
+    glib::mkdir_with_parents(&dir, 0o755);
+
+    let conn = Connection::open(dir.join("library.db"))?;
+    // The scan writes while the UI reads
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+
+    let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != SCHEMA_VERSION {
+        // The tracks are read again; the covers of the albums are kept, as
+        // they take a while to create, and the scan replaces the ones of the
+        // albums that are gone or changed
+        debug!("Library schema version {version}, recreating it");
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS tracks;
+             CREATE TABLE tracks (
+                 path TEXT PRIMARY KEY,
+                 mtime INTEGER NOT NULL,
+                 size INTEGER NOT NULL,
+                 album_id TEXT,
+                 album TEXT,
+                 album_artist TEXT,
+                 artist TEXT,
+                 artist_sort TEXT,
+                 year TEXT,
+                 disc INTEGER,
+                 track INTEGER,
+                 title TEXT,
+                 search TEXT
+             );
+             CREATE INDEX tracks_album ON tracks (album_id);
+             CREATE TABLE IF NOT EXISTS covers (
+                 album_id TEXT PRIMARY KEY,
+                 path TEXT
+             );",
+        )?;
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    }
+
+    Ok(conn)
+}
+
+// The albums, sorted by artist, then year and title
+pub fn albums() -> Vec<AlbumInfo> {
+    let query = |conn: &Connection| -> rusqlite::Result<Vec<AlbumInfo>> {
+        let mut stmt = conn.prepare(
+            "SELECT t.album_id, MAX(t.album),
+                    COALESCE(MAX(t.album_artist),
+                             CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
+                                  ELSE MAX(t.artist) END),
+                    MIN(t.year), c.path, MAX(t.artist_sort)
+             FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
+             WHERE t.album_id IS NOT NULL
+             GROUP BY t.album_id",
+        )?;
+        // Without an album artist, the albums whose tracks are by different
+        // artists are compilations
+        let various = i18n("Various Artists");
+        let rows = stmt.query_map([], |row| {
+            let artist = row
+                .get::<_, Option<String>>(2)?
+                .unwrap_or_else(|| various.clone());
+            let sort_key = row
+                .get::<_, Option<String>>(5)?
+                .unwrap_or_else(|| artist.clone());
+            let info = AlbumInfo {
+                id: row.get(0)?,
+                title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                artist,
+                year: row.get(3)?,
+                cover: row.get(4)?,
+            };
+            let key = (
+                glib::CollationKey::from(sort_key.as_str()),
+                info.year.clone(),
+                glib::CollationKey::from(info.title.as_str()),
+            );
+            Ok((key, info))
+        })?;
+
+        // Sorted by artist, then year and title, in the order of the
+        // current locale
+        let mut albums = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        albums.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        Ok(albums.into_iter().map(|(_, info)| info).collect())
+    };
+
+    match open().and_then(|conn| query(&conn)) {
+        Ok(albums) => albums,
+        Err(e) => {
+            warn!("Unable to load the albums: {e}");
+            Vec::new()
+        }
+    }
+}
+
+// The albums with a track that contains every word, which must be
+// normalized with `normalize_search_text()`, like in the playlist
+pub fn search_albums(words: &[String]) -> HashSet<String> {
+    let query = |conn: &Connection| -> rusqlite::Result<HashSet<String>> {
+        let conditions = vec!["instr(search, ?) > 0"; words.len()].join(" AND ");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT DISTINCT album_id FROM tracks
+             WHERE album_id IS NOT NULL AND {conditions}"
+        ))?;
+        stmt.query_map(rusqlite::params_from_iter(words), |row| row.get(0))?
+            .collect()
+    };
+
+    match open().and_then(|conn| query(&conn)) {
+        Ok(albums) => albums,
+        Err(e) => {
+            warn!("Unable to search the albums: {e}");
+            HashSet::new()
+        }
+    }
+}
+
+// The files of the tracks of an album, in order
+pub fn album_tracks(album_id: &str) -> Vec<PathBuf> {
+    let query = |conn: &Connection| -> rusqlite::Result<Vec<PathBuf>> {
+        let mut stmt = conn.prepare(
+            "SELECT path FROM tracks
+             WHERE album_id = ?1
+             ORDER BY COALESCE(disc, 0), COALESCE(track, 0), path",
+        )?;
+        stmt.query_map([album_id], |row| row.get::<_, String>(0).map(PathBuf::from))?
+            .collect()
+    };
+
+    match open().and_then(|conn| query(&conn)) {
+        Ok(tracks) => tracks,
+        Err(e) => {
+            warn!("Unable to load the tracks of album {album_id}: {e}");
+            Vec::new()
+        }
+    }
+}
+
+// Updates the database with the tracks in `music_dir`; this blocks, so it
+// should be called from a separate thread
+pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {
+    let now = Instant::now();
+    if let Err(e) = scan_internal(music_dir, sender) {
+        warn!("Unable to scan the library: {e}");
+    }
+    debug!("Library scan: {} ms", now.elapsed().as_millis());
+
+    let _ = sender.send_blocking(ScanEvent::Finished);
+}
+
+fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Result<()> {
+    let mut conn = open()?;
+
+    let files = utils::load_files_from_folder(&gio::File::for_path(music_dir), true);
+
+    // Find the files that are new or changed since the last scan
+    let mut known = std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT path, mtime, size FROM tracks")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                (row.get::<_, i64>(1)?, row.get::<_, i64>(2)?),
+            ))
+        })?;
+        for row in rows {
+            let (path, stamp) = row?;
+            known.insert(path, stamp);
+        }
+    }
+
+    let mut present = HashSet::new();
+    let mut changed = Vec::new();
+    for file in files {
+        let Some(path) = file.path() else {
+            continue;
+        };
+        if !utils::is_audio_path(&path) {
+            continue;
+        }
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            continue;
+        };
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or_default();
+        let size = metadata.len() as i64;
+
+        let path = path.to_string_lossy().to_string();
+        if known.get(&path) != Some(&(mtime, size)) {
+            changed.push((path.clone(), mtime, size));
+        }
+        present.insert(path);
+    }
+
+    debug!(
+        "Library: {} tracks, {} new or changed",
+        present.len(),
+        changed.len()
+    );
+
+    // The albums whose cover should be looked for again
+    let mut stale_albums = HashSet::new();
+
+    let total = changed.len();
+    for (i, chunk) in changed.chunks(200).enumerate() {
+        let tx = conn.transaction()?;
+        {
+            let mut old_album =
+                tx.prepare("SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL")?;
+            let mut upsert = tx.prepare(
+                "INSERT OR REPLACE INTO tracks
+                 (path, mtime, size, album_id, album, album_artist, artist, artist_sort,
+                  year, disc, track, title, search)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            )?;
+            for (path, mtime, size) in chunk {
+                if let Some(id) = old_album
+                    .query_row([path], |row| row.get::<_, String>(0))
+                    .optional()?
+                {
+                    stale_albums.insert(id);
+                }
+
+                // A changed track might have new cover art; new tracks
+                // don't make the cover of their album stale, so that the
+                // covers are kept when the whole library is read again
+                let tags = read_tags(Path::new(path));
+                if let Some(id) = tags.album_id.as_ref().filter(|_| known.contains_key(path)) {
+                    stale_albums.insert(id.clone());
+                }
+
+                upsert.execute(params![
+                    path,
+                    mtime,
+                    size,
+                    tags.album_id,
+                    tags.album,
+                    tags.album_artist,
+                    tags.artist,
+                    tags.artist_sort,
+                    tags.year,
+                    tags.disc,
+                    tags.track,
+                    tags.title,
+                    tags.search,
+                ])?;
+            }
+        }
+        tx.commit()?;
+
+        let done = (i * 200 + chunk.len()).min(total);
+        let _ = sender.send_blocking(ScanEvent::Progress(done, total));
+    }
+
+    // Forget the files that are gone
+    let gone: Vec<String> = known
+        .keys()
+        .filter(|path| !present.contains(*path))
+        .cloned()
+        .collect();
+    if !gone.is_empty() {
+        debug!("Library: {} tracks removed", gone.len());
+        let tx = conn.transaction()?;
+        {
+            let mut old_album =
+                tx.prepare("SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL")?;
+            let mut delete = tx.prepare("DELETE FROM tracks WHERE path = ?1")?;
+            for path in &gone {
+                if let Some(id) = old_album
+                    .query_row([path], |row| row.get::<_, String>(0))
+                    .optional()?
+                {
+                    stale_albums.insert(id);
+                }
+                delete.execute([path])?;
+            }
+        }
+        tx.commit()?;
+    }
+
+    update_covers(&mut conn, &stale_albums)
+}
+
+// Creates the thumbnails of the albums that don't have one yet, or whose
+// tracks changed; the thumbnails are in the cache directory, so they might
+// have been removed since the last scan
+fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusqlite::Result<()> {
+    let mut missing = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT t.album_id, MIN(t.path), c.album_id, c.path
+             FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
+             WHERE t.album_id IS NOT NULL
+             GROUP BY t.album_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?.is_some(),
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, first_track, has_row, cover) = row?;
+            // Albums without cover art have no thumbnail, so we only check
+            // that the thumbnails we created are still there
+            let removed = cover.is_some_and(|p| !Path::new(&p).exists());
+            if !has_row || removed || stale_albums.contains(&id) {
+                missing.push((id, first_track));
+            }
+        }
+    }
+
+    debug!("Library: generating {} album covers", missing.len());
+
+    let dir = covers_dir();
+    glib::mkdir_with_parents(&dir, 0o755);
+
+    let tx = conn.transaction()?;
+    {
+        let mut upsert =
+            tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
+        for (id, first_track) in missing {
+            let path = dir.join(format!("{id}.png"));
+            let cover = create_thumbnail(Path::new(&first_track), &path)
+                .then(|| path.to_string_lossy().to_string());
+            upsert.execute(params![id, cover])?;
+        }
+        tx.execute(
+            "DELETE FROM covers WHERE album_id NOT IN
+             (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)",
+            [],
+        )?;
+    }
+    tx.commit()?;
+
+    remove_unused_covers(conn, &dir)
+}
+
+// Removes the thumbnails of the albums that are gone, or whose id changed
+fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
+    let used = conn
+        .prepare("SELECT path FROM covers WHERE path IS NOT NULL")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<HashSet<String>>>()?;
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "png")
+            && !used.contains(path.to_string_lossy().as_ref())
+        {
+            debug!("Removing unused album cover {:?}", path);
+            if let Err(e) = std::fs::remove_file(&path) {
+                warn!("Unable to remove album cover {:?}: {e}", path);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn create_thumbnail(track: &Path, dest: &Path) -> bool {
+    let Some(tagged_file) = Probe::open(track).ok().and_then(|p| p.read().ok()) else {
+        return false;
+    };
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
+
+    let bytes = match tag {
+        Some(tag) => CoverCache::load_cover_art(tag, track.parent()),
+        None => None,
+    };
+    let Some(pixbuf) = bytes.and_then(|b| utils::load_scaled_cover(&b, THUMBNAIL_SIZE)) else {
+        return false;
+    };
+
+    match pixbuf.savev(dest, "png", &[]) {
+        Ok(_) => true,
+        Err(e) => {
+            warn!("Unable to save album cover {:?}: {e}", dest);
+            false
+        }
+    }
+}
+
+fn read_tags(path: &Path) -> TrackTags {
+    let mut options = ParseOptions::new();
+    options.read_cover_art(false).read_properties(false);
+
+    let probe = match Probe::open(path).map(|p| p.options(options).guess_file_type()) {
+        Ok(Ok(p)) => p,
+        Ok(Err(e)) => {
+            warn!("Unable to parse file type {:?}: {e}", path);
+            return TrackTags::default();
+        }
+        Err(e) => {
+            warn!("Unable to open {:?}: {e}", path);
+            return TrackTags::default();
+        }
+    };
+    let tagged_file = match probe.read() {
+        Ok(f) => f,
+        Err(e) => {
+            warn!("Unable to read {:?}: {e}", path);
+            return TrackTags::default();
+        }
+    };
+
+    match tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())
+    {
+        Some(tag) => TrackTags::from_tag(tag, path),
+        None => TrackTags::default(),
+    }
+}
+
+// The folder of the album a track is in; the discs of an album are often
+// in their own folders, e.g. "CD 1" or "Disc 2"
+fn album_folder(path: &Path) -> Option<&Path> {
+    let parent = path.parent()?;
+    let name = parent.file_name()?.to_string_lossy().to_lowercase();
+    let is_disc_folder = ["cd", "disc", "disk"].iter().any(|prefix| {
+        name.strip_prefix(prefix).is_some_and(|rest| {
+            let rest = rest.trim_start_matches([' ', '_', '-', '.']);
+            !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+        })
+    });
+
+    if is_disc_folder {
+        parent.parent()
+    } else {
+        Some(parent)
+    }
+}
+
+impl TrackTags {
+    fn from_tag(tag: &Tag, path: &Path) -> Self {
+        let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
+
+        let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
+        let album_artist = get(ItemKey::AlbumArtist).filter(|s| !s.is_empty());
+        let artist = tag
+            .artist()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let artist_sort = get(ItemKey::AlbumArtistSortOrder).filter(|s| !s.is_empty());
+        let year = get(ItemKey::RecordingDate)
+            .or_else(|| get(ItemKey::Year))
+            .or_else(|| get(ItemKey::ReleaseDate))
+            .map(|s| s.chars().take(4).collect::<String>())
+            .filter(|s| !s.is_empty());
+
+        // Tracks without an album are not part of the grid. The release
+        // id from MusicBrainz tells apart albums with the same name;
+        // without it, we use the album artist, so the discs of an album in
+        // separate folders stay together. Compilations often have no album
+        // artist, and a different artist for each track, so we fall back to
+        // the folder the album is in
+        let album_id = album.as_ref().map(|album| {
+            match get(ItemKey::MusicBrainzReleaseId).filter(|s| !s.is_empty()) {
+                Some(mbid) => mbid,
+                None => {
+                    let mut hasher = Sha256::new();
+                    hasher.update(album);
+                    hasher.update([0]);
+                    match (&album_artist, album_folder(path)) {
+                        (Some(artist), _) => hasher.update(artist),
+                        (None, Some(folder)) => {
+                            hasher.update(folder.as_os_str().as_encoded_bytes())
+                        }
+                        (None, None) => (),
+                    }
+                    format!("{:x}", hasher.finalize())
+                }
+            }
+        });
+
+        // The same text as `Track::search_key()`, so that searching the
+        // albums matches the same tracks as searching the playlist
+        let title = tag.title().map(|s| s.to_string());
+        let search = normalize_search_text(
+            &[
+                tag.get_strings(ItemKey::TrackArtist).join(", "),
+                title.clone().unwrap_or_default(),
+                tag_search_text(tag),
+            ]
+            .join(" "),
+        );
+
+        TrackTags {
+            album_id,
+            album,
+            album_artist,
+            artist,
+            artist_sort,
+            year,
+            disc: tag.disk(),
+            track: tag.track(),
+            title,
+            search: Some(search),
+        }
+    }
+}

@@ -1,6 +1,8 @@
 data/io.bassi.Amberol.desktop.in.in
 data/io.bassi.Amberol.gschema.xml
 data/io.bassi.Amberol.metainfo.xml.in.in
+src/gtk/album-tracks.blp
+src/gtk/library-view.blp
 src/gtk/playback-control.blp
 src/gtk/playlist-view.blp
 src/gtk/queue-row.blp
@@ -10,7 +12,10 @@ src/gtk/window.blp
 src/application.rs
 src/audio/inhibit_controller.rs
 src/audio/track.rs
+src/album_tracks.rs
 src/cover_picture.rs
+src/library/mod.rs
+src/library_view.rs
 src/playback_control.rs
 src/track_info_dialog.rs
 src/window.rs

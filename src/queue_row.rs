@@ -163,6 +163,25 @@ impl Default for QueueRow {
 }
 
 impl QueueRow {
+    // Shows the track of the list item, like in the playlist
+    pub fn bind_list_item(&self, list_item: &gtk::ListItem) {
+        list_item
+            .bind_property("item", self, "track")
+            .sync_create()
+            .build();
+
+        let item = list_item.property_expression("item");
+        item.chain_property::<Track>("row-subtitle")
+            .bind(self, "track-artist", gtk::Widget::NONE);
+        item.chain_property::<Track>("row-title")
+            .bind(self, "track-title", gtk::Widget::NONE);
+        item.chain_property::<Track>("cover")
+            .bind(self, "track-cover", gtk::Widget::NONE);
+        item.chain_property::<Track>("playing")
+            .bind(self, "playing", gtk::Widget::NONE);
+        item.chain_property::<Track>("selected")
+            .bind(self, "selected", gtk::Widget::NONE);
+    }
     pub fn new() -> Self {
         Self::default()
     }

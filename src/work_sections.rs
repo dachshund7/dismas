@@ -112,3 +112,54 @@ fn section_key(model: &gio::ListModel, position: u32) -> Option<(String, String)
     let work = track.movement_work()?;
     Some((work, track.composer()))
 }
+
+// The headers of the sections in the playlist: a line between each section,
+// followed by the name of the work for the movements of a work
+pub fn work_header_factory() -> gtk::ListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+
+    factory.connect_setup(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+
+        let separator = gtk::Separator::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .css_classes(["work-separator"])
+            .build();
+        let work_label = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .css_classes(["work-title"])
+            .build();
+
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
+        content.append(&separator);
+        content.append(&work_label);
+        header.set_child(Some(&content));
+    });
+
+    factory.connect_bind(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        let Some(content) = header.child() else {
+            return;
+        };
+        let separator = content.first_child().unwrap();
+        let work_label = content.last_child().and_downcast::<gtk::Label>().unwrap();
+
+        // Nothing to separate at the top of the playlist
+        separator.set_visible(header.start() > 0);
+
+        let work = header
+            .item()
+            .and_downcast::<Track>()
+            .and_then(|t| t.movement_work());
+        work_label.set_visible(work.is_some());
+        work_label.set_label(work.as_deref().unwrap_or_default());
+
+        content.set_visible(separator.is_visible() || work_label.is_visible());
+    });
+
+    factory.upcast()
+}

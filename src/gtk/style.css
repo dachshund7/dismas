@@ -144,7 +144,8 @@ dragoverlay {
   transition-timing-function: ease;
 }
 
-.main-window > overlay-split-view > widget.background > playlistview {
+.main-window > overlay-split-view > widget.background > stack > playlistview,
+.main-window > overlay-split-view > widget.background > stack > albumtracks {
   background: linear-gradient(127deg, color-mix(in srgb, var(--background-color-0) 55%, transparent), color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%),
               linear-gradient(217deg, color-mix(in srgb, var(--background-color-1) 55%, transparent), color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%),
               linear-gradient(336deg, color-mix(in srgb, var(--background-color-2) 55%, transparent), color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%),
@@ -215,4 +216,29 @@ listview.navigation-sidebar > header separator.work-separator {
 listview.navigation-sidebar > header label.work-title {
   font-weight: 800;
   margin: 6px 12px 2px 12px;
+}
+
+gridview.album-grid {
+  padding: 12px;
+}
+
+/* With "Match Cover Art", the colors of the window show between the
+ * covers, instead of the background of the grid */
+.main-window gridview.album-grid {
+  background: none;
+}
+
+gridview.album-grid > child {
+  padding: 6px;
+  border-radius: 12px;
+}
+
+gridview.album-grid .album-cover {
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.08);
+}
+
+gridview.album-grid label.album-title {
+  font-weight: 600;
+  margin-top: 3px;
 }

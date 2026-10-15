@@ -15,79 +15,27 @@ template $AmberolWindow: Adw.ApplicationWindow {
       title: _("Drop a track to add it to the playlist");
 
       child: Adw.ToastOverlay toast_overlay {
-        child: Stack main_stack {
-          transition-type: crossfade;
+        child: Adw.OverlaySplitView split_view {
+          max-sidebar-width: 330;
+          sidebar-width-fraction: 0.4;
 
-          StackPage {
-            name: "initial-view";
+          content: Stack content_stack {
+            transition-type: crossfade;
 
-            child: Adw.ToolbarView {
-              [top]
-              Adw.HeaderBar {
-                show-title: false;
-              }
+            StackPage {
+              name: "player";
 
-              content: Adw.Clamp {
-                maximum-size: 450;
-                vexpand: true;
-                valign: fill;
-
-                child: Adw.StatusPage status_page {
-                  margin-start: 12;
-                  margin-end: 12;
-                  title: "Amberol";
-                  description: _("Select a file or a folder, or drag files from your file manager to the application window to add tracks to the playlist");
-
-                  child: Box {
-                    orientation: vertical;
-                    halign: center;
-                    homogeneous: true;
-                    spacing: 12;
-
-                    Button restore_playlist_button {
-                      label: _("Restore Playlist");
-                      action-name: "queue.restore-playlist";
-
-                      styles [
-                        "suggested-action",
-                        "pill",
-                      ]
-                    }
-
-                    Button add_folder_button {
-                      label: _("Add Folder");
-                      action-name: "queue.add-folder";
-
-                      styles [
-                        "pill",
-                      ]
-                    }
-
-                    Button {
-                      label: _("Add Track");
-                      action-name: "queue.add-track";
-
-                      styles [
-                        "pill",
-                      ]
-                    }
-                  };
-                };
-              };
-            };
-          }
-
-          StackPage {
-            name: "main-view";
-
-            child: Adw.OverlaySplitView split_view {
-              max-sidebar-width: 330;
-              sidebar-width-fraction: 0.4;
-
-              content: Adw.ToolbarView {
+              child: Adw.ToolbarView {
                 [top]
                 Adw.HeaderBar {
                   show-title: false;
+
+                  [start]
+                  Button {
+                    icon-name: "view-grid-symbolic";
+                    action-name: "win.browse-albums";
+                    tooltip-text: _("Browse Albums");
+                  }
                 }
 
                 content: Box main_box {
@@ -159,23 +107,42 @@ template $AmberolWindow: Adw.ApplicationWindow {
                   }
                 };
               };
+            }
 
-              sidebar: Box {
-                $AmberolPlaylistView playlist_view {
-                  hexpand: true;
-                }
+            StackPage {
+              name: "library";
 
-                Box sidebar_handle {
-                  width-request: 6;
-                  tooltip-text: _("Drag to Resize the Playlist, Double-Click to Reset");
+              child: $AmberolLibraryView library_view {};
+            }
+          };
 
-                  styles [
-                    "sidebar-handle",
-                  ]
-                }
-              };
-            };
-          }
+          sidebar: Box {
+            Stack sidebar_stack {
+              hexpand: true;
+              transition-type: crossfade;
+
+              StackPage {
+                name: "playlist";
+
+                child: $AmberolPlaylistView playlist_view {};
+              }
+
+              StackPage {
+                name: "album";
+
+                child: $AmberolAlbumTracks album_tracks {};
+              }
+            }
+
+            Box sidebar_handle {
+              width-request: 6;
+              tooltip-text: _("Drag to Resize the Playlist, Double-Click to Reset");
+
+              styles [
+                "sidebar-handle",
+              ]
+            }
+          };
         };
       };
     }

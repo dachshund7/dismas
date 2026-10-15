@@ -71,22 +71,35 @@ pub fn load_cover_texture(buffer: &glib::Bytes) -> Option<gdk_pixbuf::Pixbuf> {
 const FULL_COVER_SIZE: i32 = 1024;
 
 pub fn load_full_cover(buffer: &glib::Bytes) -> Option<gdk_pixbuf::Pixbuf> {
+    load_scaled_cover(buffer, FULL_COVER_SIZE)
+}
+
+// Loads the cover art, scaled down to fit in `max_size`, keeping its
+// aspect ratio; smaller covers are not scaled up
+pub fn load_scaled_cover(buffer: &glib::Bytes, max_size: i32) -> Option<gdk_pixbuf::Pixbuf> {
     let stream = gio::MemoryInputStream::from_bytes(buffer);
     let pixbuf = gdk_pixbuf::Pixbuf::from_stream(&stream, gio::Cancellable::NONE).ok()?;
 
     let width = pixbuf.width();
     let height = pixbuf.height();
-    if width <= FULL_COVER_SIZE && height <= FULL_COVER_SIZE {
+    if width <= max_size && height <= max_size {
         return Some(pixbuf);
     }
 
     let (w, h) = if width > height {
-        (FULL_COVER_SIZE, FULL_COVER_SIZE * height / width)
+        (max_size, max_size * height / width)
     } else {
-        (FULL_COVER_SIZE * width / height, FULL_COVER_SIZE)
+        (max_size * width / height, max_size)
     };
 
     pixbuf.scale_simple(w, h, gdk_pixbuf::InterpType::Hyper)
+}
+
+// Whether a file is an audio track, guessing from its name only, which is
+// much faster than looking at its contents when scanning a whole library
+pub fn is_audio_path(path: &std::path::Path) -> bool {
+    let (mime_type, _) = gio::content_type_guess(Some(path), None);
+    mime_type.starts_with("audio") && !mime_type.ends_with("x-mpegurl")
 }
 
 pub fn cache_cover_art(uuid: &str, pixbuf: &gdk_pixbuf::Pixbuf) -> Option<PathBuf> {
