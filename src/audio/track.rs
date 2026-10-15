@@ -62,6 +62,11 @@ pub struct TrackCredits {
     pub arrangers: Vec<String>,
     pub conductors: Vec<String>,
     pub performers: Vec<Performer>,
+    pub producers: Vec<String>,
+    pub engineers: Vec<String>,
+    pub mixers: Vec<String>,
+    pub remixers: Vec<String>,
+    pub dj_mixers: Vec<String>,
     pub album_artist: Option<String>,
     pub date: Option<String>,
     pub labels: Vec<String>,
@@ -85,6 +90,11 @@ impl TrackCredits {
                 .iter()
                 .map(|s| Performer::parse(s))
                 .collect(),
+            producers: tag_strings(tag, ItemKey::Producer),
+            engineers: tag_strings(tag, ItemKey::Engineer),
+            mixers: tag_strings(tag, ItemKey::MixEngineer),
+            remixers: tag_strings(tag, ItemKey::Remixer),
+            dj_mixers: tag_strings(tag, ItemKey::MixDj),
             album_artist: tag.get_string(ItemKey::AlbumArtist).map(|s| s.to_string()),
             date: tag
                 .get_string(ItemKey::RecordingDate)

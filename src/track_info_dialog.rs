@@ -17,6 +17,8 @@ mod imp {
         #[template_child]
         pub performance_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
+        pub production_group: TemplateChild<adw::PreferencesGroup>,
+        #[template_child]
         pub release_group: TemplateChild<adw::PreferencesGroup>,
     }
 
@@ -84,6 +86,15 @@ impl TrackInfoDialog {
             performance.push((role, vec![performer.name.clone()]));
         }
         fill_group(&imp.performance_group, &performance);
+
+        let production = [
+            (i18n("Producer"), credits.producers.clone()),
+            (i18n("Engineer"), credits.engineers.clone()),
+            (i18n("Mixer"), credits.mixers.clone()),
+            (i18n("Remixer"), credits.remixers.clone()),
+            (i18n("DJ-Mixer"), credits.dj_mixers.clone()),
+        ];
+        fill_group(&imp.production_group, &production);
 
         // Only show the album artist if it adds anything
         let album_artist = credits
