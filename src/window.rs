@@ -209,11 +209,6 @@ mod imp {
             // from the search entries: bindings only get the keys the focused
             // widget doesn't handle
             klass.add_binding_action(
-                gdk::Key::a,
-                gdk::ModifierType::CONTROL_MASK,
-                "queue.select-all",
-            );
-            klass.add_binding_action(
                 gdk::Key::Delete,
                 gdk::ModifierType::empty(),
                 "queue.remove-selected",
@@ -439,6 +434,7 @@ impl Window {
         win.setup_playlist();
         win.setup_sidebar_handle();
         win.setup_drop_target();
+        win.setup_select_all_shortcut();
         win.setup_library();
         win.setup_provider();
         win.bind_state();
@@ -1696,6 +1692,20 @@ impl Window {
                     }
                 ));
         }
+    }
+
+    // Ctrl+A selects the items of the pane with the focus, even from its
+    // search entry, so it's handled before the focused widget gets it; the
+    // grid and the lists would otherwise take it for their own selection,
+    // which does nothing, and the search entries for selecting their text
+    fn setup_select_all_shortcut(&self) {
+        let controller = gtk::ShortcutController::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("<Control>a"),
+            Some(gtk::NamedAction::new("queue.select-all")),
+        ));
+        self.add_controller(controller);
     }
 
     fn setup_drop_target(&self) {
