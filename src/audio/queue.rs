@@ -183,6 +183,19 @@ impl Queue {
     }
 
     pub fn next_track(&self) -> Option<Track> {
+        self.advance(self.imp().repeat_mode.get())
+    }
+
+    // The track after the current one, even when repeating it
+    pub fn following_track(&self) -> Option<Track> {
+        let repeat_mode = match self.imp().repeat_mode.get() {
+            RepeatMode::RepeatOne => RepeatMode::Consecutive,
+            repeat_mode => repeat_mode,
+        };
+        self.advance(repeat_mode)
+    }
+
+    fn advance(&self, repeat_mode: RepeatMode) -> Option<Track> {
         let store = &self.imp().model;
 
         let n_tracks = store.n_items();
@@ -190,7 +203,6 @@ impl Queue {
             return None;
         }
 
-        let repeat_mode = self.imp().repeat_mode.get();
         if let Some(current) = self.current_track_index() {
             let next: Option<u32> = match repeat_mode {
                 RepeatMode::Consecutive if current < n_tracks - 1 => Some(current + 1),

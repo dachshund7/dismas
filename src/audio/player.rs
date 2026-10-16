@@ -326,6 +326,12 @@ impl AudioPlayer {
     }
 
     pub fn skip_next(&self) {
+        self.play_next_track(Queue::next_track);
+    }
+
+    // Goes on to the track that `next_track` picks in the queue, or stops
+    // at the first track if there is none
+    fn play_next_track(&self, next_track: impl FnOnce(&Queue) -> Option<Track>) {
         if self.queue.is_empty() {
             return;
         }
@@ -334,7 +340,7 @@ impl AudioPlayer {
             current_track.set_playing(false);
         }
 
-        if let Some(next_track) = self.queue.next_track() {
+        if let Some(next_track) = next_track(&self.queue) {
             debug!("Playing next (skip-next): {}", next_track.uri());
 
             let was_playing = self.state.playing();
@@ -523,8 +529,9 @@ impl AudioPlayer {
     }
 
     pub fn remove_track(&self, track: &Track) {
+        // Repeating the track would keep playing it after it's gone
         if track.playing() {
-            self.skip_next();
+            self.play_next_track(Queue::following_track);
         }
 
         self.queue.remove_track(track);
