@@ -32,16 +32,13 @@ mod imp {
         fn set_model(&self, model: Option<gio::ListModel>) {
             if let Some(ref model) = model {
                 model.connect_items_changed(clone!(
-                    #[strong(rename_to = this)]
+                    #[weak(rename_to = this)]
                     self.obj(),
                     move |_, position, removed, added| {
-                        if let Some(ref shuffle) = *this.imp().shuffle.borrow()
-                            && let Some(shuffled_pos) = shuffle.get(position as usize)
-                        {
-                            this.items_changed(*shuffled_pos, removed, added);
-                            return;
-                        }
-
+                        let (position, removed, added) = this
+                            .imp()
+                            .update_shuffle(position, removed, added)
+                            .unwrap_or((position, removed, added));
                         this.items_changed(position, removed, added);
                     }
                 ));
@@ -49,6 +46,44 @@ mod imp {
             self.model.replace(model);
 
             self.obj().notify_model();
+        }
+
+        // Keeps the shuffled order in step with a change of the model, and
+        // returns the change in the shuffled order, if it is shuffled. The
+        // items keep their place in the shuffled order, and the new ones go
+        // at the end of it
+        fn update_shuffle(
+            &self,
+            position: u32,
+            removed: u32,
+            added: u32,
+        ) -> Option<(u32, u32, u32)> {
+            let mut shuffle = self.shuffle.borrow_mut();
+            let shuffle = shuffle.as_mut()?;
+            let old_len = shuffle.len() as u32;
+
+            // Removing a single item is the only removal that is a single
+            // range in the shuffled order
+            let removed_at = if removed == 1 && added == 0 {
+                shuffle.iter().position(|&pos| pos == position)
+            } else {
+                None
+            };
+
+            let end = position + removed;
+            shuffle.retain(|&pos| pos < position || pos >= end);
+            for pos in shuffle.iter_mut() {
+                if *pos >= end {
+                    *pos = *pos - removed + added;
+                }
+            }
+            shuffle.extend(position..position + added);
+
+            Some(match removed_at {
+                Some(shuffled_pos) => (shuffled_pos as u32, 1, 0),
+                None if removed == 0 => (old_len, 0, added),
+                None => (0, old_len, shuffle.len() as u32),
+            })
         }
     }
 
@@ -111,7 +146,9 @@ impl ShuffleListModel {
             let n_tracks = model.n_items();
             let mut rng = rand::rng();
 
-            let positions: Vec<u32> = if anchor == 0 {
+            let positions: Vec<u32> = if n_tracks == 0 {
+                Vec::new()
+            } else if anchor == 0 {
                 let mut before: Vec<u32> = vec![0];
                 let mut after: Vec<u32> = (1..n_tracks).collect();
                 after.shuffle(&mut rng);
@@ -147,5 +184,81 @@ impl ShuffleListModel {
             self.imp().shuffle.replace(None);
             self.items_changed(0, model.n_items(), model.n_items());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use gtk::{gio, glib, prelude::*};
+
+    use super::ShuffleListModel;
+
+    fn items(model: &impl IsA<gio::ListModel>) -> Vec<glib::Object> {
+        (0..model.n_items())
+            .map(|i| model.item(i).unwrap())
+            .collect()
+    }
+
+    // The `items-changed` signals of a model
+    type Changes = Rc<RefCell<Vec<(u32, u32, u32)>>>;
+
+    // A shuffled model of `n` items, and the changes it reports
+    fn shuffled(n: usize) -> (gio::ListStore, ShuffleListModel, Changes) {
+        let store = gio::ListStore::new::<glib::Object>();
+        for _ in 0..n {
+            store.append(&glib::Object::new::<glib::Object>());
+        }
+        let model = ShuffleListModel::new(Some(&store));
+        model.reshuffle(0);
+
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        model.connect_items_changed({
+            let changes = changes.clone();
+            move |_, position, removed, added| changes.borrow_mut().push((position, removed, added))
+        });
+
+        (store, model, changes)
+    }
+
+    #[test]
+    fn removing_an_item_keeps_the_shuffled_order() {
+        let (store, model, changes) = shuffled(20);
+        let mut order = items(&model);
+
+        let removed = store.item(7).unwrap();
+        let shuffled_pos = order.iter().position(|o| *o == removed).unwrap();
+        store.remove(7);
+        order.remove(shuffled_pos);
+
+        assert_eq!(*changes.borrow(), [(shuffled_pos as u32, 1, 0)]);
+        assert_eq!(items(&model), order);
+    }
+
+    #[test]
+    fn added_items_go_at_the_end() {
+        let (store, model, changes) = shuffled(20);
+        let mut order = items(&model);
+
+        let added = glib::Object::new::<glib::Object>();
+        store.insert(3, &added);
+        order.push(added);
+
+        assert_eq!(*changes.borrow(), [(20, 0, 1)]);
+        assert_eq!(items(&model), order);
+    }
+
+    #[test]
+    fn removing_all_items_is_a_valid_change() {
+        let (store, model, changes) = shuffled(20);
+        // The last item stays last, and the ones before it are shuffled
+        model.reshuffle(19);
+        changes.borrow_mut().clear();
+
+        store.remove_all();
+
+        assert_eq!(*changes.borrow(), [(0, 20, 0)]);
+        assert_eq!(model.n_items(), 0);
     }
 }
