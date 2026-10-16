@@ -8,6 +8,7 @@ src/gtk/playlist-view.blp
 src/gtk/queue-row.blp
 src/gtk/shortcuts-dialog.blp
 src/gtk/track-info-dialog.blp
+src/gtk/volume-control.blp
 src/gtk/window.blp
 src/application.rs
 src/audio/inhibit_controller.rs
