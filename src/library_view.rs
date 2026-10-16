@@ -100,6 +100,9 @@ mod imp {
         // The selected albums, with the words of the search each was
         // selected in, so that only the tracks that matched it are added
         pub selected: RefCell<HashMap<String, Vec<String>>>,
+        // The last album selected or unselected with a click, where
+        // Shift+click starts selecting from
+        pub selection_anchor: glib::WeakRef<Album>,
         // Tracks are being added to the playlist
         pub loading: Cell<bool>,
 
@@ -139,6 +142,7 @@ mod imp {
             }
             if !selection_mode {
                 self.obj().unselect_all();
+                self.selection_anchor.set(None);
             }
             self.obj().notify_selection_mode();
         }
@@ -278,9 +282,13 @@ impl LibraryView {
                     .build();
                 cover.add_overlay(&picture);
 
+                // Clicks go to the cell, which toggles the selection like a
+                // click anywhere else on it, and keeps track of the last one
+                // clicked for Shift+click
                 let check = gtk::CheckButton::builder()
                     .halign(gtk::Align::Start)
                     .valign(gtk::Align::Start)
+                    .can_target(false)
                     .css_classes(["selection-mode"])
                     .build();
                 this.bind_property("selection-mode", &check, "visible")
@@ -336,7 +344,9 @@ impl LibraryView {
                 content.append(&title);
                 content.append(&artist);
 
-                // Ctrl+click selects the album, like in the playlist
+                // Ctrl+click selects the album, and Shift+click in selection
+                // mode the albums from the last one clicked, like in the
+                // playlist
                 let click = gtk::GestureClick::new();
                 click.connect_pressed(clone!(
                     #[weak]
@@ -344,15 +354,19 @@ impl LibraryView {
                     #[weak]
                     item,
                     move |gesture, _, _, _| {
-                        if !gesture
-                            .current_event_state()
-                            .contains(gdk::ModifierType::CONTROL_MASK)
-                        {
+                        let state = gesture.current_event_state();
+                        let range =
+                            state.contains(gdk::ModifierType::SHIFT_MASK) && this.selection_mode();
+                        if !range && !state.contains(gdk::ModifierType::CONTROL_MASK) {
                             return;
                         }
                         gesture.set_state(gtk::EventSequenceState::Claimed);
                         if let Some(album) = item.item().and_downcast::<Album>() {
-                            this.toggle_album(&album);
+                            if range {
+                                this.select_range(&album);
+                            } else {
+                                this.toggle_album(&album);
+                            }
                         }
                     }
                 ));
@@ -616,6 +630,33 @@ impl LibraryView {
             self.set_album_selected(album, true);
         } else {
             self.set_album_selected(album, !album.selected());
+        }
+        self.imp().selection_anchor.set(Some(album));
+    }
+
+    // Selects the albums from the last one clicked to this one, in the
+    // order of the grid; without a last one, it toggles the album like a
+    // click
+    fn select_range(&self, album: &Album) {
+        let anchor = self.imp().selection_anchor.upgrade();
+        let Some(model) = self.imp().grid_view.model() else {
+            return;
+        };
+        // The items of the selection model are typed as GObject, so
+        // `iter::<Album>()` would panic
+        let albums: Vec<Album> = (0..model.n_items())
+            .filter_map(|i| model.item(i).and_downcast::<Album>())
+            .collect();
+        let position = |album: &Album| albums.iter().position(|a| a == album);
+
+        let Some((from, to)) = anchor.as_ref().and_then(position).zip(position(album)) else {
+            self.toggle_album(album);
+            return;
+        };
+        for album in &albums[from.min(to)..=from.max(to)] {
+            if !album.selected() {
+                self.set_album_selected(album, true);
+            }
         }
     }
 

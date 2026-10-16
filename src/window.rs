@@ -113,6 +113,9 @@ mod imp {
         pub playlist_visible: Cell<bool>,
         #[property(get, set = Self::set_playlist_selection, explicit_notify)]
         pub playlist_selection: Cell<bool>,
+        // The last track selected or unselected with a click, where
+        // Shift+click starts selecting from
+        pub playlist_anchor: glib::WeakRef<Track>,
         #[property(get, set = Self::set_playlist_search, explicit_notify)]
         pub playlist_search: Cell<bool>,
         #[property(get, set = Self::set_replaygain_mode, explicit_notify, builder(ReplayGainMode::default()))]
@@ -261,6 +264,7 @@ mod imp {
                 playlist_shuffled: Cell::new(false),
                 playlist_visible: Cell::new(true),
                 playlist_selection: Cell::new(false),
+                playlist_anchor: glib::WeakRef::new(),
                 playlist_search: Cell::new(false),
                 playlist_filtermodel: RefCell::default(),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
@@ -331,6 +335,9 @@ mod imp {
                 if !selection && let Some(player) = obj.player() {
                     let queue = player.queue();
                     queue.unselect_all_tracks();
+                }
+                if !selection {
+                    self.playlist_anchor.set(None);
                 }
 
                 self.playlist_view.queue_actionbar().set_revealed(selection);

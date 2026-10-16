@@ -15,6 +15,24 @@ use crate::{
 // the document portal
 pub const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
 
+// Selects the tracks of a list from `from` to `to`, both included, in the
+// order of the list; returns false if either is not in it
+pub fn select_track_range(model: &gio::ListModel, from: &Track, to: &Track) -> bool {
+    let position = |track: &Track| {
+        (0..model.n_items()).find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
+    };
+    let (Some(from), Some(to)) = (position(from), position(to)) else {
+        return false;
+    };
+
+    for i in from.min(to)..=from.max(to) {
+        if let Some(track) = model.item(i).and_downcast::<Track>() {
+            track.set_selected(true);
+        }
+    }
+    true
+}
+
 pub fn settings_manager() -> gio::Settings {
     // We ship a single schema for both default and development profiles
     let app_id = APPLICATION_ID.trim_end_matches(".Devel");

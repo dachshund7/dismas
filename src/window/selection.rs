@@ -59,7 +59,29 @@ impl Window {
         } else {
             track.set_selected(!track.selected());
         }
+        self.imp().playlist_anchor.set(Some(track));
         self.update_selected_count();
+    }
+
+    // Selects the tracks from the last one clicked to this one, in the
+    // order of the playlist or the search results; without a last one,
+    // it toggles the track like a click
+    pub(super) fn select_playlist_range(&self, track: &Track) {
+        let imp = self.imp();
+        let anchor = imp.playlist_anchor.upgrade();
+        let model = imp.playlist_view.queue_view().model();
+        let selected = match (anchor, model) {
+            (Some(anchor), Some(model)) => {
+                utils::select_track_range(model.upcast_ref(), &anchor, track)
+            }
+            _ => false,
+        };
+
+        if selected {
+            self.update_selected_count();
+        } else {
+            self.toggle_playlist_track(track);
+        }
     }
 
     pub(super) fn remove_selected_tracks(&self) {

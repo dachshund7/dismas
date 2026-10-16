@@ -120,6 +120,9 @@ mod imp {
                         .build(),
                     // A Ctrl+click, to select the track
                     Signal::builder("select-requested").build(),
+                    // A Shift+click in selection mode, to select the tracks
+                    // from the last one clicked to this one
+                    Signal::builder("range-select-requested").build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -259,23 +262,39 @@ impl QueueRow {
         ));
         self.add_controller(long_press);
 
-        let ctrl_click = gtk::GestureClick::new();
-        ctrl_click.connect_pressed(clone!(
+        let modifier_click = gtk::GestureClick::new();
+        modifier_click.connect_pressed(clone!(
             #[weak(rename_to = this)]
             self,
             move |gesture, _, _, _| {
-                if !gesture
-                    .current_event_state()
-                    .contains(gdk::ModifierType::CONTROL_MASK)
+                let state = gesture.current_event_state();
+                let signal = if state.contains(gdk::ModifierType::SHIFT_MASK)
+                    && this.imp().selection_mode.get()
                 {
+                    "range-select-requested"
+                } else if state.contains(gdk::ModifierType::CONTROL_MASK) {
+                    "select-requested"
+                } else {
                     return;
-                }
-                // Instead of playing the track
+                };
+                // Instead of activating the row, which plays the track or
+                // toggles its selection
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                this.emit_by_name::<()>("select-requested", &[]);
+                this.emit_by_name::<()>(signal, &[]);
             }
         ));
-        self.add_controller(ctrl_click);
+        self.add_controller(modifier_click);
+    }
+
+    pub fn connect_range_select_requested<F: Fn(&Self) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "range-select-requested",
+            false,
+            glib::closure_local!(move |row: &Self| f(row)),
+        )
     }
 
     pub fn connect_select_requested<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
@@ -303,7 +322,10 @@ impl QueueRow {
         let (icon, label) = if imp.paused.get() {
             ("media-playback-pause-symbolic", pi18n("a11y", "Paused"))
         } else {
-            ("media-playback-start-symbolic", pi18n("a11y", "Currently playing"))
+            (
+                "media-playback-start-symbolic",
+                pi18n("a11y", "Currently playing"),
+            )
         };
         for image in [&*imp.track_playing_image, &*imp.selection_playing_image] {
             image.set_icon_name(Some(icon));

@@ -16,6 +16,7 @@ use crate::{
     i18n::{i18n, ni18n_f},
     library::{self, Album},
     queue_row::QueueRow,
+    utils,
     work_sections::{WorkSectionModel, work_header_factory},
 };
 
@@ -47,6 +48,9 @@ mod imp {
         // tracks are played or added
         #[property(get, set = Self::set_selection_mode)]
         pub selection_mode: Cell<bool>,
+        // The last track selected or unselected with a click, where
+        // Shift+click starts selecting from
+        pub selection_anchor: glib::WeakRef<Track>,
         // Tracks are being added to the playlist
         pub loading: Cell<bool>,
 
@@ -83,6 +87,7 @@ mod imp {
             }
             if !selection_mode {
                 self.obj().unselect_all();
+                self.selection_anchor.set(None);
             }
             self.obj().update_selection();
             self.obj().notify_selection_mode();
@@ -207,6 +212,15 @@ impl AlbumTracks {
                         }
                     }
                 ));
+                row.connect_range_select_requested(clone!(
+                    #[weak]
+                    this,
+                    move |row| {
+                        if let Some(track) = row.track() {
+                            this.select_range(&track);
+                        }
+                    }
+                ));
                 row.connect_notify_local(
                     Some("selected"),
                     clone!(
@@ -312,7 +326,27 @@ impl AlbumTracks {
         } else {
             track.set_selected(!track.selected());
         }
+        self.imp().selection_anchor.set(Some(track));
         self.update_selection();
+    }
+
+    // Selects the tracks from the last one clicked to this one; without a
+    // last one, it toggles the track like a click
+    fn select_range(&self, track: &Track) {
+        let anchor = self.imp().selection_anchor.upgrade();
+        let model = self.imp().tracks_view.model();
+        let selected = match (anchor, model) {
+            (Some(anchor), Some(model)) => {
+                utils::select_track_range(model.upcast_ref(), &anchor, track)
+            }
+            _ => false,
+        };
+
+        if selected {
+            self.update_selection();
+        } else {
+            self.toggle_track(track);
+        }
     }
 
     pub fn select_all(&self) {

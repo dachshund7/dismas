@@ -280,12 +280,6 @@ impl Queue {
         }
     }
 
-    pub fn select_track_at(&self, index: u32) {
-        if let Some(track) = self.track_at(index) {
-            track.set_selected(!track.selected());
-        }
-    }
-
     pub fn unselect_all_tracks(&self) {
         for track in self.imp().store.iter::<Track>().flatten() {
             track.set_selected(false);

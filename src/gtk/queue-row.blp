@@ -96,6 +96,10 @@ template $AmberolQueueRow: Widget {
         CheckButton selected_button {
           halign: center;
           valign: center;
+          // Clicks go to the row, which toggles the selection like a click
+          // anywhere else on it, and keeps track of the last one clicked
+          // for Shift+click
+          can-target: false;
 
           styles [
             "selection-mode",

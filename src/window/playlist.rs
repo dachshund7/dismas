@@ -41,6 +41,15 @@ impl Window {
                         }
                     }
                 ));
+                row.connect_range_select_requested(clone!(
+                    #[weak]
+                    win,
+                    move |row| {
+                        if let Some(track) = row.track() {
+                            win.select_playlist_range(&track);
+                        }
+                    }
+                ));
 
                 win.bind_property("playlist-selection", &row, "selection-mode")
                     .sync_create()
@@ -97,7 +106,7 @@ impl Window {
 
                         if let Some(real_pos) = real_pos {
                             if win.playlist_selection() {
-                                queue.select_track_at(real_pos);
+                                win.toggle_playlist_track(&track);
                                 return;
                             }
                             if queue.current_track_index() != Some(real_pos) {
