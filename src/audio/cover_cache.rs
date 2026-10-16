@@ -170,7 +170,8 @@ impl CoverCache {
 
         // We use the album and artist to ensure we share the
         // same cover data for every track in the album; if we
-        // don't have an album, we use the file name
+        // don't have an album, we use the file name; paths are hashed as
+        // bytes, as they are not always valid UTF-8
         let mut hasher = Sha256::new();
         if let Some(album) = album {
             hasher.update(&album);
@@ -182,10 +183,10 @@ impl CoverCache {
             }
 
             if let Some(parent) = path.parent() {
-                hasher.update(parent.to_str().unwrap());
+                hasher.update(parent.as_os_str().as_encoded_bytes());
             }
         } else {
-            hasher.update(path.to_str().unwrap());
+            hasher.update(path.as_os_str().as_encoded_bytes());
         }
 
         let uuid = format!("{:x}", hasher.finalize());
