@@ -378,7 +378,12 @@ impl TrackData {
         let now = Instant::now();
 
         let file = gio::File::for_uri(uri);
-        let path = file.path().expect("Unable to find file");
+        // Files without a local path, like the ones in the trash or on the
+        // web, can't be read by lofty
+        let Some(path) = file.path() else {
+            warn!("Unable to find a local path for {}", uri);
+            return TrackData::default();
+        };
 
         let (mime_type, _) = gio::content_type_guess(Some(&path), None);
         if !mime_type.starts_with("audio") || mime_type.ends_with("x-mpegurl") {
