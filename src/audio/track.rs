@@ -291,6 +291,12 @@ fn album_artist_search_text(tag: &Tag, album_artist: &str) -> String {
     text
 }
 
+// The artists of a track, if the tags name any
+fn track_artist(tag: &Tag) -> Option<String> {
+    let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");
+    (!artists.is_empty()).then_some(artists)
+}
+
 // All the values for a key, including the ones that were stored as a
 // single value separated by semicolons
 fn tag_strings(tag: &Tag, key: ItemKey) -> Vec<String> {
@@ -423,7 +429,7 @@ impl TrackData {
         let mut cover_uuid = None;
         if let Some(tag) = tagged_file.primary_tag() {
             debug!("Found primary tag");
-            artist = Some(tag.get_strings(ItemKey::TrackArtist).join(", "));
+            artist = track_artist(tag);
             title = tag.title().map(|s| s.to_string());
             album = tag.album().map(|s| s.to_string());
             credits = TrackCredits::from_tag(tag);
@@ -436,9 +442,11 @@ impl TrackData {
             warn!("Unable to load primary tag for: {}", uri);
             for tag in tagged_file.tags() {
                 debug!("Found tag: {:?}", tag.tag_type());
-                artist = Some(tag.get_strings(ItemKey::TrackArtist).join(", "));
-                title = tag.title().map(|s| s.to_string());
-                album = tag.album().map(|s| s.to_string());
+                // The tags that come later fill in for the ones missing
+                // from the first
+                artist = artist.or_else(|| track_artist(tag));
+                title = title.or_else(|| tag.title().map(|s| s.to_string()));
+                album = album.or_else(|| tag.album().map(|s| s.to_string()));
                 credits = TrackCredits::from_tag(tag);
                 tag_text = tag_search_text(tag);
                 if let Some(res) = cover_cache.cover_art(&path, tag) {
