@@ -112,7 +112,11 @@ impl Window {
                             if queue.current_track_index() != Some(real_pos) {
                                 player.skip_to(real_pos);
                                 player.play();
-                            } else if !player.state().playing() {
+                            } else if player.state().playing() {
+                                // Activating the playing track pauses it
+                                player.pause();
+                                return;
+                            } else {
                                 player.play();
                             }
                             // Playing a track brings up the player in place
