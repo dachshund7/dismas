@@ -97,7 +97,7 @@ mod imp {
         fn open(&self, files: &[gio::File], _hint: &str) {
             debug!("Application::open");
 
-            // The files take the place of the playlist of the last session
+            // The files take the place of the queue of the last session
             self.obj().present_main_window(false).open_files(files);
         }
     }
@@ -180,7 +180,7 @@ impl Application {
         glib::ControlFlow::Continue
     }
 
-    // With `restore`, a new window restores the playlist of the last
+    // With `restore`, a new window restores the queue of the last
     // session, if the user wants it; otherwise, the caller adds tracks
     fn present_main_window(&self, restore: bool) -> Window {
         let window = if let Some(window) = self.active_window().and_downcast::<Window>() {
@@ -188,7 +188,7 @@ impl Application {
         } else {
             let window = Window::new(self);
             if restore {
-                window.restore_playlist_on_startup();
+                window.restore_queue_on_startup();
             }
             window
         };

@@ -147,9 +147,17 @@ pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::F
     res
 }
 
-pub fn store_playlist(queue: &Queue) {
+// The queue is saved as a PLS playlist, which needs a "playlist" group
+fn queue_cache_file() -> std::path::PathBuf {
+    let mut path = glib::user_cache_dir();
+    path.push("amberol");
+    path.push("queue.pls");
+    path
+}
+
+pub fn store_queue(queue: &Queue) {
     let pls = glib::KeyFile::new();
-    pls.set_string("playlist", "X-GNOME-Title", "Amberol's current playlist");
+    pls.set_string("playlist", "X-GNOME-Title", "Amberol's queue");
 
     pls.set_int64("playlist", "NumberOfEntries", i64::from(queue.n_tracks()));
 
@@ -158,27 +166,21 @@ pub fn store_playlist(queue: &Queue) {
         pls.set_value("playlist", &format!("File{i}"), &track.uri());
     }
 
-    let mut pls_cache = glib::user_cache_dir();
-    pls_cache.push("amberol");
-    pls_cache.push("playlists");
-    glib::mkdir_with_parents(&pls_cache, 0o755);
+    let pls_cache = queue_cache_file();
+    if let Some(dir) = pls_cache.parent() {
+        glib::mkdir_with_parents(dir, 0o755);
+    }
 
-    pls_cache.push("current.pls");
     match pls.save_to_file(&pls_cache) {
-        Ok(_) => debug!("Current playlist updated to: {pls_cache:?}"),
-        Err(e) => debug!("Unable to save current playlist: {e}"),
+        Ok(()) => debug!("Queue saved to: {pls_cache:?}"),
+        Err(e) => debug!("Unable to save the queue: {e}"),
     }
 }
 
-pub fn load_cached_tracks() -> Option<Vec<gio::File>> {
-    let mut pls_cache = glib::user_cache_dir();
-    pls_cache.push("amberol");
-    pls_cache.push("playlists");
-    pls_cache.push("current.pls");
-
+pub fn load_cached_queue() -> Option<Vec<gio::File>> {
     let pls = glib::KeyFile::new();
-    if let Err(e) = pls.load_from_file(&pls_cache, glib::KeyFileFlags::NONE) {
-        debug!("Unable to load current playlist: {e}");
+    if let Err(e) = pls.load_from_file(queue_cache_file(), glib::KeyFileFlags::NONE) {
+        debug!("Unable to load the saved queue: {e}");
         return None;
     }
 
@@ -187,7 +189,7 @@ pub fn load_cached_tracks() -> Option<Vec<gio::File>> {
     let keys = match pls.keys("playlist") {
         Ok(keys) => keys,
         Err(e) => {
-            debug!("Unable to read current playlist: {e}");
+            debug!("Unable to read the saved queue: {e}");
             return None;
         }
     };
@@ -195,14 +197,8 @@ pub fn load_cached_tracks() -> Option<Vec<gio::File>> {
         .iter()
         .filter_map(|key| {
             let index = key.as_str().strip_prefix("File")?.parse().ok()?;
-            let value = pls.value("playlist", key.as_str()).ok()?;
-            // Older versions saved paths
-            let file = if value.starts_with('/') {
-                gio::File::for_path(value.as_str())
-            } else {
-                gio::File::for_uri(value.as_str())
-            };
-            Some((index, file))
+            let uri = pls.value("playlist", key.as_str()).ok()?;
+            Some((index, gio::File::for_uri(uri.as_str())))
         })
         .collect();
     entries.sort_by_key(|(index, _)| *index);
@@ -210,11 +206,6 @@ pub fn load_cached_tracks() -> Option<Vec<gio::File>> {
     Some(entries.into_iter().map(|(_, file)| file).collect())
 }
 
-pub fn has_cached_playlist() -> bool {
-    let mut pls_cache = glib::user_cache_dir();
-    pls_cache.push("amberol");
-    pls_cache.push("playlists");
-    pls_cache.push("current.pls");
-
-    pls_cache.exists()
+pub fn has_cached_queue() -> bool {
+    queue_cache_file().exists()
 }

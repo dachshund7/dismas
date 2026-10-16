@@ -43,14 +43,14 @@ use crate::{
     work_sections::{WorkSectionModel, work_header_factory},
 };
 
-// What happens once tracks are added to the playlist
+// What happens once tracks are added to the queue
 #[derive(Clone, Copy, PartialEq)]
 enum QueueMode {
     // Stay in the album grid, to keep browsing
     Add,
     // Show the player, e.g. after opening files
     Show,
-    // Show the player, without announcing the tracks, for the playlist
+    // Show the player, without announcing the tracks, for the queue
     // of the last session
     Restore,
     // Show the player, and play the tracks from the given one
@@ -60,7 +60,7 @@ enum QueueMode {
 // Where the menu of a track is shown
 #[derive(Clone, Copy)]
 enum TrackMenu {
-    Playlist,
+    Queue,
     // The tracks of an album from the grid
     Album,
 }
@@ -107,30 +107,30 @@ mod imp {
         pub provider: gtk::CssProvider,
         pub settings: gio::Settings,
 
-        #[property(get, set = Self::set_playlist_shuffled, explicit_notify)]
-        pub playlist_shuffled: Cell<bool>,
+        #[property(get, set = Self::set_queue_shuffled, explicit_notify)]
+        pub queue_shuffled: Cell<bool>,
         #[property(get, set = Self::set_playlist_visible, explicit_notify)]
         pub playlist_visible: Cell<bool>,
-        #[property(get, set = Self::set_playlist_selection, explicit_notify)]
-        pub playlist_selection: Cell<bool>,
+        #[property(get, set = Self::set_queue_selection, explicit_notify)]
+        pub queue_selection: Cell<bool>,
         // The last track selected or unselected with a click, where
         // Shift+click starts selecting from
-        pub playlist_anchor: glib::WeakRef<Track>,
-        #[property(get, set = Self::set_playlist_search, explicit_notify)]
-        pub playlist_search: Cell<bool>,
+        pub queue_anchor: glib::WeakRef<Track>,
+        #[property(get, set = Self::set_queue_search, explicit_notify)]
+        pub queue_search: Cell<bool>,
         #[property(get, set = Self::set_replaygain_mode, explicit_notify, builder(ReplayGainMode::default()))]
         pub replaygain_mode: Cell<ReplayGainMode>,
         pub sidebar_width: Cell<i32>,
         #[property(get, set = Self::set_library_visible, explicit_notify)]
         pub library_visible: Cell<bool>,
-        // Whether the playlist might still be restored or opened at startup
+        // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
         // Whether the sidebar was showing before the tracks of an album
         pub sidebar_was_visible: Cell<bool>,
         // Whether the sidebar was showing before the split view collapsed
         pub sidebar_visible_uncollapsed: Cell<bool>,
 
-        pub playlist_filtermodel: RefCell<Option<gio::ListModel>>,
+        pub queue_filtermodel: RefCell<Option<gio::ListModel>>,
 
         pub notify_playing_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_position_id: RefCell<Option<glib::SignalHandlerId>>,
@@ -235,9 +235,9 @@ mod imp {
             });
 
             klass.install_property_action("queue.toggle", "playlist-visible");
-            klass.install_property_action("queue.shuffle", "playlist-shuffled");
-            klass.install_property_action("queue.select", "playlist-selection");
-            klass.install_property_action("queue.search", "playlist-search");
+            klass.install_property_action("queue.shuffle", "queue-shuffled");
+            klass.install_property_action("queue.select", "queue-selection");
+            klass.install_property_action("queue.search", "queue-search");
             klass.install_property_action("win.browse-albums", "library-visible");
             klass.install_property_action("win.replaygain", "replaygain-mode");
         }
@@ -263,12 +263,12 @@ mod imp {
                 sidebar_stack: TemplateChild::default(),
                 album_tracks: TemplateChild::default(),
                 sidebar_handle: TemplateChild::default(),
-                playlist_shuffled: Cell::new(false),
+                queue_shuffled: Cell::new(false),
                 playlist_visible: Cell::new(true),
-                playlist_selection: Cell::new(false),
-                playlist_anchor: glib::WeakRef::new(),
-                playlist_search: Cell::new(false),
-                playlist_filtermodel: RefCell::default(),
+                queue_selection: Cell::new(false),
+                queue_anchor: glib::WeakRef::new(),
+                queue_search: Cell::new(false),
+                queue_filtermodel: RefCell::default(),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
                 sidebar_width: Cell::new(0),
                 library_visible: Cell::new(false),
@@ -311,10 +311,10 @@ mod imp {
             }
         }
 
-        fn set_playlist_shuffled(&self, shuffled: bool) {
+        fn set_queue_shuffled(&self, shuffled: bool) {
             let obj = self.obj();
 
-            if shuffled != self.playlist_shuffled.replace(shuffled) {
+            if shuffled != self.queue_shuffled.replace(shuffled) {
                 if let Some(player) = obj.player() {
                     let queue = player.queue();
                     let state = player.state();
@@ -327,38 +327,38 @@ mod imp {
                     }
                 }
 
-                obj.notify_playlist_shuffled();
+                obj.notify_queue_shuffled();
             }
         }
 
-        fn set_playlist_selection(&self, selection: bool) {
+        fn set_queue_selection(&self, selection: bool) {
             let obj = self.obj();
 
-            if selection != self.playlist_selection.replace(selection) {
+            if selection != self.queue_selection.replace(selection) {
                 if !selection && let Some(player) = obj.player() {
                     let queue = player.queue();
                     queue.unselect_all_tracks();
                 }
                 if !selection {
-                    self.playlist_anchor.set(None);
+                    self.queue_anchor.set(None);
                 }
 
                 self.playlist_view.queue_actionbar().set_revealed(selection);
                 obj.action_set_enabled("queue.remove-selected", selection);
 
-                obj.notify_playlist_selection();
+                obj.notify_queue_selection();
             }
         }
 
-        fn set_playlist_search(&self, search: bool) {
+        fn set_queue_search(&self, search: bool) {
             let obj = self.obj();
 
-            if search != self.playlist_search.replace(search) {
+            if search != self.queue_search.replace(search) {
                 if search {
                     obj.set_playlist_visible(true);
                 }
                 self.playlist_view.set_search(search);
-                obj.notify_playlist_search();
+                obj.notify_queue_search();
             }
         }
 
@@ -457,7 +457,7 @@ impl Window {
     }
 
     fn setup_actions(&self) {
-        self.add_action(&self.imp().settings.create_action("restore-playlist"));
+        self.add_action(&self.imp().settings.create_action("restore-queue"));
 
         let enable_recoloring = self.imp().settings.boolean("enable-recoloring");
         self.add_action_entries([gio::ActionEntry::builder("enable-recoloring")
@@ -488,7 +488,7 @@ impl Window {
         self.imp().toast_overlay.add_toast(toast);
     }
 
-    // The playlist can change while the toast is up, so the track is
+    // The queue can change while the toast is up, so the track is
     // looked up when the button is clicked
     pub fn add_skip_to_toast(&self, msg: String, button: String, track: &Track) {
         let toast = adw::Toast::new(&msg);

@@ -46,7 +46,7 @@ impl Window {
                     #[weak(rename_to = win)]
                     self,
                     move |_, _| {
-                        win.set_playlist_selection(false);
+                        win.set_queue_selection(false);
                         win.update_play_button();
                     }
                 ),
@@ -202,7 +202,7 @@ impl Window {
                             p.skip_next();
                         }
 
-                        win.update_playlist_time();
+                        win.update_queue_time();
                     }
                 ),
             );
@@ -333,19 +333,19 @@ impl Window {
             .connect_clicked(clone!(
                 #[weak(rename_to = win)]
                 self,
-                move |_| win.select_all_playlist_tracks()
+                move |_| win.select_all_queue_tracks()
             ));
 
         self.imp()
             .playlist_view
-            .playlist_searchbar()
+            .queue_searchbar()
             .connect_notify_local(
                 Some("search-mode-enabled"),
                 clone!(
                     #[weak(rename_to = win)]
                     self,
                     move |searchbar, _| {
-                        win.set_playlist_search(searchbar.is_search_mode());
+                        win.set_queue_search(searchbar.is_search_mode());
                     }
                 ),
             );
@@ -391,7 +391,7 @@ impl Window {
 
         self.imp()
             .playlist_view
-            .playlist_searchbar()
+            .queue_searchbar()
             .set_key_capture_widget(Some(self.upcast_ref::<gtk::Widget>()));
     }
 
@@ -416,7 +416,7 @@ impl Window {
             self.imp()
                 .playback_control
                 .set_repeat_mode(queue.repeat_mode());
-            self.set_playlist_shuffled(queue.is_shuffled());
+            self.set_queue_shuffled(queue.is_shuffled());
 
             self.update_library_for_queue();
         }

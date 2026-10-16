@@ -103,7 +103,7 @@ mod imp {
         // The last album selected or unselected with a click, where
         // Shift+click starts selecting from
         pub selection_anchor: glib::WeakRef<Album>,
-        // Tracks are being added to the playlist
+        // Tracks are being added to the queue
         pub loading: Cell<bool>,
 
         pub model: RefCell<Option<gio::ListStore>>,
@@ -346,7 +346,7 @@ impl LibraryView {
 
                 // Ctrl+click selects the album, and Shift+click in selection
                 // mode the albums from the last one clicked, like in the
-                // playlist
+                // queue
                 let click = gtk::GestureClick::new();
                 click.connect_pressed(clone!(
                     #[weak]
@@ -529,7 +529,7 @@ impl LibraryView {
     }
 
     // Looks for the albums with a track that contains every word of the
-    // search, in any of its tags, like searching the playlist
+    // search, in any of its tags, like searching the queue
     fn update_search(&self) {
         let text = self.imp().search_entry.text();
         let words: Vec<String> = normalize_search_text(&text)
@@ -706,7 +706,7 @@ impl LibraryView {
             .collect()
     }
 
-    // Albums can't be added while tracks are being added to the playlist
+    // Albums can't be added while tracks are being added to the queue
     pub fn set_adding_enabled(&self, enabled: bool) {
         self.imp().loading.set(!enabled);
         self.update_selection();

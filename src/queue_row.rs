@@ -193,7 +193,7 @@ impl Default for QueueRow {
 }
 
 impl QueueRow {
-    // Shows the track of the list item, like in the playlist
+    // Shows the track of the list item, like in the queue
     pub fn bind_list_item(&self, list_item: &gtk::ListItem) {
         list_item
             .bind_property("item", self, "track")
@@ -347,7 +347,7 @@ impl QueueRow {
         }
     }
 
-    // Long titles get truncated in the playlist, so we show the full
+    // Long titles get truncated in the queue, so we show the full
     // text of the row on hover; for movements, that includes the work from
     // the header of their section, which may be scrolled away
     fn update_tooltip(&self) {

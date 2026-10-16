@@ -29,12 +29,12 @@ impl Window {
         }
     }
 
-    // Selects all the tracks in the playlist, or the ones matching the
+    // Selects all the tracks in the queue, or the ones matching the
     // search
-    pub(super) fn select_all_playlist_tracks(&self) {
-        self.set_playlist_selection(true);
-        if self.playlist_search() {
-            if let Some(ref model) = *self.imp().playlist_filtermodel.borrow() {
+    pub(super) fn select_all_queue_tracks(&self) {
+        self.set_queue_selection(true);
+        if self.queue_search() {
+            if let Some(ref model) = *self.imp().queue_filtermodel.borrow() {
                 for idx in 0..model.n_items() {
                     if let Some(track) = model.item(idx).and_downcast::<Track>() {
                         track.set_selected(true);
@@ -50,25 +50,25 @@ impl Window {
         self.update_selected_count();
     }
 
-    // Selects or unselects a track of the playlist, entering selection
+    // Selects or unselects a track of the queue, entering selection
     // mode if needed
-    pub(super) fn toggle_playlist_track(&self, track: &Track) {
-        if self.playlist_selection() {
+    pub(super) fn toggle_queue_track(&self, track: &Track) {
+        if self.queue_selection() {
             track.set_selected(!track.selected());
         } else {
-            self.set_playlist_selection(true);
+            self.set_queue_selection(true);
             track.set_selected(true);
         }
-        self.imp().playlist_anchor.set(Some(track));
+        self.imp().queue_anchor.set(Some(track));
         self.update_selected_count();
     }
 
     // Selects the tracks from the last one clicked to this one, in the
-    // order of the playlist or the search results; without a last one,
+    // order of the queue or the search results; without a last one,
     // it toggles the track like a click
-    pub(super) fn select_playlist_range(&self, track: &Track) {
+    pub(super) fn select_queue_range(&self, track: &Track) {
         let imp = self.imp();
-        let anchor = imp.playlist_anchor.upgrade();
+        let anchor = imp.queue_anchor.upgrade();
         let model = imp.playlist_view.queue_view().model();
         let selected = match (anchor, model) {
             (Some(anchor), Some(model)) => {
@@ -80,7 +80,7 @@ impl Window {
         if selected {
             self.update_selected_count();
         } else {
-            self.toggle_playlist_track(track);
+            self.toggle_queue_track(track);
         }
     }
 
@@ -98,13 +98,13 @@ impl Window {
                 self.remove_track(&track);
             }
 
-            // Store the current state of the playlist
-            utils::store_playlist(queue);
+            // Store the current state of the queue
+            utils::store_queue(queue);
         }
     }
 
     // Leaves selection mode in the grid, the tracks of an album and the
-    // playlist; returns whether any of them was in it
+    // queue; returns whether any of them was in it
     pub(super) fn exit_selection_mode(&self) -> bool {
         let imp = self.imp();
         let mut exited = false;
@@ -116,15 +116,15 @@ impl Window {
             imp.album_tracks.set_selection_mode(false);
             exited = true;
         }
-        if self.playlist_selection() {
-            self.set_playlist_selection(false);
+        if self.queue_selection() {
+            self.set_queue_selection(false);
             exited = true;
         }
         exited
     }
 
     // Ctrl+A selects all the items of the list with the focus: the album
-    // grid, the tracks of an album, or the playlist
+    // grid, the tracks of an album, or the queue
     pub(super) fn select_all(&self) {
         let imp = self.imp();
         let focus = gtk::prelude::GtkWindowExt::focus(self);
@@ -136,7 +136,7 @@ impl Window {
         } else if focus_in(imp.album_tracks.upcast_ref()) {
             imp.album_tracks.select_all();
         } else if self.playlist_visible() && sidebar_page.as_deref() == Some("playlist") {
-            self.select_all_playlist_tracks();
+            self.select_all_queue_tracks();
         } else if self.playlist_visible() && sidebar_page.as_deref() == Some("album") {
             imp.album_tracks.select_all();
         } else if self.library_visible() {

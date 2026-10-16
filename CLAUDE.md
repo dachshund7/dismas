@@ -47,7 +47,7 @@ Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-I
   - `InhibitController`: prevents suspend during playback.
 - Controllers and the UI ask for things by sending `PlaybackAction`s back to the player.
 - `PlayerState` is a GObject whose properties the UI binds to. It is only mutated on the main context.
-- `Queue` is the playlist, a `GListModel` of `Track` GObjects. `ShuffleListModel` is a shuffled view over it.
+- `Queue` is the list of tracks to play, a `GListModel` of `Track` GObjects. `ShuffleListModel` is a shuffled view over it.
 - Covers are deduplicated across tracks of the same album through a global `CoverCache`.
 - Cover art comes from the tags and could be crafted, so `cover_image.rs` decodes it with glycin, in sandboxed loader processes. Only the decoded pixels are scaled, color-picked and saved as PNG in the app. Decoding blocks, so it never runs on the main thread.
 - Tags and covers are read in a worker thread: `load_tracks()` (`audio/track.rs`) sends `TrackData` over a channel, and the main thread wraps it in `Track` GObjects, which are not `Send`.
@@ -59,9 +59,9 @@ Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-I
 - **Resources:** Meson compiles the `.blp` files to `.ui` and bundles them with CSS and icons through `src/amberol.gresource.xml`. Templates load from `/io/bassi/Amberol/<name>.ui`.
 - **Adding a widget:** update the `.blp` list in `src/gtk/meson.build`, the gresource XML and `po/POTFILES.in` together.
 - **Stale resources after editing `.blp` files:** the gresource bundle doesn't track the compiled `.ui` files, so the first `ninja` run can leave the old UI in `_build/src/amberol.gresource`. Run `ninja` a second time.
-- **Window coordination:** `Window` is the coordinator. `window.rs` holds its template, properties and `win.*` actions, and its methods are split by area into `window/*.rs`: `bindings.rs` (binding `PlayerState` and the queue to the widgets), `loading.rs` (opening files, drag-and-drop, restoring the playlist), `playlist.rs`, `selection.rs`, `albums.rs` (the album grid), `now_playing.rs`, `sidebar.rs` and `track_menu.rs`. Playlist search filtering is in `search.rs`.
+- **Window coordination:** `Window` is the coordinator. `window.rs` holds its template, properties and `win.*` actions, and its methods are split by area into `window/*.rs`: `bindings.rs` (binding `PlayerState` and the queue to the widgets), `loading.rs` (opening files, drag-and-drop, restoring the queue), `playlist.rs` (the playlist pane, which shows the queue), `selection.rs`, `albums.rs` (the album grid), `now_playing.rs`, `sidebar.rs` and `track_menu.rs`. Queue search filtering is in `search.rs`.
 - **Settings:** stored through GSettings (`data/io.bassi.Amberol.gschema.xml`).
-- **Saved playlist:** kept in the user cache dir (`utils.rs`) so "Restore Playlist" can reload it.
+- **Saved queue:** kept as a PLS file in the user cache dir (`utils.rs`) so "Restore Queue at Startup" can reload it.
 
 ### Translations
 

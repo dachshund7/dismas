@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Filters the playlist, keeping the tracks that contain every word of the
+// Filters the queue, keeping the tracks that contain every word of the
 // search, in any of their tags; matching ignores case and accents.
 //
 // Fuzzy matching used to be used here, but the tags of classical music are

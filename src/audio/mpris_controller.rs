@@ -69,7 +69,7 @@ impl MprisController {
 
         if let Some(track) = self.track.take() {
             // Clients pass the id back when setting the position; a new one
-            // for each track, as the same track can be in the playlist
+            // for each track, as the same track can be in the queue
             // more than once
             let track_id = self.next_track_id.get();
             self.next_track_id.set(track_id + 1);

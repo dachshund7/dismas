@@ -25,11 +25,11 @@ mod imp {
         #[template_child]
         pub queue_selected_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub playlist_progress: TemplateChild<gtk::ProgressBar>,
+        pub queue_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
-        pub playlist_searchbar: TemplateChild<gtk::SearchBar>,
+        pub queue_searchbar: TemplateChild<gtk::SearchBar>,
         #[template_child]
-        pub playlist_searchentry: TemplateChild<gtk::SearchEntry>,
+        pub queue_searchentry: TemplateChild<gtk::SearchEntry>,
     }
 
     #[glib::object_subclass]
@@ -86,8 +86,8 @@ impl PlaylistView {
     }
 
     fn setup_searchbar(&self) {
-        let entry = self.imp().playlist_searchentry.get();
-        self.imp().playlist_searchbar.connect_entry(&entry);
+        let entry = self.imp().queue_searchentry.get();
+        self.imp().queue_searchbar.connect_entry(&entry);
     }
 
     pub fn back_button(&self) -> gtk::Button {
@@ -118,29 +118,29 @@ impl PlaylistView {
         self.imp().queue_length_label.get()
     }
 
-    pub fn playlist_searchbar(&self) -> gtk::SearchBar {
-        self.imp().playlist_searchbar.get()
+    pub fn queue_searchbar(&self) -> gtk::SearchBar {
+        self.imp().queue_searchbar.get()
     }
 
-    pub fn playlist_searchentry(&self) -> gtk::SearchEntry {
-        self.imp().playlist_searchentry.get()
+    pub fn queue_searchentry(&self) -> gtk::SearchEntry {
+        self.imp().queue_searchentry.get()
     }
 
     pub fn begin_loading(&self) {
-        self.imp().playlist_progress.set_fraction(0.0);
-        self.imp().playlist_progress.set_visible(true);
+        self.imp().queue_progress.set_fraction(0.0);
+        self.imp().queue_progress.set_visible(true);
     }
 
     pub fn end_loading(&self) {
-        self.imp().playlist_progress.set_visible(false);
+        self.imp().queue_progress.set_visible(false);
     }
 
     pub fn update_loading(&self, cur: u32, max: u32) {
         let step = f64::from(cur) / f64::from(max);
-        self.imp().playlist_progress.set_fraction(step);
+        self.imp().queue_progress.set_fraction(step);
     }
 
     pub fn set_search(&self, search: bool) {
-        self.imp().playlist_searchbar.set_search_mode(search);
+        self.imp().queue_searchbar.set_search_mode(search);
     }
 }

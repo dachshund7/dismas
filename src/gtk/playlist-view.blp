@@ -13,7 +13,7 @@ template $AmberolPlaylistView: Widget {
         icon-name: "system-search-symbolic";
         action-name: "queue.search";
         valign: center;
-        tooltip-text: _("Search Tracks in the Playlist");
+        tooltip-text: _("Search Tracks in the Queue");
       }
 
       title-widget: Box queue_length_box {
@@ -22,7 +22,7 @@ template $AmberolPlaylistView: Widget {
 
         Label {
           ellipsize: end;
-          label: _("Playlist");
+          label: _("Queue");
 
           styles [
             "heading",
@@ -52,13 +52,13 @@ template $AmberolPlaylistView: Widget {
         icon-name: "selection-mode-symbolic";
         action-name: "queue.select";
         valign: center;
-        tooltip-text: _("Select Tracks in the Playlist");
+        tooltip-text: _("Select Tracks in the Queue");
       }
     }
 
     [top]
-    SearchBar playlist_searchbar {
-      child: SearchEntry playlist_searchentry {
+    SearchBar queue_searchbar {
+      child: SearchEntry queue_searchentry {
         placeholder-text: _("Search tracks");
         hexpand: true;
 
@@ -69,9 +69,9 @@ template $AmberolPlaylistView: Widget {
       };
     }
 
-    content: Overlay playlist_overlay {
+    content: Overlay queue_overlay {
       [overlay]
-      ProgressBar playlist_progress {
+      ProgressBar queue_progress {
         valign: start;
         hexpand: true;
         visible: false;

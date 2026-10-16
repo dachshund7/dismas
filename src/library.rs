@@ -72,7 +72,7 @@ struct TrackTags {
     disc: Option<u32>,
     track: Option<u32>,
     title: Option<String>,
-    // The text that searching looks into, as in the playlist
+    // The text that searching looks into, as in the queue
     search: Option<String>,
 }
 
@@ -198,7 +198,7 @@ pub fn albums() -> Vec<AlbumInfo> {
 }
 
 // The albums with a track that contains every word, which must be
-// normalized with `normalize_search_text()`, like in the playlist
+// normalized with `normalize_search_text()`, like in the queue
 pub fn search_albums(words: &[String]) -> HashSet<String> {
     let query = |conn: &Connection| -> rusqlite::Result<HashSet<String>> {
         let conditions = vec!["instr(search, ?) > 0"; words.len()].join(" AND ");
@@ -621,7 +621,7 @@ impl TrackTags {
         });
 
         // The same text as `Track::search_key()`, so that searching the
-        // albums matches the same tracks as searching the playlist
+        // albums matches the same tracks as searching the queue
         let title = tag.title().map(|s| s.to_string());
         let search = normalize_search_text(
             &[

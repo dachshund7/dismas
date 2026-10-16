@@ -45,7 +45,7 @@ impl Window {
             move |_, _| {
                 win.remove_track(&track);
                 if let Some(player) = win.player() {
-                    utils::store_playlist(player.queue());
+                    utils::store_queue(player.queue());
                 }
             }
         ));
@@ -65,7 +65,7 @@ impl Window {
 
         let select = gio::SimpleAction::new("select", None);
         select.set_enabled(match kind {
-            TrackMenu::Playlist => !self.playlist_selection(),
+            TrackMenu::Queue => !self.queue_selection(),
             TrackMenu::Album => !self.imp().album_tracks.selection_mode(),
         });
         select.connect_activate(clone!(
@@ -74,7 +74,7 @@ impl Window {
             #[strong]
             track,
             move |_, _| match kind {
-                TrackMenu::Playlist => win.toggle_playlist_track(&track),
+                TrackMenu::Queue => win.toggle_queue_track(&track),
                 TrackMenu::Album => win.imp().album_tracks.toggle_track(&track),
             }
         ));
@@ -86,10 +86,10 @@ impl Window {
         menu.append(Some(&i18n("Select")), Some("track.select"));
         let section = gio::Menu::new();
         match kind {
-            TrackMenu::Playlist => {
-                section.append(Some(&i18n("Remove from Playlist")), Some("track.remove"));
+            TrackMenu::Queue => {
+                section.append(Some(&i18n("Remove from Queue")), Some("track.remove"));
             }
-            TrackMenu::Album => section.append(Some(&i18n("Add to Playlist")), Some("track.add")),
+            TrackMenu::Album => section.append(Some(&i18n("Add to Queue")), Some("track.add")),
         }
         menu.append_section(None, &section);
 

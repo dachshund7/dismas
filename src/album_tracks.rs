@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // The tracks of an album from the library, shown in the sidebar like the
-// playlist, so they can be played or added to it
+// queue, so they can be played or added to it
 
 use std::cell::{Cell, RefCell};
 
@@ -51,7 +51,7 @@ mod imp {
         // The last track selected or unselected with a click, where
         // Shift+click starts selecting from
         pub selection_anchor: glib::WeakRef<Track>,
-        // Tracks are being added to the playlist
+        // Tracks are being added to the queue
         pub loading: Cell<bool>,
 
         pub tracks: RefCell<Option<gio::ListStore>>,
@@ -389,7 +389,7 @@ impl AlbumTracks {
         !self.imp().loading.get()
     }
 
-    // Albums can't be added while tracks are being added to the playlist
+    // Albums can't be added while tracks are being added to the queue
     pub fn set_adding_enabled(&self, enabled: bool) {
         self.imp().loading.set(!enabled);
         self.update_selection();

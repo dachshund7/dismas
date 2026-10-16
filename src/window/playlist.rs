@@ -30,14 +30,14 @@ impl Window {
                 row.connect_menu_requested(clone!(
                     #[weak]
                     win,
-                    move |row, x, y| win.show_track_menu(row, x, y, TrackMenu::Playlist)
+                    move |row, x, y| win.show_track_menu(row, x, y, TrackMenu::Queue)
                 ));
                 row.connect_select_requested(clone!(
                     #[weak]
                     win,
                     move |row| {
                         if let Some(track) = row.track() {
-                            win.toggle_playlist_track(&track);
+                            win.toggle_queue_track(&track);
                         }
                     }
                 ));
@@ -46,12 +46,12 @@ impl Window {
                     win,
                     move |row| {
                         if let Some(track) = row.track() {
-                            win.select_playlist_range(&track);
+                            win.select_queue_range(&track);
                         }
                     }
                 ));
 
-                win.bind_property("playlist-selection", &row, "selection-mode")
+                win.bind_property("queue-selection", &row, "selection-mode")
                     .sync_create()
                     .build();
 
@@ -71,7 +71,7 @@ impl Window {
             let filter = SearchFilter::new();
             let filter_model =
                 gtk::FilterListModel::new(Some(queue.model().clone()), Some(filter.clone()));
-            // Search results keep the order of the playlist
+            // Search results keep the order of the queue
             let sections = WorkSectionModel::new(&filter_model);
             let selection = gtk::NoSelection::new(Some(sections));
             imp.playlist_view
@@ -105,8 +105,8 @@ impl Window {
                         }
 
                         if let Some(real_pos) = real_pos {
-                            if win.playlist_selection() {
-                                win.toggle_playlist_track(&track);
+                            if win.queue_selection() {
+                                win.toggle_queue_track(&track);
                                 return;
                             }
                             if queue.current_track_index() != Some(real_pos) {
@@ -127,16 +127,16 @@ impl Window {
                 }
             ));
 
-            imp.playlist_filtermodel
+            imp.queue_filtermodel
                 .replace(Some(filter_model.upcast::<gio::ListModel>()));
 
             imp.playlist_view
-                .playlist_searchentry()
+                .queue_searchentry()
                 .bind_property("text", &filter, "search")
                 .sync_create()
                 .build();
             imp.playlist_view
-                .playlist_searchentry()
+                .queue_searchentry()
                 .connect_search_changed(clone!(
                     #[weak(rename_to = win)]
                     self,
@@ -152,8 +152,8 @@ impl Window {
 
     pub(super) fn reset_queue(&self) {
         self.set_playlist_visible(false);
-        self.set_playlist_shuffled(false);
-        self.set_playlist_selection(false);
+        self.set_queue_shuffled(false);
+        self.set_queue_selection(false);
         self.update_style(None);
     }
 
@@ -161,8 +161,8 @@ impl Window {
         if let Some(p) = self.player() {
             p.clear_queue();
 
-            // So that the playlist isn't restored at the next startup
-            utils::store_playlist(p.queue());
+            // So that the queue isn't restored at the next startup
+            utils::store_queue(p.queue());
         }
     }
 
@@ -170,7 +170,7 @@ impl Window {
         self.player().is_none_or(|p| p.queue().is_empty())
     }
 
-    pub(super) fn update_playlist_time(&self) {
+    pub(super) fn update_queue_time(&self) {
         if let Some(player) = self.player() {
             let queue = player.queue();
             let n_tracks = queue.n_tracks();
@@ -211,7 +211,7 @@ impl Window {
                     ni18n_f(
                         // Translators: the '{}' must be left unmodified, and
                         // it will be replaced by the number of minutes remaining
-                        // in the playlist
+                        // in the queue
                         "{} minute remaining",
                         "{} minutes remaining",
                         remaining_min,
@@ -236,12 +236,12 @@ impl Window {
         }
     }
 
-    pub(super) fn scroll_playlist_to_track(&self) {
+    pub(super) fn scroll_queue_to_track(&self) {
         let queue_view = self.imp().playlist_view.queue_view();
         if let Some(player) = self.player()
             && let Some(current_idx) = player.queue().current_track_index()
         {
-            debug!("Scrolling playlist to {current_idx}");
+            debug!("Scrolling queue to {current_idx}");
             queue_view
                 .upcast_ref::<gtk::Widget>()
                 .activate_action("list.scroll-to-item", Some(&current_idx.to_variant()))
@@ -254,6 +254,6 @@ impl Window {
             p.remove_track(track);
         }
         self.update_selected_count();
-        self.update_playlist_time();
+        self.update_queue_time();
     }
 }

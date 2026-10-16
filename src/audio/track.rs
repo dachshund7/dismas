@@ -304,7 +304,7 @@ pub fn normalize_search_text(s: &str) -> String {
     res
 }
 
-// The text of all the tags of a track, for searching the playlist; this
+// The text of all the tags of a track, for searching the queue; this
 // leaves out the tags that only contain identifiers, numbers or technical
 // data, as they would make short searches, like "op 29", match by accident
 pub fn tag_search_text(tag: &Tag) -> String {
@@ -823,7 +823,7 @@ mod imp {
         #[property(name = "heading", get = Self::heading, type = String)]
         // The movement of a larger work, if the track is one
         #[property(name = "movement", get = Self::movement, nullable, type = Option<String>)]
-        // The lines in the playlist: for movements, the movement and the
+        // The lines in the queue: for movements, the movement and the
         // composer, as the work is in the header of their section; otherwise
         // the title and the artist
         #[property(name = "row-title", get = Self::row_title, type = String)]
@@ -1000,7 +1000,7 @@ impl Track {
         self.imp().composer()
     }
 
-    // The text that searching the playlist looks into, normalized with
+    // The text that searching the queue looks into, normalized with
     // `normalize_search_text()`; computed once, as the tags don't change
     pub fn search_key(&self) -> String {
         self.imp()

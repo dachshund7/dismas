@@ -91,7 +91,7 @@ template $AmberolPlaybackControl: Widget {
           icon-name: "media-playlist-shuffle-symbolic";
           action-name: "queue.shuffle";
           valign: center;
-          tooltip-text: _("Shuffle the Playlist");
+          tooltip-text: _("Shuffle the Queue");
 
           accessibility {
             label: C_("a11y", "Shuffle");
@@ -198,8 +198,8 @@ menu primary_menu {
     }
 
     item {
-      label: _("_Restore Playlist at Startup");
-      action: "win.restore-playlist";
+      label: _("_Restore Queue at Startup");
+      action: "win.restore-queue";
     }
   }
 

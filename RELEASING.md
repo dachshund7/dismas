@@ -12,13 +12,13 @@ QA Plan
   - Play/pause
   - Previous/next
   - Scrubbing
-3. Playlist
+3. Queue
   - Shuffle
   - Repeat: all, one, continuous
   - Select
   - Remove track
   - Remove all
-  - Toggle playlist
+  - Toggle queue
 
 Release
 -------

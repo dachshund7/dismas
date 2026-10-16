@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // A pass-through list model that groups consecutive movements of the same
-// work into sections, so that the playlist can separate the works.
+// work into sections, so that the queue can separate the works.
 // The order of the tracks is not changed: if the movements of a work are not
 // next to each other, for instance after shuffling, each run of movements
 // gets its own section.
@@ -116,7 +116,7 @@ fn section_key(model: &gio::ListModel, position: u32) -> Option<(String, String)
     Some((work, track.composer()))
 }
 
-// The headers of the sections in the playlist: a line between each section,
+// The headers of the sections in the queue: a line between each section,
 // followed by the name of the work for the movements of a work
 pub fn work_header_factory() -> gtk::ListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
@@ -151,7 +151,7 @@ pub fn work_header_factory() -> gtk::ListItemFactory {
         let separator = content.first_child().unwrap();
         let work_label = content.last_child().and_downcast::<gtk::Label>().unwrap();
 
-        // Nothing to separate at the top of the playlist
+        // Nothing to separate at the top of the queue
         separator.set_visible(header.start() > 0);
 
         let work = header

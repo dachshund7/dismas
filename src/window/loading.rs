@@ -4,7 +4,7 @@
 use super::*;
 
 impl Window {
-    // Called once the playlist of the last session, or the files the
+    // Called once the queue of the last session, or the files the
     // application was opened with, have been added, or there are none
     fn end_startup(&self) {
         let imp = self.imp();
@@ -21,27 +21,27 @@ impl Window {
         imp.content_stack.set_transition_type(transition);
     }
 
-    // Restores the playlist of the last session, if the user wants it
-    pub fn restore_playlist_on_startup(&self) {
-        if self.imp().settings.boolean("restore-playlist")
-            && utils::has_cached_playlist()
+    // Restores the queue of the last session, if the user wants it
+    pub fn restore_queue_on_startup(&self) {
+        if self.imp().settings.boolean("restore-queue")
+            && utils::has_cached_queue()
             && self.queue_is_empty()
         {
-            self.restore_playlist();
+            self.restore_queue();
         } else {
             self.end_startup();
         }
     }
 
-    fn restore_playlist(&self) {
-        // The saved playlist is empty after clearing the playlist
-        match utils::load_cached_tracks() {
+    fn restore_queue(&self) {
+        // The saved queue is empty after clearing the queue
+        match utils::load_cached_queue() {
             Some(tracks) if !tracks.is_empty() => self.queue_tracks(tracks, QueueMode::Restore),
             _ => self.end_startup(),
         }
     }
 
-    // Adds the files to the end of the playlist
+    // Adds the files to the end of the queue
     pub(super) fn queue_tracks(&self, queue: Vec<gio::File>, mode: QueueMode) {
         let play = matches!(mode, QueueMode::Play(_));
         if queue.is_empty() {
@@ -102,8 +102,8 @@ impl Window {
                     // Bulk add to avoid hammering the UI with list model updates
                     queue.add_tracks(&tracks);
 
-                    // Store the current state of the playlist
-                    utils::store_playlist(queue);
+                    // Store the current state of the queue
+                    utils::store_queue(queue);
 
                     debug!(
                         "Queue was empty: {}, new size: {}",
@@ -118,13 +118,13 @@ impl Window {
                     }
                     if mode == QueueMode::Add {
                         // Show where the album went, even if the
-                        // playlist was closed while adding it
+                        // queue was closed while adding it
                         win.set_playlist_visible(true);
                     } else {
                         win.set_library_visible(false);
                     }
 
-                    // Restoring the playlist at startup is quiet, and
+                    // Restoring the queue at startup is quiet, and
                     // doesn't start playing
                     if mode == QueueMode::Restore {
                         // Nothing to announce
@@ -147,7 +147,7 @@ impl Window {
                         let msg = ni18n_f(
                             // Translators: the `{}` must be left unmodified;
                             // it will be expanded to the number of tracks added
-                            // to the playlist
+                            // to the queue
                             "Added one track",
                             "Added {} tracks",
                             tracks.len() as u32,
@@ -163,7 +163,7 @@ impl Window {
         ));
     }
 
-    // Adds the audio files, and the ones in the folders, to the playlist;
+    // Adds the audio files, and the ones in the folders, to the queue;
     // looking into the folders takes a while, so it's done in a separate
     // thread
     fn add_files_to_queue(&self, files: Vec<gio::File>) {

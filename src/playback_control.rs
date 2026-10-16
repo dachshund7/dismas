@@ -72,13 +72,13 @@ mod imp {
 
             self.menu_button.set_primary(true);
 
-            // Clicking the button again restores the order of the playlist,
+            // Clicking the button again restores the order of the queue,
             // so the tooltip says what the next click does
             self.shuffle_button.connect_active_notify(|button| {
                 let tooltip = if button.is_active() {
-                    i18n("Unshuffle the Playlist")
+                    i18n("Unshuffle the Queue")
                 } else {
-                    i18n("Shuffle the Playlist")
+                    i18n("Shuffle the Queue")
                 };
                 button.set_tooltip_text(Some(&tooltip));
             });

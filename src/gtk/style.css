@@ -201,7 +201,7 @@ volume > scale trough slider { opacity: 0; }
   }
 }
 
-/* Headers of the sections in the playlist: a line between the sections,
+/* Headers of the sections in the queue: a line between the sections,
  * and the name of the work above its movements; the theme's padding of the
  * headers is removed, so that headers with nothing to show take no space */
 listview.navigation-sidebar > header {

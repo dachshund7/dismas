@@ -5,7 +5,7 @@ use super::*;
 
 impl Window {
     // Shows the tracks of an album in the sidebar, in place of the
-    // playlist, so that it can be played or added to the playlist
+    // queue, so that it can be played or added to the queue
     fn show_album_tracks(&self, album: &Album, search_words: &[String]) {
         let imp = self.imp();
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
@@ -27,26 +27,26 @@ impl Window {
         self.show_album_tracks(&album, &[]);
     }
 
-    // Goes back from the tracks of an album to the playlist, closing the
+    // Goes back from the tracks of an album to the queue, closing the
     // sidebar if it was opened for the album
     fn show_playlist(&self) {
-        self.show_playlist_pane();
+        self.show_playlist_view();
         if !self.imp().sidebar_was_visible.get() {
             self.set_playlist_visible(false);
         }
     }
 
-    fn show_playlist_pane(&self) {
+    fn show_playlist_view(&self) {
         self.imp().sidebar_stack.set_visible_child_name("playlist");
     }
 
-    // With an empty playlist, there is nothing to play, so the album grid
+    // With an empty queue, there is nothing to play, so the album grid
     // takes the place of the player, and there's no going back to it
     pub(super) fn update_library_for_queue(&self) {
         let queue_empty = self.queue_is_empty();
         self.imp().library_view.set_can_go_back(!queue_empty);
 
-        // At startup, the playlist is empty until it's restored, or until
+        // At startup, the queue is empty until it's restored, or until
         // the files to open are added, and showing the grid in the meantime
         // would only make it flash
         if queue_empty && !self.imp().starting.get() {
@@ -55,7 +55,7 @@ impl Window {
         }
     }
 
-    // Adds the tracks of the albums selected in the grid to the playlist,
+    // Adds the tracks of the albums selected in the grid to the queue,
     // or plays them in its place; for the albums selected in a search, only
     // the tracks that match it
     fn queue_selected_albums(&self, play: bool) {
@@ -81,7 +81,7 @@ impl Window {
 
                 if play {
                     win.clear_queue();
-                    win.show_playlist_pane();
+                    win.show_playlist_view();
                     win.queue_tracks(files, QueueMode::Play(0));
                 } else {
                     win.queue_tracks(files, QueueMode::Add);
@@ -118,7 +118,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |album_tracks| {
-                win.show_playlist_pane();
+                win.show_playlist_view();
                 win.queue_tracks(album_tracks.files(), QueueMode::Add);
             }
         ));
@@ -127,7 +127,7 @@ impl Window {
             self,
             move |album_tracks, start| {
                 win.clear_queue();
-                win.show_playlist_pane();
+                win.show_playlist_view();
                 win.queue_tracks(album_tracks.files(), QueueMode::Play(start));
             }
         ));

@@ -43,8 +43,8 @@ impl Window {
     pub(super) fn update_track(&self) {
         if let Some(player) = self.player() {
             let state = player.state();
-            self.scroll_playlist_to_track();
-            self.update_playlist_time();
+            self.scroll_queue_to_track();
+            self.update_queue_time();
             self.update_title(state.track().as_ref());
             self.update_style(state.track().as_ref());
         }

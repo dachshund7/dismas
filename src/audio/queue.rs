@@ -81,7 +81,7 @@ impl Queue {
         self.imp().model.item(pos).and_downcast()
     }
 
-    // The position of a track in the playlist, if it's in it
+    // The position of a track in the queue, if it's in it
     pub fn position(&self, track: &Track) -> Option<u32> {
         self.imp()
             .model
