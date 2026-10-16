@@ -789,15 +789,16 @@ impl LibraryView {
                                 imp.albums_stack.visible_child_name().as_deref() == Some("albums"),
                             );
                         }
-                        ScanEvent::Finished => {
-                            imp.scanning.set(false);
-                            imp.update_progress.set_visible(false);
-                            imp.rescan_button.set_sensitive(true);
-                            this.reload();
-                            break;
-                        }
+                        ScanEvent::Finished => break,
                     }
                 }
+
+                // The channel also closes if the scan panicked
+                let imp = this.imp();
+                imp.scanning.set(false);
+                imp.update_progress.set_visible(false);
+                imp.rescan_button.set_sensitive(true);
+                this.reload();
             }
         ));
     }
