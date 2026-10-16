@@ -18,6 +18,9 @@ template $AmberolWindow: Adw.ApplicationWindow {
         child: Adw.OverlaySplitView split_view {
           max-sidebar-width: 330;
           sidebar-width-fraction: 0.4;
+          // The sidebar is hidden and shown again when collapsing in
+          // window/bindings.rs, to keep it hidden if the user hid it
+          pin-sidebar: true;
 
           content: Stack content_stack {
             transition-type: crossfade;

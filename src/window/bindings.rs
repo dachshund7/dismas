@@ -269,9 +269,18 @@ impl Window {
                 #[weak(rename_to = win)]
                 self,
                 move |split_view, _| {
+                    // The sidebar is pinned, so that it's only shown again
+                    // when uncollapsing if it was showing before collapsing
+                    let imp = win.imp();
+                    if split_view.is_collapsed() {
+                        imp.sidebar_visible_uncollapsed
+                            .set(split_view.shows_sidebar());
+                        split_view.set_show_sidebar(false);
+                    } else if imp.sidebar_visible_uncollapsed.get() {
+                        split_view.set_show_sidebar(true);
+                    }
                     win.set_playlist_visible(split_view.shows_sidebar());
-                    win.imp()
-                        .playlist_view
+                    imp.playlist_view
                         .back_button()
                         .set_visible(split_view.is_collapsed());
                 }

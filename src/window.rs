@@ -127,6 +127,8 @@ mod imp {
         pub starting: Cell<bool>,
         // Whether the sidebar was showing before the tracks of an album
         pub sidebar_was_visible: Cell<bool>,
+        // Whether the sidebar was showing before the split view collapsed
+        pub sidebar_visible_uncollapsed: Cell<bool>,
 
         pub playlist_filtermodel: RefCell<Option<gio::ListModel>>,
 
@@ -272,6 +274,7 @@ mod imp {
                 library_visible: Cell::new(false),
                 starting: Cell::new(true),
                 sidebar_was_visible: Cell::new(false),
+                sidebar_visible_uncollapsed: Cell::new(true),
                 provider: gtk::CssProvider::new(),
                 settings: utils::settings_manager(),
                 notify_playing_id: RefCell::new(None),
