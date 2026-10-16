@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
-
-const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
+use crate::utils::ATTRIBUTE_HOST_PATH;
 
 impl Window {
     // The menu of a track, at the given point of its row

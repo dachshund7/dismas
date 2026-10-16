@@ -57,6 +57,7 @@ mod shuffle;
 mod state;
 mod track;
 mod waveform_generator;
+mod youtube_description;
 
 pub use player::{
     AudioPlayer, PlaybackAction, PlaybackState, RepeatMode, ReplayGainMode, SeekDirection,
@@ -64,5 +65,8 @@ pub use player::{
 pub use queue::Queue;
 pub use shuffle::ShuffleListModel;
 pub use state::PlayerState;
-pub use track::{Track, load_tracks, normalize_search_text, tag_search_text};
+pub use track::{
+    FileDetails, MusicBrainzIds, Track, TrackCredits, load_tracks, normalize_search_text,
+    tag_search_text,
+};
 pub use waveform_generator::WaveformGenerator;

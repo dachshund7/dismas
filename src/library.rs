@@ -556,7 +556,7 @@ fn read_tags(path: &Path) -> TrackTags {
 
 // MusicBrainz ids are UUIDs; the album id names the file of its cover, so
 // anything else in the tag, like a path, must not be used as one
-fn is_mbid(s: &str) -> bool {
+pub fn is_mbid(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 

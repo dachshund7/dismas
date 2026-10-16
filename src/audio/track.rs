@@ -4,6 +4,8 @@
 use std::{
     cell::{Cell, RefCell},
     fmt::{self, Display, Formatter},
+    fs::File,
+    io::BufReader,
     path::PathBuf,
     time::Instant,
 };
@@ -11,6 +13,10 @@ use std::{
 use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
 use itertools::Itertools;
 use lofty::{
+    config::ParseOptions,
+    file::{AudioFile, FileType, TaggedFile},
+    flac::FlacFile,
+    ogg::{OpusFile, SpeexFile, VorbisComments, VorbisFile},
     prelude::{Accessor, TaggedFileExt},
     probe::Probe,
     tag::{ItemKey, Tag},
@@ -19,29 +25,34 @@ use log::{debug, warn};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    audio::cover_cache::{CoverArt, CoverCache},
+    audio::{
+        cover_cache::{CoverArt, CoverCache},
+        youtube_description,
+    },
     i18n::i18n,
+    library::is_mbid,
+    utils::ATTRIBUTE_HOST_PATH,
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Performer {
+pub struct Credit {
     pub name: String,
     pub role: Option<String>,
 }
 
-impl Performer {
+impl Credit {
     // MusicBrainz Picard stores performers as "Name (role)"
     fn parse(s: &str) -> Self {
         if let Some(name) = s.strip_suffix(')')
             && let Some((name, role)) = name.rsplit_once(" (")
         {
-            return Performer {
+            return Credit {
                 name: name.trim().to_string(),
                 role: Some(role.trim().to_string()),
             };
         }
 
-        Performer {
+        Credit {
             name: s.to_string(),
             role: None,
         }
@@ -59,21 +70,83 @@ pub struct TrackCredits {
     pub lyricists: Vec<String>,
     pub arrangers: Vec<String>,
     pub conductors: Vec<String>,
-    pub performers: Vec<Performer>,
+    pub performers: Vec<Credit>,
     pub producers: Vec<String>,
     pub engineers: Vec<String>,
     pub mixers: Vec<String>,
     pub remixers: Vec<String>,
     pub dj_mixers: Vec<String>,
+    // The production roles without a field of their own, e.g. "mastering
+    // engineer"
+    pub other_production: Vec<Credit>,
     pub album_artist: Option<String>,
+    pub disc_number: Option<u32>,
+    pub disc_total: Option<u32>,
+    pub disc_subtitle: Option<String>,
+    pub track_number: Option<u32>,
+    pub track_total: Option<u32>,
     pub date: Option<String>,
+    pub original_date: Option<String>,
+    // The MusicBrainz release types, e.g. "album" and "live"
+    pub release_types: Vec<String>,
+    // The medium of the disc, e.g. "CD" or "Digital Media"
+    pub media: Vec<String>,
+    // A country code, or one of the MusicBrainz codes like "XW" for the
+    // whole world
+    pub release_country: Option<String>,
     pub labels: Vec<String>,
     pub catalog_numbers: Vec<String>,
+    pub barcodes: Vec<String>,
+    pub isrcs: Vec<String>,
     pub genres: Vec<String>,
+    pub copyright: Vec<String>,
+    pub musicbrainz: MusicBrainzIds,
+}
+
+// The ids of a track on MusicBrainz; they are only set if they are valid,
+// so they can be put in a URL
+#[derive(Debug, Clone, Default)]
+pub struct MusicBrainzIds {
+    pub recording: Option<String>,
+    pub release: Option<String>,
+    pub work: Option<String>,
+}
+
+impl MusicBrainzIds {
+    fn from_tag(tag: &Tag) -> Self {
+        let id = |key| {
+            tag.get_string(key)
+                .filter(|id| is_mbid(id))
+                .map(|id| id.to_string())
+        };
+        MusicBrainzIds {
+            recording: id(ItemKey::MusicBrainzRecordingId),
+            release: id(ItemKey::MusicBrainzReleaseId),
+            work: id(ItemKey::MusicBrainzWorkId),
+        }
+    }
 }
 
 impl TrackCredits {
-    fn from_tag(tag: &Tag) -> Self {
+    // The credits in the tags, filled in from the description that YouTube
+    // generated, if the track has one; lofty leaves the tags it doesn't
+    // know out of `tag`, so `synopsis` is the "SYNOPSIS" Vorbis comment
+    fn from_tag(tag: &Tag, synopsis: Option<&str>) -> Self {
+        let mut credits = Self::from_tag_items(tag);
+
+        let description = synopsis
+            .into_iter()
+            .chain(tag.get_strings(ItemKey::Description))
+            .chain(tag.get_strings(ItemKey::Comment))
+            .find_map(youtube_description::parse);
+        if let Some(description) = description {
+            credits.fill_in(description);
+        }
+
+        credits
+    }
+
+    fn from_tag_items(tag: &Tag) -> Self {
         TrackCredits {
             work: tag.get_string(ItemKey::Work).map(|s| s.to_string()),
             movement: tag.get_string(ItemKey::Movement).map(|s| s.to_string()),
@@ -86,21 +159,81 @@ impl TrackCredits {
             conductors: tag_strings(tag, ItemKey::Conductor),
             performers: tag_strings(tag, ItemKey::Performer)
                 .iter()
-                .map(|s| Performer::parse(s))
+                .map(|s| Credit::parse(s))
                 .collect(),
             producers: tag_strings(tag, ItemKey::Producer),
             engineers: tag_strings(tag, ItemKey::Engineer),
             mixers: tag_strings(tag, ItemKey::MixEngineer),
             remixers: tag_strings(tag, ItemKey::Remixer),
             dj_mixers: tag_strings(tag, ItemKey::MixDj),
+            other_production: Vec::new(),
             album_artist: tag.get_string(ItemKey::AlbumArtist).map(|s| s.to_string()),
+            disc_number: tag.disk(),
+            disc_total: tag.disk_total(),
+            disc_subtitle: tag.get_string(ItemKey::SetSubtitle).map(|s| s.to_string()),
+            track_number: tag.track(),
+            track_total: tag.track_total(),
             date: tag
                 .get_string(ItemKey::RecordingDate)
                 .or_else(|| tag.get_string(ItemKey::Year))
                 .map(|s| s.to_string()),
+            // Both "ORIGINALDATE" and "ORIGINALYEAR" end up here, and the
+            // year is less precise
+            original_date: tag
+                .get_strings(ItemKey::OriginalReleaseDate)
+                .max_by_key(|s| s.len())
+                .map(|s| s.to_string()),
+            release_types: tag_strings(tag, ItemKey::MusicBrainzReleaseType),
+            media: tag_strings(tag, ItemKey::OriginalMediaType),
+            release_country: tag
+                .get_string(ItemKey::ReleaseCountry)
+                .map(|s| s.to_string()),
             labels: tag_strings(tag, ItemKey::Label),
             catalog_numbers: tag_strings(tag, ItemKey::CatalogNumber),
+            barcodes: tag_strings(tag, ItemKey::Barcode),
+            isrcs: tag_strings(tag, ItemKey::Isrc),
             genres: tag_strings(tag, ItemKey::Genre),
+            copyright: tag
+                .get_strings(ItemKey::CopyrightMessage)
+                .map(|s| s.to_string())
+                .collect(),
+            musicbrainz: MusicBrainzIds::from_tag(tag),
+        }
+    }
+
+    // Takes what a YouTube description has and the tags don't
+    fn fill_in(&mut self, description: TrackCredits) {
+        fn fill<T>(field: &mut Vec<T>, other: Vec<T>) {
+            if field.is_empty() {
+                *field = other;
+            }
+        }
+
+        fill(&mut self.composers, description.composers);
+        fill(&mut self.lyricists, description.lyricists);
+        fill(&mut self.arrangers, description.arrangers);
+        fill(&mut self.conductors, description.conductors);
+        fill(&mut self.performers, description.performers);
+        fill(&mut self.producers, description.producers);
+        fill(&mut self.engineers, description.engineers);
+        fill(&mut self.mixers, description.mixers);
+        fill(&mut self.remixers, description.remixers);
+        fill(&mut self.other_production, description.other_production);
+        fill(&mut self.copyright, description.copyright);
+
+        if self.date.as_deref().is_none_or(is_upload_date) {
+            self.date = description.date;
+        }
+        self.original_date = self.original_date.take().or(description.original_date);
+    }
+
+    // The original release date, if it's not the same as the date, e.g.
+    // for reissues; the dates can be just a year
+    pub fn distinct_original_date(&self) -> Option<&str> {
+        let original = self.original_date.as_deref()?;
+        match self.date.as_deref() {
+            Some(date) if date.starts_with(original) || original.starts_with(date) => None,
+            _ => Some(original),
         }
     }
 
@@ -291,6 +424,37 @@ fn album_artist_search_text(tag: &Tag, album_artist: &str) -> String {
     text
 }
 
+// Reads a file, and the "SYNOPSIS" Vorbis comment if it has one, which
+// lofty leaves out of the tags of the `TaggedFile`
+fn read_tagged_file(
+    probe: Probe<BufReader<File>>,
+) -> lofty::error::Result<(TaggedFile, Option<String>)> {
+    fn read<F: AudioFile + Into<TaggedFile>>(
+        probe: Probe<BufReader<File>>,
+        comments: fn(&F) -> Option<&VorbisComments>,
+    ) -> lofty::error::Result<(TaggedFile, Option<String>)> {
+        let file = F::read_from(&mut probe.into_inner(), ParseOptions::new())?;
+        let synopsis = comments(&file)
+            .and_then(|c| c.get("SYNOPSIS"))
+            .map(|s| s.to_string());
+        Ok((file.into(), synopsis))
+    }
+
+    match probe.file_type() {
+        Some(FileType::Opus) => read(probe, |f: &OpusFile| Some(f.vorbis_comments())),
+        Some(FileType::Vorbis) => read(probe, |f: &VorbisFile| Some(f.vorbis_comments())),
+        Some(FileType::Speex) => read(probe, |f: &SpeexFile| Some(f.vorbis_comments())),
+        Some(FileType::Flac) => read(probe, FlacFile::vorbis_comments),
+        _ => probe.read().map(|f| (f, None)),
+    }
+}
+
+// yt-dlp stores the date of the upload as "YYYYMMDD", which is not when
+// the track was released
+fn is_upload_date(date: &str) -> bool {
+    date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit())
+}
+
 // The artists of a track, if the tags name any
 fn track_artist(tag: &Tag) -> Option<String> {
     let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");
@@ -320,7 +484,64 @@ pub struct TrackData {
     cover_uuid: Option<String>,
     uuid: Option<String>,
     duration: u64,
+    details: FileDetails,
     file: gio::File,
+}
+
+// The format and the properties of the file of a track
+#[derive(Debug, Clone, Default)]
+pub struct FileDetails {
+    pub format: Option<&'static str>,
+    // The path outside the sandbox, if the file came through the document
+    // portal
+    pub path: Option<PathBuf>,
+    pub size: Option<u64>,
+    // In kbps
+    pub bitrate: Option<u32>,
+    // In Hz
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub channels: Option<u8>,
+    pub replay_gain: ReplayGain,
+}
+
+// The gains as written in the tags, e.g. "-6.20 dB"
+#[derive(Debug, Clone, Default)]
+pub struct ReplayGain {
+    pub track: Option<String>,
+    pub album: Option<String>,
+}
+
+impl ReplayGain {
+    fn from_tag(tag: &Tag) -> Self {
+        ReplayGain {
+            track: tag
+                .get_string(ItemKey::ReplayGainTrackGain)
+                .map(|s| s.to_string()),
+            album: tag
+                .get_string(ItemKey::ReplayGainAlbumGain)
+                .map(|s| s.to_string()),
+        }
+    }
+}
+
+// The usual name of a format
+fn format_name(file_type: FileType) -> Option<&'static str> {
+    match file_type {
+        FileType::Aac => Some("AAC"),
+        FileType::Aiff => Some("AIFF"),
+        FileType::Ape => Some("Monkey's Audio"),
+        FileType::Flac => Some("FLAC"),
+        FileType::Mpeg => Some("MP3"),
+        FileType::Mp4 => Some("MPEG-4 Audio"),
+        FileType::Mpc => Some("Musepack"),
+        FileType::Opus => Some("Opus"),
+        FileType::Speex => Some("Speex"),
+        FileType::Vorbis => Some("Ogg Vorbis"),
+        FileType::Wav => Some("WAV"),
+        FileType::WavPack => Some("WavPack"),
+        _ => None,
+    }
 }
 
 impl TrackData {
@@ -354,6 +575,10 @@ impl TrackData {
 
     pub fn duration(&self) -> u64 {
         self.duration
+    }
+
+    pub fn details(&self) -> &FileDetails {
+        &self.details
     }
 
     pub fn cover_texture(&self) -> Option<&gdk::Texture> {
@@ -406,8 +631,8 @@ impl TrackData {
             }
         };
 
-        let tagged_file = match file_probe.guess_file_type() {
-            Ok(t) => match t.read() {
+        let (tagged_file, synopsis) = match file_probe.guess_file_type() {
+            Ok(t) => match read_tagged_file(t) {
                 Ok(f) => f,
                 Err(e) => {
                     warn!("Unable to read parsed file {:?}: {}", path, e);
@@ -427,12 +652,14 @@ impl TrackData {
         let mut tag_text = String::new();
         let mut cover_art = None;
         let mut cover_uuid = None;
+        let mut replay_gain = ReplayGain::default();
         if let Some(tag) = tagged_file.primary_tag() {
             debug!("Found primary tag");
             artist = track_artist(tag);
             title = tag.title().map(|s| s.to_string());
             album = tag.album().map(|s| s.to_string());
-            credits = TrackCredits::from_tag(tag);
+            credits = TrackCredits::from_tag(tag, synopsis.as_deref());
+            replay_gain = ReplayGain::from_tag(tag);
             tag_text = tag_search_text(tag);
             if let Some(res) = CoverCache::cover_art(&path, tag) {
                 cover_art = Some(res.0);
@@ -447,7 +674,8 @@ impl TrackData {
                 artist = artist.or_else(|| track_artist(tag));
                 title = title.or_else(|| tag.title().map(|s| s.to_string()));
                 album = album.or_else(|| tag.album().map(|s| s.to_string()));
-                credits = TrackCredits::from_tag(tag);
+                credits = TrackCredits::from_tag(tag, synopsis.as_deref());
+                replay_gain = ReplayGain::from_tag(tag);
                 tag_text = tag_search_text(tag);
                 if let Some(res) = CoverCache::cover_art(&path, tag) {
                     cover_art = Some(res.0);
@@ -460,33 +688,50 @@ impl TrackData {
             }
         };
 
-        let uuid = match file.query_info(
-            "standard::display-name",
-            gio::FileQueryInfoFlags::NONE,
-            gio::Cancellable::NONE,
-        ) {
-            Ok(info) => {
-                let mut hasher = Sha256::new();
+        let info = file
+            .query_info(
+                &format!("standard::display-name,standard::size,{ATTRIBUTE_HOST_PATH}"),
+                gio::FileQueryInfoFlags::NONE,
+                gio::Cancellable::NONE,
+            )
+            .ok();
 
-                hasher.update(info.display_name().as_str());
+        let uuid = info.as_ref().map(|info| {
+            let mut hasher = Sha256::new();
 
-                if let Some(ref artist) = artist {
-                    hasher.update(artist);
-                }
-                if let Some(ref title) = title {
-                    hasher.update(title);
-                }
-                if let Some(ref album) = album {
-                    hasher.update(album);
-                }
+            hasher.update(info.display_name().as_str());
 
-                Some(format!("{:x}", hasher.finalize()))
+            if let Some(ref artist) = artist {
+                hasher.update(artist);
             }
-            _ => None,
-        };
+            if let Some(ref title) = title {
+                hasher.update(title);
+            }
+            if let Some(ref album) = album {
+                hasher.update(album);
+            }
 
-        let properties = lofty::prelude::AudioFile::properties(&tagged_file);
+            format!("{:x}", hasher.finalize())
+        });
+
+        let properties = tagged_file.properties();
         let duration = properties.duration().as_secs();
+        let details = FileDetails {
+            format: format_name(tagged_file.file_type()),
+            path: info
+                .as_ref()
+                .and_then(|info| info.attribute_as_string(ATTRIBUTE_HOST_PATH))
+                .map(|p| PathBuf::from(p.as_str()))
+                .or(Some(path)),
+            size: info
+                .as_ref()
+                .and_then(|info| u64::try_from(info.size()).ok()),
+            bitrate: properties.audio_bitrate().filter(|b| *b > 0),
+            sample_rate: properties.sample_rate().filter(|r| *r > 0),
+            bit_depth: properties.bit_depth().filter(|d| *d > 0),
+            channels: properties.channels().filter(|c| *c > 0),
+            replay_gain,
+        };
 
         debug!(
             "Track {:?} ('{:?}') loading time: {} ms",
@@ -505,6 +750,7 @@ impl TrackData {
             cover_uuid,
             uuid,
             duration,
+            details,
             file,
         })
     }
@@ -550,6 +796,7 @@ impl Default for TrackData {
             cover_uuid: None,
             uuid: None,
             duration: 0,
+            details: FileDetails::default(),
             file: gio::File::for_path("/does-not-exist"),
         }
     }
@@ -711,6 +958,10 @@ impl Track {
         self.imp().data.borrow().credits().clone()
     }
 
+    pub fn file_details(&self) -> FileDetails {
+        self.imp().data.borrow().details().clone()
+    }
+
     pub fn cover_color(&self) -> Option<gdk::RGBA> {
         self.imp().data.borrow().cover_palette().map(|p| p[0])
     }
@@ -782,7 +1033,49 @@ impl Display for Track {
 
 #[cfg(test)]
 mod tests {
-    use super::{album_title_search_text, normalize_search_text};
+    use super::{TrackCredits, album_title_search_text, normalize_search_text};
+
+    fn dates(date: Option<&str>, original_date: Option<&str>) -> TrackCredits {
+        TrackCredits {
+            date: date.map(str::to_string),
+            original_date: original_date.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn original_date_is_only_shown_if_different() {
+        let reissue = dates(Some("2007-03-01"), Some("1961"));
+        assert_eq!(reissue.distinct_original_date(), Some("1961"));
+        assert_eq!(
+            dates(Some("2016-06-24"), Some("2016")).distinct_original_date(),
+            None
+        );
+        assert_eq!(
+            dates(Some("2016"), Some("2016-06-24")).distinct_original_date(),
+            None
+        );
+        assert_eq!(
+            dates(None, Some("1961")).distinct_original_date(),
+            Some("1961")
+        );
+        assert_eq!(dates(Some("2007"), None).distinct_original_date(), None);
+    }
+
+    #[test]
+    fn description_replaces_only_the_upload_date() {
+        let description = || dates(Some("2019-03-01"), Some("1963"));
+
+        let mut downloaded = dates(Some("20240411"), None);
+        downloaded.fill_in(description());
+        assert_eq!(downloaded.date.as_deref(), Some("2019-03-01"));
+        assert_eq!(downloaded.original_date.as_deref(), Some("1963"));
+
+        let mut tagged = dates(Some("2019"), Some("1962"));
+        tagged.fill_in(description());
+        assert_eq!(tagged.date.as_deref(), Some("2019"));
+        assert_eq!(tagged.original_date.as_deref(), Some("1962"));
+    }
 
     #[test]
     fn album_title_leaves_out_album_artist_names() {

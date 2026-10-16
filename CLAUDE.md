@@ -26,7 +26,7 @@ meson devenv -C _build ./src/amberol   # run uninstalled
 ```sh
 cargo fmt --all -- --check                  # CI runs this; CI creates an empty src/config.rs first
 cargo clippy --all-targets -- -D warnings   # CI fails on any warning
-cargo test                                  # unit tests are in src/i18n.rs and src/audio/track.rs
+cargo test                                  # unit tests are in #[cfg(test)] modules next to the code
 cargo test <name>                           # a single test
 build-aux/checks.sh                         # fmt + typos (spelling, configured in .typos.toml)
 reuse lint                                  # CI checks REUSE/SPDX licensing

@@ -11,6 +11,10 @@ use crate::{
     config::APPLICATION_ID,
 };
 
+// The path of a file outside the sandbox, for the files that came through
+// the document portal
+pub const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
+
 pub fn settings_manager() -> gio::Settings {
     // We ship a single schema for both default and development profiles
     let app_id = APPLICATION_ID.trim_end_matches(".Devel");
