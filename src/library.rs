@@ -39,7 +39,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 // The size of the covers in the grid, accounting for HiDPI
 const THUMBNAIL_SIZE: i32 = 256;
@@ -553,6 +553,12 @@ fn read_tags(path: &Path) -> TrackTags {
     }
 }
 
+// MusicBrainz ids are UUIDs; the album id names the file of its cover, so
+// anything else in the tag, like a path, must not be used as one
+fn is_mbid(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
 // The folder of the album a track is in; the discs of an album are often
 // in their own folders, e.g. "CD 1" or "Disc 2"
 fn album_folder(path: &Path) -> Option<&Path> {
@@ -596,7 +602,7 @@ impl TrackTags {
         // artist, and a different artist for each track, so we fall back to
         // the folder the album is in
         let album_id = album.as_ref().map(|album| {
-            match get(ItemKey::MusicBrainzReleaseId).filter(|s| !s.is_empty()) {
+            match get(ItemKey::MusicBrainzReleaseId).filter(|s| is_mbid(s)) {
                 Some(mbid) => mbid,
                 None => {
                     let mut hasher = Sha256::new();
@@ -638,5 +644,18 @@ impl TrackTags {
             title,
             search: Some(search),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_mbid;
+
+    #[test]
+    fn only_uuids_are_musicbrainz_ids() {
+        assert!(is_mbid("9e8f8d6e-3a1c-4b4f-9b0c-2f1d6a5e7c3b"));
+        assert!(!is_mbid(""));
+        assert!(!is_mbid("../../Pictures/photo"));
+        assert!(!is_mbid("/home/user/Pictures/photo"));
     }
 }
