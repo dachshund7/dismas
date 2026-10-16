@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    cell::{OnceCell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     rc::Rc,
 };
 
@@ -10,7 +10,7 @@ use async_channel::Sender;
 use glib::clone;
 use gtk::{gio, glib, prelude::*};
 use log::error;
-use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time};
+use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId};
 
 use crate::{
     audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Track},
@@ -21,6 +21,7 @@ use crate::{
 pub struct MprisController {
     mpris: Rc<OnceCell<Player>>,
     track: RefCell<Option<Track>>,
+    next_track_id: Cell<u64>,
 }
 
 impl MprisController {
@@ -59,6 +60,7 @@ impl MprisController {
         Self {
             mpris,
             track: RefCell::new(None),
+            next_track_id: Cell::new(0),
         }
     }
 
@@ -66,6 +68,16 @@ impl MprisController {
         let mut metadata = Metadata::new();
 
         if let Some(track) = self.track.take() {
+            // Clients pass the id back when setting the position; a new one
+            // for each track, as the same track can be in the playlist
+            // more than once
+            let track_id = self.next_track_id.get();
+            self.next_track_id.set(track_id + 1);
+            match TrackId::try_from(format!("/io/bassi/Amberol/Track/{track_id}")) {
+                Ok(id) => metadata.set_trackid(Some(id)),
+                Err(e) => error!("Invalid MPRIS track id: {e}"),
+            }
+
             metadata.set_artist(Some(vec![track.artist()]));
             metadata.set_title(Some(track.title()));
             metadata.set_album(Some(track.album()));
@@ -269,6 +281,23 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
 
             if let Err(e) = sender.send_blocking(PlaybackAction::Repeat(mode)) {
                 error!("Unable to send Repeat({mode}): {e}");
+            }
+        }
+    ));
+
+    mpris.connect_set_position(clone!(
+        #[strong]
+        sender,
+        move |player, track_id, position| {
+            // The position is for the track the client last saw, which
+            // might not be playing anymore
+            if player.metadata().trackid().as_ref() != Some(track_id) || position.is_negative() {
+                return;
+            }
+
+            let position = position.as_secs() as u64;
+            if let Err(e) = sender.send_blocking(PlaybackAction::SeekTo(position)) {
+                error!("Unable to send SeekTo({position}): {e}");
             }
         }
     ));

@@ -32,6 +32,7 @@ pub enum PlaybackAction {
     VolumeChanged(f64),
     Repeat(RepeatMode),
     Seek(i64),
+    SeekTo(u64),
     PlayNext,
 
     Raise,
@@ -185,6 +186,7 @@ impl AudioPlayer {
             PlaybackAction::Raise => self.present(),
             PlaybackAction::Repeat(mode) => self.update_repeat_mode(mode),
             PlaybackAction::Seek(offset) => self.seek_offset(offset),
+            PlaybackAction::SeekTo(position) => self.seek_position_abs(position),
             // _ => debug!("Received action {:?}", action),
         }
 
@@ -444,7 +446,7 @@ impl AudioPlayer {
     }
 
     pub fn seek_position_abs(&self, position: u64) {
-        let pos = u64::max(position, self.state.duration());
+        let pos = u64::min(position, self.state.duration());
         self.backend.seek_position(pos);
     }
 
