@@ -25,7 +25,13 @@ impl Window {
                 let remaining = duration.saturating_sub(elapsed);
                 self.set_track_time(Some(elapsed), Some(remaining));
 
-                let position = state.position() as f64 / state.duration() as f64;
+                // The duration is 0 until it's known, and dividing by it
+                // would make the position NaN, which survives clamping
+                let position = if duration > 0 {
+                    elapsed as f64 / duration as f64
+                } else {
+                    0.0
+                };
                 self.set_track_position(position);
             } else {
                 self.set_track_time(None, None);
