@@ -31,13 +31,7 @@ mod imp {
     #[glib::derived_properties]
     impl ObjectImpl for WaveformGenerator {
         fn dispose(&self) {
-            if let Some((pipeline, _bus_watch)) = self.pipeline.take() {
-                pipeline.send_event(gst::event::Eos::new());
-                match pipeline.set_state(gst::State::Null) {
-                    Ok(_) => {}
-                    Err(err) => warn!("Unable to set existing pipeline to Null state: {}", err),
-                }
-            }
+            self.obj().stop_pipeline();
         }
     }
 }
@@ -109,9 +103,16 @@ impl WaveformGenerator {
         self.notify_has_peaks();
     }
 
-    async fn load_peaks_cache(&self, cache: impl AsRef<std::path::Path>) {
+    async fn load_peaks_cache(&self, track: &Track, cache: impl AsRef<std::path::Path>) {
         let file = gio::File::for_path(&cache);
-        if let Ok((bytes, _tag)) = file.load_contents_future().await {
+        let contents = file.load_contents_future().await;
+
+        // Another track might have been set while we were loading
+        if self.imp().track.borrow().as_ref() != Some(track) {
+            return;
+        }
+
+        if let Ok((bytes, _tag)) = contents {
             match serde_json::from_slice(&bytes[..]) {
                 Ok(p) => {
                     debug!("Loaded cached waveform file");
@@ -130,6 +131,10 @@ impl WaveformGenerator {
     }
 
     fn load_peaks(&self) {
+        // The pipeline of the previous track would otherwise keep adding
+        // its peaks to the ones of this track, and save them as its own
+        self.stop_pipeline();
+
         let track = match self.imp().track.borrow().as_ref() {
             Some(s) => s.clone(),
             None => return,
@@ -145,22 +150,24 @@ impl WaveformGenerator {
             ctx.spawn_local(clone!(
                 #[weak(rename_to = this)]
                 self,
-                async move { this.load_peaks_cache(&cache).await }
+                async move { this.load_peaks_cache(&track, &cache).await }
             ));
         }
     }
 
-    fn generate_peaks(&self) {
+    // Stops generating the peaks, if a pipeline is running
+    fn stop_pipeline(&self) {
         if let Some((pipeline, _bus_watch)) = self.imp().pipeline.take() {
-            // Stop any running pipeline, and ensure that we have nothing to
-            // report
-            self.imp().peaks.replace(None);
             pipeline.send_event(gst::event::Eos::new());
             match pipeline.set_state(gst::State::Null) {
                 Ok(_) => {}
                 Err(err) => warn!("Unable to set existing pipeline to Null state: {}", err),
             }
         }
+    }
+
+    fn generate_peaks(&self) {
+        self.stop_pipeline();
 
         let track = match self.imp().track.borrow().as_ref() {
             Some(s) => s.clone(),
