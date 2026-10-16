@@ -112,7 +112,7 @@ fn add_credit(credits: &mut TrackCredits, roles: &str, name: &str) {
         match role {
             "composer" => push_name(&mut credits.composers, name),
             "lyricist" | "author" | "librettist" | "poet" => {
-                push_name(&mut credits.lyricists, name)
+                push_name(&mut credits.lyricists, name);
             }
             "composer lyricist" => {
                 push_name(&mut credits.composers, name);
@@ -122,7 +122,7 @@ fn add_credit(credits: &mut TrackCredits, roles: &str, name: &str) {
             "conductor" => push_name(&mut credits.conductors, name),
             "producer" | "studio producer" => push_name(&mut credits.producers, name),
             "engineer" | "recording engineer" | "sound engineer" | "balance engineer" => {
-                push_name(&mut credits.engineers, name)
+                push_name(&mut credits.engineers, name);
             }
             "mixer" | "mixing engineer" | "mix engineer" => push_name(&mut credits.mixers, name),
             "remixer" => push_name(&mut credits.remixers, name),
@@ -130,7 +130,7 @@ fn add_credit(credits: &mut TrackCredits, roles: &str, name: &str) {
             // "Copyright Control"
             "music publisher" => (),
             _ if is_production_role(role) => {
-                push_credit(&mut credits.other_production, name, Some(role))
+                push_credit(&mut credits.other_production, name, Some(role));
             }
             // Anything else is a performer, like "orchestra", "choir",
             // "soprano" or "harpsichord"

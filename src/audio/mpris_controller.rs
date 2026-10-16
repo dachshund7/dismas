@@ -46,7 +46,7 @@ impl MprisController {
             sender,
             async move {
                 match builder.build().await {
-                    Err(err) => error!("Failed to create MPRIS server: {:?}", err),
+                    Err(err) => error!("Failed to create MPRIS server: {err:?}"),
                     Ok(player) => {
                         setup_signals(sender, &player);
                         let mpris_task = player.run();
@@ -205,7 +205,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
                         error!("Unable to send Pause: {e}");
                     }
                 }
-            };
+            }
         }
     ));
 

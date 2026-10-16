@@ -112,13 +112,13 @@ impl Queue {
     }
 
     pub fn add_track(&self, track: &Track) -> bool {
-        if !track.equals(&Track::default()) {
+        if track.equals(&Track::default()) {
+            false
+        } else {
             // Add track to the backing store
             self.imp().store.append(track);
             self.notify_n_tracks();
             true
-        } else {
-            false
         }
     }
 

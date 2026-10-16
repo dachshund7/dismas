@@ -87,7 +87,7 @@ impl Window {
         let section = gio::Menu::new();
         match kind {
             TrackMenu::Playlist => {
-                section.append(Some(&i18n("Remove from Playlist")), Some("track.remove"))
+                section.append(Some(&i18n("Remove from Playlist")), Some("track.remove"));
             }
             TrackMenu::Album => section.append(Some(&i18n("Add to Playlist")), Some("track.add")),
         }
@@ -172,7 +172,7 @@ impl Window {
                                 ))
                                 .await
                             {
-                                self.add_toast(i18n("Unable to open folder"))
+                                self.add_toast(i18n("Unable to open folder"));
                             }
                         }
                     }

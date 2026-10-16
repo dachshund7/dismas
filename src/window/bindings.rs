@@ -293,7 +293,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, position| {
-                debug!("New position: {}", position);
+                debug!("New position: {position}");
                 if let Some(player) = win.player() {
                     let state = player.state();
                     if state.track().is_some() {
@@ -311,7 +311,7 @@ impl Window {
                 #[weak(rename_to = win)]
                 self,
                 move |_, volume| {
-                    debug!("Volume changed: {}", volume);
+                    debug!("Volume changed: {volume}");
                     if let Some(p) = win.player() {
                         p.set_volume(volume);
                     }

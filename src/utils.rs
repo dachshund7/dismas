@@ -62,19 +62,17 @@ fn load_files_from_folder_internal(
     folder: &gio::File,
     recursive: bool,
 ) -> Vec<gio::File> {
-    let mut enumerator = if let Ok(enumerator) = folder.enumerate_children(
+    let Ok(mut enumerator) = folder.enumerate_children(
         "standard::name,standard::type",
         gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
         None::<&gio::Cancellable>,
-    ) {
-        enumerator
-    } else {
+    ) else {
         warn!("Unable to enumerate {}", folder.uri());
         return Vec::new();
     };
 
     let mut files = Vec::new();
-    while let Some(info) = enumerator.next().and_then(|s| s.ok()) {
+    while let Some(info) = enumerator.next().and_then(Result::ok) {
         let child = enumerator.child(&info);
         if recursive && info.file_type() == gio::FileType::Directory {
             let mut res = load_files_from_folder_internal(base, &child, recursive);
@@ -113,9 +111,10 @@ fn folder_sort_name(base: Option<&gio::File>, file: &gio::File) -> String {
 
 // Files that aren't paths, like some GVFS locations, have no basename
 fn file_sort_name(file: &gio::File) -> String {
-    file.basename()
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|| file.uri().to_string())
+    file.basename().map_or_else(
+        || file.uri().to_string(),
+        |path| path.to_string_lossy().into_owned(),
+    )
 }
 
 fn cmp_like_nautilus(filename_a: &str, filename_b: &str) -> Ordering {
@@ -152,7 +151,7 @@ pub fn store_playlist(queue: &Queue) {
     let pls = glib::KeyFile::new();
     pls.set_string("playlist", "X-GNOME-Title", "Amberol's current playlist");
 
-    pls.set_int64("playlist", "NumberOfEntries", queue.n_tracks() as i64);
+    pls.set_int64("playlist", "NumberOfEntries", i64::from(queue.n_tracks()));
 
     // URIs, unlike paths, are valid UTF-8, and have no line breaks
     for (i, track) in queue.model().iter::<Track>().flatten().enumerate() {
@@ -166,7 +165,7 @@ pub fn store_playlist(queue: &Queue) {
 
     pls_cache.push("current.pls");
     match pls.save_to_file(&pls_cache) {
-        Ok(_) => debug!("Current playlist updated to: {:?}", pls_cache),
+        Ok(_) => debug!("Current playlist updated to: {pls_cache:?}"),
         Err(e) => debug!("Unable to save current playlist: {e}"),
     }
 }

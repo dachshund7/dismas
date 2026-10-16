@@ -534,7 +534,7 @@ impl LibraryView {
         let text = self.imp().search_entry.text();
         let words: Vec<String> = normalize_search_text(&text)
             .split_whitespace()
-            .map(|w| w.to_string())
+            .map(ToString::to_string)
             .collect();
 
         if words.is_empty() {
@@ -625,11 +625,11 @@ impl LibraryView {
 
     // Selects or unselects an album, entering selection mode if needed
     fn toggle_album(&self, album: &Album) {
-        if !self.selection_mode() {
+        if self.selection_mode() {
+            self.set_album_selected(album, !album.selected());
+        } else {
             self.set_selection_mode(true);
             self.set_album_selected(album, true);
-        } else {
-            self.set_album_selected(album, !album.selected());
         }
         self.imp().selection_anchor.set(Some(album));
     }
@@ -748,7 +748,7 @@ impl LibraryView {
         // Keep the selection, minus the albums that are gone
         {
             let mut selected = imp.selected.borrow_mut();
-            let ids: HashSet<String> = albums.iter().map(|a| a.id()).collect();
+            let ids: HashSet<String> = albums.iter().map(Album::id).collect();
             selected.retain(|id, _| ids.contains(id));
             for album in &albums {
                 album.set_selected(selected.contains_key(&album.id()));
@@ -771,7 +771,7 @@ impl LibraryView {
 
     fn update_stack(&self) {
         let imp = self.imp();
-        let n_albums = imp.model.borrow().as_ref().map_or(0, |m| m.n_items());
+        let n_albums = imp.model.borrow().as_ref().map_or(0, ListModelExt::n_items);
         let page = if n_albums > 0 {
             "albums"
         } else if imp.scanning.get() {

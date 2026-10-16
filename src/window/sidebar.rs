@@ -144,8 +144,7 @@ impl Window {
         let handle = &self.imp().sidebar_handle;
         handle
             .compute_point(self, &graphene::Point::new(x as f32, y as f32))
-            .map(|p| p.x() as f64)
-            .unwrap_or(x)
+            .map_or(x, |p| f64::from(p.x()))
     }
 
     pub(super) fn update_sidebar_width(&self) {
@@ -173,8 +172,7 @@ impl Window {
             } else {
                 let content_min = split_view
                     .content()
-                    .map(|c| c.measure(gtk::Orientation::Horizontal, -1).0)
-                    .unwrap_or(0);
+                    .map_or(0, |c| c.measure(gtk::Orientation::Horizontal, -1).0);
                 total - content_min
             };
 
@@ -185,7 +183,7 @@ impl Window {
                 wanted
             };
 
-            (width as f64, 1.0)
+            (f64::from(width), 1.0)
         };
 
         // Only update the split view if something changed, as each change
@@ -201,7 +199,7 @@ impl Window {
     fn store_sidebar_width(&self) {
         let width = self.imp().sidebar_width.get();
         if let Err(e) = self.imp().settings.set_int("sidebar-width", width) {
-            debug!("Unable to store sidebar-width: {}", e);
+            debug!("Unable to store sidebar-width: {e}");
         }
     }
 }

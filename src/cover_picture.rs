@@ -98,7 +98,7 @@ mod imp {
         fn measure(&self, _orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             match self.cover_size.get() {
                 CoverSize::Large => {
-                    let size = (LARGE_SIZE as f64 * self.font_scale()).round() as i32;
+                    let size = (f64::from(LARGE_SIZE) * self.font_scale()).round() as i32;
                     (size, size, -1, -1)
                 }
                 CoverSize::Small => (SMALL_SIZE, SMALL_SIZE, -1, -1),
@@ -108,9 +108,9 @@ mod imp {
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             if let Some(ref cover) = *self.cover.borrow() {
                 let widget = self.obj();
-                let scale_factor = widget.scale_factor() as f64;
-                let width = widget.width() as f64 * scale_factor;
-                let height = widget.height() as f64 * scale_factor;
+                let scale_factor = f64::from(widget.scale_factor());
+                let width = f64::from(widget.width()) * scale_factor;
+                let height = f64::from(widget.height()) * scale_factor;
                 let ratio = cover.intrinsic_aspect_ratio();
 
                 let (w, h) = if ratio > 1.0 {
@@ -147,7 +147,7 @@ mod imp {
                 return 1.0;
             }
 
-            dpi as f64 / 1024.0 / BASE_DPI
+            f64::from(dpi) / 1024.0 / BASE_DPI
         }
 
         fn set_cover(&self, cover: Option<gdk::Texture>) {

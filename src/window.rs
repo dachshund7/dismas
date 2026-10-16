@@ -194,7 +194,7 @@ mod imp {
             });
             klass.install_action_async("win.open-directory", None, async move |win, _, _| {
                 debug!("Window::win.open-directory()");
-                win.open_track_directory().await
+                win.open_track_directory().await;
             });
             klass.install_action("queue.clear", None, move |win, _, _| {
                 debug!("Window::queue.clear()");
@@ -470,7 +470,7 @@ impl Window {
                     .set_boolean("enable-recoloring", enable_recoloring)
                     .expect("Unable to store setting");
             })
-            .build()])
+            .build()]);
     }
 
     fn restore_window_state(&self) {

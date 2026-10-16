@@ -90,22 +90,19 @@ impl CoverCache {
         if let Some(picture) = tag.get_picture_type(lofty::picture::PictureType::CoverFront) {
             debug!("Found CoverFront");
             return Some(glib::Bytes::from(picture.data()));
-        } else {
-            // If we don't have a CoverFront picture, we fall back to Other
-            // and BandLogo types
-            for picture in tag.pictures() {
-                let cover_art = match picture.pic_type() {
-                    lofty::picture::PictureType::Other => Some(glib::Bytes::from(picture.data())),
-                    lofty::picture::PictureType::BandLogo => {
-                        Some(glib::Bytes::from(picture.data()))
-                    }
-                    _ => None,
-                };
+        }
+        // If we don't have a CoverFront picture, we fall back to Other
+        // and BandLogo types
+        for picture in tag.pictures() {
+            let cover_art = match picture.pic_type() {
+                lofty::picture::PictureType::Other => Some(glib::Bytes::from(picture.data())),
+                lofty::picture::PictureType::BandLogo => Some(glib::Bytes::from(picture.data())),
+                _ => None,
+            };
 
-                if cover_art.is_some() {
-                    debug!("Found fallback");
-                    return cover_art;
-                }
+            if cover_art.is_some() {
+                debug!("Found fallback");
+                return cover_art;
             }
         }
 
@@ -122,7 +119,7 @@ impl CoverCache {
                 .map(|&b| {
                     ext_cover_ext
                         .iter()
-                        .map(move |&e| format!("{}.{}", b, e))
+                        .map(move |&e| format!("{b}.{e}"))
                         .collect::<Vec<_>>()
                 })
                 .fold(vec![], |mut v, mut dat| {
@@ -132,7 +129,7 @@ impl CoverCache {
             for name in ext_covers {
                 let mut cover_file = PathBuf::from(p);
                 cover_file.push(name);
-                debug!("Looking for external cover file: {:?}", cover_file);
+                debug!("Looking for external cover file: {cover_file:?}");
 
                 let f = gio::File::for_path(&cover_file);
                 if let Ok((res, _)) = f.load_bytes(None::<&gio::Cancellable>) {
@@ -168,7 +165,7 @@ impl CoverCache {
                 lofty::prelude::ItemKey::AlbumArtist => album_artist = get_text_value(item.value()),
                 lofty::prelude::ItemKey::TrackArtist => track_artist = get_text_value(item.value()),
                 _ => (),
-            };
+            }
         }
 
         // We use the album and artist to ensure we share the
@@ -195,11 +192,11 @@ impl CoverCache {
         let uuid = format!("{:x}", hasher.finalize());
 
         if let Some(cover) = Self::global().lock().unwrap().lookup(&uuid) {
-            debug!("Found cover for UUID '{}'", uuid);
+            debug!("Found cover for UUID '{uuid}'");
             return cover.map(|c| (c, uuid));
         }
 
-        debug!("Loading cover art for UUID: {}", uuid);
+        debug!("Loading cover art for UUID: {uuid}");
         let cover = Self::load_cover_art(tag, path.parent())
             .and_then(|data| CoverImage::decode(data, COVER_SIZE))
             .and_then(|image| {
@@ -247,18 +244,18 @@ fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
     path.push("covers");
     glib::mkdir_with_parents(&path, 0o755);
 
-    path.push(format!("{}.png", uuid));
+    path.push(format!("{uuid}.png"));
     if path.exists() {
         return Some(path);
     }
 
     match image.save_png(&path) {
         Ok(()) => {
-            debug!("Created cover data cache at {:?}", path);
+            debug!("Created cover data cache at {path:?}");
             Some(path)
         }
         Err(e) => {
-            warn!("Unable to cache cover data: {}", e);
+            warn!("Unable to cache cover data: {e}");
             None
         }
     }

@@ -136,7 +136,7 @@ impl PlaylistView {
     }
 
     pub fn update_loading(&self, cur: u32, max: u32) {
-        let step = cur as f64 / max as f64;
+        let step = f64::from(cur) / f64::from(max);
         self.imp().playlist_progress.set_fraction(step);
     }
 

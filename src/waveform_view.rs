@@ -120,7 +120,7 @@ mod imp {
 
     impl WidgetImpl for WaveformView {
         fn focus(&self, direction: gtk::DirectionType) -> bool {
-            debug!("WaveformView::focus({:?})", direction);
+            debug!("WaveformView::focus({direction:?})");
             let widget = self.obj();
             if !widget.is_focus() {
                 widget.grab_focus();
@@ -193,7 +193,7 @@ mod imp {
 
             if let Some(ref peaks) = *self.peaks.borrow() {
                 let n_peaks = peaks.len() as i32;
-                let waveform_width = w as f64;
+                let waveform_width = f64::from(w);
 
                 // We have two cursors:
                 //
@@ -234,9 +234,9 @@ mod imp {
                 // If the number of samples is too big to fit into the available
                 // width, we average the samples that fit within a bar
                 let pixels_per_sample = if available_width > n_peaks * block_size {
-                    block_size as f64
+                    f64::from(block_size)
                 } else {
-                    (available_width as f64 / 2.0) / n_peaks as f64
+                    (f64::from(available_width) / 2.0) / f64::from(n_peaks)
                 };
 
                 let mut current_pixel = 0.0;
@@ -249,8 +249,8 @@ mod imp {
                     samples_in_accum += 1;
                     accum.left += sample.left;
                     accum.right += sample.right;
-                    if current_pixel > bar_size as f64 || i == peaks.len() - 1 {
-                        accum /= samples_in_accum as f64;
+                    if current_pixel > f64::from(bar_size) || i == peaks.len() - 1 {
+                        accum /= f64::from(samples_in_accum);
 
                         // Scale by half: left goes in the upper half of the
                         // available space, and right goes in the lower half
@@ -314,12 +314,12 @@ mod imp {
                         accum.left = 0.0;
                         accum.right = 0.0;
                         samples_in_accum = 0;
-                        current_pixel -= bar_size as f64;
+                        current_pixel -= f64::from(bar_size);
 
                         if is_rtl {
-                            offset -= block_size as f64;
+                            offset -= f64::from(block_size);
                         } else {
-                            offset += block_size as f64;
+                            offset += f64::from(block_size);
                         }
                     }
                 }
@@ -397,7 +397,7 @@ impl WaveformView {
             #[strong(rename_to = this)]
             self,
             move |_, x, _| {
-                let width = this.width() as f64;
+                let width = f64::from(this.width());
                 let position = x / width;
                 this.imp().hover_position.replace(Some(position));
                 this.queue_draw();
@@ -435,13 +435,10 @@ impl WaveformView {
     fn seek_to_coord(&self, pos: f64) {
         let width = self.width();
         let position = match self.direction() {
-            gtk::TextDirection::Rtl => 1.0 - (pos / width as f64),
-            _ => pos / width as f64,
+            gtk::TextDirection::Rtl => 1.0 - (pos / f64::from(width)),
+            _ => pos / f64::from(width),
         };
-        debug!(
-            "Seeking to coord {} (width: {}, position: {})",
-            pos, width, position
-        );
+        debug!("Seeking to coord {pos} (width: {width}, position: {position})");
         self.emit_by_name::<()>("position-changed", &[&position]);
     }
 
@@ -521,10 +518,9 @@ impl WaveformView {
                             this.imp().tick_id.replace(None);
                             this.queue_resize();
                             return glib::ControlFlow::Break;
-                        } else {
-                            this.imp().factor.replace(Some(delta));
-                            this.queue_draw();
                         }
+                        this.imp().factor.replace(Some(delta));
+                        this.queue_draw();
                     } else if !has_peaks && has_next_peaks {
                         // Swap peaks
                         let next_peaks = this.imp().next_peaks.take();

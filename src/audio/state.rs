@@ -139,8 +139,8 @@ impl PlayerState {
         // We only care about two digits of precision, to avoid
         // notification cycles when we update the volume with a
         // similar value coming from the volume control
-        let old_rounded = format!("{:.2}", old_volume);
-        let new_rounded = format!("{:.2}", volume);
+        let old_rounded = format!("{old_volume:.2}");
+        let new_rounded = format!("{volume:.2}");
         if old_rounded != new_rounded {
             self.notify_volume();
         }

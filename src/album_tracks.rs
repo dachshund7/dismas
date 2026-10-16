@@ -311,7 +311,7 @@ impl AlbumTracks {
             self.tracks()
                 .iter()
                 .filter(|t| t.selected())
-                .map(|t| t.file())
+                .map(Track::file)
                 .collect()
         } else {
             self.imp().files.borrow().clone()
@@ -320,11 +320,11 @@ impl AlbumTracks {
 
     // Selects or unselects a track, entering selection mode if needed
     pub fn toggle_track(&self, track: &Track) {
-        if !self.selection_mode() {
+        if self.selection_mode() {
+            track.set_selected(!track.selected());
+        } else {
             self.set_selection_mode(true);
             track.set_selected(true);
-        } else {
-            track.set_selected(!track.selected());
         }
         self.imp().selection_anchor.set(Some(track));
         self.update_selection();

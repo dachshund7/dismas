@@ -117,7 +117,7 @@ impl MusicBrainzIds {
         let id = |key| {
             tag.get_string(key)
                 .filter(|id| is_mbid(id))
-                .map(|id| id.to_string())
+                .map(ToString::to_string)
         };
         MusicBrainzIds {
             recording: id(ItemKey::MusicBrainzRecordingId),
@@ -148,11 +148,11 @@ impl TrackCredits {
 
     fn from_tag_items(tag: &Tag) -> Self {
         TrackCredits {
-            work: tag.get_string(ItemKey::Work).map(|s| s.to_string()),
-            movement: tag.get_string(ItemKey::Movement).map(|s| s.to_string()),
+            work: tag.get_string(ItemKey::Work).map(ToString::to_string),
+            movement: tag.get_string(ItemKey::Movement).map(ToString::to_string),
             movement_number: tag
                 .get_string(ItemKey::MovementNumber)
-                .map(|s| s.to_string()),
+                .map(ToString::to_string),
             composers: tag_strings(tag, ItemKey::Composer),
             lyricists: tag_strings(tag, ItemKey::Lyricist),
             arrangers: tag_strings(tag, ItemKey::Arranger),
@@ -167,27 +167,31 @@ impl TrackCredits {
             remixers: tag_strings(tag, ItemKey::Remixer),
             dj_mixers: tag_strings(tag, ItemKey::MixDj),
             other_production: Vec::new(),
-            album_artist: tag.get_string(ItemKey::AlbumArtist).map(|s| s.to_string()),
+            album_artist: tag
+                .get_string(ItemKey::AlbumArtist)
+                .map(ToString::to_string),
             disc_number: tag.disk(),
             disc_total: tag.disk_total(),
-            disc_subtitle: tag.get_string(ItemKey::SetSubtitle).map(|s| s.to_string()),
+            disc_subtitle: tag
+                .get_string(ItemKey::SetSubtitle)
+                .map(ToString::to_string),
             track_number: tag.track(),
             track_total: tag.track_total(),
             date: tag
                 .get_string(ItemKey::RecordingDate)
                 .or_else(|| tag.get_string(ItemKey::Year))
-                .map(|s| s.to_string()),
+                .map(ToString::to_string),
             // Both "ORIGINALDATE" and "ORIGINALYEAR" end up here, and the
             // year is less precise
             original_date: tag
                 .get_strings(ItemKey::OriginalReleaseDate)
                 .max_by_key(|s| s.len())
-                .map(|s| s.to_string()),
+                .map(ToString::to_string),
             release_types: tag_strings(tag, ItemKey::MusicBrainzReleaseType),
             media: tag_strings(tag, ItemKey::OriginalMediaType),
             release_country: tag
                 .get_string(ItemKey::ReleaseCountry)
-                .map(|s| s.to_string()),
+                .map(ToString::to_string),
             labels: tag_strings(tag, ItemKey::Label),
             catalog_numbers: tag_strings(tag, ItemKey::CatalogNumber),
             barcodes: tag_strings(tag, ItemKey::Barcode),
@@ -195,7 +199,7 @@ impl TrackCredits {
             genres: tag_strings(tag, ItemKey::Genre),
             copyright: tag
                 .get_strings(ItemKey::CopyrightMessage)
-                .map(|s| s.to_string())
+                .map(ToString::to_string)
                 .collect(),
             musicbrainz: MusicBrainzIds::from_tag(tag),
         }
@@ -436,7 +440,7 @@ fn read_tagged_file(
         let file = F::read_from(&mut probe.into_inner(), ParseOptions::new())?;
         let synopsis = comments(&file)
             .and_then(|c| c.get("SYNOPSIS"))
-            .map(|s| s.to_string());
+            .map(ToString::to_string);
         Ok((file.into(), synopsis))
     }
 
@@ -466,10 +470,10 @@ fn track_artist(tag: &Tag) -> Option<String> {
 fn tag_strings(tag: &Tag, key: ItemKey) -> Vec<String> {
     tag.get_strings(key)
         .flat_map(|s| s.split(';'))
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
         .unique()
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
         .collect()
 }
 
@@ -517,10 +521,10 @@ impl ReplayGain {
         ReplayGain {
             track: tag
                 .get_string(ItemKey::ReplayGainTrackGain)
-                .map(|s| s.to_string()),
+                .map(ToString::to_string),
             album: tag
                 .get_string(ItemKey::ReplayGainAlbumGain)
-                .map(|s| s.to_string()),
+                .map(ToString::to_string),
         }
     }
 }
@@ -614,7 +618,7 @@ impl TrackData {
         // Files without a local path, like the ones in the trash or on the
         // web, can't be read by lofty
         let Some(path) = file.path() else {
-            warn!("Unable to find a local path for {}", uri);
+            warn!("Unable to find a local path for {uri}");
             return None;
         };
 
@@ -626,7 +630,7 @@ impl TrackData {
         let file_probe = match Probe::open(&path) {
             Ok(p) => p,
             Err(e) => {
-                warn!("Unable to open file {:?}: {}", path, e);
+                warn!("Unable to open file {path:?}: {e}");
                 return None;
             }
         };
@@ -635,12 +639,12 @@ impl TrackData {
             Ok(t) => match read_tagged_file(t) {
                 Ok(f) => f,
                 Err(e) => {
-                    warn!("Unable to read parsed file {:?}: {}", path, e);
+                    warn!("Unable to read parsed file {path:?}: {e}");
                     return None;
                 }
             },
             Err(e) => {
-                warn!("Unable to parse file type {:?}: {}", path, e);
+                warn!("Unable to parse file type {path:?}: {e}");
                 return None;
             }
         };
@@ -666,7 +670,7 @@ impl TrackData {
                 cover_uuid = Some(res.1);
             }
         } else {
-            warn!("Unable to load primary tag for: {}", uri);
+            warn!("Unable to load primary tag for: {uri}");
             for tag in tagged_file.tags() {
                 debug!("Found tag: {:?}", tag.tag_type());
                 // The tags that come later fill in for the ones missing
@@ -686,7 +690,7 @@ impl TrackData {
                     break;
                 }
             }
-        };
+        }
 
         let info = file
             .query_info(
@@ -971,7 +975,11 @@ impl Track {
     }
 
     pub fn cover_uuid(&self) -> Option<String> {
-        self.imp().data.borrow().cover_uuid().map(|s| s.to_string())
+        self.imp()
+            .data
+            .borrow()
+            .cover_uuid()
+            .map(ToString::to_string)
     }
 
     pub fn cover_cache(&self) -> Option<PathBuf> {
@@ -979,7 +987,7 @@ impl Track {
     }
 
     pub fn uuid(&self) -> Option<String> {
-        self.imp().data.borrow().uuid().map(|s| s.to_string())
+        self.imp().data.borrow().uuid().map(ToString::to_string)
     }
 
     // The work the movement belongs to, if the track is a movement

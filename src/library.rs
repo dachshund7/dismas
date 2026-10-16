@@ -487,9 +487,9 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
         if path.extension().is_some_and(|ext| ext == "png")
             && !used.contains(path.to_string_lossy().as_ref())
         {
-            debug!("Removing unused album cover {:?}", path);
+            debug!("Removing unused album cover {path:?}");
             if let Err(e) = std::fs::remove_file(&path) {
-                warn!("Unable to remove album cover {:?}: {e}", path);
+                warn!("Unable to remove album cover {path:?}: {e}");
             }
         }
     }
@@ -516,7 +516,7 @@ fn create_thumbnail(track: &Path, dest: &Path) -> bool {
     match image.save_png(dest) {
         Ok(_) => true,
         Err(e) => {
-            warn!("Unable to save album cover {:?}: {e}", dest);
+            warn!("Unable to save album cover {dest:?}: {e}");
             false
         }
     }
@@ -529,18 +529,18 @@ fn read_tags(path: &Path) -> TrackTags {
     let probe = match Probe::open(path).map(|p| p.options(options).guess_file_type()) {
         Ok(Ok(p)) => p,
         Ok(Err(e)) => {
-            warn!("Unable to parse file type {:?}: {e}", path);
+            warn!("Unable to parse file type {path:?}: {e}");
             return TrackTags::default();
         }
         Err(e) => {
-            warn!("Unable to open {:?}: {e}", path);
+            warn!("Unable to open {path:?}: {e}");
             return TrackTags::default();
         }
     };
     let tagged_file = match probe.read() {
         Ok(f) => f,
         Err(e) => {
-            warn!("Unable to read {:?}: {e}", path);
+            warn!("Unable to read {path:?}: {e}");
             return TrackTags::default();
         }
     };
@@ -603,21 +603,20 @@ impl TrackTags {
         // artist, and a different artist for each track, so we fall back to
         // the folder the album is in
         let album_id = album.as_ref().map(|album| {
-            match get(ItemKey::MusicBrainzReleaseId).filter(|s| is_mbid(s)) {
-                Some(mbid) => mbid,
-                None => {
-                    let mut hasher = Sha256::new();
-                    hasher.update(album);
-                    hasher.update([0]);
-                    match (&album_artist, album_folder(path)) {
-                        (Some(artist), _) => hasher.update(artist),
-                        (None, Some(folder)) => {
-                            hasher.update(folder.as_os_str().as_encoded_bytes())
-                        }
-                        (None, None) => (),
+            if let Some(mbid) = get(ItemKey::MusicBrainzReleaseId).filter(|s| is_mbid(s)) {
+                mbid
+            } else {
+                let mut hasher = Sha256::new();
+                hasher.update(album);
+                hasher.update([0]);
+                match (&album_artist, album_folder(path)) {
+                    (Some(artist), _) => hasher.update(artist),
+                    (None, Some(folder)) => {
+                        hasher.update(folder.as_os_str().as_encoded_bytes());
                     }
-                    format!("{:x}", hasher.finalize())
+                    (None, None) => (),
                 }
+                format!("{:x}", hasher.finalize())
             }
         });
 

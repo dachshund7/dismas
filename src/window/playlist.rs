@@ -237,7 +237,7 @@ impl Window {
         if let Some(player) = self.player()
             && let Some(current_idx) = player.queue().current_track_index()
         {
-            debug!("Scrolling playlist to {}", current_idx);
+            debug!("Scrolling playlist to {current_idx}");
             queue_view
                 .upcast_ref::<gtk::Widget>()
                 .activate_action("list.scroll-to-item", Some(&current_idx.to_variant()))

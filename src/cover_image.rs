@@ -110,9 +110,9 @@ impl CoverImage {
                 .iter()
                 .map(|c| {
                     gdk::RGBA::new(
-                        c.r as f32 / 255.0,
-                        c.g as f32 / 255.0,
-                        c.b as f32 / 255.0,
+                        f32::from(c.r) / 255.0,
+                        f32::from(c.g) / 255.0,
+                        f32::from(c.b) / 255.0,
                         1.0,
                     )
                 })

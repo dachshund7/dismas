@@ -131,15 +131,12 @@ impl Window {
 
             let n_colors = bg_colors.len();
             for (i, color) in bg_colors.iter().enumerate().take(n_colors) {
-                let s = format!("--background-color-{}: {};", i, color);
+                let s = format!("--background-color-{i}: {color};");
                 css.push_str(&s);
             }
 
             for i in n_colors + 1 - 1..5 {
-                css.push_str(&format!(
-                    "--background-color-{}: var(--window-bg-color);",
-                    i
-                ));
+                css.push_str(&format!("--background-color-{i}: var(--window-bg-color);"));
             }
 
             css.push('}');

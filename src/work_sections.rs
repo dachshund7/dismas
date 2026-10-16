@@ -36,7 +36,10 @@ mod imp {
         }
 
         fn n_items(&self) -> u32 {
-            self.model.borrow().as_ref().map_or(0, |m| m.n_items())
+            self.model
+                .borrow()
+                .as_ref()
+                .map_or(0, ListModelExt::n_items)
         }
 
         fn item(&self, position: u32) -> Option<glib::Object> {

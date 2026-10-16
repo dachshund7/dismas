@@ -183,15 +183,14 @@ impl Application {
     // With `restore`, a new window restores the playlist of the last
     // session, if the user wants it; otherwise, the caller adds tracks
     fn present_main_window(&self, restore: bool) -> Window {
-        let window = match self.active_window().and_downcast::<Window>() {
-            Some(window) => window,
-            None => {
-                let window = Window::new(self);
-                if restore {
-                    window.restore_playlist_on_startup();
-                }
-                window
+        let window = if let Some(window) = self.active_window().and_downcast::<Window>() {
+            window
+        } else {
+            let window = Window::new(self);
+            if restore {
+                window.restore_playlist_on_startup();
             }
+            window
         };
 
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -264,11 +263,11 @@ impl Application {
                 |r: ashpd::desktop::Request<ashpd::desktop::background::Background>| r.response(),
             ) {
                 Ok(response) => {
-                    debug!("Background request successful: {:?}", response);
+                    debug!("Background request successful: {response:?}");
                     self.imp().background_hold.replace(Some(self.hold()));
                 }
                 Err(err) => {
-                    warn!("Background request denied: {}", err);
+                    warn!("Background request denied: {err}");
                     self.imp()
                         .settings
                         .set_boolean("background-play", false)

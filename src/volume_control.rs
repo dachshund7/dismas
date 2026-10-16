@@ -165,7 +165,7 @@ impl VolumeControl {
             #[strong(rename_to = this)]
             self,
             move |_, _, dy| {
-                debug!("Scroll delta: {}", dy);
+                debug!("Scroll delta: {dy}");
                 let adj = this.imp().volume_scale.adjustment();
                 let delta = dy * adj.step_increment();
                 let d = (adj.value() - delta).clamp(adj.lower(), adj.upper());

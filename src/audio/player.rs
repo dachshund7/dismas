@@ -481,7 +481,7 @@ impl AudioPlayer {
     }
 
     fn update_volume(&self, volume: f64) {
-        debug!("Updating volume to: {}", volume);
+        debug!("Updating volume to: {volume}");
         self.state.set_volume(volume);
     }
 

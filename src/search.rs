@@ -49,7 +49,7 @@ mod imp {
                 .map(|s| {
                     normalize_search_text(s)
                         .split_whitespace()
-                        .map(|w| w.to_string())
+                        .map(ToString::to_string)
                         .collect()
                 })
                 .unwrap_or_default();

@@ -75,14 +75,14 @@ fn main() -> glib::ExitCode {
                     .expect("Unable to find amberol.gresource in devenv")
             }
             Err(err) => {
-                error!("Unable to find the current path: {}", err);
+                error!("Unable to find the current path: {err}");
                 return glib::ExitCode::FAILURE;
             }
         },
     };
     gio::resources_register(&resources);
 
-    debug!("Setting up application (profile: {})", PROFILE);
+    debug!("Setting up application (profile: {PROFILE})");
     glib::set_application_name("Amberol");
     glib::set_program_name(Some("amberol"));
 

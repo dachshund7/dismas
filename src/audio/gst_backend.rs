@@ -193,7 +193,7 @@ impl GstBackend {
             gst_audio::StreamVolumeFormat::Linear,
             volume,
         );
-        debug!("Setting volume to: {}", linear_volume);
+        debug!("Setting volume to: {linear_volume}");
         self.gst_player.set_volume(linear_volume);
     }
 

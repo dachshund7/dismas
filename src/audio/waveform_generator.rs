@@ -69,12 +69,9 @@ impl WaveformGenerator {
 
     fn save_peaks(&self) {
         if let Some(peaks) = self.peaks() {
-            let track = match self.imp().track.borrow().as_ref() {
-                Some(s) => s.clone(),
-                None => {
-                    self.notify_has_peaks();
-                    return;
-                }
+            let Some(track) = self.imp().track.borrow().clone() else {
+                self.notify_has_peaks();
+                return;
             };
 
             if let Some(uuid) = track.uuid() {
@@ -83,7 +80,7 @@ impl WaveformGenerator {
                 cache.push("waveforms");
                 glib::mkdir_with_parents(&cache, 0o755);
 
-                cache.push(format!("{}.json", uuid));
+                cache.push(format!("{uuid}.json"));
 
                 let j = serde_json::to_string(&peaks).unwrap();
                 let file = gio::File::for_path(&cache);
@@ -94,7 +91,7 @@ impl WaveformGenerator {
                     gio::FileCreateFlags::NONE,
                     gio::Cancellable::NONE,
                     move |_| {
-                        debug!("Waveform cached at: {:?}", cache);
+                        debug!("Waveform cached at: {cache:?}");
                     },
                 );
             }
@@ -120,7 +117,7 @@ impl WaveformGenerator {
                     self.notify_has_peaks();
                 }
                 Err(err) => {
-                    debug!("Could not parse cached waveform file: {}", err);
+                    debug!("Could not parse cached waveform file: {err}");
                     self.generate_peaks();
                 }
             }
@@ -144,7 +141,7 @@ impl WaveformGenerator {
             let mut cache = glib::user_cache_dir();
             cache.push("amberol");
             cache.push("waveforms");
-            cache.push(format!("{}.json", uuid));
+            cache.push(format!("{uuid}.json"));
 
             let ctx = glib::MainContext::default();
             ctx.spawn_local(clone!(
@@ -161,7 +158,7 @@ impl WaveformGenerator {
             pipeline.send_event(gst::event::Eos::new());
             match pipeline.set_state(gst::State::Null) {
                 Ok(_) => {}
-                Err(err) => warn!("Unable to set existing pipeline to Null state: {}", err),
+                Err(err) => warn!("Unable to set existing pipeline to Null state: {err}"),
             }
         }
     }
@@ -169,13 +166,10 @@ impl WaveformGenerator {
     fn generate_peaks(&self) {
         self.stop_pipeline();
 
-        let track = match self.imp().track.borrow().as_ref() {
-            Some(s) => s.clone(),
-            None => {
-                self.imp().peaks.replace(None);
-                self.notify_has_peaks();
-                return;
-            }
+        let Some(track) = self.imp().track.borrow().clone() else {
+            self.imp().peaks.replace(None);
+            self.notify_has_peaks();
+            return;
         };
 
         // Reset the peaks vector
@@ -186,7 +180,7 @@ impl WaveformGenerator {
         let pipeline = match gst::parse::launch(pipeline_str) {
             Ok(pipeline) => pipeline,
             Err(err) => {
-                warn!("Unable to generate the waveform: {}", err);
+                warn!("Unable to generate the waveform: {err}");
                 self.imp().peaks.replace(None);
                 self.notify_has_peaks();
                 return;
@@ -236,7 +230,7 @@ impl WaveformGenerator {
                             return glib::ControlFlow::Break;
                         }
                         MessageView::Error(err) => {
-                            warn!("Pipeline error: {:?}", err);
+                            warn!("Pipeline error: {err:?}");
                             pipeline
                                 .set_state(gst::State::Null)
                                 .expect("Unable to set 'null' state");
@@ -261,7 +255,7 @@ impl WaveformGenerator {
                             }
                         }
                         _ => (),
-                    };
+                    }
 
                     glib::ControlFlow::Continue
                 }
@@ -273,13 +267,13 @@ impl WaveformGenerator {
                 self.imp().pipeline.replace(Some((pipeline, bus_watch)));
             }
             Err(err) => {
-                warn!("Unable to generate the waveform: {}", err);
+                warn!("Unable to generate the waveform: {err}");
                 pipeline
                     .set_state(gst::State::Null)
                     .expect("Pipeline reset failed");
                 self.imp().peaks.replace(None);
                 self.notify_has_peaks();
             }
-        };
+        }
     }
 }

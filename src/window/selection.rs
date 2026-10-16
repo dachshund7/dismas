@@ -53,11 +53,11 @@ impl Window {
     // Selects or unselects a track of the playlist, entering selection
     // mode if needed
     pub(super) fn toggle_playlist_track(&self, track: &Track) {
-        if !self.playlist_selection() {
+        if self.playlist_selection() {
+            track.set_selected(!track.selected());
+        } else {
             self.set_playlist_selection(true);
             track.set_selected(true);
-        } else {
-            track.set_selected(!track.selected());
         }
         self.imp().playlist_anchor.set(Some(track));
         self.update_selected_count();
@@ -91,7 +91,7 @@ impl Window {
             // remove objects from the model while we're iterating it
             let remove_tracks: Vec<Track> = (0..queue.n_tracks())
                 .filter_map(|idx| queue.track_at(idx))
-                .filter(|track| track.selected())
+                .filter(Track::selected)
                 .collect();
 
             for track in remove_tracks {
