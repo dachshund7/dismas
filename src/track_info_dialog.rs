@@ -123,9 +123,12 @@ fn fill_group(group: &adw::PreferencesGroup, fields: &[(String, Vec<String>)]) {
             continue;
         }
 
+        // The titles of the performers are their roles, from the tags, so
+        // neither line is markup
         let row = adw::ActionRow::builder()
+            .use_markup(false)
             .title(title.as_str())
-            .subtitle(glib::markup_escape_text(&values.join(", ")).as_str())
+            .subtitle(values.join(", ").as_str())
             .subtitle_selectable(true)
             .build();
         row.add_css_class("property");
