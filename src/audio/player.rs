@@ -369,7 +369,7 @@ impl AudioPlayer {
     }
 
     pub fn skip_to(&self, pos: u32) {
-        if self.queue.is_empty() {
+        if pos >= self.queue.n_tracks() {
             return;
         }
 

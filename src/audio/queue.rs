@@ -81,6 +81,15 @@ impl Queue {
         self.imp().model.item(pos).and_downcast()
     }
 
+    // The position of a track in the playlist, if it's in it
+    pub fn position(&self, track: &Track) -> Option<u32> {
+        self.imp()
+            .model
+            .iter::<Track>()
+            .position(|s| s.is_ok_and(|s| s == *track))
+            .map(|pos| pos as u32)
+    }
+
     pub fn set_current_track(&self, track: Option<Track>) {
         if let Some(track) = track {
             let pos = self

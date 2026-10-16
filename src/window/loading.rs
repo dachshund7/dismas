@@ -146,7 +146,7 @@ impl Window {
                                     win.add_skip_to_toast(
                                         i18n("Added a new track"),
                                         i18n("Play"),
-                                        queue.n_tracks() - 1,
+                                        &tracks[0],
                                     );
                                 }
                             } else {

@@ -235,19 +235,6 @@ mod imp {
             klass.install_property_action("queue.search", "playlist-search");
             klass.install_property_action("win.browse-albums", "library-visible");
             klass.install_property_action("win.replaygain", "replaygain-mode");
-
-            klass.install_action(
-                "win.skip-to",
-                Some(glib::VariantTy::UINT32),
-                move |win, _, param| {
-                    if let Some(pos) = param.and_then(u32::from_variant)
-                        && let Some(player) = win.player()
-                    {
-                        player.skip_to(pos);
-                        player.play();
-                    }
-                },
-            );
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -491,11 +478,25 @@ impl Window {
         self.imp().toast_overlay.add_toast(toast);
     }
 
-    pub fn add_skip_to_toast(&self, msg: String, button: String, pos: u32) {
+    // The playlist can change while the toast is up, so the track is
+    // looked up when the button is clicked
+    pub fn add_skip_to_toast(&self, msg: String, button: String, track: &Track) {
         let toast = adw::Toast::new(&msg);
         toast.set_button_label(Some(&button));
-        toast.set_action_name(Some("win.skip-to"));
-        toast.set_action_target_value(Some(&pos.to_variant()));
+        toast.connect_button_clicked(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_| {
+                if let Some(player) = win.player()
+                    && let Some(pos) = player.queue().position(&track)
+                {
+                    player.skip_to(pos);
+                    player.play();
+                }
+            }
+        ));
         self.imp().toast_overlay.add_toast(toast);
     }
 }
