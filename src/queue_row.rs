@@ -301,9 +301,9 @@ impl QueueRow {
     fn update_playing_icon(&self) {
         let imp = self.imp();
         let (icon, label) = if imp.paused.get() {
-            ("audio-paused-symbolic", pi18n("a11y", "Paused"))
+            ("media-playback-pause-symbolic", pi18n("a11y", "Paused"))
         } else {
-            ("audio-only-symbolic", pi18n("a11y", "Currently playing"))
+            ("media-playback-start-symbolic", pi18n("a11y", "Currently playing"))
         };
         for image in [&*imp.track_playing_image, &*imp.selection_playing_image] {
             image.set_icon_name(Some(icon));
