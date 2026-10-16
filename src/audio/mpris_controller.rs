@@ -183,17 +183,12 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         sender,
         move |player| {
             match player.playback_status() {
-                PlaybackStatus::Paused => {
+                PlaybackStatus::Paused | PlaybackStatus::Stopped => {
                     if let Err(e) = sender.send_blocking(PlaybackAction::Play) {
                         error!("Unable to send Play: {e}");
                     }
                 }
-                PlaybackStatus::Stopped => {
-                    if let Err(e) = sender.send_blocking(PlaybackAction::Stop) {
-                        error!("Unable to send Stop: {e}");
-                    }
-                }
-                _ => {
+                PlaybackStatus::Playing => {
                     if let Err(e) = sender.send_blocking(PlaybackAction::Pause) {
                         error!("Unable to send Pause: {e}");
                     }
