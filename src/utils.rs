@@ -271,12 +271,9 @@ pub fn store_playlist(queue: &Queue) {
 
     pls.set_int64("playlist", "NumberOfEntries", queue.n_tracks() as i64);
 
+    // URIs, unlike paths, are valid UTF-8, and have no line breaks
     for (i, track) in queue.model().iter::<Track>().flatten().enumerate() {
-        // Loading skips the missing entries
-        let Some(path) = track.file().path() else {
-            continue;
-        };
-        pls.set_value("playlist", &format!("File{i}"), &path.to_string_lossy());
+        pls.set_value("playlist", &format!("File{i}"), &track.uri());
     }
 
     let mut pls_cache = glib::user_cache_dir();
@@ -303,21 +300,32 @@ pub fn load_cached_tracks() -> Option<Vec<gio::File>> {
         return None;
     }
 
-    let n_entries: usize = match pls.int64("playlist", "NumberOfEntries") {
-        Ok(n) => n as usize,
-        Err(_) => 0,
-    };
-
-    let mut res = Vec::with_capacity(n_entries);
-
-    for i in 0..n_entries {
-        match pls.value("playlist", &format!("File{i}")) {
-            Ok(p) => res.push(gio::File::for_path(p)),
-            Err(e) => debug!("Skipping File{i} from playlist: {e}"),
+    // The entries are read from the keys, rather than up to the number of
+    // entries, which a damaged file could get wrong
+    let keys = match pls.keys("playlist") {
+        Ok(keys) => keys,
+        Err(e) => {
+            debug!("Unable to read current playlist: {e}");
+            return None;
         }
-    }
+    };
+    let mut entries: Vec<(u64, gio::File)> = keys
+        .iter()
+        .filter_map(|key| {
+            let index = key.as_str().strip_prefix("File")?.parse().ok()?;
+            let value = pls.value("playlist", key.as_str()).ok()?;
+            // Older versions saved paths
+            let file = if value.starts_with('/') {
+                gio::File::for_path(value.as_str())
+            } else {
+                gio::File::for_uri(value.as_str())
+            };
+            Some((index, file))
+        })
+        .collect();
+    entries.sort_by_key(|(index, _)| *index);
 
-    Some(res)
+    Some(entries.into_iter().map(|(_, file)| file).collect())
 }
 
 pub fn has_cached_playlist() -> bool {
