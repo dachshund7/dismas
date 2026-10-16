@@ -38,7 +38,7 @@ rust-clippy:
   before_script:
     - >-
       dnf install -y cargo clippy gcc pkgconf-pkg-config
-      gtk4-devel libadwaita-devel sqlite-devel
+      gtk4-devel libadwaita-devel sqlite-devel libseccomp-devel fontconfig-devel
       gstreamer1-devel gstreamer1-plugins-base-devel
       gstreamer1-plugins-bad-free-devel
   script:

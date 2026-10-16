@@ -380,7 +380,9 @@ impl TrackData {
         None
     }
 
-    pub fn from_uri(uri: &str) -> Self {
+    // Reads the tags and the cover of a track; this blocks, so it must not
+    // be called on the main thread
+    pub fn from_uri(uri: &str) -> Option<Self> {
         let now = Instant::now();
 
         let file = gio::File::for_uri(uri);
@@ -388,19 +390,19 @@ impl TrackData {
         // web, can't be read by lofty
         let Some(path) = file.path() else {
             warn!("Unable to find a local path for {}", uri);
-            return TrackData::default();
+            return None;
         };
 
         let (mime_type, _) = gio::content_type_guess(Some(&path), None);
         if !mime_type.starts_with("audio") || mime_type.ends_with("x-mpegurl") {
-            return TrackData::default();
+            return None;
         }
 
         let file_probe = match Probe::open(&path) {
             Ok(p) => p,
             Err(e) => {
                 warn!("Unable to open file {:?}: {}", path, e);
-                return TrackData::default();
+                return None;
             }
         };
 
@@ -409,16 +411,14 @@ impl TrackData {
                 Ok(f) => f,
                 Err(e) => {
                     warn!("Unable to read parsed file {:?}: {}", path, e);
-                    return TrackData::default();
+                    return None;
                 }
             },
             Err(e) => {
                 warn!("Unable to parse file type {:?}: {}", path, e);
-                return TrackData::default();
+                return None;
             }
         };
-
-        let mut cover_cache = CoverCache::global().lock().unwrap();
 
         let mut artist = None;
         let mut title = None;
@@ -434,7 +434,7 @@ impl TrackData {
             album = tag.album().map(|s| s.to_string());
             credits = TrackCredits::from_tag(tag);
             tag_text = tag_search_text(tag);
-            if let Some(res) = cover_cache.cover_art(&path, tag) {
+            if let Some(res) = CoverCache::cover_art(&path, tag) {
                 cover_art = Some(res.0);
                 cover_uuid = Some(res.1);
             }
@@ -449,7 +449,7 @@ impl TrackData {
                 album = album.or_else(|| tag.album().map(|s| s.to_string()));
                 credits = TrackCredits::from_tag(tag);
                 tag_text = tag_search_text(tag);
-                if let Some(res) = cover_cache.cover_art(&path, tag) {
+                if let Some(res) = CoverCache::cover_art(&path, tag) {
                     cover_art = Some(res.0);
                     cover_uuid = Some(res.1);
                 }
@@ -495,7 +495,7 @@ impl TrackData {
             now.elapsed().as_millis()
         );
 
-        TrackData {
+        Some(TrackData {
             artist,
             title,
             album,
@@ -506,7 +506,7 @@ impl TrackData {
             uuid,
             duration,
             file,
-        }
+        })
     }
 
     pub fn uri(&self) -> String {
@@ -516,6 +516,26 @@ impl TrackData {
     pub fn file(&self) -> gio::File {
         self.file.clone()
     }
+}
+
+// Reads the tracks in a separate thread, and sends them one at a time, in
+// order, with `None` for the files that are not tracks; reading stops if
+// the receiver is dropped
+pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Option<TrackData>> {
+    let (sender, receiver) = async_channel::unbounded();
+
+    std::thread::spawn(move || {
+        for file in files {
+            if sender
+                .send_blocking(TrackData::from_uri(file.uri().as_str()))
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    receiver
 }
 
 impl Default for TrackData {
@@ -669,19 +689,10 @@ glib::wrapper! {
 }
 
 impl Track {
-    pub fn new(uri: &str) -> Self {
+    pub fn new(data: TrackData) -> Self {
         let track: Self = glib::Object::new();
-        track.imp().data.replace(TrackData::from_uri(uri));
+        track.imp().data.replace(data);
         track
-    }
-
-    pub fn from_uri(uri: &str) -> Result<Track, &'static str> {
-        let res = Track::new(uri);
-        if res.equals(&Track::default()) {
-            Err("Invalid track")
-        } else {
-            Ok(res)
-        }
     }
 
     pub fn empty() -> Self {

@@ -18,7 +18,7 @@ meson devenv -C _build ./src/amberol   # run uninstalled
 
 - **Generated `config.rs`:** `meson setup` writes `src/config.rs` from `src/config.rs.in` and copies it into the source tree. The file is gitignored. Cargo, rustfmt and clippy all need it to exist.
 - **Profiles:** the default profile builds `--release`. Cargo's target dir is `_build/src/`.
-- **Runtime dependencies:** gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20 (incl. plugins-bad), plus `blueprint-compiler` and `msgfmt` (gettext) at build time.
+- **Runtime dependencies:** gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20 (incl. plugins-bad), and the glycin loaders (`glycin-loaders`, plus `bwrap` outside Flatpak) to decode cover art. At build time: `blueprint-compiler`, `msgfmt` (gettext), and the libseccomp and fontconfig development files, which glycin links against.
 - **Flatpak:** the manifest is `io.bassi.Amberol.json`. CI builds the Devel flatpak.
 
 ## Checks
@@ -49,6 +49,8 @@ Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-I
 - `PlayerState` is a GObject whose properties the UI binds to. It is only mutated on the main context.
 - `Queue` is the playlist, a `GListModel` of `Track` GObjects. `ShuffleListModel` is a shuffled view over it.
 - Covers are deduplicated across tracks of the same album through a global `CoverCache`.
+- Cover art comes from the tags and could be crafted, so `cover_image.rs` decodes it with glycin, in sandboxed loader processes. Only the decoded pixels are scaled, color-picked and saved as PNG in the app. Decoding blocks, so it never runs on the main thread.
+- Tags and covers are read in a worker thread: `load_tracks()` (`audio/track.rs`) sends `TrackData` over a channel, and the main thread wraps it in `Track` GObjects, which are not `Send`.
 - `WaveformGenerator` builds the seek-bar waveform in a separate GStreamer pipeline.
 
 ### UI

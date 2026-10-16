@@ -9,32 +9,22 @@ use std::{
 
 use gtk::{gdk, gio, glib, prelude::*};
 use lofty::prelude::TaggedFileExt;
-use log::debug;
+use log::{debug, warn};
 use sha2::{Digest, Sha256};
 
-use crate::utils;
+use crate::cover_image::CoverImage;
 
-// The pixels of a full resolution cover; unlike GdkPixbuf, they can be
-// sent from the thread loading them to the main thread
-pub struct FullCover {
-    width: i32,
-    height: i32,
-    stride: usize,
-    has_alpha: bool,
-    pixels: glib::Bytes,
-}
+// The base cover size is 192px, but we need to account for HiDPI;
+// better to scale down when rendering on displays with a scaling
+// factor of 1 than having to scale up on displays with a scaling
+// factor of 2.
+const COVER_SIZE: u32 = 192 * 2;
 
-impl FullCover {
-    pub fn texture(&self) -> gdk::Texture {
-        let format = if self.has_alpha {
-            gdk::MemoryFormat::R8g8b8a8
-        } else {
-            gdk::MemoryFormat::R8g8b8
-        };
-
-        gdk::MemoryTexture::new(self.width, self.height, format, &self.pixels, self.stride).upcast()
-    }
-}
+// The cover in the main view is drawn larger than the shared cover
+// texture, so it is loaded separately for the current track; we limit its
+// size, as the original artwork can be very large, and let the renderer
+// scale it down the rest of the way
+const FULL_COVER_SIZE: u32 = 1024;
 
 #[derive(Clone, Debug)]
 pub struct CoverArt {
@@ -57,9 +47,14 @@ impl CoverArt {
     }
 }
 
+// The covers are shared by the tracks of an album, which can be loaded in
+// separate threads, so the cache is behind a mutex; it's only locked to
+// look up and add covers, not while loading them
 #[derive(Debug)]
 pub struct CoverCache {
-    entries: HashMap<String, CoverArt>,
+    // The albums without a cover are kept as well, so that we don't look
+    // for it again for each of their tracks
+    entries: HashMap<String, Option<CoverArt>>,
 }
 
 impl CoverCache {
@@ -78,12 +73,17 @@ impl CoverCache {
         }
     }
 
-    fn add_entry(&mut self, uuid: &str, cover: CoverArt) -> &CoverArt {
-        self.entries.entry(uuid.to_string()).or_insert(cover)
+    // Another thread might have added the same cover in the meantime, in
+    // which case its cover is kept
+    fn add_entry(&mut self, uuid: &str, cover: Option<CoverArt>) -> Option<CoverArt> {
+        self.entries
+            .entry(uuid.to_string())
+            .or_insert(cover)
+            .clone()
     }
 
-    fn lookup(&self, uuid: &String) -> Option<&CoverArt> {
-        self.entries.get(uuid)
+    fn lookup(&self, uuid: &str) -> Option<Option<CoverArt>> {
+        self.entries.get(uuid).cloned()
     }
 
     pub fn load_cover_art(tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
@@ -147,7 +147,10 @@ impl CoverCache {
         None
     }
 
-    pub fn cover_art(&mut self, path: &Path, tag: &lofty::tag::Tag) -> Option<(CoverArt, String)> {
+    // The cover of the album of a track, loaded the first time one of its
+    // tracks asks for it; this blocks, so it must not be called on the main
+    // thread
+    pub fn cover_art(path: &Path, tag: &lofty::tag::Tag) -> Option<(CoverArt, String)> {
         let mut album_artist = None;
         let mut track_artist = None;
         let mut album = None;
@@ -191,75 +194,72 @@ impl CoverCache {
 
         let uuid = format!("{:x}", hasher.finalize());
 
-        match self.lookup(&uuid) {
-            Some(c) => {
-                debug!("Found cover for UUID '{}'", uuid);
-                Some((c.clone(), uuid))
-            }
-            None => {
-                debug!("Loading cover art for UUID: {}", uuid);
-
-                let cover_art = Self::load_cover_art(tag, path.parent());
-
-                // The pixel buffer for the cover art
-                let cover_pixbuf = if let Some(ref cover_art) = cover_art {
-                    utils::load_cover_texture(cover_art)
-                } else {
-                    None
-                };
-
-                // Cache the pixel buffer, so that the MPRIS controller can
-                // reference it later
-                let cache_path = if let Some(ref pixbuf) = cover_pixbuf {
-                    utils::cache_cover_art(&uuid, pixbuf)
-                } else {
-                    None
-                };
-
-                // The texture we draw on screen
-                let texture = cover_pixbuf.as_ref().map(gdk::Texture::for_pixbuf);
-
-                // The color palette we use for styling the UI
-                let palette = cover_pixbuf.as_ref().and_then(utils::load_palette);
-
-                // We want both texture and palette
-                if let (Some(texture), Some(palette)) = (texture, palette) {
-                    let res = CoverArt {
-                        texture,
-                        palette,
-                        cache: cache_path,
-                    };
-
-                    self.add_entry(&uuid, res.clone());
-
-                    Some((res, uuid))
-                } else {
-                    None
-                }
-            }
+        if let Some(cover) = Self::global().lock().unwrap().lookup(&uuid) {
+            debug!("Found cover for UUID '{}'", uuid);
+            return cover.map(|c| (c, uuid));
         }
+
+        debug!("Loading cover art for UUID: {}", uuid);
+        let cover = Self::load_cover_art(tag, path.parent())
+            .and_then(|data| CoverImage::decode(data, COVER_SIZE))
+            .and_then(|image| {
+                // The color palette we use for styling the UI; we want both
+                // the texture and the palette
+                let palette = image.palette()?;
+                // Cache the cover, so that the MPRIS controller can
+                // reference it later
+                let cache = cache_cover_art(&uuid, &image);
+                Some(CoverArt {
+                    texture: image.into_texture(),
+                    palette,
+                    cache,
+                })
+            });
+
+        let cover = Self::global().lock().unwrap().add_entry(&uuid, cover);
+        cover.map(|c| (c, uuid))
     }
 
     // Loads the cover art of a file again, at full resolution; this does not
-    // use the cache, and it can be called from any thread
-    pub fn load_full_cover(path: &Path) -> Option<FullCover> {
+    // use the cache, and it blocks, so it must not be called on the main
+    // thread
+    pub fn load_full_cover(path: &Path) -> Option<gdk::Texture> {
         let tagged_file = lofty::probe::Probe::open(path).ok()?.read().ok()?;
         let tag = tagged_file
             .primary_tag()
             .or_else(|| tagged_file.first_tag())?;
         let bytes = Self::load_cover_art(tag, path.parent())?;
-        let pixbuf = utils::load_full_cover(&bytes)?;
+        let image = CoverImage::decode(bytes, FULL_COVER_SIZE)?;
 
-        Some(FullCover {
-            width: pixbuf.width(),
-            height: pixbuf.height(),
-            stride: pixbuf.rowstride() as usize,
-            has_alpha: pixbuf.has_alpha(),
-            pixels: pixbuf.read_pixel_bytes(),
-        })
+        Some(image.into_texture())
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
+    }
+}
+
+// Saves the cover in the cache directory, for the MPRIS controller, which
+// can only pass the cover art to the desktop as a file
+fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
+    let mut path = glib::user_cache_dir();
+    path.push("amberol");
+    path.push("covers");
+    glib::mkdir_with_parents(&path, 0o755);
+
+    path.push(format!("{}.png", uuid));
+    if path.exists() {
+        return Some(path);
+    }
+
+    match image.save_png(&path) {
+        Ok(()) => {
+            debug!("Created cover data cache at {:?}", path);
+            Some(path)
+        }
+        Err(e) => {
+            warn!("Unable to cache cover data: {}", e);
+            None
+        }
     }
 }

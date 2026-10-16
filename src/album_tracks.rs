@@ -12,7 +12,7 @@ use gtk::{CompositeTemplate, gio, glib};
 use std::sync::LazyLock;
 
 use crate::{
-    audio::Track,
+    audio::{Track, load_tracks},
     i18n::{i18n, ni18n_f},
     library::{self, Album},
     queue_row::QueueRow,
@@ -382,39 +382,37 @@ impl AlbumTracks {
         };
         tracks.remove_all();
 
-        // Reading the tags of the tracks takes a moment, so we do it a few
-        // at a time in the main loop, like when adding tracks to the playlist
+        // Reading the tags of the tracks takes a moment, so it's done in a
+        // separate thread, and the tracks are shown as they come; showing
+        // another album stops it
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
-        let mut files = files.into_iter();
-        glib::idle_add_local(clone!(
+        let receiver = load_tracks(files);
+        glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
-            #[upgrade_or]
-            glib::ControlFlow::Break,
-            move || {
-                if this.imp().generation.get() != generation {
-                    return glib::ControlFlow::Break;
+            async move {
+                while let Ok(data) = receiver.recv().await {
+                    if this.imp().generation.get() != generation {
+                        return;
+                    }
+
+                    // Along with the ones that are already read
+                    let mut batch: Vec<Track> = data.into_iter().map(Track::new).collect();
+                    while let Ok(data) = receiver.try_recv() {
+                        batch.extend(data.map(Track::new));
+                    }
+                    if batch.is_empty() {
+                        continue;
+                    }
+                    tracks.extend_from_slice(&batch);
+
+                    // The list keeps its first track at the top as tracks are
+                    // added, which hides the header of its work above it
+                    if let Some(adjustment) = this.imp().tracks_view.vadjustment() {
+                        adjustment.set_value(0.0);
+                    }
                 }
-
-                let batch: Vec<gio::File> = files.by_ref().take(4).collect();
-                if batch.is_empty() {
-                    return glib::ControlFlow::Break;
-                }
-
-                let batch: Vec<Track> = batch
-                    .iter()
-                    .filter_map(|f| Track::from_uri(f.uri().as_str()).ok())
-                    .collect();
-                tracks.extend_from_slice(&batch);
-
-                // The list keeps its first track at the top as tracks are
-                // added, which hides the header of its work above it
-                if let Some(adjustment) = this.imp().tracks_view.vadjustment() {
-                    adjustment.set_value(0.0);
-                }
-
-                glib::ControlFlow::Continue
             }
         ));
     }

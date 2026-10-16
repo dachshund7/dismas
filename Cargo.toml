@@ -9,7 +9,8 @@ edition = "2024"
 
 [dependencies]
 color-thief = "0.2.1"
-gdk-pixbuf = { version = "0.22", features = ["v2_42"] }
+glycin = { version = "4", features = ["gdk4"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 gettext-rs = { version = "0.7", features = ["gettext-system"] }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_16"] }
 itertools = "0.14"

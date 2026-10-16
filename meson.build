@@ -16,6 +16,12 @@ dependency('gstreamer-play-1.0', version: '>= 1.20')
 dependency('gstreamer-plugins-base-1.0', version: '>= 1.20')
 dependency('gstreamer-plugins-bad-1.0', version: '>= 1.20')
 dependency('gstreamer-bad-audio-1.0', version: '>= 1.20')
+# glycin, which decodes the covers in sandboxed loaders, links against these;
+# the loaders themselves (glycin-loaders) are only needed at runtime
+if host_machine.system() == 'linux'
+  dependency('libseccomp')
+  dependency('fontconfig')
+endif
 
 i18n = import('i18n')
 gnome = import('gnome')

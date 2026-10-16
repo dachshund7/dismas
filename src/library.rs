@@ -33,6 +33,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     audio::{CoverCache, normalize_search_text, tag_search_text},
+    cover_image::CoverImage,
     i18n::i18n,
     utils,
 };
@@ -42,7 +43,7 @@ use crate::{
 const SCHEMA_VERSION: i32 = 4;
 
 // The size of the covers in the grid, accounting for HiDPI
-const THUMBNAIL_SIZE: i32 = 256;
+const THUMBNAIL_SIZE: u32 = 256;
 
 pub enum ScanEvent {
     // The number of files read so far, out of the files that changed
@@ -508,11 +509,11 @@ fn create_thumbnail(track: &Path, dest: &Path) -> bool {
         Some(tag) => CoverCache::load_cover_art(tag, track.parent()),
         None => None,
     };
-    let Some(pixbuf) = bytes.and_then(|b| utils::load_scaled_cover(&b, THUMBNAIL_SIZE)) else {
+    let Some(image) = bytes.and_then(|b| CoverImage::decode(b, THUMBNAIL_SIZE)) else {
         return false;
     };
 
-    match pixbuf.savev(dest, "png", &[]) {
+    match image.save_png(dest) {
         Ok(_) => true,
         Err(e) => {
             warn!("Unable to save album cover {:?}: {e}", dest);

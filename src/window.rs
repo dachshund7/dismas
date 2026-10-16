@@ -25,7 +25,7 @@ use log::debug;
 
 use crate::{
     album_tracks::AlbumTracks,
-    audio::{AudioPlayer, CoverCache, RepeatMode, ReplayGainMode, Track},
+    audio::{AudioPlayer, CoverCache, RepeatMode, ReplayGainMode, Track, load_tracks},
     config::APPLICATION_ID,
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},

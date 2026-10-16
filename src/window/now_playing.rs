@@ -95,7 +95,7 @@ impl Window {
                     .track_cover
                     .get()
                     .album_image()
-                    .set_cover(Some(&cover.texture()));
+                    .set_cover(Some(&cover));
             }
         ));
     }

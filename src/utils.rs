@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use core::cmp::Ordering;
-use std::path::PathBuf;
 
-use color_thief::{ColorFormat, get_palette};
-use gtk::{gdk, gio, glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 use log::{debug, warn};
 
 use crate::{
@@ -30,148 +28,11 @@ pub fn format_time(t: i64) -> String {
     format!("{}:{:02}", (t - (t % 60)) / 60, t % 60)
 }
 
-// The base cover size is 192px, but we need to account for HiDPI;
-// better to scale down when rendering on displays with a scaling
-// factor of 1 than having to scale up on displays with a scaling
-// factor of 2.
-const COVER_SIZE: i32 = 192 * 2;
-
-pub fn load_cover_texture(buffer: &glib::Bytes) -> Option<gdk_pixbuf::Pixbuf> {
-    let stream = gio::MemoryInputStream::from_bytes(buffer);
-
-    if let Ok(pixbuf) = gdk_pixbuf::Pixbuf::from_stream(&stream, gio::Cancellable::NONE) {
-        let width = pixbuf.width();
-        let height = pixbuf.height();
-        let ratio = width as f32 / height as f32;
-
-        let w: i32;
-        let h: i32;
-
-        if ratio > 1.0 {
-            w = COVER_SIZE;
-            h = (COVER_SIZE as f32 / ratio) as i32;
-        } else {
-            w = (COVER_SIZE as f32 * ratio) as i32;
-            h = COVER_SIZE;
-        }
-
-        debug!("Cover size {width} x {height} (ratio: {ratio}), scaled: {w} x {h}");
-
-        pixbuf.scale_simple(w, h, gdk_pixbuf::InterpType::Bilinear)
-    } else {
-        warn!("Unable to load cover art");
-        None
-    }
-}
-
-// The cover in the main view is drawn larger than the shared cover
-// texture, so it is loaded separately for the current track; we limit its
-// size, as the original artwork can be very large, and let the renderer
-// scale it down the rest of the way
-const FULL_COVER_SIZE: i32 = 1024;
-
-pub fn load_full_cover(buffer: &glib::Bytes) -> Option<gdk_pixbuf::Pixbuf> {
-    load_scaled_cover(buffer, FULL_COVER_SIZE)
-}
-
-// Loads the cover art, scaled down to fit in `max_size`, keeping its
-// aspect ratio; smaller covers are not scaled up
-pub fn load_scaled_cover(buffer: &glib::Bytes, max_size: i32) -> Option<gdk_pixbuf::Pixbuf> {
-    let stream = gio::MemoryInputStream::from_bytes(buffer);
-    let pixbuf = gdk_pixbuf::Pixbuf::from_stream(&stream, gio::Cancellable::NONE).ok()?;
-
-    let width = pixbuf.width();
-    let height = pixbuf.height();
-    if width <= max_size && height <= max_size {
-        return Some(pixbuf);
-    }
-
-    let (w, h) = if width > height {
-        (max_size, max_size * height / width)
-    } else {
-        (max_size * width / height, max_size)
-    };
-
-    pixbuf.scale_simple(w, h, gdk_pixbuf::InterpType::Hyper)
-}
-
 // Whether a file is an audio track, guessing from its name only, which is
 // much faster than looking at its contents when scanning a whole library
 pub fn is_audio_path(path: &std::path::Path) -> bool {
     let (mime_type, _) = gio::content_type_guess(Some(path), None);
     mime_type.starts_with("audio") && !mime_type.ends_with("x-mpegurl")
-}
-
-pub fn cache_cover_art(uuid: &str, pixbuf: &gdk_pixbuf::Pixbuf) -> Option<PathBuf> {
-    let mut cache_dir = glib::user_cache_dir();
-    cache_dir.push("amberol");
-    cache_dir.push("covers");
-    glib::mkdir_with_parents(&cache_dir, 0o755);
-
-    cache_dir.push(format!("{}.png", uuid));
-    let file = gio::File::for_path(&cache_dir);
-    match file.create(gio::FileCreateFlags::NONE, gio::Cancellable::NONE) {
-        Ok(stream) => {
-            debug!("Creating cover data cache at {:?}", cache_dir);
-            pixbuf.save_to_streamv_async(
-                &stream,
-                "png",
-                &[("tEXt::Software", "amberol")],
-                gio::Cancellable::NONE,
-                move |res| {
-                    if let Err(e) = res {
-                        warn!("Unable to cache cover data: {}", e);
-                    }
-                },
-            );
-        }
-        Err(e) => {
-            if let Some(file_error) = e.kind::<glib::FileError>() {
-                match file_error {
-                    glib::FileError::Exist => (),
-                    _ => {
-                        warn!("Unable to create cache file: {}", e);
-                        return None;
-                    }
-                };
-            }
-        }
-    };
-
-    Some(cache_dir)
-}
-
-fn color_format(has_alpha: bool) -> ColorFormat {
-    if has_alpha {
-        ColorFormat::Rgba
-    } else {
-        ColorFormat::Rgb
-    }
-}
-
-pub fn load_palette(pixbuf: &gdk_pixbuf::Pixbuf) -> Option<Vec<gdk::RGBA>> {
-    if let Ok(palette) = get_palette(
-        pixbuf.pixel_bytes().unwrap().as_ref(),
-        color_format(pixbuf.has_alpha()),
-        5,
-        4,
-    ) {
-        let colors: Vec<gdk::RGBA> = palette
-            .iter()
-            .map(|c| {
-                gdk::RGBA::new(
-                    c.r as f32 / 255.0,
-                    c.g as f32 / 255.0,
-                    c.b as f32 / 255.0,
-                    1.0,
-                )
-            })
-            .collect();
-
-        return Some(colors);
-    }
-
-    None
 }
 
 fn load_files_from_folder_internal(
