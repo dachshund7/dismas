@@ -21,10 +21,15 @@
 	  <key name="background-play" type="b">
 	    <default>true</default>
 	  </key>
-	  <key name="restore-queue" type="b">
+	  <key name="restore-playlist" type="b">
 	    <default>true</default>
-	    <summary>Restore the queue on startup</summary>
-	    <description>Whether to load the queue of the last session when the application starts</description>
+	    <summary>Restore the playlist on startup</summary>
+	    <description>Whether to load the playlist selected in the last session when the application starts; otherwise, it starts with an empty queue</description>
+	  </key>
+	  <key name="selected-playlist" type="s">
+	    <default>""</default>
+	    <summary>The selected playlist</summary>
+	    <description>The name of the saved playlist that is played and that tracks are added to; empty for the queue</description>
 	  </key>
 	  <key name="sidebar-width" type="i">
 	    <default>0</default>

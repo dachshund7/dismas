@@ -99,7 +99,7 @@ impl Window {
             }
 
             // Store the current state of the queue
-            utils::store_queue(queue);
+            self.store_queue();
         }
     }
 

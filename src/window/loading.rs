@@ -21,21 +21,24 @@ impl Window {
         imp.content_stack.set_transition_type(transition);
     }
 
-    // Restores the queue of the last session, if the user wants it
-    pub fn restore_queue_on_startup(&self) {
-        if self.imp().settings.boolean("restore-queue")
-            && utils::has_cached_queue()
-            && self.queue_is_empty()
-        {
-            self.restore_queue();
+    // Restores the playlist selected in the last session, if the user
+    // wants it; otherwise, starts with an empty queue
+    pub fn restore_playlist_on_startup(&self) {
+        if !self.imp().settings.boolean("restore-playlist") {
+            // Adding tracks to a saved playlist that wasn't loaded would
+            // replace its tracks
+            self.select_queue_to_play();
+            self.end_startup();
+        } else if self.queue_is_empty() {
+            self.restore_playlist();
         } else {
             self.end_startup();
         }
     }
 
-    fn restore_queue(&self) {
+    fn restore_playlist(&self) {
         // The saved queue is empty after clearing the queue
-        match utils::load_cached_queue() {
+        match playlists::load(&self.selected_playlist()) {
             Some(tracks) if !tracks.is_empty() => self.queue_tracks(tracks, QueueMode::Restore),
             _ => self.end_startup(),
         }
@@ -52,6 +55,8 @@ impl Window {
 
         // Disable actions on the queue; loading is "atomic"
         self.action_set_enabled("queue.clear", false);
+        self.action_set_enabled("win.select-playlist", false);
+        self.action_set_enabled("win.new-playlist", false);
         self.imp().album_tracks.set_adding_enabled(false);
         self.imp().library_view.set_adding_enabled(false);
 
@@ -87,6 +92,8 @@ impl Window {
 
                 // Re-enable the actions
                 win.action_set_enabled("queue.clear", true);
+                win.action_set_enabled("win.select-playlist", true);
+                win.action_set_enabled("win.new-playlist", true);
                 win.imp().album_tracks.set_adding_enabled(true);
                 win.imp().library_view.set_adding_enabled(true);
 
@@ -102,8 +109,12 @@ impl Window {
                     // Bulk add to avoid hammering the UI with list model updates
                     queue.add_tracks(&tracks);
 
-                    // Store the current state of the queue
-                    utils::store_queue(queue);
+                    // Store the current state of the queue; restoring
+                    // doesn't change it, and saving it would drop the
+                    // tracks that couldn't be read, e.g. on another drive
+                    if mode != QueueMode::Restore {
+                        win.store_queue();
+                    }
 
                     debug!(
                         "Queue was empty: {}, new size: {}",
@@ -184,6 +195,12 @@ impl Window {
             self.add_toast(i18n("Unable to access files"));
             self.end_startup();
             return;
+        }
+
+        // At startup, the selected playlist isn't loaded, and the files
+        // take the place of the queue instead
+        if self.imp().starting.get() {
+            self.select_queue_to_play();
         }
 
         self.add_files_to_queue(files.to_vec());

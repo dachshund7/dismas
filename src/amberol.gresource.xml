@@ -23,8 +23,10 @@
     <!-- All UI files are generated in the builddir/src/gtk directory -->
     <file preprocess="xml-stripblanks">album-tracks.ui</file>
     <file preprocess="xml-stripblanks">library-view.ui</file>
+    <file preprocess="xml-stripblanks">page-switcher.ui</file>
     <file preprocess="xml-stripblanks">playback-control.ui</file>
     <file preprocess="xml-stripblanks">playlist-view.ui</file>
+    <file preprocess="xml-stripblanks">playlists-page.ui</file>
     <file preprocess="xml-stripblanks">queue-row.ui</file>
     <file preprocess="xml-stripblanks">shortcuts-dialog.ui</file>
     <file preprocess="xml-stripblanks">track-cover.ui</file>

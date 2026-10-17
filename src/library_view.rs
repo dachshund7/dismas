@@ -72,8 +72,6 @@ mod imp {
     #[properties(wrapper_type = super::LibraryView)]
     pub struct LibraryView {
         #[template_child]
-        pub back_button: TemplateChild<gtk::Button>,
-        #[template_child]
         pub rescan_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
@@ -124,6 +122,7 @@ mod imp {
         type ParentType = gtk::Widget;
 
         fn class_init(klass: &mut Self::Class) {
+            crate::page_switcher::PageSwitcher::static_type();
             Self::bind_template(klass);
 
             klass.set_layout_manager_type::<gtk::BinLayout>();
@@ -706,6 +705,11 @@ impl LibraryView {
             .collect()
     }
 
+    // The label of the button that adds the albums to the selected playlist
+    pub fn set_add_label(&self, label: &str) {
+        crate::utils::set_playlist_button_label(&self.imp().add_albums_button, label);
+    }
+
     // Albums can't be added while tracks are being added to the queue
     pub fn set_adding_enabled(&self, enabled: bool) {
         self.imp().loading.set(!enabled);
@@ -732,11 +736,6 @@ impl LibraryView {
         let can_add = n_selected > 0 && !imp.loading.get();
         imp.play_albums_button.set_sensitive(can_add);
         imp.add_albums_button.set_sensitive(can_add);
-    }
-
-    // Whether there is a player to go back to
-    pub fn set_can_go_back(&self, can_go_back: bool) {
-        self.imp().back_button.set_visible(can_go_back);
     }
 
     // Reads the albums from the database

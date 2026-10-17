@@ -13,11 +13,7 @@ template $AmberolLibraryView: Widget {
       };
 
       [start]
-      Button back_button {
-        icon-name: "go-previous-symbolic";
-        action-name: "win.browse-albums";
-        tooltip-text: _("Back to the Player");
-      }
+      $AmberolPageSwitcher {}
 
       [end]
       Button rescan_button {

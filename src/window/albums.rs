@@ -36,15 +36,17 @@ impl Window {
         }
     }
 
-    fn show_playlist_view(&self) {
+    pub(super) fn show_playlist_view(&self) {
         self.imp().sidebar_stack.set_visible_child_name("playlist");
     }
 
     // With an empty queue, there is nothing to play, so the album grid
-    // takes the place of the player, and there's no going back to it
+    // takes the place of the player, and there's no going to it
     pub(super) fn update_library_for_queue(&self) {
         let queue_empty = self.queue_is_empty();
-        self.imp().library_view.set_can_go_back(!queue_empty);
+        if self.imp().player_available.replace(!queue_empty) == queue_empty {
+            self.notify_player_available();
+        }
 
         // At startup, the queue is empty until it's restored, or until
         // the files to open are added, and showing the grid in the meantime
@@ -80,6 +82,7 @@ impl Window {
                 let files = paths.into_iter().map(gio::File::for_path).collect();
 
                 if play {
+                    win.select_queue_to_play();
                     win.clear_queue();
                     win.show_playlist_view();
                     win.queue_tracks(files, QueueMode::Play(0));
@@ -126,6 +129,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |album_tracks, start| {
+                win.select_queue_to_play();
                 win.clear_queue();
                 win.show_playlist_view();
                 win.queue_tracks(album_tracks.files(), QueueMode::Play(start));

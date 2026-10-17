@@ -77,6 +77,16 @@ impl Queue {
         self.imp().model.as_ref()
     }
 
+    // The tracks in the order they were added, even when shuffled
+    pub fn files_in_order(&self) -> Vec<gio::File> {
+        self.imp()
+            .store
+            .iter::<Track>()
+            .flatten()
+            .map(|track| track.file())
+            .collect()
+    }
+
     pub fn track_at(&self, pos: u32) -> Option<Track> {
         self.imp().model.item(pos).and_downcast()
     }

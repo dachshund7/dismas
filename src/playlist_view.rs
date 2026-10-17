@@ -11,6 +11,8 @@ mod imp {
     #[template(resource = "/io/bassi/Amberol/playlist-view.ui")]
     pub struct PlaylistView {
         #[template_child]
+        pub title_label: TemplateChild<gtk::Label>,
+        #[template_child]
         pub back_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub queue_view: TemplateChild<gtk::ListView>,
@@ -88,6 +90,11 @@ impl PlaylistView {
     fn setup_searchbar(&self) {
         let entry = self.imp().queue_searchentry.get();
         self.imp().queue_searchbar.connect_entry(&entry);
+    }
+
+    // The name of the selected playlist
+    pub fn set_title(&self, title: &str) {
+        self.imp().title_label.set_label(title);
     }
 
     pub fn back_button(&self) -> gtk::Button {

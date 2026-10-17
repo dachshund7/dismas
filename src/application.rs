@@ -77,7 +77,10 @@ mod imp {
             obj.set_accels_for_action("win.play", &["<primary>p"]);
             obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
-            obj.set_accels_for_action("win.browse-albums", &["<primary>g"]);
+            // In the order of the buttons of the pages
+            obj.set_accels_for_action("win.page::player", &["<primary>1"]);
+            obj.set_accels_for_action("win.page::library", &["<primary>2", "<primary>g"]);
+            obj.set_accels_for_action("win.page::playlists", &["<primary>3"]);
         }
     }
 
@@ -180,7 +183,7 @@ impl Application {
         glib::ControlFlow::Continue
     }
 
-    // With `restore`, a new window restores the queue of the last
+    // With `restore`, a new window restores the playlist of the last
     // session, if the user wants it; otherwise, the caller adds tracks
     fn present_main_window(&self, restore: bool) -> Window {
         let window = if let Some(window) = self.active_window().and_downcast::<Window>() {
@@ -188,7 +191,7 @@ impl Application {
         } else {
             let window = Window::new(self);
             if restore {
-                window.restore_queue_on_startup();
+                window.restore_playlist_on_startup();
             }
             window
         };

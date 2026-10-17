@@ -25,8 +25,18 @@ Adw.ShortcutsDialog shortcuts_dialog {
         }
 
         Adw.ShortcutsItem {
-            title: C_("shortcut window", "Toggle the album grid");
-            action-name: "win.browse-albums";
+            title: C_("shortcut window", "Show the player");
+            accelerator: "<primary>1";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Show the album grid");
+            accelerator: "<primary>2 <primary>g";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Show the playlists");
+            accelerator: "<primary>3";
         }
 
         Adw.ShortcutsItem {

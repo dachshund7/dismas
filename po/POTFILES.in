@@ -3,8 +3,10 @@ data/io.bassi.Amberol.gschema.xml
 data/io.bassi.Amberol.metainfo.xml.in.in
 src/gtk/album-tracks.blp
 src/gtk/library-view.blp
+src/gtk/page-switcher.blp
 src/gtk/playback-control.blp
 src/gtk/playlist-view.blp
+src/gtk/playlists-page.blp
 src/gtk/queue-row.blp
 src/gtk/shortcuts-dialog.blp
 src/gtk/track-info-dialog.blp
@@ -18,6 +20,8 @@ src/cover_picture.rs
 src/library.rs
 src/library_view.rs
 src/playback_control.rs
+src/playlists_page.rs
 src/queue_row.rs
 src/track_info_dialog.rs
 src/window.rs
+src/window/selected_playlist.rs

@@ -162,7 +162,7 @@ impl Window {
             p.clear_queue();
 
             // So that the queue isn't restored at the next startup
-            utils::store_queue(p.queue());
+            self.store_queue();
         }
     }
 

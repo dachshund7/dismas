@@ -385,6 +385,11 @@ impl AlbumTracks {
         imp.add_button.set_sensitive(can_add);
     }
 
+    // The label of the button that adds the tracks to the selected playlist
+    pub fn set_add_label(&self, label: &str) {
+        utils::set_playlist_button_label(&self.imp().add_button, label);
+    }
+
     pub fn adding_enabled(&self) -> bool {
         !self.imp().loading.get()
     }

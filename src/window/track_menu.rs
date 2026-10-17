@@ -44,9 +44,7 @@ impl Window {
             track,
             move |_, _| {
                 win.remove_track(&track);
-                if let Some(player) = win.player() {
-                    utils::store_queue(player.queue());
-                }
+                win.store_queue();
             }
         ));
         actions.add_action(&remove);
@@ -87,9 +85,14 @@ impl Window {
         let section = gio::Menu::new();
         match kind {
             TrackMenu::Queue => {
-                section.append(Some(&i18n("Remove from Queue")), Some("track.remove"));
+                section.append(
+                    Some(&self.remove_from_playlist_label()),
+                    Some("track.remove"),
+                );
             }
-            TrackMenu::Album => section.append(Some(&i18n("Add to Queue")), Some("track.add")),
+            TrackMenu::Album => {
+                section.append(Some(&self.add_to_playlist_label()), Some("track.add"));
+            }
         }
         menu.append_section(None, &section);
 

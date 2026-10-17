@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 John Hamilton
+
+using Gtk 4.0;
+
+template $AmberolPageSwitcher: Widget {
+  // Clicking a button hides its page, so it doesn't take the focus; when
+  // the page came back, the focus would be shown on the button
+  Box {
+    styles [
+      "linked",
+    ]
+
+    // Not on the action, which would make it sensitive again whenever
+    // the action is enabled; see page_switcher.rs
+    ToggleButton player_button {
+      icon-name: "audio-x-generic-symbolic";
+      focus-on-click: false;
+      tooltip-text: _("Player");
+    }
+
+    ToggleButton {
+      icon-name: "view-grid-symbolic";
+      focus-on-click: false;
+      action-name: "win.page";
+      action-target: "'library'";
+      tooltip-text: _("Albums");
+    }
+
+    ToggleButton {
+      icon-name: "view-list-bullet-symbolic";
+      focus-on-click: false;
+      action-name: "win.page";
+      action-target: "'playlists'";
+      tooltip-text: _("Playlists");
+    }
+  }
+}

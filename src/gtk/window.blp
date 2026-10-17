@@ -34,11 +34,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
                   show-title: false;
 
                   [start]
-                  Button {
-                    icon-name: "view-grid-symbolic";
-                    action-name: "win.browse-albums";
-                    tooltip-text: _("Browse Albums");
-                  }
+                  $AmberolPageSwitcher {}
                 }
 
                 content: Box main_box {
@@ -116,6 +112,12 @@ template $AmberolWindow: Adw.ApplicationWindow {
               name: "library";
 
               child: $AmberolLibraryView library_view {};
+            }
+
+            StackPage {
+              name: "playlists";
+
+              child: $AmberolPlaylistsPage playlists_page {};
             }
           };
 

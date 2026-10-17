@@ -6,14 +6,23 @@ use core::cmp::Ordering;
 use gtk::{gio, glib, prelude::*};
 use log::{debug, warn};
 
-use crate::{
-    audio::{Queue, Track},
-    config::APPLICATION_ID,
-};
+use crate::{audio::Track, config::APPLICATION_ID};
 
 // The path of a file outside the sandbox, for the files that came through
 // the document portal
 pub const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
+
+// Sets the label of a button that names the selected playlist, which can
+// have a long name
+pub fn set_playlist_button_label(button: &gtk::Button, label: &str) {
+    button.set_label(label);
+    // The full label, when it doesn't fit
+    button.set_tooltip_text(Some(label));
+    if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_max_width_chars(16);
+    }
+}
 
 // Selects the tracks of a list from `from` to `to`, both included, in the
 // order of the list; returns false if either is not in it
@@ -145,67 +154,4 @@ pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::F
     );
 
     res
-}
-
-// The queue is saved as a PLS playlist, which needs a "playlist" group
-fn queue_cache_file() -> std::path::PathBuf {
-    let mut path = glib::user_cache_dir();
-    path.push("amberol");
-    path.push("queue.pls");
-    path
-}
-
-pub fn store_queue(queue: &Queue) {
-    let pls = glib::KeyFile::new();
-    pls.set_string("playlist", "X-GNOME-Title", "Amberol's queue");
-
-    pls.set_int64("playlist", "NumberOfEntries", i64::from(queue.n_tracks()));
-
-    // URIs, unlike paths, are valid UTF-8, and have no line breaks
-    for (i, track) in queue.model().iter::<Track>().flatten().enumerate() {
-        pls.set_value("playlist", &format!("File{i}"), &track.uri());
-    }
-
-    let pls_cache = queue_cache_file();
-    if let Some(dir) = pls_cache.parent() {
-        glib::mkdir_with_parents(dir, 0o755);
-    }
-
-    match pls.save_to_file(&pls_cache) {
-        Ok(()) => debug!("Queue saved to: {pls_cache:?}"),
-        Err(e) => debug!("Unable to save the queue: {e}"),
-    }
-}
-
-pub fn load_cached_queue() -> Option<Vec<gio::File>> {
-    let pls = glib::KeyFile::new();
-    if let Err(e) = pls.load_from_file(queue_cache_file(), glib::KeyFileFlags::NONE) {
-        debug!("Unable to load the saved queue: {e}");
-        return None;
-    }
-
-    // The entries are read from the keys, rather than up to the number of
-    // entries, which a damaged file could get wrong
-    let keys = match pls.keys("playlist") {
-        Ok(keys) => keys,
-        Err(e) => {
-            debug!("Unable to read the saved queue: {e}");
-            return None;
-        }
-    };
-    let mut entries: Vec<(u64, gio::File)> = keys
-        .iter()
-        .filter_map(|key| {
-            let index = key.as_str().strip_prefix("File")?.parse().ok()?;
-            let uri = pls.value("playlist", key.as_str()).ok()?;
-            Some((index, gio::File::for_uri(uri.as_str())))
-        })
-        .collect();
-    entries.sort_by_key(|(index, _)| *index);
-
-    Some(entries.into_iter().map(|(_, file)| file).collect())
-}
-
-pub fn has_cached_queue() -> bool {
-    queue_cache_file().exists()
 }

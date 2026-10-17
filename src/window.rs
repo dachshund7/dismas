@@ -6,6 +6,7 @@ mod bindings;
 mod loading;
 mod now_playing;
 mod playlist;
+mod selected_playlist;
 mod selection;
 mod sidebar;
 mod track_menu;
@@ -31,8 +32,11 @@ use crate::{
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album},
     library_view::LibraryView,
+    page_switcher::PageSwitcher,
     playback_control::PlaybackControl,
     playlist_view::PlaylistView,
+    playlists::{self, NameError},
+    playlists_page::PlaylistsPage,
     queue_row::QueueRow,
     search::SearchFilter,
     track_cover::TrackCover,
@@ -98,6 +102,8 @@ mod imp {
         #[template_child]
         pub library_view: TemplateChild<LibraryView>,
         #[template_child]
+        pub playlists_page: TemplateChild<PlaylistsPage>,
+        #[template_child]
         pub sidebar_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         pub album_tracks: TemplateChild<AlbumTracks>,
@@ -123,6 +129,15 @@ mod imp {
         pub sidebar_width: Cell<i32>,
         #[property(get, set = Self::set_library_visible, explicit_notify)]
         pub library_visible: Cell<bool>,
+        // The list of playlists, shown over the player or the album grid
+        #[property(get, set = Self::set_playlists_visible, explicit_notify)]
+        pub playlists_visible: Cell<bool>,
+        // The visible page: "player", "library" or "playlists"
+        #[property(name = "page", get = Self::page, set = Self::set_page, explicit_notify, type = String)]
+        page: std::marker::PhantomData<String>,
+        // Whether there is anything to play, to go to the player
+        #[property(get)]
+        pub player_available: Cell<bool>,
         // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
         // Whether the sidebar was showing before the tracks of an album
@@ -148,6 +163,7 @@ mod imp {
         type ParentType = adw::ApplicationWindow;
 
         fn class_init(klass: &mut Self::Class) {
+            PageSwitcher::static_type();
             Self::bind_template(klass);
 
             klass.install_action("win.play", None, move |win, _, _| {
@@ -202,6 +218,20 @@ mod imp {
                 debug!("Window::queue.clear()");
                 win.clear_queue();
             });
+            klass.install_action(
+                "win.select-playlist",
+                Some(glib::VariantTy::STRING),
+                move |win, _, param| {
+                    debug!("Window::win.select-playlist()");
+                    if let Some(name) = param.and_then(String::from_variant) {
+                        win.select_playlist(&name);
+                    }
+                },
+            );
+            klass.install_action("win.new-playlist", None, move |win, _, _| {
+                debug!("Window::win.new-playlist()");
+                win.show_new_playlist_dialog();
+            });
             klass.install_action("queue.select-all", None, move |win, _, _| {
                 debug!("Window::queue.select-all()");
                 win.select_all();
@@ -238,7 +268,7 @@ mod imp {
             klass.install_property_action("queue.shuffle", "queue-shuffled");
             klass.install_property_action("queue.select", "queue-selection");
             klass.install_property_action("queue.search", "queue-search");
-            klass.install_property_action("win.browse-albums", "library-visible");
+            klass.install_property_action("win.page", "page");
             klass.install_property_action("win.replaygain", "replaygain-mode");
         }
 
@@ -260,6 +290,7 @@ mod imp {
                 playlist_view: TemplateChild::default(),
                 content_stack: TemplateChild::default(),
                 library_view: TemplateChild::default(),
+                playlists_page: TemplateChild::default(),
                 sidebar_stack: TemplateChild::default(),
                 album_tracks: TemplateChild::default(),
                 sidebar_handle: TemplateChild::default(),
@@ -272,6 +303,9 @@ mod imp {
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
                 sidebar_width: Cell::new(0),
                 library_visible: Cell::new(false),
+                playlists_visible: Cell::new(false),
+                page: std::marker::PhantomData,
+                player_available: Cell::new(false),
                 starting: Cell::new(true),
                 sidebar_was_visible: Cell::new(false),
                 sidebar_visible_uncollapsed: Cell::new(true),
@@ -371,17 +405,64 @@ mod imp {
                 obj.notify_library_visible();
                 return;
             }
+            // Going to the albums from the playlists closes them
+            if visible {
+                obj.set_playlists_visible(false);
+            }
             if visible == self.library_visible.replace(visible) {
                 return;
             }
 
-            let page = if visible { "library" } else { "player" };
-            self.content_stack.set_visible_child_name(page);
+            self.update_content_page();
             // Typing searches the albums right away
             if visible {
                 self.library_view.focus_search();
             }
             obj.notify_library_visible();
+        }
+
+        fn set_playlists_visible(&self, visible: bool) {
+            if visible == self.playlists_visible.replace(visible) {
+                return;
+            }
+
+            let obj = self.obj();
+            if visible {
+                obj.update_playlists_page();
+            }
+            self.update_content_page();
+            obj.notify_playlists_visible();
+        }
+
+        fn page(&self) -> String {
+            if self.playlists_visible.get() {
+                "playlists"
+            } else if self.library_visible.get() {
+                "library"
+            } else {
+                "player"
+            }
+            .to_string()
+        }
+
+        fn set_page(&self, page: String) {
+            let obj = self.obj();
+            match page.as_str() {
+                "library" => obj.set_library_visible(true),
+                "playlists" => obj.set_playlists_visible(true),
+                _ => {
+                    obj.set_playlists_visible(false);
+                    obj.set_library_visible(false);
+                }
+            }
+            // A page that can't be shown, like the player with nothing to
+            // play, leaves the buttons as they were
+            obj.notify_page();
+        }
+
+        fn update_content_page(&self) {
+            self.content_stack.set_visible_child_name(&self.page());
+            self.obj().notify_page();
         }
 
         fn set_replaygain_mode(&self, replaygain: ReplayGainMode) {
@@ -433,6 +514,7 @@ impl Window {
         win.setup_drop_target();
         win.setup_select_all_shortcut();
         win.setup_library();
+        win.setup_playlists();
         win.setup_provider();
         win.bind_state();
         win.bind_queue();
@@ -457,7 +539,7 @@ impl Window {
     }
 
     fn setup_actions(&self) {
-        self.add_action(&self.imp().settings.create_action("restore-queue"));
+        self.add_action(&self.imp().settings.create_action("restore-playlist"));
 
         let enable_recoloring = self.imp().settings.boolean("enable-recoloring");
         self.add_action_entries([gio::ActionEntry::builder("enable-recoloring")
