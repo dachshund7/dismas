@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 
 use adw::subclass::prelude::*;
 use glib::clone;
-use gtk::{CompositeTemplate, glib, prelude::*};
+use gtk::{CompositeTemplate, gdk, glib, prelude::*};
 
 // How close to the top or bottom of the queue a dragged track scrolls it,
 // and how fast at most, in pixels per frame
@@ -47,6 +47,8 @@ mod imp {
         // scroll it by on each frame
         pub autoscroll_speed: Cell<f64>,
         pub autoscroll_tick: RefCell<Option<gtk::TickCallbackId>>,
+        // The drag that is scrolling the queue, to stop when it ends
+        pub autoscroll_drag: glib::WeakRef<gdk::Drag>,
     }
 
     #[glib::object_subclass]
@@ -106,7 +108,8 @@ impl PlaylistView {
         motion.connect_motion(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_, _, y| {
+            move |motion, _, y| {
+                this.watch_drag_end(motion);
                 let height = f64::from(this.imp().queue_scrolled.height());
                 let speed = if y < AUTOSCROLL_EDGE {
                     -(AUTOSCROLL_EDGE - y) / AUTOSCROLL_EDGE
@@ -124,6 +127,37 @@ impl PlaylistView {
             move |_| this.set_autoscroll_speed(0.0)
         ));
         self.imp().queue_scrolled.add_controller(motion);
+    }
+
+    // The list isn't told that the drag left it when the track is dropped,
+    // so the scrolling also stops when the drag ends; tracks are only
+    // dragged within Amberol, so the drag is known
+    fn watch_drag_end(&self, motion: &gtk::DropControllerMotion) {
+        let Some(drag) = motion.drop().and_then(|drop| drop.drag()) else {
+            return;
+        };
+        let imp = self.imp();
+        if imp.autoscroll_drag.upgrade().as_ref() == Some(&drag) {
+            return;
+        }
+        imp.autoscroll_drag.set(Some(&drag));
+
+        let stop = clone!(
+            #[weak(rename_to = this)]
+            self,
+            move || this.set_autoscroll_speed(0.0)
+        );
+        drag.connect_drop_performed(clone!(
+            #[strong]
+            stop,
+            move |_| stop()
+        ));
+        drag.connect_dnd_finished(clone!(
+            #[strong]
+            stop,
+            move |_| stop()
+        ));
+        drag.connect_cancel(move |_, _| stop());
     }
 
     fn set_autoscroll_speed(&self, speed: f64) {
