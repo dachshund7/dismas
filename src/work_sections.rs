@@ -119,12 +119,18 @@ fn section_key(model: &gio::ListModel, position: u32) -> Option<(String, String)
 // The headers of the sections in the queue: a line between each section,
 // followed by the name of the work for the movements of a work; a click
 // on the name calls `on_work_clicked` with the positions of the first
-// movement and past the last one, and whether Ctrl was held
+// movement and past the last one, and whether Ctrl was held. In lists
+// whose tracks can be moved, a track dropped on the header of a work at
+// the top of the list calls `on_drop_before_work` with the track and the
+// position of the first movement; elsewhere, tracks go before a work by
+// being dropped below the row above its header
 pub fn work_header_factory(
     on_work_clicked: impl Fn(u32, u32, bool) + 'static,
+    on_drop_before_work: Option<impl Fn(&Track, u32) + 'static>,
 ) -> gtk::ListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     let on_work_clicked = Rc::new(on_work_clicked);
+    let on_drop_before_work = on_drop_before_work.map(Rc::new);
 
     factory.connect_setup(move |_, item| {
         let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
@@ -175,6 +181,53 @@ pub fn work_header_factory(
             .build();
         content.append(&separator);
         content.append(&work_label);
+
+        if let Some(on_drop_before_work) = &on_drop_before_work {
+            let drop_target = gtk::DropTarget::new(Track::static_type(), gdk::DragAction::MOVE);
+            drop_target.connect_motion(glib::clone!(
+                #[weak]
+                header,
+                #[weak]
+                content,
+                #[upgrade_or]
+                gdk::DragAction::empty(),
+                move |_, _, _| {
+                    if header.start() > 0 {
+                        return gdk::DragAction::empty();
+                    }
+                    content.add_css_class("drop-above");
+                    gdk::DragAction::MOVE
+                }
+            ));
+            drop_target.connect_leave(glib::clone!(
+                #[weak]
+                content,
+                move |_| content.remove_css_class("drop-above")
+            ));
+            drop_target.connect_drop(glib::clone!(
+                #[weak]
+                header,
+                #[weak]
+                content,
+                #[strong]
+                on_drop_before_work,
+                #[upgrade_or]
+                false,
+                move |_, value, _, _| {
+                    content.remove_css_class("drop-above");
+                    let Ok(track) = value.get::<Track>() else {
+                        return false;
+                    };
+                    if header.start() > 0 {
+                        return false;
+                    }
+                    on_drop_before_work(&track, header.start());
+                    true
+                }
+            ));
+            content.add_controller(drop_target);
+        }
+
         header.set_child(Some(&content));
     });
 

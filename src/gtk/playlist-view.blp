@@ -81,7 +81,7 @@ template $AmberolPlaylistView: Widget {
         ]
       }
 
-      ScrolledWindow {
+      ScrolledWindow queue_scrolled {
         hscrollbar-policy: never;
         vscrollbar-policy: automatic;
         propagate-natural-height: true;
@@ -92,6 +92,7 @@ template $AmberolPlaylistView: Widget {
 
           styles [
             "navigation-sidebar",
+            "track-list",
           ]
         };
       }

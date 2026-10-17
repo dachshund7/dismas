@@ -533,6 +533,11 @@ impl AudioPlayer {
         self.queue.remove_all();
     }
 
+    // Moves a track before another one, or to the end of the queue
+    pub fn move_track(&self, track: &Track, before: Option<&Track>) {
+        self.queue.move_track(track, before);
+    }
+
     pub fn remove_track(&self, track: &Track) {
         // Repeating the track would keep playing it after it's gone
         if track.playing() {

@@ -1,8 +1,16 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::cell::{Cell, RefCell};
+
 use adw::subclass::prelude::*;
+use glib::clone;
 use gtk::{CompositeTemplate, glib, prelude::*};
+
+// How close to the top or bottom of the queue a dragged track scrolls it,
+// and how fast at most, in pixels per frame
+const AUTOSCROLL_EDGE: f64 = 48.0;
+const AUTOSCROLL_MAX_SPEED: f64 = 12.0;
 
 mod imp {
     use super::*;
@@ -14,6 +22,8 @@ mod imp {
         pub title_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub back_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub queue_scrolled: TemplateChild<gtk::ScrolledWindow>,
         #[template_child]
         pub queue_view: TemplateChild<gtk::ListView>,
         #[template_child]
@@ -32,6 +42,11 @@ mod imp {
         pub queue_searchbar: TemplateChild<gtk::SearchBar>,
         #[template_child]
         pub queue_searchentry: TemplateChild<gtk::SearchEntry>,
+
+        // While a track is dragged near an edge of the queue, the pixels to
+        // scroll it by on each frame
+        pub autoscroll_speed: Cell<f64>,
+        pub autoscroll_tick: RefCell<Option<gtk::TickCallbackId>>,
     }
 
     #[glib::object_subclass]
@@ -64,6 +79,7 @@ mod imp {
             self.parent_constructed();
 
             self.obj().setup_searchbar();
+            self.obj().setup_autoscroll();
         }
     }
 
@@ -83,6 +99,57 @@ impl Default for PlaylistView {
 }
 
 impl PlaylistView {
+    // GTK doesn't scroll lists while dragging, so a track dragged near the
+    // top or bottom of the queue scrolls it, faster closer to the edge
+    fn setup_autoscroll(&self) {
+        let motion = gtk::DropControllerMotion::new();
+        motion.connect_motion(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, _, y| {
+                let height = f64::from(this.imp().queue_scrolled.height());
+                let speed = if y < AUTOSCROLL_EDGE {
+                    -(AUTOSCROLL_EDGE - y) / AUTOSCROLL_EDGE
+                } else if y > height - AUTOSCROLL_EDGE {
+                    (y - (height - AUTOSCROLL_EDGE)) / AUTOSCROLL_EDGE
+                } else {
+                    0.0
+                };
+                this.set_autoscroll_speed(speed.clamp(-1.0, 1.0) * AUTOSCROLL_MAX_SPEED);
+            }
+        ));
+        motion.connect_leave(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.set_autoscroll_speed(0.0)
+        ));
+        self.imp().queue_scrolled.add_controller(motion);
+    }
+
+    fn set_autoscroll_speed(&self, speed: f64) {
+        let imp = self.imp();
+        imp.autoscroll_speed.set(speed);
+
+        if speed == 0.0 {
+            if let Some(tick) = imp.autoscroll_tick.take() {
+                tick.remove();
+            }
+        } else if imp.autoscroll_tick.borrow().is_none() {
+            let tick = imp.queue_scrolled.add_tick_callback(clone!(
+                #[weak(rename_to = this)]
+                self,
+                #[upgrade_or]
+                glib::ControlFlow::Break,
+                move |scrolled, _| {
+                    let adjustment = scrolled.vadjustment();
+                    adjustment.set_value(adjustment.value() + this.imp().autoscroll_speed.get());
+                    glib::ControlFlow::Continue
+                }
+            ));
+            imp.autoscroll_tick.replace(Some(tick));
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

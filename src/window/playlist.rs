@@ -55,6 +55,22 @@ impl Window {
                     .sync_create()
                     .build();
 
+                // The shuffled order is only the one tracks are played in,
+                // so tracks are only moved in the order they were added
+                win.bind_property("queue-shuffled", &row, "reorderable")
+                    .invert_boolean()
+                    .sync_create()
+                    .build();
+                row.connect_move_requested(clone!(
+                    #[weak]
+                    win,
+                    move |row, track, above| {
+                        if let Some(target) = row.track() {
+                            win.move_queue_track(track, &target, above);
+                        }
+                    }
+                ));
+
                 row.bind_list_item(list_item);
             }
         ));
@@ -63,11 +79,29 @@ impl Window {
             .set_factory(Some(&factory.upcast::<gtk::ListItemFactory>()));
         imp.playlist_view
             .queue_view()
-            .set_header_factory(Some(&work_header_factory(clone!(
-                #[weak(rename_to = win)]
-                self,
-                move |start, end, ctrl| win.toggle_queue_work(start, end, ctrl)
-            ))));
+            .set_header_factory(Some(&work_header_factory(
+                clone!(
+                    #[weak(rename_to = win)]
+                    self,
+                    move |start, end, ctrl| win.toggle_queue_work(start, end, ctrl)
+                ),
+                Some(clone!(
+                    #[weak(rename_to = win)]
+                    self,
+                    move |track: &Track, position| {
+                        let target = win
+                            .imp()
+                            .playlist_view
+                            .queue_view()
+                            .model()
+                            .and_then(|model| model.item(position))
+                            .and_downcast::<Track>();
+                        if let Some(target) = target {
+                            win.move_queue_track(track, &target, true);
+                        }
+                    }
+                )),
+            )));
 
         if let Some(player) = self.player() {
             let queue = player.queue();
@@ -254,6 +288,20 @@ impl Window {
                 .activate_action("list.scroll-to-item", Some(&current_idx.to_variant()))
                 .expect("Failed to activate action");
         }
+    }
+
+    // Moves a track above or below another one, dropped on its row
+    fn move_queue_track(&self, track: &Track, target: &Track, above: bool) {
+        let Some(player) = self.player() else {
+            return;
+        };
+        let before = if above {
+            Some(target.clone())
+        } else {
+            player.queue().next_in_order(target)
+        };
+        player.move_track(track, before.as_ref());
+        self.store_queue();
     }
 
     pub fn remove_track(&self, track: &Track) {

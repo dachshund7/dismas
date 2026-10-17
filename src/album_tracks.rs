@@ -249,11 +249,14 @@ impl AlbumTracks {
             .set_model(Some(&gtk::NoSelection::new(Some(sections))));
         imp.tracks_view.set_factory(Some(&factory));
         imp.tracks_view
-            .set_header_factory(Some(&work_header_factory(clone!(
-                #[weak(rename_to = this)]
-                self,
-                move |start, end, ctrl| this.toggle_work(start, end, ctrl)
-            ))));
+            .set_header_factory(Some(&work_header_factory(
+                clone!(
+                    #[weak(rename_to = this)]
+                    self,
+                    move |start, end, ctrl| this.toggle_work(start, end, ctrl)
+                ),
+                None::<fn(&Track, u32)>,
+            )));
 
         imp.tracks.replace(Some(tracks));
     }

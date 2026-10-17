@@ -48,6 +48,8 @@ mod imp {
         pub track_artist_label: TemplateChild<gtk::Inscription>,
         #[template_child]
         pub track_playing_image: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub drag_handle: TemplateChild<gtk::Image>,
 
         #[property(get, set, nullable)]
         pub track: RefCell<Option<Track>>,
@@ -62,6 +64,14 @@ mod imp {
         // highlighted
         #[property(get, set = Self::set_selected, explicit_notify)]
         pub selected: Cell<bool>,
+        // Whether the track can be dragged by its handle to another place
+        // in the list
+        #[property(get, set = Self::set_reorderable, explicit_notify)]
+        pub reorderable: Cell<bool>,
+        // Where the handle was pressed, for the drag icon
+        pub drag_start: Cell<(f64, f64)>,
+        // The list item showing the row, for its position in the list
+        pub list_item: glib::WeakRef<gtk::ListItem>,
     }
 
     #[glib::object_subclass]
@@ -109,6 +119,11 @@ mod imp {
                     // A Shift+click in selection mode, to select the tracks
                     // from the last one clicked to this one
                     Signal::builder("range-select-requested").build(),
+                    // A track dropped on this row, to be moved above it, or
+                    // below it
+                    Signal::builder("move-requested")
+                        .param_types([Track::static_type(), bool::static_type()])
+                        .build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -139,6 +154,13 @@ mod imp {
                 let obj = self.obj();
                 obj.update_selected();
                 obj.notify_selection_mode();
+            }
+        }
+
+        fn set_reorderable(&self, reorderable: bool) {
+            if reorderable != self.reorderable.replace(reorderable) {
+                self.drag_handle.set_visible(reorderable);
+                self.obj().notify_reorderable();
             }
         }
 
@@ -187,6 +209,7 @@ impl Default for QueueRow {
 impl QueueRow {
     // Shows the track of the list item, like in the queue
     pub fn bind_list_item(&self, list_item: &gtk::ListItem) {
+        self.imp().list_item.set(Some(list_item));
         list_item
             .bind_property("item", self, "track")
             .sync_create()
@@ -265,6 +288,181 @@ impl QueueRow {
             }
         ));
         self.add_controller(modifier_click);
+
+        self.setup_drag_and_drop();
+    }
+
+    // The handle drags the track, and the rows take it, above or below
+    // them depending on the half it's dropped on
+    fn setup_drag_and_drop(&self) {
+        let handle = &*self.imp().drag_handle;
+        handle.set_cursor_from_name(Some("grab"));
+
+        let drag_source = gtk::DragSource::new();
+        drag_source.set_actions(gdk::DragAction::MOVE);
+        drag_source.connect_prepare(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[upgrade_or]
+            None,
+            move |_, x, y| {
+                if !this.reorderable() {
+                    return None;
+                }
+                let track = this.track()?;
+                this.imp().drag_start.set((x, y));
+                Some(gdk::ContentProvider::for_value(&track.to_value()))
+            }
+        ));
+        drag_source.connect_drag_begin(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, drag| {
+                let (x, y) = this.imp().drag_start.get();
+                let point = this
+                    .imp()
+                    .drag_handle
+                    .compute_point(&this, &gtk::graphene::Point::new(x as f32, y as f32))
+                    .unwrap_or_else(|| gtk::graphene::Point::new(x as f32, y as f32));
+
+                // The dragged track is shown as a copy of the row with a
+                // background: the row's own is transparent, which shows as
+                // black without a compositor
+                let icon = Self::new();
+                icon.set_track_title(this.track_title());
+                icon.set_track_artist(this.track_artist());
+                icon.set_track_cover(this.track_cover());
+                icon.set_reorderable(true);
+                icon.set_width_request(this.width());
+                icon.add_css_class("drag-icon");
+                if this.display().is_composited() {
+                    icon.add_css_class("composited");
+                }
+                gtk::DragIcon::for_drag(drag).set_child(Some(&icon));
+                drag.set_hotspot(point.x() as i32, point.y() as i32);
+
+                this.add_css_class("dragging");
+            }
+        ));
+        drag_source.connect_drag_end(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, _, _| this.remove_css_class("dragging")
+        ));
+        handle.add_controller(drag_source.clone());
+
+        // A click on the handle doesn't play the track like a click on the
+        // rest of the row; grouped with the drag source, which still gets
+        // the press
+        let click = gtk::GestureClick::new();
+        click.connect_pressed(|gesture, _, _, _| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+        });
+        click.group_with(&drag_source);
+        handle.add_controller(click);
+
+        let drop_target = gtk::DropTarget::new(Track::static_type(), gdk::DragAction::MOVE);
+        drop_target.connect_motion(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[upgrade_or]
+            gdk::DragAction::empty(),
+            move |_, _, y| {
+                let position = this.drop_position(y);
+                this.show_drop_position(position);
+                if position.is_some() {
+                    gdk::DragAction::MOVE
+                } else {
+                    gdk::DragAction::empty()
+                }
+            }
+        ));
+        drop_target.connect_leave(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.show_drop_position(None)
+        ));
+        drop_target.connect_drop(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[upgrade_or]
+            false,
+            move |_, value, _, y| {
+                this.show_drop_position(None);
+                let Ok(track) = value.get::<Track>() else {
+                    return false;
+                };
+                let Some(above) = this.drop_position(y) else {
+                    return false;
+                };
+                if this.track().as_ref() == Some(&track) {
+                    return false;
+                }
+                this.emit_by_name::<()>("move-requested", &[&track, &above]);
+                true
+            }
+        ));
+        self.add_controller(drop_target);
+    }
+
+    // Whether a track dropped at this height goes above or below the row,
+    // if it can be dropped there. Above the first movement of a work is
+    // between the movement and the header with the name of the work, but
+    // tracks that are not part of the work go above the header; tracks go
+    // there by being dropped below the row before the header instead
+    fn drop_position(&self, y: f64) -> Option<bool> {
+        if !self.reorderable() {
+            return None;
+        }
+        let above = y < f64::from(self.height()) / 2.0;
+        if above && self.starts_work() {
+            return None;
+        }
+        Some(above)
+    }
+
+    // Whether the row is the first movement of a work, under its header
+    fn starts_work(&self) -> bool {
+        if self.track().and_then(|t| t.movement_work()).is_none() {
+            return false;
+        }
+        let Some(position) = self.imp().list_item.upgrade().map(|item| item.position()) else {
+            return false;
+        };
+        let sections = self
+            .ancestor(gtk::ListView::static_type())
+            .and_downcast::<gtk::ListView>()
+            .and_then(|list| list.model())
+            .and_dynamic_cast::<gtk::SectionModel>()
+            .ok();
+        sections.is_some_and(|sections| sections.section(position).0 == position)
+    }
+
+    // A line above or below the row, where a dragged track would go
+    fn show_drop_position(&self, above: Option<bool>) {
+        for (class, shown) in [
+            ("drop-above", above == Some(true)),
+            ("drop-below", above == Some(false)),
+        ] {
+            if shown {
+                self.add_css_class(class);
+            } else {
+                self.remove_css_class(class);
+            }
+        }
+    }
+
+    pub fn connect_move_requested<F: Fn(&Self, &Track, bool) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "move-requested",
+            false,
+            glib::closure_local!(move |row: &Self, track: &Track, above: bool| f(
+                row, track, above
+            )),
+        )
     }
 
     pub fn connect_range_select_requested<F: Fn(&Self) + 'static>(
@@ -325,12 +523,12 @@ impl QueueRow {
         let imp = self.imp();
         let selection_mode = imp.selection_mode.get();
         let highlighted = selection_mode && imp.selected.get();
-        if let Some(parent) = self.parent() {
-            if highlighted {
-                parent.add_css_class("selected-item");
-            } else {
-                parent.remove_css_class("selected-item");
-            }
+        // On the row itself: changing the list's own row widget while the
+        // list rebinds its rows, as when tracks move, crashes GTK
+        if highlighted {
+            self.add_css_class("selected-item");
+        } else {
+            self.remove_css_class("selected-item");
         }
         if selection_mode {
             self.update_state(&[gtk::accessible::State::Selected(Some(highlighted))]);

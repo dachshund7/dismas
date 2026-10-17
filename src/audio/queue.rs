@@ -155,15 +155,70 @@ impl Queue {
             self.notify_n_tracks();
         }
 
-        // Removing a track moves the ones after it, so the current track
-        // is looked up again
-        let current_pos = current.and_then(|current| {
-            self.imp()
-                .model
+        // Removing a track moves the ones after it
+        self.update_current_pos(current);
+    }
+
+    // Moves a track before another one, or to the end; the tracks are
+    // moved in the order they were added, which is the one that is saved
+    pub fn move_track(&self, track: &Track, before: Option<&Track>) {
+        if before == Some(track) {
+            return;
+        }
+        let store = &self.imp().store;
+        let store_position = |track: &Track| {
+            store
                 .iter::<Track>()
-                .position(|s| s.is_ok_and(|s| s == current))
+                .position(|s| s.is_ok_and(|s| s == *track))
                 .map(|pos| pos as u32)
-        });
+        };
+        let Some(from) = store_position(track) else {
+            return;
+        };
+
+        // Where the track ends up, once it's taken out of its old place
+        let to = match before.and_then(store_position) {
+            Some(before) if before > from => before - 1,
+            Some(before) => before,
+            None => store.n_items() - 1,
+        };
+        if to == from {
+            return;
+        }
+
+        // The tracks between the old and new places are replaced in a
+        // single change, rather than removing the track and inserting it
+        // again, so the list redraws the headers of the works around them
+        let (start, end) = (from.min(to), from.max(to));
+        let mut tracks: Vec<Track> = (start..=end)
+            .filter_map(|pos| store.item(pos).and_downcast::<Track>())
+            .collect();
+        if from < to {
+            tracks.rotate_left(1);
+        } else {
+            tracks.rotate_right(1);
+        }
+
+        let current = self.current();
+        store.splice(start, end - start + 1, &tracks);
+
+        // Moving a track moves the ones between its old and new places
+        self.update_current_pos(current);
+    }
+
+    // The track after this one in the order they were added, which is
+    // not the shown one when shuffled
+    pub fn next_in_order(&self, track: &Track) -> Option<Track> {
+        let store = &self.imp().store;
+        let pos = store
+            .iter::<Track>()
+            .position(|s| s.is_ok_and(|s| s == *track))?;
+        store.item(pos as u32 + 1).and_downcast()
+    }
+
+    // Looks up the current track again, after tracks moved
+    fn update_current_pos(&self, current: Option<Track>) {
+        let current_pos = current.and_then(|current| self.position(&current));
         if current_pos != self.imp().current_pos.replace(current_pos) {
             self.notify_current();
         }
@@ -310,5 +365,61 @@ impl Queue {
             .flatten()
             .filter(Track::selected)
             .count() as u32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::track::TrackData;
+
+    fn queue_of(n: usize) -> (Queue, Vec<Track>) {
+        let queue = Queue::default();
+        let tracks: Vec<Track> = (0..n).map(|_| Track::new(TrackData::default())).collect();
+        queue.add_tracks(&tracks);
+        (queue, tracks)
+    }
+
+    fn order(queue: &Queue, tracks: &[Track]) -> Vec<usize> {
+        (0..queue.n_tracks())
+            .map(|i| {
+                let track = queue.track_at(i).unwrap();
+                tracks.iter().position(|t| *t == track).unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn move_track_forward_backward_and_to_end() {
+        let (queue, t) = queue_of(4);
+
+        queue.move_track(&t[0], Some(&t[2]));
+        assert_eq!(order(&queue, &t), [1, 0, 2, 3]);
+
+        queue.move_track(&t[3], Some(&t[1]));
+        assert_eq!(order(&queue, &t), [3, 1, 0, 2]);
+
+        queue.move_track(&t[3], None);
+        assert_eq!(order(&queue, &t), [1, 0, 2, 3]);
+
+        // Before itself, nothing moves
+        queue.move_track(&t[2], Some(&t[2]));
+        assert_eq!(order(&queue, &t), [1, 0, 2, 3]);
+    }
+
+    #[test]
+    fn move_track_keeps_the_current_track() {
+        let (queue, t) = queue_of(4);
+        queue.set_current_track(Some(t[1].clone()));
+
+        // The current track itself moves
+        queue.move_track(&t[1], None);
+        assert_eq!(queue.current_track_index(), Some(3));
+        assert_eq!(queue.current(), Some(t[1].clone()));
+
+        // Another track moves past it
+        queue.move_track(&t[0], None);
+        assert_eq!(queue.current_track_index(), Some(2));
+        assert_eq!(queue.current(), Some(t[1].clone()));
     }
 }

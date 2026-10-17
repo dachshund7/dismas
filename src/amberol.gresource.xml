@@ -2,6 +2,7 @@
 <gresources>
   <gresource prefix="/io/bassi/Amberol/icons/scalable/actions/">
     <file alias="app-remove-symbolic.svg">assets/icons/app-remove-symbolic.svg</file>
+    <file alias="drag-handle-symbolic.svg">assets/icons/drag-handle-symbolic.svg</file>
     <file alias="edit-clear-all-symbolic.svg">assets/icons/edit-clear-all-symbolic.svg</file>
     <file alias="edit-select-all-symbolic.svg">assets/icons/edit-select-all-symbolic.svg</file>
     <file alias="folder-music-symbolic.svg">assets/icons/folder-music-symbolic.svg</file>

@@ -5,6 +5,21 @@ using Gtk 4.0;
 
 template $AmberolQueueRow: Widget {
   Box {
+    // The whole height of the row can be grabbed, not just the icon
+    Image drag_handle {
+      icon-name: "drag-handle-symbolic";
+      valign: fill;
+      visible: false;
+
+      styles [
+        "drag-handle",
+      ]
+
+      accessibility {
+        label: C_("a11y", "Drag to move");
+      }
+    }
+
     Stack track_cover_stack {
       StackPage {
         name: "no-cover";
