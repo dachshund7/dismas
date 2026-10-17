@@ -441,6 +441,12 @@ mod imp {
                 }
 
                 self.playlist_view.queue_actionbar().set_revealed(selection);
+                let queue_view = self.playlist_view.queue_view();
+                if selection {
+                    queue_view.add_css_class("selecting");
+                } else {
+                    queue_view.remove_css_class("selecting");
+                }
                 obj.action_set_enabled("queue.remove-selected", selection);
 
                 obj.notify_queue_selection();

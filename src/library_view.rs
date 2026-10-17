@@ -13,6 +13,7 @@ use log::debug;
 use std::sync::LazyLock;
 
 use crate::{
+    album_cell::AlbumCell,
     audio::normalize_search_text,
     i18n::{i18n, i18n_k, ni18n_f},
     library::{self, Album, ScanEvent},
@@ -287,38 +288,6 @@ impl LibraryView {
                     .build();
                 cover.add_overlay(&picture);
 
-                // Clicks go to the cell, which toggles the selection like a
-                // click anywhere else on it, and keeps track of the last one
-                // clicked for Shift+click
-                let check = gtk::CheckButton::builder()
-                    .halign(gtk::Align::Start)
-                    .valign(gtk::Align::Start)
-                    .can_target(false)
-                    .css_classes(["selection-mode"])
-                    .build();
-                this.bind_property("selection-mode", &check, "visible")
-                    .sync_create()
-                    .build();
-                item.property_expression("item")
-                    .chain_property::<Album>("selected")
-                    .bind(&check, "active", gtk::Widget::NONE);
-                check.connect_toggled(clone!(
-                    #[weak]
-                    this,
-                    #[weak]
-                    item,
-                    move |check| {
-                        let Some(album) = item.item().and_downcast::<Album>() else {
-                            return;
-                        };
-                        // Also called when the cell shows another album
-                        if album.selected() != check.is_active() {
-                            this.set_album_selected(&album, check.is_active());
-                        }
-                    }
-                ));
-                cover.add_overlay(&check);
-
                 let title = gtk::Label::builder()
                     .ellipsize(gtk::pango::EllipsizeMode::End)
                     .max_width_chars(1)
@@ -340,11 +309,11 @@ impl LibraryView {
                     .css_classes(["caption", "dim-label"])
                     .build();
 
-                let content = gtk::Box::builder()
-                    .orientation(gtk::Orientation::Vertical)
-                    .spacing(3)
-                    .width_request(CELL_COVER_SIZE)
-                    .build();
+                let content = AlbumCell::default();
+                content.set_orientation(gtk::Orientation::Vertical);
+                content.set_spacing(3);
+                content.set_width_request(CELL_COVER_SIZE);
+                content.add_css_class("album-cell");
                 content.append(&cover);
                 content.append(&title);
                 content.append(&artist);
@@ -378,6 +347,13 @@ impl LibraryView {
                 content.add_controller(click);
 
                 item.set_child(Some(&content));
+
+                item.property_expression("item")
+                    .chain_property::<Album>("selected")
+                    .bind(&content, "selected", gtk::Widget::NONE);
+                this.bind_property("selection-mode", &content, "selection-mode")
+                    .sync_create()
+                    .build();
             }
         ));
 
@@ -391,11 +367,7 @@ impl LibraryView {
                 };
                 let content = item.child().unwrap();
                 let cover = content.first_child().unwrap();
-                let picture = cover
-                    .last_child()
-                    .and_then(|check| check.prev_sibling())
-                    .and_downcast::<gtk::Picture>()
-                    .unwrap();
+                let picture = cover.last_child().and_downcast::<gtk::Picture>().unwrap();
                 let title = cover.next_sibling().and_downcast::<gtk::Label>().unwrap();
                 let artist = content.last_child().and_downcast::<gtk::Label>().unwrap();
 

@@ -96,11 +96,6 @@ queuerow image.card {
   margin: 0px;
 }
 
-queuerow checkbutton.selection-mode {
-  padding-right: 12px;
-  padding-left: 8px;
-}
-
 dragoverlay {
   box-shadow: none;
 }
@@ -235,6 +230,13 @@ gridview.album-grid {
 }
 
 gridview.album-grid > child {
+  padding: 0;
+  border-radius: 12px;
+}
+
+/* The padding is on the content of the cells, which is highlighted when
+ * the album is selected */
+gridview.album-grid .album-cell {
   padding: 6px;
   border-radius: 12px;
 }
@@ -244,11 +246,45 @@ gridview.album-grid .album-cover {
   background-color: alpha(currentColor, 0.08);
 }
 
-gridview.album-grid .album-cover checkbutton {
-  margin: 6px;
-}
-
 gridview.album-grid label.album-title {
   font-weight: 600;
   margin-top: 3px;
+}
+
+/* In selection mode, selected tracks and albums get a darker background,
+ * in place of a check button; the hover state is restated, since these
+ * rules take precedence over the theme's. Albums are darker, as the
+ * background around a large cover is harder to notice */
+listview.navigation-sidebar > row.selected-item {
+  background-color: rgb(0 0 0 / 12%);
+}
+
+listview.navigation-sidebar > row.selected-item:hover {
+  background-color: rgb(0 0 0 / 18%);
+}
+
+gridview.album-grid .album-cell.selected-item {
+  background-color: rgb(0 0 0 / 30%);
+}
+
+gridview.album-grid > child:hover > .album-cell.selected-item {
+  background-color: rgb(0 0 0 / 36%);
+}
+
+@media (prefers-color-scheme: dark) {
+  listview.navigation-sidebar > row.selected-item {
+    background-color: rgb(0 0 0 / 30%);
+  }
+
+  listview.navigation-sidebar > row.selected-item:hover {
+    background-color: rgb(0 0 0 / 38%);
+  }
+
+  gridview.album-grid .album-cell.selected-item {
+    background-color: rgb(0 0 0 / 45%);
+  }
+
+  gridview.album-grid > child:hover > .album-cell.selected-item {
+    background-color: rgb(0 0 0 / 50%);
+  }
 }

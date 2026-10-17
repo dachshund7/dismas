@@ -7,9 +7,9 @@
 // next to each other, for instance after shuffling, each run of movements
 // gets its own section.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
-use gtk::{gio, glib, prelude::*, subclass::prelude::*};
+use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
 
 use crate::audio::Track;
 
@@ -117,11 +117,16 @@ fn section_key(model: &gio::ListModel, position: u32) -> Option<(String, String)
 }
 
 // The headers of the sections in the queue: a line between each section,
-// followed by the name of the work for the movements of a work
-pub fn work_header_factory() -> gtk::ListItemFactory {
+// followed by the name of the work for the movements of a work; a click
+// on the name calls `on_work_clicked` with the positions of the first
+// movement and past the last one, and whether Ctrl was held
+pub fn work_header_factory(
+    on_work_clicked: impl Fn(u32, u32, bool) + 'static,
+) -> gtk::ListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
+    let on_work_clicked = Rc::new(on_work_clicked);
 
-    factory.connect_setup(|_, item| {
+    factory.connect_setup(move |_, item| {
         let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
 
         let separator = gtk::Separator::builder()
@@ -134,6 +139,36 @@ pub fn work_header_factory() -> gtk::ListItemFactory {
             .wrap_mode(gtk::pango::WrapMode::WordChar)
             .css_classes(["work-title"])
             .build();
+
+        // Headers are reused for other sections, so the positions are
+        // only read on click
+        let click = gtk::GestureClick::new();
+        click.connect_pressed(glib::clone!(
+            #[weak]
+            header,
+            #[strong]
+            on_work_clicked,
+            move |gesture, _, _, _| {
+                let ctrl = gesture
+                    .current_event_state()
+                    .contains(gdk::ModifierType::CONTROL_MASK);
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                on_work_clicked(header.start(), header.end(), ctrl);
+            }
+        ));
+        work_label.add_controller(click);
+
+        // A click selects the work only in selection mode, so that's when
+        // the title shows it can be clicked
+        let motion = gtk::EventControllerMotion::new();
+        motion.connect_enter(|motion, _, _| {
+            let label = motion.widget().unwrap();
+            let selecting = label
+                .ancestor(gtk::ListView::static_type())
+                .is_some_and(|list| list.has_css_class("selecting"));
+            label.set_cursor_from_name(selecting.then_some("pointer"));
+        });
+        work_label.add_controller(motion);
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)

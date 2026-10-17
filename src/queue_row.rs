@@ -20,8 +20,6 @@ mod imp {
     pub struct QueueRow {
         // Template widgets
         #[template_child]
-        pub row_stack: TemplateChild<gtk::Stack>,
-        #[template_child]
         pub track_cover_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         #[property(
@@ -50,22 +48,6 @@ mod imp {
         pub track_artist_label: TemplateChild<gtk::Inscription>,
         #[template_child]
         pub track_playing_image: TemplateChild<gtk::Image>,
-        #[template_child]
-        pub selection_title_label: TemplateChild<gtk::Inscription>,
-        #[template_child]
-        pub selection_artist_label: TemplateChild<gtk::Inscription>,
-        // The check button notifies changes to the selection
-        #[template_child]
-        #[property(
-            name = "selected",
-            get = |imp: &Self| imp.selected_button.is_active(),
-            set = |imp: &Self, selected: bool| imp.selected_button.set_active(selected),
-            explicit_notify,
-            type = bool,
-        )]
-        pub selected_button: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub selection_playing_image: TemplateChild<gtk::Image>,
 
         #[property(get, set, nullable)]
         pub track: RefCell<Option<Track>>,
@@ -76,6 +58,10 @@ mod imp {
         pub paused: Cell<bool>,
         #[property(get, set = Self::set_selection_mode, explicit_notify)]
         pub selection_mode: Cell<bool>,
+        // Follows the track; in selection mode, selected rows are
+        // highlighted
+        #[property(get, set = Self::set_selected, explicit_notify)]
+        pub selected: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -135,7 +121,7 @@ mod imp {
         fn set_playing(&self, playing: bool) {
             if playing != self.playing.replace(playing) {
                 let obj = self.obj();
-                obj.update_mode();
+                obj.update_playing();
                 obj.notify_playing();
             }
         }
@@ -151,20 +137,26 @@ mod imp {
         fn set_selection_mode(&self, selection_mode: bool) {
             if selection_mode != self.selection_mode.replace(selection_mode) {
                 let obj = self.obj();
-                obj.update_mode();
+                obj.update_selected();
                 obj.notify_selection_mode();
+            }
+        }
+
+        fn set_selected(&self, selected: bool) {
+            if selected != self.selected.replace(selected) {
+                let obj = self.obj();
+                obj.update_selected();
+                obj.notify_selected();
             }
         }
 
         fn set_track_title(&self, title: String) {
             self.track_title_label.set_text(Some(&title));
-            self.selection_title_label.set_text(Some(&title));
             self.obj().update_tooltip();
         }
 
         fn set_track_artist(&self, artist: String) {
             self.track_artist_label.set_text(Some(&artist));
-            self.selection_artist_label.set_text(Some(&artist));
             self.obj().update_tooltip();
         }
 
@@ -227,17 +219,6 @@ impl QueueRow {
     }
 
     fn init_widgets(&self) {
-        self.imp().selected_button.connect_active_notify(clone!(
-            #[strong(rename_to = this)]
-            self,
-            move |button| {
-                if let Some(ref track) = *this.imp().track.borrow() {
-                    track.set_selected(button.is_active());
-                }
-                this.notify_selected();
-            }
-        ));
-
         let click = gtk::GestureClick::builder()
             .button(gdk::BUTTON_SECONDARY)
             .build();
@@ -327,23 +308,34 @@ impl QueueRow {
                 pi18n("a11y", "Currently playing"),
             )
         };
-        for image in [&*imp.track_playing_image, &*imp.selection_playing_image] {
-            image.set_icon_name(Some(icon));
-        }
+        imp.track_playing_image.set_icon_name(Some(icon));
         imp.track_playing_image
             .update_property(&[gtk::accessible::Property::Label(&label)]);
     }
 
-    fn update_mode(&self) {
+    fn update_playing(&self) {
         let imp = self.imp();
-        if imp.selection_mode.get() {
-            imp.row_stack.set_visible_child_name("selection-mode");
-            let opacity = if imp.playing.get() { 1.0 } else { 0.0 };
-            imp.selection_playing_image.set_opacity(opacity);
+        let opacity = if imp.playing.get() { 1.0 } else { 0.0 };
+        imp.track_playing_image.set_opacity(opacity);
+    }
+
+    // Selected rows are highlighted in selection mode, in place of a
+    // check button, so the cover stays visible
+    fn update_selected(&self) {
+        let imp = self.imp();
+        let selection_mode = imp.selection_mode.get();
+        let highlighted = selection_mode && imp.selected.get();
+        if let Some(parent) = self.parent() {
+            if highlighted {
+                parent.add_css_class("selected-item");
+            } else {
+                parent.remove_css_class("selected-item");
+            }
+        }
+        if selection_mode {
+            self.update_state(&[gtk::accessible::State::Selected(Some(highlighted))]);
         } else {
-            imp.row_stack.set_visible_child_name("track-details");
-            let opacity = if imp.playing.get() { 1.0 } else { 0.0 };
-            imp.track_playing_image.set_opacity(opacity);
+            self.reset_state(gtk::AccessibleState::Selected);
         }
     }
 

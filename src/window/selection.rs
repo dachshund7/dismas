@@ -84,6 +84,23 @@ impl Window {
         }
     }
 
+    // Selects or unselects the movements of a work, from its header: in
+    // selection mode, or entering it with Ctrl+click
+    pub(super) fn toggle_queue_work(&self, start: u32, end: u32, ctrl: bool) {
+        if !ctrl && !self.queue_selection() {
+            return;
+        }
+        let imp = self.imp();
+        let Some(model) = imp.playlist_view.queue_view().model() else {
+            return;
+        };
+        self.set_queue_selection(true);
+        if let Some(last) = utils::toggle_track_section(model.upcast_ref(), start, end) {
+            imp.queue_anchor.set(Some(&last));
+        }
+        self.update_selected_count();
+    }
+
     pub(super) fn remove_selected_tracks(&self) {
         if let Some(player) = self.player() {
             let queue = player.queue();

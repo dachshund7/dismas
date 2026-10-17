@@ -89,6 +89,11 @@ mod imp {
                 self.obj().unselect_all();
                 self.selection_anchor.set(None);
             }
+            if selection_mode {
+                self.tracks_view.add_css_class("selecting");
+            } else {
+                self.tracks_view.remove_css_class("selecting");
+            }
             self.obj().update_selection();
             self.obj().notify_selection_mode();
         }
@@ -232,8 +237,9 @@ impl AlbumTracks {
                 this.bind_property("selection-mode", &row, "selection-mode")
                     .sync_create()
                     .build();
-                row.bind_list_item(list_item);
+                // The row highlights its parent, so it's added first
                 list_item.set_child(Some(&row));
+                row.bind_list_item(list_item);
             }
         ));
 
@@ -243,7 +249,11 @@ impl AlbumTracks {
             .set_model(Some(&gtk::NoSelection::new(Some(sections))));
         imp.tracks_view.set_factory(Some(&factory));
         imp.tracks_view
-            .set_header_factory(Some(&work_header_factory()));
+            .set_header_factory(Some(&work_header_factory(clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |start, end, ctrl| this.toggle_work(start, end, ctrl)
+            ))));
 
         imp.tracks.replace(Some(tracks));
     }
@@ -327,6 +337,22 @@ impl AlbumTracks {
             track.set_selected(true);
         }
         self.imp().selection_anchor.set(Some(track));
+        self.update_selection();
+    }
+
+    // Selects or unselects the movements of a work, from its header: in
+    // selection mode, or entering it with Ctrl+click
+    fn toggle_work(&self, start: u32, end: u32, ctrl: bool) {
+        if !ctrl && !self.selection_mode() {
+            return;
+        }
+        let Some(model) = self.imp().tracks_view.model() else {
+            return;
+        };
+        self.set_selection_mode(true);
+        if let Some(last) = utils::toggle_track_section(model.upcast_ref(), start, end) {
+            self.imp().selection_anchor.set(Some(&last));
+        }
         self.update_selection();
     }
 

@@ -49,6 +49,19 @@ pub fn select_track_range(model: &gio::ListModel, from: &Track, to: &Track) -> b
     true
 }
 
+// Selects the tracks of a list from position `start` up to `end`, or
+// unselects them if they are all selected already; returns the last one
+pub fn toggle_track_section(model: &gio::ListModel, start: u32, end: u32) -> Option<Track> {
+    let tracks: Vec<Track> = (start..end.min(model.n_items()))
+        .filter_map(|i| model.item(i).and_downcast::<Track>())
+        .collect();
+    let selected = !tracks.iter().all(Track::selected);
+    for track in &tracks {
+        track.set_selected(selected);
+    }
+    tracks.last().cloned()
+}
+
 pub fn settings_manager() -> gio::Settings {
     // We ship a single schema for both default and development profiles
     let app_id = APPLICATION_ID.trim_end_matches(".Devel");

@@ -63,7 +63,11 @@ impl Window {
             .set_factory(Some(&factory.upcast::<gtk::ListItemFactory>()));
         imp.playlist_view
             .queue_view()
-            .set_header_factory(Some(&work_header_factory()));
+            .set_header_factory(Some(&work_header_factory(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |start, end, ctrl| win.toggle_queue_work(start, end, ctrl)
+            ))));
 
         if let Some(player) = self.player() {
             let queue = player.queue();
