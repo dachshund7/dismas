@@ -31,6 +31,13 @@ template $AmberolPlaylistsPage: Widget {
         action-name: "win.new-playlist";
         tooltip-text: _("New Playlist");
       }
+
+      [end]
+      Button import_button {
+        icon-name: "document-open-symbolic";
+        action-name: "win.import-playlist";
+        tooltip-text: _("Import a Playlist");
+      }
     }
 
     content: ScrolledWindow {

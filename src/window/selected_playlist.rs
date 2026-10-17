@@ -300,4 +300,130 @@ impl Window {
             self.update_playlists_page();
         }
     }
+
+    // Makes a saved playlist of an M3U playlist, like one from another
+    // player or device, keeping the tracks that are here; it isn't
+    // selected, so that what's playing goes on
+    pub(super) async fn import_playlist(&self) {
+        let dialog = playlist_file_dialog(&i18n("Import a Playlist"));
+        let Ok(file) = dialog.open_future(Some(self)).await else {
+            // Cancelled
+            return;
+        };
+        let Some(path) = file.path() else {
+            self.add_toast(i18n("Unable to open the playlist"));
+            return;
+        };
+
+        // Looking for the tracks blocks
+        let read = gio::spawn_blocking(move || {
+            let files = playlists::read_m3u(&path)?;
+            let n_entries = files.len();
+            let found: Vec<gio::File> = files
+                .into_iter()
+                .filter(|f| f.path().is_some_and(|p| p.is_file()))
+                .collect();
+            let stem = path.file_stem()?.to_string_lossy().into_owned();
+            Some((stem, n_entries, found))
+        })
+        .await;
+        let Ok(Some((stem, n_entries, found))) = read else {
+            self.add_toast(i18n("Unable to open the playlist"));
+            return;
+        };
+        if found.is_empty() {
+            self.add_toast(i18n("None of the tracks of the playlist were found"));
+            return;
+        }
+
+        let name = playlists::free_name(&stem);
+        if let Err(e) = playlists::create_with_tracks(&name, &found) {
+            log::warn!("Unable to import the playlist '{name}': {e}");
+            self.add_toast(i18n("Unable to import the playlist"));
+            return;
+        }
+        self.update_playlists_page();
+
+        let n_missing = (n_entries - found.len()) as u32;
+        let message = if n_missing == 0 {
+            // Translators: `{playlist}` must be left unmodified; it is
+            // expanded to the name of a playlist
+            i18n_k("Imported “{playlist}”", &[("playlist", &name)])
+        } else {
+            ni18n_k(
+                // Translators: `{playlist}` and `{n}` must be left
+                // unmodified; they are expanded to the name of a playlist,
+                // and to the number of its tracks that weren't found
+                "Imported “{playlist}”, without one track that wasn't found",
+                "Imported “{playlist}”, without {n} tracks that weren't found",
+                n_missing,
+                &[("playlist", &name), ("n", &n_missing.to_string())],
+            )
+        };
+        self.add_toast(message);
+    }
+
+    // Saves a playlist where the user picks, e.g. to copy it with the
+    // music to a phone; the tracks in that folder have relative paths
+    pub(super) async fn export_playlist(&self, name: &str) {
+        let title = if name.is_empty() {
+            i18n("Queue")
+        } else {
+            name.to_string()
+        };
+        let dialog = playlist_file_dialog(&i18n("Export the Playlist"));
+        dialog.set_initial_name(Some(&format!("{title}.m3u8")));
+        let Ok(file) = dialog.save_future(Some(self)).await else {
+            // Cancelled
+            return;
+        };
+        let Some(path) = file.path() else {
+            self.add_toast(i18n("Unable to export the playlist"));
+            return;
+        };
+
+        let message = match playlists::export(name, &path) {
+            // Translators: `{playlist}` must be left unmodified; it is
+            // expanded to the name of a playlist
+            Ok(0) => i18n_k("Exported “{playlist}”", &[("playlist", &title)]),
+            Ok(n_outside) => ni18n_k(
+                // Translators: `{playlist}` and `{n}` must be left
+                // unmodified; they are expanded to the name of a playlist,
+                // and to the number of its tracks outside the folder it was
+                // exported to
+                "Exported “{playlist}”; one track isn't in its folder, so other devices won't find it",
+                "Exported “{playlist}”; {n} tracks aren't in its folder, so other devices won't find them",
+                n_outside as u32,
+                &[("playlist", &title), ("n", &n_outside.to_string())],
+            ),
+            Err(e) => {
+                log::warn!("Unable to export the playlist '{name}' to {path:?}: {e}");
+                i18n("Unable to export the playlist")
+            }
+        };
+        self.add_toast(message);
+    }
+}
+
+// A dialog for M3U playlists, starting in the music folder
+fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some(&i18n("Playlists")));
+    filter.add_mime_type("audio/x-mpegurl");
+    filter.add_mime_type("application/vnd.apple.mpegurl");
+    filter.add_suffix("m3u");
+    filter.add_suffix("m3u8");
+    let filters = gio::ListStore::new::<gtk::FileFilter>();
+    filters.append(&filter);
+
+    let dialog = gtk::FileDialog::builder()
+        .title(title)
+        .modal(true)
+        .filters(&filters)
+        .default_filter(&filter)
+        .build();
+    if let Some(dir) = library::music_dir() {
+        dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
+    }
+    dialog
 }

@@ -246,6 +246,20 @@ mod imp {
                     }
                 },
             );
+            klass.install_action_async("win.import-playlist", None, async move |win, _, _| {
+                debug!("Window::win.import-playlist()");
+                win.import_playlist().await;
+            });
+            klass.install_action_async(
+                "win.export-playlist",
+                Some(glib::VariantTy::STRING),
+                async move |win, _, param| {
+                    debug!("Window::win.export-playlist()");
+                    if let Some(name) = param.and_then(|p| p.get::<String>()) {
+                        win.export_playlist(&name).await;
+                    }
+                },
+            );
             klass.install_action(
                 "win.delete-playlist",
                 Some(glib::VariantTy::STRING),

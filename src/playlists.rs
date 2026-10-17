@@ -84,7 +84,11 @@ fn is_valid_name(name: &str) -> bool {
 
 // Creates an empty playlist; the name has been checked with `check_name()`
 pub fn create(name: &str) -> Result<(), glib::Error> {
-    write(name.trim(), &[])
+    create_with_tracks(name, &[])
+}
+
+pub fn create_with_tracks(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
+    write(name.trim(), files)
 }
 
 // Renames a saved playlist; the new name has been checked with
@@ -101,17 +105,70 @@ pub fn trash(name: &str) -> Result<(), glib::Error> {
 // The tracks of a playlist; the queue has none until it's first saved
 pub fn load(name: &str) -> Option<Vec<gio::File>> {
     let path = playlist_path(name);
-    match std::fs::read(&path) {
+    if name.is_empty() && !path.exists() {
+        return Some(Vec::new());
+    }
+    read_m3u(&path)
+}
+
+// The tracks of an M3U playlist anywhere, like one to import
+pub fn read_m3u(path: &Path) -> Option<Vec<gio::File>> {
+    match std::fs::read(path) {
         Ok(contents) => {
             let dir = path.parent().map(gio::File::for_path)?;
             Some(parse_m3u(&String::from_utf8_lossy(&contents), &dir))
         }
-        Err(e) if name.is_empty() && e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
         Err(e) => {
             warn!("Unable to read the playlist {path:?}: {e}");
             None
         }
     }
+}
+
+// A name for a new playlist, from the name of a file: without the
+// characters a name can't have, and numbered if it's taken
+pub fn free_name(name: &str) -> String {
+    free_name_among(name, exists)
+}
+
+fn free_name_among(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    let mut name: String = name
+        .trim()
+        .trim_start_matches('.')
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' => '-',
+            c if c.is_control() => ' ',
+            c => c,
+        })
+        .collect();
+    // File names are limited to 255 bytes, which leaves room for a number
+    while name.len() + EXTENSION.len() > 240 {
+        name.pop();
+    }
+    if name.trim().is_empty() {
+        name = "Playlist".to_string();
+    }
+
+    let mut candidate = name.clone();
+    let mut n = 2;
+    while taken(&candidate) {
+        candidate = format!("{name} {n}");
+        n += 1;
+    }
+    candidate
+}
+
+// Writes a playlist for other players and devices, as an M3U8 file; the
+// tracks in the directory of the file, or under it, have paths relative
+// to it, so that the playlist works wherever the directory is copied.
+// Returns the number of tracks outside it, which have absolute paths
+pub fn export(name: &str, path: &Path) -> Result<usize, glib::Error> {
+    let files = load(name).unwrap_or_default();
+    let dir = path.parent().unwrap_or(Path::new("/"));
+    let (text, n_outside) = format_m3u(&files, Some(dir));
+    glib::file_set_contents(path, text.as_bytes())?;
+    Ok(n_outside)
 }
 
 pub fn save(name: &str, files: &[gio::File]) {
@@ -128,19 +185,30 @@ fn write(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
     }
     // Written to a temporary file first, so that a crash can't leave
     // half a playlist
-    glib::file_set_contents(path, format_m3u(files).as_bytes())
+    glib::file_set_contents(path, format_m3u(files, None).0.as_bytes())
 }
 
 // An M3U8 playlist, with the absolute paths of the local files, which
-// other players read best, and the URIs of the others
-fn format_m3u(files: &[gio::File]) -> String {
+// other players read best, and the URIs of the others; with `relative_to`,
+// the files under that directory have relative paths. Returns the number
+// of files that aren't under it
+fn format_m3u(files: &[gio::File], relative_to: Option<&Path>) -> (String, usize) {
     let mut text = String::from("#EXTM3U\n");
+    let mut n_outside = 0;
     for file in files {
-        let line = match file.path() {
-            Some(path) => match path.to_str() {
-                Some(path) => path.to_string(),
-                None => file.uri().to_string(),
-            },
+        let path = file.path();
+        let relative = match (&path, relative_to) {
+            (Some(path), Some(dir)) => {
+                let relative = path.strip_prefix(dir).ok();
+                if relative.is_none() {
+                    n_outside += 1;
+                }
+                relative
+            }
+            _ => None,
+        };
+        let line = match relative.or(path.as_deref()).and_then(Path::to_str) {
+            Some(path) => path.to_string(),
             None => file.uri().to_string(),
         };
         // A line break would split the entry in two
@@ -151,7 +219,7 @@ fn format_m3u(files: &[gio::File]) -> String {
         text.push_str(&line);
         text.push('\n');
     }
-    text
+    (text, n_outside)
 }
 
 // The entries of an M3U playlist, which can be URIs, or paths; relative
@@ -162,11 +230,19 @@ fn parse_m3u(text: &str, base: &gio::File) -> Vec<gio::File> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .map(|line| {
             if line.contains("://") {
-                gio::File::for_uri(line)
-            } else if Path::new(line).is_absolute() {
-                gio::File::for_path(line)
+                return gio::File::for_uri(line);
+            }
+            // Players on Windows, or set to be compatible with it, use
+            // backslashes
+            let line = if line.contains('/') {
+                line.to_string()
             } else {
-                base.resolve_relative_path(line)
+                line.replace('\\', "/")
+            };
+            if Path::new(&line).is_absolute() {
+                gio::File::for_path(&line)
+            } else {
+                base.resolve_relative_path(&line)
             }
         })
         .collect()
@@ -207,7 +283,7 @@ mod tests {
             gio::File::for_path("/music/Café/01 a.opus"),
             gio::File::for_path("/music/b.flac"),
         ];
-        let text = format_m3u(&files);
+        let (text, _) = format_m3u(&files, None);
         assert_eq!(text, "#EXTM3U\n/music/Café/01 a.opus\n/music/b.flac\n");
         let parsed = parse_m3u(&text, &gio::File::for_path("/"));
         assert_eq!(paths(&parsed), paths(&files));
@@ -216,7 +292,36 @@ mod tests {
     #[test]
     fn format_skips_line_breaks() {
         let files = [gio::File::for_path("/music/a\nb.opus")];
-        assert_eq!(format_m3u(&files), "#EXTM3U\n");
+        assert_eq!(format_m3u(&files, None).0, "#EXTM3U\n");
+    }
+
+    #[test]
+    fn format_relative_to_a_directory() {
+        let files = [
+            gio::File::for_path("/home/me/Music/Album/01 a.opus"),
+            gio::File::for_path("/home/me/Other/b.flac"),
+        ];
+        let (text, n_outside) = format_m3u(&files, Some(Path::new("/home/me/Music")));
+        assert_eq!(text, "#EXTM3U\nAlbum/01 a.opus\n/home/me/Other/b.flac\n");
+        assert_eq!(n_outside, 1);
+    }
+
+    #[test]
+    fn parse_backslashes() {
+        let text = "Album\\01 a.opus\n";
+        let files = parse_m3u(text, &gio::File::for_path("/music"));
+        assert_eq!(paths(&files), ["/music/Album/01 a.opus"]);
+    }
+
+    #[test]
+    fn free_names() {
+        let none = |_: &str| false;
+        assert_eq!(free_name_among("Road/trip", none), "Road-trip");
+        assert_eq!(free_name_among(".hidden", none), "hidden");
+        assert_eq!(free_name_among("  ", none), "Playlist");
+
+        let taken = |name: &str| name == "Mix" || name == "Mix 2";
+        assert_eq!(free_name_among("Mix", taken), "Mix 3");
     }
 
     #[test]

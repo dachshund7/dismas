@@ -85,30 +85,35 @@ impl PlaylistsPage {
 
         // Radio buttons, since exactly one playlist is selected
         let group = gtk::CheckButton::new();
-        list.append(&playlist_row(
-            &i18n("Queue"),
-            "",
-            selected.is_empty(),
-            &group,
-        ));
+        let queue_row = playlist_row(&i18n("Queue"), "", selected.is_empty(), &group);
+        queue_row.add_suffix(&playlist_menu_button(&i18n("Queue"), ""));
+        list.append(&queue_row);
         for name in names {
             let row = playlist_row(name, name, name == selected, &group);
-            row.add_suffix(&playlist_menu_button(name));
+            row.add_suffix(&playlist_menu_button(name, name));
             list.append(&row);
         }
     }
 }
 
-// The queue can't be renamed or deleted, only the saved playlists
-fn playlist_menu_button(name: &str) -> gtk::MenuButton {
+// The menu of a playlist; `name` is empty for the queue, which can't be
+// renamed or deleted, only exported
+fn playlist_menu_button(title: &str, name: &str) -> gtk::MenuButton {
     let target = name.to_variant();
     let menu = gio::Menu::new();
-    let rename = gio::MenuItem::new(Some(&i18n("_Rename…")), None);
-    rename.set_action_and_target_value(Some("win.rename-playlist"), Some(&target));
-    menu.append_item(&rename);
-    let delete = gio::MenuItem::new(Some(&i18n("_Delete…")), None);
-    delete.set_action_and_target_value(Some("win.delete-playlist"), Some(&target));
-    menu.append_item(&delete);
+    if !name.is_empty() {
+        let rename = gio::MenuItem::new(Some(&i18n("_Rename…")), None);
+        rename.set_action_and_target_value(Some("win.rename-playlist"), Some(&target));
+        menu.append_item(&rename);
+    }
+    let export = gio::MenuItem::new(Some(&i18n("_Export…")), None);
+    export.set_action_and_target_value(Some("win.export-playlist"), Some(&target));
+    menu.append_item(&export);
+    if !name.is_empty() {
+        let delete = gio::MenuItem::new(Some(&i18n("_Delete…")), None);
+        delete.set_action_and_target_value(Some("win.delete-playlist"), Some(&target));
+        menu.append_item(&delete);
+    }
 
     let button = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")
@@ -121,7 +126,7 @@ fn playlist_menu_button(name: &str) -> gtk::MenuButton {
         // Translators: `{playlist}` must be left unmodified; it is
         // expanded to the name of a playlist
         "Options for {playlist}",
-        &[("playlist", name)],
+        &[("playlist", title)],
     ))]);
     button
 }
