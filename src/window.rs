@@ -394,9 +394,7 @@ mod imp {
 
             // Each page has the main menu; F10 opens the one of the
             // visible page
-            self.menu_button
-                .set_menu_model(Some(&utils::primary_menu()));
-            self.menu_button.set_primary(true);
+            utils::setup_primary_menu_button(&self.menu_button);
         }
     }
 

@@ -19,6 +19,28 @@ pub fn primary_menu() -> gio::MenuModel {
         .expect("The main menu is in the resources")
 }
 
+// Gives a page's menu button the main menu. GTK opens the primary menu
+// of the visible page with F10, but doesn't close it with F10 again, as
+// the menu has the keyboard; its popover takes care of that
+pub fn setup_primary_menu_button(button: &gtk::MenuButton) {
+    button.set_menu_model(Some(&primary_menu()));
+    button.set_primary(true);
+
+    if let Some(popover) = button.popover() {
+        let controller = gtk::ShortcutController::new();
+        controller.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("F10"),
+            Some(gtk::CallbackAction::new(|widget, _| {
+                if let Some(popover) = widget.downcast_ref::<gtk::Popover>() {
+                    popover.popdown();
+                }
+                glib::Propagation::Stop
+            })),
+        ));
+        popover.add_controller(controller);
+    }
+}
+
 // Sets the label of a button that names the selected playlist, which can
 // have a long name
 pub fn set_playlist_button_label(button: &gtk::Button, label: &str) {
