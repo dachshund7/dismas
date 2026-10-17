@@ -290,17 +290,25 @@ impl Window {
         }
     }
 
-    // Moves a track above or below another one, dropped on its row
+    // Moves a track above or below another one, dropped on its row. In
+    // selection mode, dragging a selected track moves all the selected
+    // ones, together and in the order they had
     fn move_queue_track(&self, track: &Track, target: &Track, above: bool) {
         let Some(player) = self.player() else {
             return;
         };
+        let queue = player.queue();
+        let tracks = if self.queue_selection() && track.selected() {
+            queue.selected_tracks_in_order()
+        } else {
+            vec![track.clone()]
+        };
         let before = if above {
             Some(target.clone())
         } else {
-            player.queue().next_in_order(target)
+            queue.next_in_order(target)
         };
-        player.move_track(track, before.as_ref());
+        player.move_tracks(&tracks, before.as_ref());
         self.store_queue();
     }
 

@@ -162,48 +162,54 @@ impl Queue {
     // Moves a track before another one, or to the end; the tracks are
     // moved in the order they were added, which is the one that is saved
     pub fn move_track(&self, track: &Track, before: Option<&Track>) {
-        if before == Some(track) {
-            return;
-        }
+        self.move_tracks(std::slice::from_ref(track), before);
+    }
+
+    // Moves tracks together before another one, or to the end, keeping
+    // the order they had; if the other one is moved as well, they go
+    // before the next track that isn't
+    pub fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
         let store = &self.imp().store;
-        let store_position = |track: &Track| {
-            store
-                .iter::<Track>()
-                .position(|s| s.is_ok_and(|s| s == *track))
-                .map(|pos| pos as u32)
-        };
-        let Some(from) = store_position(track) else {
-            return;
-        };
-
-        // Where the track ends up, once it's taken out of its old place
-        let to = match before.and_then(store_position) {
-            Some(before) if before > from => before - 1,
-            Some(before) => before,
-            None => store.n_items() - 1,
-        };
-        if to == from {
+        let old: Vec<Track> = store.iter::<Track>().flatten().collect();
+        let moved: Vec<Track> = old.iter().filter(|t| tracks.contains(t)).cloned().collect();
+        if moved.is_empty() {
             return;
         }
 
-        // The tracks between the old and new places are replaced in a
-        // single change, rather than removing the track and inserting it
-        // again, so the list redraws the headers of the works around them
-        let (start, end) = (from.min(to), from.max(to));
-        let mut tracks: Vec<Track> = (start..=end)
-            .filter_map(|pos| store.item(pos).and_downcast::<Track>())
-            .collect();
-        if from < to {
-            tracks.rotate_left(1);
-        } else {
-            tracks.rotate_right(1);
-        }
+        let before = before.and_then(|before| {
+            let from = old.iter().position(|t| t == before)?;
+            old[from..].iter().find(|t| !moved.contains(t)).cloned()
+        });
+        let mut new: Vec<Track> = old.iter().filter(|t| !moved.contains(t)).cloned().collect();
+        let to = before
+            .and_then(|before| new.iter().position(|t| *t == before))
+            .unwrap_or(new.len());
+        new.splice(to..to, moved);
+
+        // Only the tracks between the first and last ones that changed
+        // places are replaced, in a single change, rather than removing
+        // the tracks and inserting them again, so the list redraws the
+        // headers of the works around them
+        let Some(start) = (0..old.len()).find(|&i| old[i] != new[i]) else {
+            return;
+        };
+        let end = (0..old.len()).rfind(|&i| old[i] != new[i]).unwrap_or(start);
 
         let current = self.current();
-        store.splice(start, end - start + 1, &tracks);
+        store.splice(start as u32, (end - start + 1) as u32, &new[start..=end]);
 
-        // Moving a track moves the ones between its old and new places
+        // Moving tracks moves the ones between their old and new places
         self.update_current_pos(current);
+    }
+
+    // The selected tracks, in the order they were added
+    pub fn selected_tracks_in_order(&self) -> Vec<Track> {
+        self.imp()
+            .store
+            .iter::<Track>()
+            .flatten()
+            .filter(Track::selected)
+            .collect()
     }
 
     // The track after this one in the order they were added, which is
@@ -405,6 +411,29 @@ mod tests {
         // Before itself, nothing moves
         queue.move_track(&t[2], Some(&t[2]));
         assert_eq!(order(&queue, &t), [1, 0, 2, 3]);
+    }
+
+    #[test]
+    fn move_tracks_together_in_their_order() {
+        let (queue, t) = queue_of(8);
+
+        // Spread out tracks, given out of order, go together before
+        // another one, in the order they had
+        queue.move_tracks(&[t[5].clone(), t[1].clone(), t[3].clone()], Some(&t[7]));
+        assert_eq!(order(&queue, &t), [0, 2, 4, 6, 1, 3, 5, 7]);
+
+        // Before one of them: before the next track that isn't moved,
+        // which is where they already are
+        queue.move_tracks(&[t[1].clone(), t[3].clone()], Some(&t[3]));
+        assert_eq!(order(&queue, &t), [0, 2, 4, 6, 1, 3, 5, 7]);
+        queue.move_tracks(&[t[1].clone(), t[3].clone()], Some(&t[1]));
+        assert_eq!(order(&queue, &t), [0, 2, 4, 6, 1, 3, 5, 7]);
+
+        // To the start, and to the end
+        queue.move_tracks(&[t[6].clone(), t[7].clone()], Some(&t[0]));
+        assert_eq!(order(&queue, &t), [6, 7, 0, 2, 4, 1, 3, 5]);
+        queue.move_tracks(&[t[6].clone(), t[0].clone()], None);
+        assert_eq!(order(&queue, &t), [7, 2, 4, 1, 3, 5, 6, 0]);
     }
 
     #[test]

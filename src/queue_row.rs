@@ -7,7 +7,12 @@ use adw::subclass::prelude::*;
 use glib::{clone, subclass::Signal};
 use gtk::{CompositeTemplate, gdk, gio, glib, prelude::*};
 
-use crate::{application::Application, audio::Track, cover_picture::CoverPicture, i18n::pi18n};
+use crate::{
+    application::Application,
+    audio::Track,
+    cover_picture::CoverPicture,
+    i18n::{ni18n_f, pi18n},
+};
 
 mod imp {
     use std::sync::LazyLock;
@@ -338,6 +343,30 @@ impl QueueRow {
                 if this.display().is_composited() {
                     icon.add_css_class("composited");
                 }
+
+                // A selected track takes the other selected ones with it,
+                // which the copy shows by their number, and which all fade
+                // in the list
+                let n_tracks = this.n_dragged_tracks();
+                if n_tracks > 1 {
+                    let count = gtk::Label::builder()
+                        .label(ni18n_f(
+                            // Translators: The '{}' must be left unmodified, and
+                            // it is expanded to the number of tracks being moved
+                            "{} track",
+                            "{} tracks",
+                            n_tracks,
+                            &[&n_tracks.to_string()],
+                        ))
+                        .valign(gtk::Align::Center)
+                        .css_classes(["drag-count"])
+                        .build();
+                    count.set_parent(&icon);
+                    if let Some(list) = this.ancestor(gtk::ListView::static_type()) {
+                        list.add_css_class("dragging-selection");
+                    }
+                }
+
                 gtk::DragIcon::for_drag(drag).set_child(Some(&icon));
                 drag.set_hotspot(point.x() as i32, point.y() as i32);
 
@@ -347,7 +376,12 @@ impl QueueRow {
         drag_source.connect_drag_end(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_, _, _| this.remove_css_class("dragging")
+            move |_, _, _| {
+                this.remove_css_class("dragging");
+                if let Some(list) = this.ancestor(gtk::ListView::static_type()) {
+                    list.remove_css_class("dragging-selection");
+                }
+            }
         ));
         handle.add_controller(drag_source.clone());
 
@@ -358,8 +392,9 @@ impl QueueRow {
         click.connect_pressed(|gesture, _, _, _| {
             gesture.set_state(gtk::EventSequenceState::Claimed);
         });
+        // Gestures can only be grouped once they're on the same widget
+        handle.add_controller(click.clone());
         click.group_with(&drag_source);
-        handle.add_controller(click);
 
         let drop_target = gtk::DropTarget::new(Track::static_type(), gdk::DragAction::MOVE);
         drop_target.connect_motion(clone!(
@@ -403,6 +438,17 @@ impl QueueRow {
             }
         ));
         self.add_controller(drop_target);
+    }
+
+    // The number of tracks dragged with this one's handle: in selection
+    // mode, a selected track moves with all the selected ones
+    fn n_dragged_tracks(&self) -> u32 {
+        if !self.selection_mode() || !self.selected() {
+            return 1;
+        }
+        gio::Application::default()
+            .and_downcast::<Application>()
+            .map_or(1, |app| app.player().queue().n_selected_tracks().max(1))
     }
 
     // Whether a track dropped at this height goes above or below the row,

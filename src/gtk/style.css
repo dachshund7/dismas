@@ -101,9 +101,23 @@ listview > row:hover queuerow image.drag-handle {
   opacity: 1;
 }
 
-/* The row of the track being dragged */
-queuerow.dragging {
+/* The row of the track being dragged, and the rows of the selected
+ * tracks dragged along with it */
+queuerow.dragging,
+listview.dragging-selection queuerow.selected-item {
   opacity: 0.5;
+}
+
+/* The number of tracks being dragged, on the copy of the row that
+ * follows the pointer */
+queuerow.drag-icon label.drag-count {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+  font-weight: bold;
+  font-size: 85%;
 }
 
 /* The track rows have the padding and the corners of the list's rows, so

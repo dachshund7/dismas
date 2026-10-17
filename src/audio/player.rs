@@ -533,9 +533,10 @@ impl AudioPlayer {
         self.queue.remove_all();
     }
 
-    // Moves a track before another one, or to the end of the queue
-    pub fn move_track(&self, track: &Track, before: Option<&Track>) {
-        self.queue.move_track(track, before);
+    // Moves tracks together before another one, or to the end of the
+    // queue, keeping the order they had
+    pub fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
+        self.queue.move_tracks(tracks, before);
     }
 
     pub fn remove_track(&self, track: &Track) {
