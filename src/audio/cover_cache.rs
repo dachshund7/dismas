@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use gtk::{gdk, gio, glib, prelude::*};
@@ -47,14 +47,18 @@ impl CoverArt {
     }
 }
 
-// The covers are shared by the tracks of an album, which can be loaded in
+// The cover of an album, loaded once by the first of its tracks that asks
+// for it; the others wait for it, rather than loading it again
+type CoverSlot = Arc<OnceLock<Option<CoverArt>>>;
+
+// The covers are shared by the tracks of an album, which are loaded in
 // separate threads, so the cache is behind a mutex; it's only locked to
-// look up and add covers, not while loading them
+// find the slot of a cover, not while loading it
 #[derive(Debug)]
 pub struct CoverCache {
     // The albums without a cover are kept as well, so that we don't look
     // for it again for each of their tracks
-    entries: HashMap<String, Option<CoverArt>>,
+    entries: HashMap<String, CoverSlot>,
 }
 
 impl CoverCache {
@@ -73,17 +77,8 @@ impl CoverCache {
         }
     }
 
-    // Another thread might have added the same cover in the meantime, in
-    // which case its cover is kept
-    fn add_entry(&mut self, uuid: &str, cover: Option<CoverArt>) -> Option<CoverArt> {
-        self.entries
-            .entry(uuid.to_string())
-            .or_insert(cover)
-            .clone()
-    }
-
-    fn lookup(&self, uuid: &str) -> Option<Option<CoverArt>> {
-        self.entries.get(uuid).cloned()
+    fn slot(&mut self, uuid: &str) -> CoverSlot {
+        self.entries.entry(uuid.to_string()).or_default().clone()
     }
 
     pub fn load_cover_art(tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
@@ -191,30 +186,27 @@ impl CoverCache {
 
         let uuid = format!("{:x}", hasher.finalize());
 
-        if let Some(cover) = Self::global().lock().unwrap().lookup(&uuid) {
-            debug!("Found cover for UUID '{uuid}'");
-            return cover.map(|c| (c, uuid));
-        }
-
-        debug!("Loading cover art for UUID: {uuid}");
-        let cover = Self::load_cover_art(tag, path.parent())
-            .and_then(|data| CoverImage::decode(data, COVER_SIZE))
-            .and_then(|image| {
-                // The color palette we use for styling the UI; we want both
-                // the texture and the palette
-                let palette = image.palette()?;
-                // Cache the cover, so that the MPRIS controller can
-                // reference it later
-                let cache = cache_cover_art(&uuid, &image);
-                Some(CoverArt {
-                    texture: image.into_texture(),
-                    palette,
-                    cache,
+        let slot = Self::global().lock().unwrap().slot(&uuid);
+        let cover = slot.get_or_init(|| {
+            debug!("Loading cover art for UUID: {uuid}");
+            Self::load_cover_art(tag, path.parent())
+                .and_then(|data| CoverImage::decode(data, COVER_SIZE))
+                .and_then(|image| {
+                    // The color palette we use for styling the UI; we want
+                    // both the texture and the palette
+                    let palette = image.palette()?;
+                    // Cache the cover, so that the MPRIS controller can
+                    // reference it later
+                    let cache = cache_cover_art(&uuid, &image);
+                    Some(CoverArt {
+                        texture: image.into_texture(),
+                        palette,
+                        cache,
+                    })
                 })
-            });
+        });
 
-        let cover = Self::global().lock().unwrap().add_entry(&uuid, cover);
-        cover.map(|c| (c, uuid))
+        cover.clone().map(|c| (c, uuid))
     }
 
     // Loads the cover art of a file again, at full resolution; this does not

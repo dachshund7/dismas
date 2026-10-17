@@ -48,9 +48,9 @@ Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-I
 - Controllers and the UI ask for things by sending `PlaybackAction`s back to the player.
 - `PlayerState` is a GObject whose properties the UI binds to. It is only mutated on the main context.
 - `Queue` is the list of tracks to play, a `GListModel` of `Track` GObjects. `ShuffleListModel` is a shuffled view over it.
-- Covers are deduplicated across tracks of the same album through a global `CoverCache`.
+- Covers are deduplicated across tracks of the same album through a global `CoverCache`. Each cover has a `OnceLock` slot, so it's decoded once even when several of its tracks load at the same time.
 - Cover art comes from the tags and could be crafted, so `cover_image.rs` decodes it with glycin, in sandboxed loader processes. Only the decoded pixels are scaled, color-picked and saved as PNG in the app. Decoding blocks, so it never runs on the main thread.
-- Tags and covers are read in a worker thread: `load_tracks()` (`audio/track.rs`) sends `TrackData` over a channel, and the main thread wraps it in `Track` GObjects, which are not `Send`.
+- Tags and covers are read in up to four worker threads: `load_tracks()` (`audio/track.rs`) sends `TrackData` over a channel, in the order of the files, and the main thread wraps it in `Track` GObjects, which are not `Send`.
 - `WaveformGenerator` builds the seek-bar waveform in a separate GStreamer pipeline.
 
 ### UI

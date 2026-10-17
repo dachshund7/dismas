@@ -142,6 +142,8 @@ mod imp {
         pub player_available: Cell<bool>,
         // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
+        // Whether to hide the focus again once the page is shown
+        pub hide_focus_after_transition: Cell<bool>,
         // The playlist whose tracks are loading, to take the place of
         // those of the selected one once they're loaded
         pub pending_playlist: RefCell<Option<String>>,
@@ -335,6 +337,7 @@ mod imp {
                 player_available: Cell::new(false),
                 starting: Cell::new(true),
                 pending_playlist: RefCell::default(),
+                hide_focus_after_transition: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),
                 sidebar_visible_uncollapsed: Cell::new(true),
                 provider: gtk::CssProvider::new(),
@@ -362,6 +365,18 @@ mod imp {
             // Only in selection mode
             self.obj()
                 .action_set_enabled("queue.remove-selected", false);
+
+            self.content_stack.connect_transition_running_notify(clone!(
+                #[weak(rename_to = win)]
+                self.obj(),
+                move |stack| {
+                    if !stack.is_transition_running()
+                        && win.imp().hide_focus_after_transition.replace(false)
+                    {
+                        win.set_focus_visible(false);
+                    }
+                }
+            ));
 
             // Each page has the main menu; F10 opens the one of the
             // visible page
@@ -475,19 +490,47 @@ mod imp {
             .to_string()
         }
 
+        // The visibility of the pages changes before the stack does, so
+        // that it goes straight to the page, rather than through the one
+        // under the playlists
         fn set_page(&self, page: String) {
             let obj = self.obj();
-            match page.as_str() {
+            let old_page = self.page();
+            let (library, playlists) = match page.as_str() {
                 // Going to the albums from the playlists closes them
-                "library" => {
-                    obj.set_playlists_visible(false);
-                    obj.set_library_visible(true);
+                "library" => (true, false),
+                "playlists" => (self.library_visible.get(), true),
+                // With nothing to play, there is no player to go to
+                _ if obj.queue_is_empty() => {
+                    (self.library_visible.get(), self.playlists_visible.get())
                 }
-                "playlists" => obj.set_playlists_visible(true),
-                _ => {
-                    obj.set_playlists_visible(false);
-                    obj.set_library_visible(false);
-                }
+                _ => (false, false),
+            };
+            let library_changed = self.library_visible.replace(library) != library;
+            let playlists_changed = self.playlists_visible.replace(playlists) != playlists;
+
+            if playlists && playlists_changed {
+                obj.update_playlists_page();
+            }
+            self.update_content_page();
+            // Typing searches the albums right away
+            if self.page() == "library" && old_page != "library" {
+                self.library_view.focus_search();
+            }
+            // The focus moves to the page, and the shortcuts would show it
+            // there, like after any key; as after a click, it's shown again
+            // when moving it with the keyboard. It can move again at the end
+            // of the transition, when the previous page goes away
+            if self.page() != old_page {
+                obj.set_focus_visible(false);
+                self.hide_focus_after_transition.set(true);
+            }
+
+            if library_changed {
+                obj.notify_library_visible();
+            }
+            if playlists_changed {
+                obj.notify_playlists_visible();
             }
             // A page that can't be shown, like the player with nothing to
             // play, leaves the buttons as they were

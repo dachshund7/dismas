@@ -3,10 +3,15 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeMap,
     fmt::{self, Display, Formatter},
     fs::File,
     io::BufReader,
     path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Instant,
 };
 
@@ -771,16 +776,49 @@ impl TrackData {
 // Reads the tracks in a separate thread, and sends them one at a time, in
 // order, with `None` for the files that are not tracks; reading stops if
 // the receiver is dropped
+// Decoding a cover mostly waits for its sandboxed loader, so a few at a
+// time go faster, even on fewer cores
+const MAX_LOADING_THREADS: usize = 4;
+
+// Reading the tags and decoding the covers takes a while, so the tracks
+// are read in a few threads; they are sent in the order of the files, one
+// for each, and the threads stop once the receiver is dropped
 pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Option<TrackData>> {
     let (sender, receiver) = async_channel::unbounded();
 
+    let uris: Arc<Vec<String>> = Arc::new(files.iter().map(|f| f.uri().to_string()).collect());
+    let next = Arc::new(AtomicUsize::new(0));
+    let (read_sender, read_receiver) = std::sync::mpsc::channel();
+    let n_threads = MAX_LOADING_THREADS.min(uris.len()).max(1);
+    for _ in 0..n_threads {
+        let uris = Arc::clone(&uris);
+        let next = Arc::clone(&next);
+        let read_sender = read_sender.clone();
+        std::thread::spawn(move || {
+            loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(uri) = uris.get(index) else {
+                    break;
+                };
+                if read_sender.send((index, TrackData::from_uri(uri))).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    drop(read_sender);
+
+    // The tracks read out of order wait for the ones before them
     std::thread::spawn(move || {
-        for file in files {
-            if sender
-                .send_blocking(TrackData::from_uri(file.uri().as_str()))
-                .is_err()
-            {
-                break;
+        let mut waiting = BTreeMap::new();
+        let mut next_index = 0;
+        for (index, data) in read_receiver {
+            waiting.insert(index, data);
+            while let Some(data) = waiting.remove(&next_index) {
+                if sender.send_blocking(data).is_err() {
+                    return;
+                }
+                next_index += 1;
             }
         }
     });
