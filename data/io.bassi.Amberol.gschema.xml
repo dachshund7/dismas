@@ -31,6 +31,17 @@
 	    <summary>The selected playlist</summary>
 	    <description>The name of the saved playlist that is played and that tracks are added to; empty for the queue</description>
 	  </key>
+	  <key name="sleep-timer-minutes" type="i">
+	    <range min="1" max="720"/>
+	    <default>30</default>
+	    <summary>Minutes of the sleep timer</summary>
+	    <description>The number of minutes the sleep timer was last set to</description>
+	  </key>
+	  <key name="sleep-timer-finish-track" type="b">
+	    <default>false</default>
+	    <summary>Finish the last track when the sleep timer runs out</summary>
+	    <description>Whether the music stops at the end of the track that is playing when the sleep timer runs out, instead of right away</description>
+	  </key>
 	  <key name="sidebar-width" type="i">
 	    <default>0</default>
 	    <summary>Width of the playlist sidebar</summary>

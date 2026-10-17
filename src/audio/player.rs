@@ -15,8 +15,8 @@ use log::{debug, error};
 use crate::{
     application::ApplicationAction,
     audio::{
-        Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, Track,
-        WaveformGenerator,
+        Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, SleepTimer,
+        Track, WaveformGenerator,
     },
 };
 
@@ -34,6 +34,7 @@ pub enum PlaybackAction {
     Seek(i64),
     SeekTo(u64),
     PlayNext,
+    SleepTimerExpired,
 
     Raise,
 }
@@ -111,6 +112,7 @@ pub struct AudioPlayer {
     controllers: Vec<Box<dyn Controller>>,
     queue: Queue,
     state: PlayerState,
+    sleep_timer: SleepTimer,
     waveform_generator: WaveformGenerator,
 }
 
@@ -136,6 +138,8 @@ impl AudioPlayer {
         let waveform_generator = WaveformGenerator::new();
         controllers.push(Box::new(waveform_generator.clone()));
 
+        let sleep_timer = SleepTimer::new(sender.clone());
+
         let backend = GstBackend::new(sender);
 
         let queue = Queue::default();
@@ -148,6 +152,7 @@ impl AudioPlayer {
             controllers,
             queue,
             state,
+            sleep_timer,
             waveform_generator,
         });
 
@@ -183,6 +188,7 @@ impl AudioPlayer {
             PlaybackAction::UpdatePosition(pos, notify) => self.update_position(pos, notify),
             PlaybackAction::VolumeChanged(vol) => self.update_volume(vol),
             PlaybackAction::PlayNext => self.play_next(),
+            PlaybackAction::SleepTimerExpired => self.sleep_timer_expired(),
             PlaybackAction::Raise => self.present(),
             PlaybackAction::Repeat(mode) => self.update_repeat_mode(mode),
             PlaybackAction::Seek(offset) => self.seek_offset(offset),
@@ -245,8 +251,26 @@ impl AudioPlayer {
         }
     }
 
+    // Called at the end of a track
     fn play_next(&self) {
+        if self.sleep_timer.finishing_track() {
+            // Go on to the next track without playing it, so playing
+            // again starts there
+            self.sleep_timer.cancel();
+            self.set_playback_state(PlaybackState::Paused);
+        }
+
         self.skip_next();
+    }
+
+    // Pausing keeps the position, to go on from there later
+    fn sleep_timer_expired(&self) {
+        if self.state.playing() && self.sleep_timer.finish_track() {
+            self.sleep_timer.wait_for_track_end();
+        } else {
+            self.sleep_timer.cancel();
+            self.pause();
+        }
     }
 
     pub fn toggle_play(&self) {
@@ -462,6 +486,10 @@ impl AudioPlayer {
 
     pub fn state(&self) -> &PlayerState {
         &self.state
+    }
+
+    pub fn sleep_timer(&self) -> &SleepTimer {
+        &self.sleep_timer
     }
 
     pub fn waveform_generator(&self) -> &WaveformGenerator {

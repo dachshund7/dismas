@@ -54,6 +54,7 @@ pub use gst_backend::GstBackend;
 mod player;
 mod queue;
 mod shuffle;
+mod sleep_timer;
 mod state;
 mod track;
 mod waveform_generator;
@@ -64,6 +65,7 @@ pub use player::{
 };
 pub use queue::Queue;
 pub use shuffle::ShuffleListModel;
+pub use sleep_timer::SleepTimer;
 pub use state::PlayerState;
 pub use track::{
     FileDetails, MusicBrainzIds, Track, TrackCredits, load_tracks, normalize_search_text,

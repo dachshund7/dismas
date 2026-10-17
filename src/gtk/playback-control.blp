@@ -109,6 +109,21 @@ template $AmberolPlaybackControl: Widget {
         spacing: 12;
         margin-start: 18;
 
+        MenuButton sleep_timer_button {
+          icon-name: "weather-clear-night-symbolic";
+          popover: sleep_timer_popover;
+          valign: center;
+          tooltip-text: _("Sleep Timer");
+
+          styles [
+            "circular",
+          ]
+
+          accessibility {
+            label: C_("a11y", "Sleep timer");
+          }
+        }
+
         Button track_info_button {
           icon-name: "help-about-symbolic";
           action-name: "win.track-info";
@@ -138,6 +153,79 @@ template $AmberolPlaybackControl: Widget {
             label: C_("a11y", "Repeat");
           }
         }
+      }
+    }
+  }
+}
+
+
+Popover sleep_timer_popover {
+  Box {
+    orientation: vertical;
+    spacing: 12;
+    margin-top: 6;
+    margin-bottom: 6;
+    margin-start: 6;
+    margin-end: 6;
+
+    // Shows the time left while the timer is on
+    Label sleep_timer_label {
+      visible: false;
+
+      styles [
+        "dim-label",
+      ]
+    }
+
+    Box {
+      spacing: 6;
+      halign: center;
+
+      SpinButton sleep_timer_minutes {
+        numeric: true;
+
+        adjustment: Adjustment {
+          lower: 1;
+          upper: 720;
+          step-increment: 1;
+          page-increment: 15;
+          value: 30;
+        };
+
+        accessibility {
+          label: C_("a11y", "Sleep timer minutes");
+        }
+      }
+
+      Label {
+        label: C_("sleep-timer", "minutes");
+      }
+    }
+
+    CheckButton {
+      label: _("_Finish Last Track");
+      use-underline: true;
+      action-name: "win.sleep-timer-finish-track";
+    }
+
+    Box {
+      spacing: 6;
+      homogeneous: true;
+
+      Button {
+        label: _("_Turn Off");
+        use-underline: true;
+        action-name: "win.sleep-timer-cancel";
+      }
+
+      Button {
+        label: _("_Start");
+        use-underline: true;
+        action-name: "win.sleep-timer-start";
+
+        styles [
+          "suggested-action",
+        ]
       }
     }
   }

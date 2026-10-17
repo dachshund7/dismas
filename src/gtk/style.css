@@ -70,6 +70,23 @@ playbackcontrol {
   padding-bottom: 12px;
 }
 
+/* The sleep timer button is filled while the timer is on; coloring the
+ * icon alone wouldn't show with "Match Cover Art", which makes the accent
+ * color the color of the text */
+playbackcontrol menubutton.sleep-timer-on > button {
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+}
+
+playbackcontrol menubutton.sleep-timer-on > button:hover {
+  background-image: image(color-mix(in srgb, currentColor 10%, transparent));
+}
+
+playbackcontrol menubutton.sleep-timer-on > button:active,
+playbackcontrol menubutton.sleep-timer-on > button:checked {
+  background-image: image(color-mix(in srgb, currentColor 20%, transparent));
+}
+
 queuerow .currently-playing {
   padding-left: 6px;
   font-weight: 700;

@@ -9,6 +9,7 @@ mod playlist;
 mod selected_playlist;
 mod selection;
 mod sidebar;
+mod sleep_timer;
 mod track_menu;
 
 use std::{
@@ -604,6 +605,7 @@ impl Window {
 
         win.setup_waveform();
         win.setup_actions();
+        win.setup_sleep_timer();
         win.setup_playlist();
         win.setup_sidebar_handle();
         win.setup_drop_target();

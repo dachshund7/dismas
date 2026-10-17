@@ -36,6 +36,14 @@ mod imp {
         pub shuffle_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub repeat_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub sleep_timer_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub sleep_timer_popover: TemplateChild<gtk::Popover>,
+        #[template_child]
+        pub sleep_timer_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
     }
 
     #[glib::object_subclass]
@@ -78,6 +86,11 @@ mod imp {
                 };
                 button.set_tooltip_text(Some(&tooltip));
             });
+
+            // Enter in the minutes starts the timer
+            self.sleep_timer_minutes.connect_activate(|spin| {
+                spin.activate_action("win.sleep-timer-start", None).ok();
+            });
         }
     }
 
@@ -111,6 +124,30 @@ impl PlaybackControl {
 
     pub fn volume_control(&self) -> VolumeControl {
         self.imp().volume_control.get()
+    }
+
+    pub fn sleep_timer_minutes(&self) -> gtk::SpinButton {
+        self.imp().sleep_timer_minutes.get()
+    }
+
+    pub fn close_sleep_timer(&self) {
+        self.imp().sleep_timer_popover.popdown();
+    }
+
+    // Shows what the sleep timer is waiting for, or None when it's off
+    pub fn set_sleep_timer(&self, status: Option<&str>) {
+        let imp = self.imp();
+        let button = imp.sleep_timer_button.get();
+        if let Some(status) = status {
+            imp.sleep_timer_label.set_label(status);
+            imp.sleep_timer_label.set_visible(true);
+            button.set_tooltip_text(Some(status));
+            button.add_css_class("sleep-timer-on");
+        } else {
+            imp.sleep_timer_label.set_visible(false);
+            button.set_tooltip_text(Some(&i18n("Sleep Timer")));
+            button.remove_css_class("sleep-timer-on");
+        }
     }
 
     pub fn set_repeat_mode(&self, repeat_mode: RepeatMode) {
