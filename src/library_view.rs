@@ -72,6 +72,8 @@ mod imp {
     #[properties(wrapper_type = super::LibraryView)]
     pub struct LibraryView {
         #[template_child]
+        pub menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub rescan_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
@@ -157,6 +159,10 @@ mod imp {
 
         fn constructed(&self) {
             self.parent_constructed();
+
+            self.menu_button
+                .set_menu_model(Some(&crate::utils::primary_menu()));
+            self.menu_button.set_primary(true);
 
             let obj = self.obj();
             obj.setup_grid();

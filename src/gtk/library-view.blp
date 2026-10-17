@@ -16,6 +16,16 @@ template $AmberolLibraryView: Widget {
       $AmberolPageSwitcher {}
 
       [end]
+      MenuButton menu_button {
+        icon-name: "open-menu-symbolic";
+        tooltip-text: _("Main Menu");
+
+        accessibility {
+          label: C_("a11y", "Primary menu");
+        }
+      }
+
+      [end]
       Button rescan_button {
         icon-name: "view-refresh-symbolic";
         tooltip-text: _("Scan the Music Folder Again");

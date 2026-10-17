@@ -87,6 +87,17 @@ pub fn create(name: &str) -> Result<(), glib::Error> {
     write(name.trim(), &[])
 }
 
+// Renames a saved playlist; the new name has been checked with
+// `check_name()`
+pub fn rename(name: &str, new_name: &str) -> std::io::Result<()> {
+    std::fs::rename(playlist_path(name), playlist_path(new_name.trim()))
+}
+
+// Moves a saved playlist to the trash, from where it can be restored
+pub fn trash(name: &str) -> Result<(), glib::Error> {
+    gio::File::for_path(playlist_path(name)).trash(gio::Cancellable::NONE)
+}
+
 // The tracks of a playlist; the queue has none until it's first saved
 pub fn load(name: &str) -> Option<Vec<gio::File>> {
     let path = playlist_path(name);

@@ -94,6 +94,8 @@ mod imp {
         #[template_child]
         pub playback_control: TemplateChild<PlaybackControl>,
         #[template_child]
+        pub menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub split_view: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
         pub playlist_view: TemplateChild<PlaylistView>,
@@ -140,6 +142,9 @@ mod imp {
         pub player_available: Cell<bool>,
         // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
+        // Whether the tracks of the selected playlist are loading, after
+        // the queue was cleared of the previous one
+        pub switching: Cell<bool>,
         // Whether the sidebar was showing before the tracks of an album
         pub sidebar_was_visible: Cell<bool>,
         // Whether the sidebar was showing before the split view collapsed
@@ -224,7 +229,28 @@ mod imp {
                 move |win, _, param| {
                     debug!("Window::win.select-playlist()");
                     if let Some(name) = param.and_then(String::from_variant) {
+                        win.set_playlists_visible(false);
                         win.select_playlist(&name);
+                    }
+                },
+            );
+            klass.install_action(
+                "win.rename-playlist",
+                Some(glib::VariantTy::STRING),
+                move |win, _, param| {
+                    debug!("Window::win.rename-playlist()");
+                    if let Some(name) = param.and_then(String::from_variant) {
+                        win.show_rename_playlist_dialog(&name);
+                    }
+                },
+            );
+            klass.install_action(
+                "win.delete-playlist",
+                Some(glib::VariantTy::STRING),
+                move |win, _, param| {
+                    debug!("Window::win.delete-playlist()");
+                    if let Some(name) = param.and_then(String::from_variant) {
+                        win.show_delete_playlist_dialog(&name);
                     }
                 },
             );
@@ -284,6 +310,7 @@ mod imp {
                 toast_overlay: TemplateChild::default(),
                 drag_overlay: TemplateChild::default(),
                 playback_control: TemplateChild::default(),
+                menu_button: TemplateChild::default(),
                 waveform_view: TemplateChild::default(),
                 elapsed_label: TemplateChild::default(),
                 remaining_label: TemplateChild::default(),
@@ -307,6 +334,7 @@ mod imp {
                 page: std::marker::PhantomData,
                 player_available: Cell::new(false),
                 starting: Cell::new(true),
+                switching: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),
                 sidebar_visible_uncollapsed: Cell::new(true),
                 provider: gtk::CssProvider::new(),
@@ -334,6 +362,12 @@ mod imp {
             // Only in selection mode
             self.obj()
                 .action_set_enabled("queue.remove-selected", false);
+
+            // Each page has the main menu; F10 opens the one of the
+            // visible page
+            self.menu_button
+                .set_menu_model(Some(&utils::primary_menu()));
+            self.menu_button.set_primary(true);
         }
     }
 
@@ -405,10 +439,6 @@ mod imp {
                 obj.notify_library_visible();
                 return;
             }
-            // Going to the albums from the playlists closes them
-            if visible {
-                obj.set_playlists_visible(false);
-            }
             if visible == self.library_visible.replace(visible) {
                 return;
             }
@@ -448,7 +478,11 @@ mod imp {
         fn set_page(&self, page: String) {
             let obj = self.obj();
             match page.as_str() {
-                "library" => obj.set_library_visible(true),
+                // Going to the albums from the playlists closes them
+                "library" => {
+                    obj.set_playlists_visible(false);
+                    obj.set_library_visible(true);
+                }
                 "playlists" => obj.set_playlists_visible(true),
                 _ => {
                     obj.set_playlists_visible(false);

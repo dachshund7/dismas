@@ -20,6 +20,7 @@ impl Window {
     pub(super) fn go_to_album(&self, album_id: &str) {
         // Showing the grid focuses the search, so it goes first, for the
         // album to take the focus
+        self.set_playlists_visible(false);
         self.set_library_visible(true);
         let Some(album) = self.imp().library_view.reveal_album(album_id) else {
             return;
@@ -43,6 +44,12 @@ impl Window {
     // With an empty queue, there is nothing to play, so the album grid
     // takes the place of the player, and there's no going to it
     pub(super) fn update_library_for_queue(&self) {
+        // The queue is only empty until the tracks of the playlist are
+        // loaded, and showing the grid in the meantime would make it flash
+        if self.imp().switching.get() {
+            return;
+        }
+
         let queue_empty = self.queue_is_empty();
         if self.imp().player_available.replace(!queue_empty) == queue_empty {
             self.notify_player_available();
@@ -50,7 +57,8 @@ impl Window {
 
         // At startup, the queue is empty until it's restored, or until
         // the files to open are added, and showing the grid in the meantime
-        // would only make it flash
+        // would only make it flash; the playlists stay over the grid, e.g.
+        // while switching from a deleted one
         if queue_empty && !self.imp().starting.get() {
             self.set_library_visible(true);
             self.set_playlist_visible(false);

@@ -28,6 +28,9 @@ impl Window {
             // Adding tracks to a saved playlist that wasn't loaded would
             // replace its tracks
             self.select_queue_to_play();
+            // The queue of the last session is gone, rather than coming
+            // back when switching to the queue
+            self.store_queue();
             self.end_startup();
         } else if self.queue_is_empty() {
             self.restore_playlist();
@@ -57,6 +60,8 @@ impl Window {
         self.action_set_enabled("queue.clear", false);
         self.action_set_enabled("win.select-playlist", false);
         self.action_set_enabled("win.new-playlist", false);
+        self.action_set_enabled("win.rename-playlist", false);
+        self.action_set_enabled("win.delete-playlist", false);
         self.imp().album_tracks.set_adding_enabled(false);
         self.imp().library_view.set_adding_enabled(false);
 
@@ -94,6 +99,8 @@ impl Window {
                 win.action_set_enabled("queue.clear", true);
                 win.action_set_enabled("win.select-playlist", true);
                 win.action_set_enabled("win.new-playlist", true);
+                win.action_set_enabled("win.rename-playlist", true);
+                win.action_set_enabled("win.delete-playlist", true);
                 win.imp().album_tracks.set_adding_enabled(true);
                 win.imp().library_view.set_adding_enabled(true);
 
@@ -167,6 +174,12 @@ impl Window {
 
                         win.add_toast(msg);
                     }
+                }
+
+                // Even with none of its tracks found, the playlist is
+                // loaded
+                if win.imp().switching.replace(false) {
+                    win.update_library_for_queue();
                 }
 
                 win.end_startup();

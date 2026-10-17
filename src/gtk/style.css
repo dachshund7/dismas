@@ -155,6 +155,12 @@ dragoverlay {
   transition-timing-function: ease;
 }
 
+/* With "Match Cover Art", the colors of the window show through the
+ * rows of the playlists, like through the cards of the track information */
+.main-window playlistspage {
+  --card-bg-color: color-mix(in srgb, var(--window-bg-color) 60%, transparent);
+}
+
 /* The track information dialog follows the colors of the cover; the
  * colors are defined on :root, so they are available outside of the
  * main window as well */

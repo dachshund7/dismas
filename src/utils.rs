@@ -12,6 +12,13 @@ use crate::{audio::Track, config::APPLICATION_ID};
 // the document portal
 pub const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
 
+// The main menu, for the menu buttons of each page
+pub fn primary_menu() -> gio::MenuModel {
+    gtk::Builder::from_resource("/io/bassi/Amberol/primary-menu.ui")
+        .object("primary_menu")
+        .expect("The main menu is in the resources")
+}
+
 // Sets the label of a button that names the selected playlist, which can
 // have a long name
 pub fn set_playlist_button_label(button: &gtk::Button, label: &str) {

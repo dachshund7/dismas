@@ -96,7 +96,6 @@ impl Window {
     // Stops playing, and puts the tracks of the playlist in the queue;
     // the tracks of the previous one were saved with each change
     pub(super) fn select_playlist(&self, name: &str) {
-        self.set_playlists_visible(false);
         if name == self.selected_playlist() {
             return;
         }
@@ -106,6 +105,7 @@ impl Window {
             return;
         };
 
+        self.imp().switching.set(!files.is_empty());
         if let Some(player) = self.player() {
             player.clear_queue();
         }
@@ -123,9 +123,37 @@ impl Window {
     }
 
     pub(super) fn show_new_playlist_dialog(&self) {
+        self.show_playlist_name_dialog(
+            &i18n("New Playlist"),
+            &i18n("_Create"),
+            "",
+            Self::create_playlist,
+        );
+    }
+
+    pub(super) fn show_rename_playlist_dialog(&self, name: &str) {
+        let old_name = name.to_string();
+        self.show_playlist_name_dialog(
+            &i18n("Rename Playlist"),
+            &i18n("_Rename"),
+            name,
+            move |win, new_name| win.rename_playlist(&old_name, new_name),
+        );
+    }
+
+    // Asks for the name of a playlist, starting from `name`, and passes it
+    // to `done` without the surrounding spaces
+    fn show_playlist_name_dialog(
+        &self,
+        heading: &str,
+        response_label: &str,
+        name: &str,
+        done: impl Fn(&Self, &str) + 'static,
+    ) {
         let entry = gtk::Entry::builder()
             .activates_default(true)
             .placeholder_text(i18n("Name"))
+            .text(name)
             .build();
         let error_label = gtk::Label::builder()
             .xalign(0.0)
@@ -138,25 +166,30 @@ impl Window {
         content.append(&error_label);
 
         let dialog = adw::AlertDialog::builder()
-            .heading(i18n("New Playlist"))
+            .heading(heading)
             .extra_child(&content)
             .close_response("cancel")
-            .default_response("create")
+            .default_response("ok")
             .build();
-        dialog.add_responses(&[("cancel", &i18n("_Cancel")), ("create", &i18n("_Create"))]);
-        dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
-        dialog.set_response_enabled("create", false);
+        dialog.add_responses(&[("cancel", &i18n("_Cancel")), ("ok", response_label)]);
+        dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
+        dialog.set_response_enabled("ok", false);
 
+        let name = name.to_string();
         entry.connect_changed(clone!(
             #[weak]
             dialog,
             #[weak]
             error_label,
             move |entry| {
-                let result = playlists::check_name(&entry.text());
-                dialog.set_response_enabled("create", result.is_ok());
+                let text = entry.text();
+                // Keeping the name is nothing to do, rather than an error
+                let unchanged = !name.is_empty() && text.trim() == name;
+                let result = playlists::check_name(&text);
+                dialog.set_response_enabled("ok", !unchanged && result.is_ok());
 
                 let message = match result {
+                    _ if unchanged => String::new(),
                     Ok(()) | Err(NameError::Empty) => String::new(),
                     Err(NameError::Invalid) => {
                         i18n("The name can't start with a dot, or have slashes or line breaks")
@@ -169,28 +202,91 @@ impl Window {
         ));
 
         dialog.connect_response(
-            Some("create"),
+            Some("ok"),
             clone!(
                 #[weak(rename_to = win)]
                 self,
                 #[weak]
                 entry,
-                move |_, _| win.create_playlist(entry.text().trim())
+                move |_, _| done(&win, entry.text().trim())
             ),
         );
 
         dialog.present(Some(self));
         dialog.set_focus(Some(&entry));
+        entry.select_region(0, -1);
     }
 
     // Creates an empty playlist, and selects it to add tracks to it
     fn create_playlist(&self, name: &str) {
         match playlists::create(name) {
-            Ok(()) => self.select_playlist(name),
+            Ok(()) => {
+                self.set_playlists_visible(false);
+                self.select_playlist(name);
+            }
             Err(e) => {
                 log::warn!("Unable to create the playlist '{name}': {e}");
                 self.add_toast(i18n("Unable to create the playlist"));
             }
+        }
+    }
+
+    // The tracks in the queue stay as they are, even when the playlist is
+    // the selected one, which keeps playing
+    fn rename_playlist(&self, name: &str, new_name: &str) {
+        if let Err(e) = playlists::rename(name, new_name) {
+            log::warn!("Unable to rename the playlist '{name}': {e}");
+            self.add_toast(i18n("Unable to rename the playlist"));
+            return;
+        }
+
+        if self.selected_playlist() == name {
+            self.set_selected_playlist(new_name);
+        } else {
+            self.update_playlists_page();
+        }
+    }
+
+    pub(super) fn show_delete_playlist_dialog(&self, name: &str) {
+        let dialog = adw::AlertDialog::builder()
+            // Translators: `{playlist}` must be left unmodified; it is
+            // expanded to the name of a playlist
+            .heading(i18n_k("Delete “{playlist}”?", &[("playlist", name)]))
+            .body(i18n(
+                "The playlist is moved to the trash. Its tracks stay where they are.",
+            ))
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        dialog.add_responses(&[("cancel", &i18n("_Cancel")), ("delete", &i18n("_Delete"))]);
+        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+
+        let name = name.to_string();
+        dialog.connect_response(
+            Some("delete"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| win.delete_playlist(&name)
+            ),
+        );
+
+        dialog.present(Some(self));
+    }
+
+    // The queue takes the place of the selected playlist, when it's the
+    // one deleted
+    fn delete_playlist(&self, name: &str) {
+        if let Err(e) = playlists::trash(name) {
+            log::warn!("Unable to move the playlist '{name}' to the trash: {e}");
+            self.add_toast(i18n("Unable to delete the playlist"));
+            return;
+        }
+
+        if self.selected_playlist() == name {
+            self.select_playlist("");
+        } else {
+            self.update_playlists_page();
         }
     }
 }

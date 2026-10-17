@@ -16,6 +16,16 @@ template $AmberolPlaylistsPage: Widget {
       $AmberolPageSwitcher {}
 
       [end]
+      MenuButton menu_button {
+        icon-name: "open-menu-symbolic";
+        tooltip-text: _("Main Menu");
+
+        accessibility {
+          label: C_("a11y", "Primary menu");
+        }
+      }
+
+      [end]
       Button new_button {
         icon-name: "list-add-symbolic";
         action-name: "win.new-playlist";

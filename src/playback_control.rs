@@ -36,8 +36,6 @@ mod imp {
         pub shuffle_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub repeat_button: TemplateChild<gtk::Button>,
-        #[template_child]
-        pub menu_button: TemplateChild<gtk::MenuButton>,
     }
 
     #[glib::object_subclass]
@@ -69,8 +67,6 @@ mod imp {
 
         fn constructed(&self) {
             self.parent_constructed();
-
-            self.menu_button.set_primary(true);
 
             // Clicking the button again restores the order of the queue,
             // so the tooltip says what the next click does
