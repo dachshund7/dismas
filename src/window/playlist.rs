@@ -151,7 +151,10 @@ impl Window {
     }
 
     pub(super) fn reset_queue(&self) {
-        self.set_playlist_visible(false);
+        // The sidebar shows the tracks of the playlist replacing these
+        if self.imp().pending_playlist.borrow().is_none() {
+            self.set_playlist_visible(false);
+        }
         self.set_queue_shuffled(false);
         self.set_queue_selection(false);
         self.update_style(None);

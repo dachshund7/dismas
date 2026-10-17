@@ -81,8 +81,13 @@ impl Window {
         let Some(player) = self.player() else {
             return;
         };
+        // A deleted playlist could still be playing, while the queue loads
+        let name = self.selected_playlist();
+        if !name.is_empty() && !playlists::exists(&name) {
+            return;
+        }
         // Shuffling only changes the order they're played in
-        playlists::save(&self.selected_playlist(), &player.queue().files_in_order());
+        playlists::save(&name, &player.queue().files_in_order());
     }
 
     // Playing tracks right away replaces those of the queue, rather than
@@ -93,8 +98,10 @@ impl Window {
         }
     }
 
-    // Stops playing, and puts the tracks of the playlist in the queue;
-    // the tracks of the previous one were saved with each change
+    // Puts the tracks of the playlist in the queue; the tracks of the
+    // previous one were saved with each change. They keep playing while
+    // the new ones load, which can take a while, rather than leaving
+    // nothing to show in the meantime
     pub(super) fn select_playlist(&self, name: &str) {
         if name == self.selected_playlist() {
             return;
@@ -105,21 +112,25 @@ impl Window {
             return;
         };
 
-        self.imp().switching.set(!files.is_empty());
-        if let Some(player) = self.player() {
-            player.clear_queue();
-        }
-        self.set_selected_playlist(name);
         // The tracks of an album could be showing in its place
         self.show_playlist_view();
 
         if files.is_empty() {
-            // With nothing to play, the album grid takes the place of the
-            // player, to add tracks
-            self.update_library_for_queue();
+            self.replace_selected_playlist(name);
         } else {
+            self.imp().pending_playlist.replace(Some(name.to_string()));
             self.queue_tracks(files, QueueMode::Restore);
         }
+    }
+
+    // Stops playing the selected playlist, and empties the queue for the
+    // tracks of the new one; with none, the album grid takes the place of
+    // the player, to add tracks
+    pub(super) fn replace_selected_playlist(&self, name: &str) {
+        if let Some(player) = self.player() {
+            player.empty_queue();
+        }
+        self.set_selected_playlist(name);
     }
 
     pub(super) fn show_new_playlist_dialog(&self) {

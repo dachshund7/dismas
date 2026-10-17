@@ -15,8 +15,8 @@ use log::{debug, error};
 use crate::{
     application::ApplicationAction,
     audio::{
-        Controller, CoverCache, GstBackend, InhibitController, MprisController, PlayerState, Queue,
-        Track, WaveformGenerator,
+        Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, Track,
+        WaveformGenerator,
     },
 };
 
@@ -523,9 +523,14 @@ impl AudioPlayer {
         self.stop();
         self.state.set_current_track(None);
         self.queue.clear();
+    }
 
-        let mut cover_cache = CoverCache::global().lock().unwrap();
-        cover_cache.clear();
+    // Empties the queue for the tracks of another playlist, keeping the
+    // covers, which switching back would need again
+    pub fn empty_queue(&self) {
+        self.stop();
+        self.state.set_current_track(None);
+        self.queue.remove_all();
     }
 
     pub fn remove_track(&self, track: &Track) {

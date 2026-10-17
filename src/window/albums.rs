@@ -44,9 +44,10 @@ impl Window {
     // With an empty queue, there is nothing to play, so the album grid
     // takes the place of the player, and there's no going to it
     pub(super) fn update_library_for_queue(&self) {
-        // The queue is only empty until the tracks of the playlist are
-        // loaded, and showing the grid in the meantime would make it flash
-        if self.imp().switching.get() {
+        // The queue is only empty while the tracks of a playlist take the
+        // place of those of the previous one, and showing the grid in the
+        // meantime would make it flash
+        if self.imp().pending_playlist.borrow().is_some() {
             return;
         }
 

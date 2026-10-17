@@ -104,14 +104,26 @@ impl Window {
                 win.imp().album_tracks.set_adding_enabled(true);
                 win.imp().library_view.set_adding_enabled(true);
 
+                win.imp().playlist_view.end_loading();
+
+                // The tracks of the playlist being selected replace those
+                // of the previous one, even when none of them was found;
+                // the queue is only empty in between when some were, so
+                // it stays pending until they're added
+                let pending_playlist = win.imp().pending_playlist.borrow().clone();
+                if let Some(name) = &pending_playlist {
+                    if tracks.is_empty() {
+                        win.imp().pending_playlist.take();
+                    }
+                    win.replace_selected_playlist(name);
+                }
+
                 if tracks.is_empty() {
                     win.add_toast(i18n("No tracks found"));
                 } else if let Some(player) = win.player() {
                     let queue = player.queue();
                     let was_empty = queue.is_empty();
                     let first_added = queue.n_tracks();
-
-                    win.imp().playlist_view.end_loading();
 
                     // Bulk add to avoid hammering the UI with list model updates
                     queue.add_tracks(&tracks);
@@ -176,9 +188,7 @@ impl Window {
                     }
                 }
 
-                // Even with none of its tracks found, the playlist is
-                // loaded
-                if win.imp().switching.replace(false) {
+                if win.imp().pending_playlist.take().is_some() {
                     win.update_library_for_queue();
                 }
 

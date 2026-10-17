@@ -172,7 +172,14 @@ impl Queue {
     pub fn clear(&self) {
         let mut cover_cache = CoverCache::global().lock().unwrap();
         cover_cache.clear();
+        drop(cover_cache);
 
+        self.remove_all();
+    }
+
+    // Like `clear()`, but keeps the covers, for the tracks that replace
+    // these, which can be from the same albums
+    pub fn remove_all(&self) {
         self.imp().current_pos.replace(None);
         self.imp().store.remove_all();
         self.notify_n_tracks();

@@ -83,9 +83,16 @@ impl PlaylistsPage {
         let list = self.imp().playlists_list.get();
         list.remove_all();
 
-        list.append(&playlist_row(&i18n("Queue"), "", selected.is_empty()));
+        // Radio buttons, since exactly one playlist is selected
+        let group = gtk::CheckButton::new();
+        list.append(&playlist_row(
+            &i18n("Queue"),
+            "",
+            selected.is_empty(),
+            &group,
+        ));
         for name in names {
-            let row = playlist_row(name, name, name == selected);
+            let row = playlist_row(name, name, name == selected, &group);
             row.add_suffix(&playlist_menu_button(name));
             list.append(&row);
         }
@@ -119,7 +126,12 @@ fn playlist_menu_button(name: &str) -> gtk::MenuButton {
     button
 }
 
-fn playlist_row(title: &str, name: &str, selected: bool) -> adw::ActionRow {
+fn playlist_row(
+    title: &str,
+    name: &str,
+    selected: bool,
+    group: &gtk::CheckButton,
+) -> adw::ActionRow {
     let row = adw::ActionRow::builder()
         .title(title)
         // Names can have characters that mean something in markup
@@ -129,14 +141,17 @@ fn playlist_row(title: &str, name: &str, selected: bool) -> adw::ActionRow {
         .action_target(&name.to_variant())
         .build();
 
-    // Hidden rather than left out on the other rows, so that the names
-    // line up
-    let caret = gtk::Image::from_icon_name("go-next-symbolic");
-    caret.set_opacity(if selected { 1.0 } else { 0.0 });
-    if selected {
-        caret.set_tooltip_text(Some(&i18n("Selected")));
-    }
-    row.add_prefix(&caret);
+    // Only showing which one is selected: activating the row selects it,
+    // and its state is announced by the row
+    let radio = gtk::CheckButton::builder()
+        .group(group)
+        .active(selected)
+        .can_target(false)
+        .can_focus(false)
+        .valign(gtk::Align::Center)
+        .build();
+    radio.update_property(&[gtk::accessible::Property::Label(title)]);
+    row.add_prefix(&radio);
     let checked = if selected {
         gtk::AccessibleTristate::True
     } else {
