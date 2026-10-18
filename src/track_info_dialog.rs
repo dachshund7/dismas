@@ -30,6 +30,8 @@ mod imp {
         pub musicbrainz_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
         pub file_group: TemplateChild<adw::PreferencesGroup>,
+
+        pub track: glib::WeakRef<Track>,
     }
 
     #[glib::object_subclass]
@@ -65,8 +67,14 @@ impl TrackInfoDialog {
         dialog
     }
 
+    // Whether the dialog shows the information of the given track
+    pub fn shows(&self, track: &Track) -> bool {
+        self.imp().track.upgrade().as_ref() == Some(track)
+    }
+
     fn set_track(&self, track: &Track) {
         let imp = self.imp();
+        imp.track.set(Some(track));
         let credits = track.credit_details();
 
         // For movements of a larger work, the title just repeats the work

@@ -136,6 +136,17 @@ impl Window {
     }
 
     fn show_track_info_for(&self, track: &Track) {
+        // Replace the information of another track, instead of stacking
+        // dialogs on top of each other; the same track keeps its dialog
+        if let Some(open) = adw::prelude::AdwApplicationWindowExt::visible_dialog(self)
+            .and_downcast::<TrackInfoDialog>()
+        {
+            if open.shows(track) {
+                return;
+            }
+            adw::prelude::AdwDialogExt::force_close(&open);
+        }
+
         let dialog = TrackInfoDialog::new(track);
 
         // Follow the colors of the cover, like the main window
