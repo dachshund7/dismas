@@ -17,7 +17,7 @@ use std::{
     time::{Instant, UNIX_EPOCH},
 };
 
-pub use album::Album;
+pub use album::{Album, AlbumSort};
 use async_channel::Sender;
 use gtk::{gio, glib, prelude::*};
 use itertools::Itertools;
@@ -40,7 +40,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 // The size of the covers in the grid, accounting for HiDPI
 const THUMBNAIL_SIZE: u32 = 256;
@@ -56,7 +56,12 @@ pub struct AlbumInfo {
     pub id: String,
     pub title: String,
     pub artist: String,
+    // The key the artist is sorted by
+    pub artist_sort: String,
     pub year: Option<String>,
+    // When the first track of the album was added, in seconds since the
+    // epoch
+    pub added: Option<i64>,
     pub cover: Option<String>,
 }
 
@@ -119,6 +124,7 @@ fn open() -> rusqlite::Result<Connection> {
                  path TEXT PRIMARY KEY,
                  mtime INTEGER NOT NULL,
                  size INTEGER NOT NULL,
+                 added INTEGER NOT NULL,
                  album_id TEXT,
                  album TEXT,
                  album_artist TEXT,
@@ -142,7 +148,8 @@ fn open() -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
-// The albums, sorted by artist, then year and title
+// The albums, sorted by artist, then year and title; the grid sorts them
+// again in the order the user picked
 pub fn albums() -> Vec<AlbumInfo> {
     let query = |conn: &Connection| -> rusqlite::Result<Vec<AlbumInfo>> {
         let mut stmt = conn.prepare(
@@ -150,7 +157,7 @@ pub fn albums() -> Vec<AlbumInfo> {
                     COALESCE(MAX(t.album_artist),
                              CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
                                   ELSE MAX(t.artist) END),
-                    MIN(t.year), c.path, MAX(t.artist_sort)
+                    MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added)
              FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
              WHERE t.album_id IS NOT NULL
              GROUP BY t.album_id",
@@ -165,15 +172,18 @@ pub fn albums() -> Vec<AlbumInfo> {
             let sort_key = row
                 .get::<_, Option<String>>(5)?
                 .unwrap_or_else(|| artist.clone());
+            let key = glib::CollationKey::from(sort_key.as_str());
             let info = AlbumInfo {
                 id: row.get(0)?,
                 title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 artist,
+                artist_sort: sort_key,
                 year: row.get(3)?,
+                added: row.get(6)?,
                 cover: row.get(4)?,
             };
             let key = (
-                glib::CollationKey::from(sort_key.as_str()),
+                key,
                 info.year.clone(),
                 glib::CollationKey::from(info.title.as_str()),
             );
@@ -311,17 +321,22 @@ fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Resu
         let Ok(metadata) = std::fs::metadata(&path) else {
             continue;
         };
-        let mtime = metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or_default();
+        let seconds = |t: std::io::Result<std::time::SystemTime>| {
+            t.ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+        };
+        let mtime = seconds(metadata.modified()).unwrap_or_default();
         let size = metadata.len() as i64;
+        // When the file was created, so that the tracks that were in the
+        // Music folder before the library existed are sorted by when they
+        // were added too; it's only used for new tracks, as the time is
+        // kept when a track changes
+        let added = seconds(metadata.created()).unwrap_or(mtime);
 
         let path = path.to_string_lossy().to_string();
         if known.get(&path) != Some(&(mtime, size)) {
-            changed.push((path.clone(), mtime, size));
+            changed.push((path.clone(), mtime, size, added));
         }
         present.insert(path);
     }
@@ -341,13 +356,21 @@ fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Resu
         {
             let mut old_album =
                 tx.prepare("SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL")?;
+            // A changed track keeps the time it was added
             let mut upsert = tx.prepare(
-                "INSERT OR REPLACE INTO tracks
+                "INSERT INTO tracks
                  (path, mtime, size, album_id, album, album_artist, artist, artist_sort,
-                  year, disc, track, title, search)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                  year, disc, track, title, search, added)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 ON CONFLICT (path) DO UPDATE SET
+                  mtime = excluded.mtime, size = excluded.size,
+                  album_id = excluded.album_id, album = excluded.album,
+                  album_artist = excluded.album_artist, artist = excluded.artist,
+                  artist_sort = excluded.artist_sort, year = excluded.year,
+                  disc = excluded.disc, track = excluded.track,
+                  title = excluded.title, search = excluded.search",
             )?;
-            for (path, mtime, size) in chunk {
+            for (path, mtime, size, added) in chunk {
                 if let Some(id) = old_album
                     .query_row([path], |row| row.get::<_, String>(0))
                     .optional()?
@@ -377,6 +400,7 @@ fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Resu
                     tags.track,
                     tags.title,
                     tags.search,
+                    added,
                 ])?;
             }
         }

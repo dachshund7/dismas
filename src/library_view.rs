@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    cell::{Cell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
 };
 
@@ -16,7 +16,8 @@ use crate::{
     album_cell::AlbumCell,
     audio::normalize_search_text,
     i18n::{i18n, i18n_k, ni18n_f},
-    library::{self, Album, ScanEvent},
+    library::{self, Album, AlbumSort, ScanEvent},
+    utils,
 };
 
 // The size of the covers in the grid
@@ -75,6 +76,8 @@ mod imp {
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub sort_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub rescan_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
@@ -109,6 +112,8 @@ mod imp {
 
         pub model: RefCell<Option<gio::ListStore>>,
         pub filter: RefCell<Option<gtk::CustomFilter>>,
+        pub sorter: RefCell<Option<gtk::CustomSorter>>,
+        pub settings: OnceCell<gio::Settings>,
         // The albums matching the search, if there is one
         pub search_matches: RefCell<Option<HashSet<String>>>,
         // The words of the search the matches are for
@@ -165,6 +170,7 @@ mod imp {
 
             let obj = self.obj();
             obj.setup_grid();
+            obj.setup_sorting();
             obj.connect_signals();
         }
 
@@ -245,7 +251,21 @@ impl LibraryView {
             }
         ));
 
-        let filter_model = gtk::FilterListModel::new(Some(model.clone()), Some(filter.clone()));
+        let sorter = gtk::CustomSorter::new(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[upgrade_or]
+            gtk::Ordering::Equal,
+            move |a, b| {
+                let a = a.downcast_ref::<Album>().unwrap();
+                let b = b.downcast_ref::<Album>().unwrap();
+                let (sort, descending) = this.sort_order();
+                a.compare(b, sort, descending).into()
+            }
+        ));
+
+        let sort_model = gtk::SortListModel::new(Some(model.clone()), Some(sorter.clone()));
+        let filter_model = gtk::FilterListModel::new(Some(sort_model), Some(filter.clone()));
         let selection = gtk::NoSelection::new(Some(filter_model));
 
         imp.grid_view.set_model(Some(&selection));
@@ -253,6 +273,79 @@ impl LibraryView {
 
         imp.model.replace(Some(model));
         imp.filter.replace(Some(filter));
+        imp.sorter.replace(Some(sorter));
+    }
+
+    fn app_settings(&self) -> &gio::Settings {
+        self.imp().settings.get_or_init(utils::settings_manager)
+    }
+
+    // What the albums are sorted by, and whether in descending order
+    fn sort_order(&self) -> (AlbumSort, bool) {
+        let settings = self.app_settings();
+        (
+            AlbumSort::from_nick(&settings.string("album-sort")),
+            settings.string("album-sort-order") == "descending",
+        )
+    }
+
+    fn setup_sorting(&self) {
+        let settings = self.app_settings();
+
+        let actions = gio::SimpleActionGroup::new();
+        actions.add_action(&settings.create_action("album-sort"));
+        actions.add_action(&settings.create_action("album-sort-order"));
+        self.insert_action_group("library", Some(&actions));
+
+        // Picking what to sort by also picks the direction that suits it;
+        // it can be reversed afterwards
+        settings.connect_changed(
+            Some("album-sort"),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |settings, _| {
+                    let (sort, _) = this.sort_order();
+                    let order = if sort.default_descending() {
+                        "descending"
+                    } else {
+                        "ascending"
+                    };
+                    if settings.string("album-sort-order") == order {
+                        this.resort();
+                    } else {
+                        // Resorts the albums when the order changes
+                        let _ = settings.set_string("album-sort-order", order);
+                    }
+                }
+            ),
+        );
+        settings.connect_changed(
+            Some("album-sort-order"),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |_, _| this.resort()
+            ),
+        );
+
+        self.update_sort_icon();
+    }
+
+    fn resort(&self) {
+        if let Some(sorter) = self.imp().sorter.borrow().as_ref() {
+            sorter.changed(gtk::SorterChange::Different);
+        }
+        self.update_sort_icon();
+    }
+
+    fn update_sort_icon(&self) {
+        let (_, descending) = self.sort_order();
+        self.imp().sort_button.set_icon_name(if descending {
+            "view-sort-descending-symbolic"
+        } else {
+            "view-sort-ascending-symbolic"
+        });
     }
 
     fn album_factory(&self) -> gtk::ListItemFactory {

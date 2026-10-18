@@ -32,6 +32,13 @@ template $AmberolLibraryView: Widget {
       }
 
       [end]
+      MenuButton sort_button {
+        icon-name: "view-sort-ascending-symbolic";
+        tooltip-text: _("Sort Albums");
+        menu-model: sort_menu;
+      }
+
+      [end]
       ToggleButton select_button {
         icon-name: "selection-mode-symbolic";
         active: bind template.selection-mode bidirectional;
@@ -151,6 +158,48 @@ template $AmberolLibraryView: Widget {
       Button add_albums_button {
         label: _("Add to Queue");
       }
+    }
+  }
+}
+
+menu sort_menu {
+  section {
+    item {
+      label: _("Artist");
+      action: "library.album-sort";
+      target: "artist";
+    }
+
+    item {
+      label: _("Title");
+      action: "library.album-sort";
+      target: "title";
+    }
+
+    item {
+      label: _("Year");
+      action: "library.album-sort";
+      target: "year";
+    }
+
+    item {
+      label: _("Date Added");
+      action: "library.album-sort";
+      target: "added";
+    }
+  }
+
+  section {
+    item {
+      label: _("Ascending");
+      action: "library.album-sort-order";
+      target: "ascending";
+    }
+
+    item {
+      label: _("Descending");
+      action: "library.album-sort-order";
+      target: "descending";
     }
   }
 }
