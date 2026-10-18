@@ -78,8 +78,6 @@ mod imp {
         #[template_child]
         pub sort_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub rescan_button: TemplateChild<gtk::Button>,
-        #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
@@ -120,6 +118,8 @@ mod imp {
         pub search_words: RefCell<Vec<String>>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
+        // The Music folder is being read
+        #[property(get)]
         pub scanning: Cell<bool>,
     }
 
@@ -170,7 +170,7 @@ mod imp {
 
             let obj = self.obj();
             obj.setup_grid();
-            obj.setup_sorting();
+            obj.setup_actions();
             obj.connect_signals();
         }
 
@@ -289,7 +289,7 @@ impl LibraryView {
         )
     }
 
-    fn setup_sorting(&self) {
+    fn setup_actions(&self) {
         let settings = self.app_settings();
 
         let actions = gio::SimpleActionGroup::new();
@@ -330,6 +330,12 @@ impl LibraryView {
         );
 
         self.update_sort_icon();
+    }
+
+    fn set_scanning(&self, scanning: bool) {
+        if self.imp().scanning.replace(scanning) != scanning {
+            self.notify_scanning();
+        }
     }
 
     fn resort(&self) {
@@ -588,12 +594,6 @@ impl LibraryView {
         ));
 
         self.update_selection();
-
-        imp.rescan_button.connect_clicked(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |_| this.start_scan()
-        ));
     }
 
     // Looks for the albums with a track that contains every word of the
@@ -858,18 +858,18 @@ impl LibraryView {
     // folder in a separate thread
     pub fn start_scan(&self) {
         let imp = self.imp();
-        if imp.scanning.replace(true) {
+        if imp.scanning.get() {
             return;
         }
+        self.set_scanning(true);
 
         let Some(music_dir) = library::music_dir() else {
-            imp.scanning.set(false);
+            self.set_scanning(false);
             self.reload();
             return;
         };
 
         self.reload();
-        imp.rescan_button.set_sensitive(false);
         imp.scan_progress.set_fraction(0.0);
         imp.scan_progress.set_text(None);
 
@@ -908,9 +908,8 @@ impl LibraryView {
 
                 // The channel also closes if the scan panicked
                 let imp = this.imp();
-                imp.scanning.set(false);
+                this.set_scanning(false);
                 imp.update_progress.set_visible(false);
-                imp.rescan_button.set_sensitive(true);
                 this.reload();
             }
         ));

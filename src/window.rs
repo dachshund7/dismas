@@ -643,6 +643,22 @@ impl Window {
     fn setup_actions(&self) {
         self.add_action(&self.imp().settings.create_action("restore-playlist"));
 
+        // In the main menu of every page, as new music can be added while
+        // the player is showing; it's off while the folder is being read
+        let rescan = gio::SimpleAction::new("rescan-library", None);
+        rescan.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, _| win.imp().library_view.start_scan()
+        ));
+        self.imp()
+            .library_view
+            .bind_property("scanning", &rescan, "enabled")
+            .invert_boolean()
+            .sync_create()
+            .build();
+        self.add_action(&rescan);
+
         let enable_recoloring = self.imp().settings.boolean("enable-recoloring");
         self.add_action_entries([gio::ActionEntry::builder("enable-recoloring")
             .state(enable_recoloring.to_variant())
