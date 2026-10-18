@@ -319,8 +319,9 @@ listview.navigation-sidebar > header label.work-title {
   margin: 6px 12px 2px 12px;
 }
 
+/* Less padding at the top, where the search bar already leaves some space */
 gridview.album-grid {
-  padding: 12px;
+  padding: 6px 12px 12px;
 }
 
 /* With "Match Cover Art", the colors of the window show between the

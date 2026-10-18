@@ -39,15 +39,20 @@ template $AmberolLibraryView: Widget {
       }
     }
 
+    // An open search bar, so that the entry has the same spacing as the
+    // one of the queue, and the two line up side by side
     [top]
-    Adw.Clamp {
-      maximum-size: 400;
-      margin-start: 12;
-      margin-end: 12;
-      margin-bottom: 6;
+    SearchBar {
+      search-mode-enabled: true;
+      show-close-button: false;
 
-      child: SearchEntry search_entry {
-        placeholder-text: _("Search Albums");
+      child: Adw.Clamp {
+        maximum-size: 400;
+        hexpand: true;
+
+        child: SearchEntry search_entry {
+          placeholder-text: _("Search Albums");
+        };
       };
     }
 

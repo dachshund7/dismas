@@ -57,15 +57,21 @@ template $AmberolPlaylistView: Widget {
     }
 
     [top]
+    // Clamped like the search entry of the albums, as the playlist can
+    // be resized, and covers the window when it's narrow
     SearchBar queue_searchbar {
-      child: SearchEntry queue_searchentry {
-        placeholder-text: _("Search tracks");
+      child: Adw.Clamp {
+        maximum-size: 400;
         hexpand: true;
 
-        accessibility {
-          label: C_("a11y", "Search");
-          description: C_("a11y", "Type to search tracks");
-        }
+        child: SearchEntry queue_searchentry {
+          placeholder-text: _("Search tracks");
+
+          accessibility {
+            label: C_("a11y", "Search");
+            description: C_("a11y", "Type to search tracks");
+          }
+        };
       };
     }
 
