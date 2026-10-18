@@ -586,6 +586,10 @@ impl LibraryView {
         self.imp().search_entry.grab_focus();
     }
 
+    pub fn search_entry(&self) -> gtk::SearchEntry {
+        self.imp().search_entry.get()
+    }
+
     fn set_album_selected(&self, album: &Album, selected: bool) {
         album.set_selected(selected);
         let mut map = self.imp().selected.borrow_mut();

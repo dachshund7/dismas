@@ -156,6 +156,17 @@ impl Window {
             move |_| win.queue_selected_albums(true)
         ));
 
+        // The search entry takes Esc to clear the search, so the window
+        // does not get it to leave selection mode; do both, as the tracks
+        // selected in the queue would otherwise stay selected
+        library_view.search_entry().connect_stop_search(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| {
+                win.exit_selection_mode();
+            }
+        ));
+
         // Reading the albums can take a while, so we do it in the
         // background as soon as the window is up
         library_view.start_scan();
