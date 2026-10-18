@@ -40,6 +40,7 @@ use crate::{
     playlists_page::PlaylistsPage,
     queue_row::QueueRow,
     search::SearchFilter,
+    slide_bin::SlideBin,
     track_cover::TrackCover,
     track_details::TrackDetails,
     track_info_dialog::TrackInfoDialog,
@@ -154,6 +155,9 @@ mod imp {
         pub sidebar_visible_uncollapsed: Cell<bool>,
 
         pub queue_filtermodel: RefCell<Option<gio::ListModel>>,
+        // The rows of the queue, to slide them to their new places when
+        // tracks are moved
+        pub queue_rows: RefCell<Vec<glib::WeakRef<SlideBin>>>,
 
         pub notify_playing_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_position_id: RefCell<Option<glib::SignalHandlerId>>,
@@ -344,6 +348,7 @@ mod imp {
                 queue_anchor: glib::WeakRef::new(),
                 queue_search: Cell::new(false),
                 queue_filtermodel: RefCell::default(),
+                queue_rows: RefCell::default(),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
                 sidebar_width: Cell::new(0),
                 library_visible: Cell::new(false),

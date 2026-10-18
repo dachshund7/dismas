@@ -14,7 +14,18 @@ impl Window {
             move |_, item| {
                 let row = QueueRow::default();
                 let list_item = item.downcast_ref::<gtk::ListItem>().unwrap();
-                list_item.set_child(Some(&row));
+                // Rows slide to their new places when tracks are moved
+                let bin = SlideBin::new(&row);
+                list_item.set_child(Some(&bin));
+                let rows = &mut *win.imp().queue_rows.borrow_mut();
+                rows.retain(|row| row.upgrade().is_some());
+                rows.push(bin.downgrade());
+                // A row reused for another track shows it in its place
+                row.connect_track_notify(clone!(
+                    #[weak]
+                    bin,
+                    move |_| bin.stop_sliding()
+                ));
 
                 row.connect_notify_local(
                     Some("selected"),
@@ -308,8 +319,90 @@ impl Window {
         } else {
             queue.next_in_order(target)
         };
+
+        let shown = self.shown_queue_rows();
+        let old_order: Vec<Track> = queue.model().iter::<Track>().flatten().collect();
         player.move_tracks(&tracks, before.as_ref());
         self.store_queue();
+
+        // The rows get their new places when the list is laid out, before
+        // it's drawn, so they can still be drawn in their old places first
+        let Some(clock) = self.imp().playlist_view.queue_view().frame_clock() else {
+            return;
+        };
+        let handler = Rc::new(RefCell::new(None));
+        let id = clock.connect_layout(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            handler,
+            move |clock| {
+                if let Some(id) = handler.take() {
+                    clock.disconnect(id);
+                }
+                win.slide_queue_rows(&shown, &old_order);
+            }
+        ));
+        handler.replace(Some(id));
+    }
+
+    // The tracks of the rows in view, and where the rows are drawn
+    fn shown_queue_rows(&self) -> Vec<(Track, f64)> {
+        let view = self.imp().playlist_view.queue_view();
+        self.mapped_queue_rows()
+            .iter()
+            .filter_map(|bin| {
+                let track = bin.child().and_downcast::<QueueRow>()?.track()?;
+                Some((track, bin.shown_y(&view)?))
+            })
+            .collect()
+    }
+
+    fn mapped_queue_rows(&self) -> Vec<SlideBin> {
+        self.imp()
+            .queue_rows
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+            .filter(WidgetExt::is_mapped)
+            .collect()
+    }
+
+    // Slides the rows from where their tracks were shown to their new
+    // places. Rows of tracks that were out of view come from above or
+    // below it, as far as their tracks moved
+    fn slide_queue_rows(&self, shown: &[(Track, f64)], old_order: &[Track]) {
+        let Some(player) = self.player() else {
+            return;
+        };
+        let queue = player.queue();
+        let view = self.imp().playlist_view.queue_view();
+        let view_height = f64::from(view.height());
+        for bin in self.mapped_queue_rows() {
+            let Some(track) = bin
+                .child()
+                .and_downcast::<QueueRow>()
+                .and_then(|r| r.track())
+            else {
+                continue;
+            };
+            if let Some((_, y)) = shown.iter().find(|(t, _)| *t == track) {
+                bin.slide_from(*y, &view);
+                continue;
+            }
+            let Some(y) = bin.shown_y(&view) else {
+                continue;
+            };
+            let (Some(old_pos), Some(new_pos)) = (
+                old_order.iter().position(|t| *t == track),
+                queue.position(&track),
+            ) else {
+                continue;
+            };
+            let height = f64::from(bin.height());
+            let moved_by = (old_pos as f64 - f64::from(new_pos)) * height;
+            bin.slide_from((y + moved_by).clamp(-height, view_height), &view);
+        }
     }
 
     pub fn remove_track(&self, track: &Track) {

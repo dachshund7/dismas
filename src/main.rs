@@ -20,6 +20,7 @@ mod playlists;
 mod playlists_page;
 mod queue_row;
 mod search;
+mod slide_bin;
 mod track_cover;
 mod track_details;
 mod track_info_dialog;
