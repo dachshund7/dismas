@@ -395,7 +395,7 @@ impl WaveformView {
         drag_gesture.set_name(Some("waveform-drag"));
         drag_gesture.set_button(0);
         drag_gesture.connect_drag_begin(clone!(
-            #[strong(rename_to = this)]
+            #[weak(rename_to = this)]
             self,
             move |gesture, start_x, _| {
                 if !this.has_focus() {
@@ -406,7 +406,7 @@ impl WaveformView {
             }
         ));
         drag_gesture.connect_drag_update(clone!(
-            #[strong(rename_to = this)]
+            #[weak(rename_to = this)]
             self,
             move |gesture, offset_x, _| {
                 if !this.has_focus() {
@@ -421,7 +421,7 @@ impl WaveformView {
         let motion_gesture = gtk::EventControllerMotion::new();
         motion_gesture.set_name(Some("waveform-motion"));
         motion_gesture.connect_motion(clone!(
-            #[strong(rename_to = this)]
+            #[weak(rename_to = this)]
             self,
             move |_, x, _| {
                 let width = f64::from(this.width());
@@ -431,7 +431,7 @@ impl WaveformView {
             }
         ));
         motion_gesture.connect_leave(clone!(
-            #[strong(rename_to = this)]
+            #[weak(rename_to = this)]
             self,
             move |_| {
                 this.imp().hover_position.replace(None);
@@ -443,7 +443,7 @@ impl WaveformView {
         let key_controller = gtk::EventControllerKey::new();
         key_controller.set_name(Some("waveform-key"));
         key_controller.connect_key_released(clone!(
-            #[strong(rename_to = this)]
+            #[weak(rename_to = this)]
             self,
             move |_, keyval, _, _| {
                 let delta = match keyval {
@@ -488,66 +488,61 @@ impl WaveformView {
         self.imp().factor.set(None);
         self.imp().first_frame_time.set(None);
 
-        let tick_id = self.add_tick_callback(clone!(
-            #[strong(rename_to = this)]
-            self,
-            move |_, clock| {
-                let frame_time = clock.frame_time();
-                if let Some(first_frame_time) = this.imp().first_frame_time.get() {
-                    if frame_time < first_frame_time {
-                        warn!("Frame clock going backwards");
-                        return glib::ControlFlow::Continue;
-                    }
+        let tick_id = self.add_tick_callback(move |this, clock| {
+            let frame_time = clock.frame_time();
+            if let Some(first_frame_time) = this.imp().first_frame_time.get() {
+                if frame_time < first_frame_time {
+                    warn!("Frame clock going backwards");
+                    return glib::ControlFlow::Continue;
+                }
 
-                    let has_peaks = this.imp().peaks.borrow().is_some();
-                    let has_next_peaks = this.imp().next_peaks.borrow().is_some();
+                let has_peaks = this.imp().peaks.borrow().is_some();
+                let has_next_peaks = this.imp().next_peaks.borrow().is_some();
 
-                    if has_peaks && has_next_peaks {
-                        // Animate the existing peaks to zero
-                        let progress =
-                            1.0 - ((frame_time - first_frame_time) as f64 / ANIMATION_USECS);
-                        let delta = ease_out_cubic(progress);
-                        if delta < 0.0 {
-                            this.imp().peaks.replace(None);
-                            this.imp().factor.replace(None);
-                        } else {
-                            this.imp().factor.replace(Some(delta));
-                            this.queue_draw();
-                        }
-                    } else if has_peaks && !has_next_peaks {
-                        // Animate the peaks from zero
-                        let progress = (frame_time - first_frame_time) as f64 / ANIMATION_USECS;
-                        let delta = ease_out_cubic(progress);
-                        if delta > 1.0 {
-                            // Animation complete
-                            this.imp().factor.replace(None);
-                            this.imp().first_frame_time.replace(None);
-                            this.imp().tick_id.replace(None);
-                            this.queue_resize();
-                            return glib::ControlFlow::Break;
-                        }
+                if has_peaks && has_next_peaks {
+                    // Animate the existing peaks to zero
+                    let progress = 1.0 - ((frame_time - first_frame_time) as f64 / ANIMATION_USECS);
+                    let delta = ease_out_cubic(progress);
+                    if delta < 0.0 {
+                        this.imp().peaks.replace(None);
+                        this.imp().factor.replace(None);
+                    } else {
                         this.imp().factor.replace(Some(delta));
                         this.queue_draw();
-                    } else if !has_peaks && has_next_peaks {
-                        // Swap peaks
-                        let next_peaks = this.imp().next_peaks.take();
-                        this.imp().peaks.replace(next_peaks);
+                    }
+                } else if has_peaks && !has_next_peaks {
+                    // Animate the peaks from zero
+                    let progress = (frame_time - first_frame_time) as f64 / ANIMATION_USECS;
+                    let delta = ease_out_cubic(progress);
+                    if delta > 1.0 {
+                        // Animation complete
                         this.imp().factor.replace(None);
                         this.imp().first_frame_time.replace(None);
-                        this.queue_resize();
-                    } else {
-                        // No peaks
-                        this.imp().factor.replace(None);
                         this.imp().tick_id.replace(None);
                         this.queue_resize();
                         return glib::ControlFlow::Break;
                     }
+                    this.imp().factor.replace(Some(delta));
+                    this.queue_draw();
+                } else if !has_peaks && has_next_peaks {
+                    // Swap peaks
+                    let next_peaks = this.imp().next_peaks.take();
+                    this.imp().peaks.replace(next_peaks);
+                    this.imp().factor.replace(None);
+                    this.imp().first_frame_time.replace(None);
+                    this.queue_resize();
                 } else {
-                    this.imp().first_frame_time.replace(Some(frame_time));
+                    // No peaks
+                    this.imp().factor.replace(None);
+                    this.imp().tick_id.replace(None);
+                    this.queue_resize();
+                    return glib::ControlFlow::Break;
                 }
-                glib::ControlFlow::Continue
+            } else {
+                this.imp().first_frame_time.replace(Some(frame_time));
             }
-        ));
+            glib::ControlFlow::Continue
+        });
 
         self.imp().tick_id.replace(Some(tick_id));
         self.queue_resize();

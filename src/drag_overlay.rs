@@ -6,8 +6,6 @@ use gtk::{glib, prelude::*, subclass::prelude::*};
 mod imp {
     use std::cell::RefCell;
 
-    use adw::subclass::prelude::*;
-
     use super::*;
 
     #[derive(Debug, Default, glib::Properties)]
@@ -38,9 +36,10 @@ mod imp {
     impl ObjectSubclass for DragOverlay {
         const NAME: &'static str = "DragOverlay";
         type Type = super::DragOverlay;
-        type ParentType = adw::Bin;
+        type ParentType = gtk::Widget;
 
         fn class_init(klass: &mut Self::Class) {
+            klass.set_layout_manager_type::<gtk::BinLayout>();
             klass.set_css_name("dragoverlay");
         }
     }
@@ -48,6 +47,8 @@ mod imp {
     #[glib::derived_properties]
     impl ObjectImpl for DragOverlay {
         fn constructed(&self) {
+            self.parent_constructed();
+
             self.overlay
                 .set_parent(self.obj().upcast_ref::<gtk::Widget>());
             self.overlay.add_overlay(&self.revealer);
@@ -106,12 +107,11 @@ mod imp {
     }
 
     impl WidgetImpl for DragOverlay {}
-    impl BinImpl for DragOverlay {}
 }
 
 glib::wrapper! {
     pub struct DragOverlay(ObjectSubclass<imp::DragOverlay>)
-        @extends gtk::Widget, adw::Bin,
+        @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 

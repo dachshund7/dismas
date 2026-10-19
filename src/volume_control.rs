@@ -136,7 +136,7 @@ impl VolumeControl {
         adj.connect_notify_local(
             Some("value"),
             clone!(
-                #[strong(rename_to = this)]
+                #[weak(rename_to = this)]
                 self,
                 move |adj, _| {
                     let value = adj.value();
@@ -162,8 +162,10 @@ impl VolumeControl {
             .flags(gtk::EventControllerScrollFlags::VERTICAL)
             .build();
         controller.connect_scroll(clone!(
-            #[strong(rename_to = this)]
+            #[weak(rename_to = this)]
             self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
             move |_, _, dy| {
                 debug!("Scroll delta: {dy}");
                 let adj = this.imp().volume_scale.adjustment();

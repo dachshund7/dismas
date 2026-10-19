@@ -10,6 +10,8 @@ use adw::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib, prelude::*};
 
 mod imp {
+    use std::cell::RefCell;
+
     use super::*;
 
     #[derive(Debug, Default, CompositeTemplate)]
@@ -17,6 +19,8 @@ mod imp {
     pub struct PageSwitcher {
         #[template_child]
         pub player_button: TemplateChild<gtk::ToggleButton>,
+        // The bindings to the window, while the switcher is in it
+        pub bindings: RefCell<Vec<glib::Binding>>,
     }
 
     #[glib::object_subclass]
@@ -64,14 +68,25 @@ mod imp {
             self.parent_root();
 
             if let Some(win) = self.obj().root().and_downcast::<crate::window::Window>() {
-                win.bind_property("player-available", &*self.player_button, "sensitive")
-                    .sync_create()
-                    .build();
-                win.bind_property("page", &*self.player_button, "active")
-                    .transform_to(|_, page: String| Some(page == "player"))
-                    .sync_create()
-                    .build();
+                let bindings = vec![
+                    win.bind_property("player-available", &*self.player_button, "sensitive")
+                        .sync_create()
+                        .build(),
+                    win.bind_property("page", &*self.player_button, "active")
+                        .transform_to(|_, page: String| Some(page == "player"))
+                        .sync_create()
+                        .build(),
+                ];
+                self.bindings.replace(bindings);
             }
+        }
+
+        fn unroot(&self) {
+            for binding in self.bindings.take() {
+                binding.unbind();
+            }
+
+            self.parent_unroot();
         }
     }
 }
