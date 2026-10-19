@@ -64,6 +64,8 @@ enum QueueMode {
 }
 
 mod imp {
+    use adw::prelude::AdwApplicationWindowExt;
+
     use super::*;
 
     #[derive(CompositeTemplate, glib::Properties)]
@@ -389,6 +391,15 @@ mod imp {
             // Only in selection mode
             self.obj()
                 .action_set_enabled("queue.remove-selected", false);
+
+            // The window manager moves the window, so dragging the header
+            // bars doesn't, nor those of the dialogs, which move it too
+            utils::disable_window_drag(self.obj().upcast_ref());
+            self.obj().connect_visible_dialog_notify(|win| {
+                if let Some(dialog) = win.visible_dialog() {
+                    utils::disable_window_drag(dialog.upcast_ref());
+                }
+            });
 
             self.content_stack.connect_transition_running_notify(clone!(
                 #[weak(rename_to = win)]

@@ -10,157 +10,155 @@ template $AmberolWindow: Adw.ApplicationWindow {
   height-request: 660;
   default-width: 800;
 
-  content: WindowHandle {
-    $DragOverlay drag_overlay {
-      title: _("Drop a track to add it to the queue");
+  content: $DragOverlay drag_overlay {
+    title: _("Drop a track to add it to the queue");
 
-      child: Adw.ToastOverlay toast_overlay {
-        child: Adw.OverlaySplitView split_view {
-          max-sidebar-width: 330;
-          sidebar-width-fraction: 0.4;
-          // The sidebar is hidden and shown again when collapsing in
-          // window/bindings.rs, to keep it hidden if the user hid it
-          pin-sidebar: true;
+    child: Adw.ToastOverlay toast_overlay {
+      child: Adw.OverlaySplitView split_view {
+        max-sidebar-width: 330;
+        sidebar-width-fraction: 0.4;
+        // The sidebar is hidden and shown again when collapsing in
+        // window/bindings.rs, to keep it hidden if the user hid it
+        pin-sidebar: true;
 
-          content: Stack content_stack {
-            transition-type: crossfade;
+        content: Stack content_stack {
+          transition-type: crossfade;
 
-            StackPage {
-              name: "player";
+          StackPage {
+            name: "player";
 
-              child: Adw.ToolbarView {
-                [top]
-                Adw.HeaderBar {
-                  show-title: false;
+            child: Adw.ToolbarView {
+              [top]
+              Adw.HeaderBar {
+                show-title: false;
 
-                  [start]
-                  $AmberolPageSwitcher {}
+                [start]
+                $AmberolPageSwitcher {}
 
-                  [end]
-                  MenuButton menu_button {
-                    icon-name: "open-menu-symbolic";
-                    tooltip-text: _("Main Menu");
+                [end]
+                MenuButton menu_button {
+                  icon-name: "open-menu-symbolic";
+                  tooltip-text: _("Main Menu");
 
-                    accessibility {
-                      label: C_("a11y", "Primary menu");
+                  accessibility {
+                    label: C_("a11y", "Primary menu");
+                  }
+                }
+              }
+
+              content: Box main_box {
+                orientation: vertical;
+                valign: center;
+                vexpand: true;
+                spacing: 6;
+
+                styles [
+                  "main-box",
+                ]
+
+                $AmberolTrackCover track_cover {}
+
+                Box {
+                  orientation: vertical;
+                  spacing: 2;
+                  width-request: 256;
+
+                  Box {
+                    halign: center;
+
+                    $AmberolWaveformView waveform_view {
+                      can-focus: "true";
+                    }
+                  }
+
+                  CenterBox {
+                    orientation: horizontal;
+                    width-request: 256;
+                    halign: center;
+
+                    [start]
+                    Label elapsed_label {
+                      label: "0:00";
+
+                      accessibility {
+                        label: C_("a11y", "Elapsed time");
+                      }
+
+                      styles [
+                        "caption",
+                        "numeric",
+                      ]
+                    }
+
+                    [end]
+                    Label remaining_label {
+                      label: "0:00";
+
+                      accessibility {
+                        label: C_("a11y", "Remaining time");
+                      }
+
+                      styles [
+                        "caption",
+                        "numeric",
+                      ]
                     }
                   }
                 }
 
-                content: Box main_box {
-                  orientation: vertical;
-                  valign: center;
-                  vexpand: true;
-                  spacing: 6;
+                $AmberolTrackDetails track_details {}
 
-                  styles [
-                    "main-box",
-                  ]
-
-                  $AmberolTrackCover track_cover {}
-
-                  Box {
-                    orientation: vertical;
-                    spacing: 2;
-                    width-request: 256;
-
-                    Box {
-                      halign: center;
-
-                      $AmberolWaveformView waveform_view {
-                        can-focus: "true";
-                      }
-                    }
-
-                    CenterBox {
-                      orientation: horizontal;
-                      width-request: 256;
-                      halign: center;
-
-                      [start]
-                      Label elapsed_label {
-                        label: "0:00";
-
-                        accessibility {
-                          label: C_("a11y", "Elapsed time");
-                        }
-
-                        styles [
-                          "caption",
-                          "numeric",
-                        ]
-                      }
-
-                      [end]
-                      Label remaining_label {
-                        label: "0:00";
-
-                        accessibility {
-                          label: C_("a11y", "Remaining time");
-                        }
-
-                        styles [
-                          "caption",
-                          "numeric",
-                        ]
-                      }
-                    }
-                  }
-
-                  $AmberolTrackDetails track_details {}
-
-                  $AmberolPlaybackControl playback_control {
-                    halign: "center";
-                    margin-top: "0";
-                    margin-bottom: "24";
-                  }
-                };
+                $AmberolPlaybackControl playback_control {
+                  halign: "center";
+                  margin-top: "0";
+                  margin-bottom: "24";
+                }
               };
+            };
+          }
+
+          StackPage {
+            name: "library";
+
+            child: $AmberolLibraryView library_view {};
+          }
+
+          StackPage {
+            name: "playlists";
+
+            child: $AmberolPlaylistsPage playlists_page {};
+          }
+        };
+
+        sidebar: Box {
+          Stack sidebar_stack {
+            hexpand: true;
+            transition-type: crossfade;
+
+            StackPage {
+              name: "playlist";
+
+              child: $AmberolPlaylistView playlist_view {};
             }
 
             StackPage {
-              name: "library";
+              name: "album";
 
-              child: $AmberolLibraryView library_view {};
+              child: $AmberolAlbumTracks album_tracks {};
             }
+          }
 
-            StackPage {
-              name: "playlists";
+          Box sidebar_handle {
+            width-request: 6;
+            tooltip-text: _("Drag to Resize the Playlist, Double-Click to Reset");
 
-              child: $AmberolPlaylistsPage playlists_page {};
-            }
-          };
-
-          sidebar: Box {
-            Stack sidebar_stack {
-              hexpand: true;
-              transition-type: crossfade;
-
-              StackPage {
-                name: "playlist";
-
-                child: $AmberolPlaylistView playlist_view {};
-              }
-
-              StackPage {
-                name: "album";
-
-                child: $AmberolAlbumTracks album_tracks {};
-              }
-            }
-
-            Box sidebar_handle {
-              width-request: 6;
-              tooltip-text: _("Drag to Resize the Playlist, Double-Click to Reset");
-
-              styles [
-                "sidebar-handle",
-              ]
-            }
-          };
+            styles [
+              "sidebar-handle",
+            ]
+          }
         };
       };
-    }
+    };
   };
 
   Adw.Breakpoint {

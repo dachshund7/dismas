@@ -197,3 +197,23 @@ pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::F
 
     res
 }
+
+// Header bars have a window handle inside, which moves the window when
+// dragged; removing its drag gesture keeps its clicks, like the window menu
+pub fn disable_window_drag(widget: &gtk::Widget) {
+    if widget.is::<gtk::WindowHandle>() {
+        let controllers = widget.observe_controllers();
+        let drags = (0..controllers.n_items())
+            .filter_map(|i| controllers.item(i))
+            .filter_map(|c| c.downcast::<gtk::GestureDrag>().ok())
+            .collect::<Vec<_>>();
+        for drag in drags {
+            widget.remove_controller(&drag);
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        disable_window_drag(&widget);
+        child = widget.next_sibling();
+    }
+}
