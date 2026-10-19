@@ -1199,7 +1199,14 @@ pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Option<Trac
                 let Some(uri) = uris.get(index) else {
                     break;
                 };
-                if read_sender.send((index, TrackData::from_uri(uri))).is_err() {
+                // A file whose tags make the reader panic is skipped, rather
+                // than leaving the tracks after it unread
+                let data =
+                    std::panic::catch_unwind(|| TrackData::from_uri(uri)).unwrap_or_else(|_| {
+                        warn!("Unable to read the tags of {uri}");
+                        None
+                    });
+                if read_sender.send((index, data)).is_err() {
                     break;
                 }
             }
