@@ -4,7 +4,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::OnceLock};
 
 use adw::{prelude::*, subclass::prelude::*};
-use gtk::{CompositeTemplate, gio, glib};
+use gtk::{CompositeTemplate, gdk, gio, glib};
 use log::warn;
 
 use crate::{
@@ -42,6 +42,13 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             klass.bind_template();
+
+            // Ctrl+I opens the dialog, and closes it again: the window's
+            // shortcuts don't run while a dialog is open
+            klass.add_binding(gdk::Key::i, gdk::ModifierType::CONTROL_MASK, |dialog| {
+                dialog.close();
+                glib::Propagation::Stop
+            });
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {

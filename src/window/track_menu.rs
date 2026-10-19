@@ -135,6 +135,43 @@ impl Window {
         }
     }
 
+    // The dialog is modal, so the button that opened it can't take the
+    // click that closes it; the click is caught on its way to the dialog,
+    // which covers the window. While the pointer hasn't moved since the
+    // dialog opened, GTK still sends clicks towards the button, through the
+    // window and not the dialog, so the window catches those
+    pub(super) fn setup_track_info_button(&self) {
+        self.add_controller(self.track_info_close_gesture(self));
+    }
+
+    fn track_info_close_gesture(&self, widget: &impl IsA<gtk::Widget>) -> gtk::GestureClick {
+        let gesture = gtk::GestureClick::new();
+        gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+        gesture.connect_pressed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[weak(rename_to = widget)]
+            widget.upcast_ref::<gtk::Widget>(),
+            move |gesture, _, x, y| {
+                let Some(dialog) = adw::prelude::AdwApplicationWindowExt::visible_dialog(&win)
+                    .and_downcast::<TrackInfoDialog>()
+                else {
+                    return;
+                };
+                let button = win.imp().playback_control.track_info_button();
+                let on_button = button.is_mapped()
+                    && widget
+                        .compute_point(&button, &graphene::Point::new(x as f32, y as f32))
+                        .is_some_and(|p| button.contains(f64::from(p.x()), f64::from(p.y())));
+                if on_button {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    adw::prelude::AdwDialogExt::close(&dialog);
+                }
+            }
+        ));
+        gesture
+    }
+
     fn show_track_info_for(&self, track: &Track) {
         // Replace the information of another track, instead of stacking
         // dialogs on top of each other; the same track keeps its dialog
@@ -153,6 +190,8 @@ impl Window {
         if self.imp().toast_overlay.has_css_class("main-window") {
             dialog.add_css_class("recolored");
         }
+
+        dialog.add_controller(self.track_info_close_gesture(&dialog));
 
         adw::prelude::AdwDialogExt::present(&dialog, Some(self));
     }

@@ -616,6 +616,7 @@ impl Window {
         win.setup_drop_target();
         win.setup_select_all_shortcut();
         win.setup_play_shortcut();
+        win.setup_track_info_button();
         win.setup_library();
         win.setup_playlists();
         win.setup_provider();

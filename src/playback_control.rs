@@ -44,6 +44,8 @@ mod imp {
         pub sleep_timer_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
+        #[template_child]
+        pub track_info_button: TemplateChild<gtk::Button>,
     }
 
     #[glib::object_subclass]
@@ -128,6 +130,10 @@ impl PlaybackControl {
 
     pub fn sleep_timer_minutes(&self) -> gtk::SpinButton {
         self.imp().sleep_timer_minutes.get()
+    }
+
+    pub fn track_info_button(&self) -> gtk::Button {
+        self.imp().track_info_button.get()
     }
 
     pub fn close_sleep_timer(&self) {
