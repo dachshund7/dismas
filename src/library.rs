@@ -12,6 +12,7 @@
 mod album;
 
 use std::{
+    cell::RefCell,
     collections::HashSet,
     path::{Path, PathBuf},
     time::{Instant, UNIX_EPOCH},
@@ -28,7 +29,7 @@ use lofty::{
     tag::{ItemKey, Tag},
 };
 use log::{debug, warn};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -106,22 +107,49 @@ fn covers_dir() -> PathBuf {
     dir
 }
 
+// Each thread keeps its connection, rather than opening the database for
+// each query: the scan has a thread of its own, and the queries of the UI
+// run in the threads of GLib's pool
+thread_local! {
+    static CONNECTION: RefCell<Option<Connection>> = const { RefCell::new(None) };
+}
+
+fn with_connection<T>(
+    query: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    CONNECTION.with_borrow_mut(|connection| {
+        let conn = match connection {
+            Some(conn) => conn,
+            None => connection.insert(open()?),
+        };
+        query(conn)
+    })
+}
+
 fn open() -> rusqlite::Result<Connection> {
     let dir = data_dir();
     glib::mkdir_with_parents(&dir, 0o755);
 
-    let conn = Connection::open(dir.join("library.db"))?;
+    let mut conn = Connection::open(dir.join("library.db"))?;
     // The scan writes while the UI reads
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version == SCHEMA_VERSION {
+        return Ok(conn);
+    }
+
+    // Another thread can be opening the database too, so the version is
+    // checked again once this one has the database to itself
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let version: i32 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version != SCHEMA_VERSION {
         // The tracks are read again; the covers of the albums are kept, as
         // they take a while to create, and the scan replaces the ones of the
         // albums that are gone or changed
         debug!("Library schema version {version}, recreating it");
-        conn.execute_batch(
+        tx.execute_batch(
             "DROP TABLE IF EXISTS tracks;
              CREATE TABLE tracks (
                  path TEXT PRIMARY KEY,
@@ -145,8 +173,9 @@ fn open() -> rusqlite::Result<Connection> {
                  path TEXT
              );",
         )?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
+    tx.commit()?;
 
     Ok(conn)
 }
@@ -201,7 +230,7 @@ pub fn albums() -> Vec<AlbumInfo> {
         Ok(albums.into_iter().map(|(_, info)| info).collect())
     };
 
-    match open().and_then(|conn| query(&conn)) {
+    match with_connection(|conn| query(conn)) {
         Ok(albums) => albums,
         Err(e) => {
             warn!("Unable to load the albums: {e}");
@@ -223,7 +252,7 @@ pub fn search_albums(words: &[String]) -> HashSet<String> {
             .collect()
     };
 
-    match open().and_then(|conn| query(&conn)) {
+    match with_connection(|conn| query(conn)) {
         Ok(albums) => albums,
         Err(e) => {
             warn!("Unable to search the albums: {e}");
@@ -249,7 +278,7 @@ pub fn album_tracks(album_id: &str, words: &[String]) -> Vec<PathBuf> {
         .collect()
     };
 
-    match open().and_then(|conn| query(&conn)) {
+    match with_connection(|conn| query(conn)) {
         Ok(tracks) => tracks,
         Err(e) => {
             warn!("Unable to load the tracks of album {album_id}: {e}");
@@ -270,7 +299,7 @@ pub fn track_album(path: &Path) -> Option<String> {
         .optional()
     };
 
-    match open().and_then(|conn| query(&conn)) {
+    match with_connection(|conn| query(conn)) {
         Ok(album_id) => album_id,
         Err(e) => {
             warn!("Unable to look up the album of {path}: {e}");
@@ -292,8 +321,14 @@ pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {
 }
 
 fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Result<()> {
-    let mut conn = open()?;
+    with_connection(|conn| scan_with(conn, music_dir, sender))
+}
 
+fn scan_with(
+    conn: &mut Connection,
+    music_dir: &Path,
+    sender: &Sender<ScanEvent>,
+) -> rusqlite::Result<()> {
     let files = utils::load_files_from_folder(&gio::File::for_path(music_dir), true);
 
     // Find the files that are new or changed since the last scan
@@ -439,7 +474,7 @@ fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Resu
         tx.commit()?;
     }
 
-    update_covers(&mut conn, &stale_albums)
+    update_covers(conn, &stale_albums)
 }
 
 // Creates the thumbnails of the albums that don't have one yet, or whose
