@@ -298,6 +298,27 @@ impl TrackCredits {
         }
     }
 
+    // The performers to show in the queue for a track that is not part of
+    // a larger work, when the artist is its composer, as classical
+    // releases are often tagged; the artist would be the only name shown.
+    // Not when the artist performs too, as songwriters do, whose band
+    // would only clutter the row
+    pub fn performers_of_composer(&self, artist: Option<&str>) -> Option<String> {
+        let artist = artist?;
+        if self.composers.is_empty() || !self.composers.iter().all(|c| artist.contains(c.as_str()))
+        {
+            return None;
+        }
+        if self
+            .performers
+            .iter()
+            .any(|p| artist.contains(p.name.as_str()))
+        {
+            return None;
+        }
+        Some(self.summary(Some(artist))).filter(|s| !s.is_empty())
+    }
+
     pub fn summary(&self, artist: Option<&str>) -> String {
         let conductors = self
             .conductors
@@ -1276,10 +1297,15 @@ mod imp {
         fn row_credits(&self) -> String {
             if self.movement_levels().is_some() {
                 self.performers()
-            } else if self.movement().is_none() && self.listed_composers().is_some() {
+            } else if self.movement().is_some() {
+                String::new()
+            } else if self.listed_composers().is_some() {
                 self.artist()
             } else {
-                String::new()
+                let data = self.data.borrow();
+                data.credits()
+                    .performers_of_composer(data.artist())
+                    .unwrap_or_default()
             }
         }
 
@@ -1467,7 +1493,7 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        ExtraComments, MovementName, TrackCredits, album_title_search_text, is_numbered,
+        Credit, ExtraComments, MovementName, TrackCredits, album_title_search_text, is_numbered,
         normalize_search_text, position_ranges, tag_search_text, work_hierarchy_labels,
     };
 
@@ -1793,6 +1819,37 @@ mod tests {
             classical.listed_composers(Some("The Beatles")).as_deref(),
             Some("John Lennon, Paul McCartney")
         );
+    }
+
+    #[test]
+    fn performers_are_listed_when_the_artist_is_the_composer() {
+        let arabeske = TrackCredits {
+            composers: vec!["Robert Schumann".to_string()],
+            performers: vec![Credit::parse("Fabrizio Chiovetta (piano)")],
+            ..Default::default()
+        };
+        assert_eq!(
+            arabeske
+                .performers_of_composer(Some("Robert Schumann"))
+                .as_deref(),
+            Some("Fabrizio Chiovetta")
+        );
+        // Not if the artist isn't the composer
+        assert_eq!(
+            arabeske.performers_of_composer(Some("Fabrizio Chiovetta")),
+            None
+        );
+
+        // Nor if the artist performs, like a songwriter with a band
+        let song = TrackCredits {
+            composers: vec!["Joni Mitchell".to_string()],
+            performers: vec![
+                Credit::parse("Joni Mitchell (vocals)"),
+                Credit::parse("Jaco Pastorius (bass)"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(song.performers_of_composer(Some("Joni Mitchell")), None);
     }
 
     #[test]
