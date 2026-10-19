@@ -17,10 +17,54 @@ use crate::{
     config::APPLICATION_ID,
 };
 
+// What the desktop is told about the player. The server starts after the
+// player, which can already have a track by then, so it's kept to be
+// told once the server is up
+#[derive(Debug)]
+struct Shared {
+    player: OnceCell<Player>,
+    metadata: RefCell<Metadata>,
+    playback_status: Cell<PlaybackStatus>,
+    loop_status: Cell<LoopStatus>,
+    can_play: Cell<bool>,
+}
+
+impl Shared {
+    async fn publish_metadata(&self) {
+        let Some(player) = self.player.get() else {
+            return;
+        };
+        let metadata = self.metadata.borrow().clone();
+        if let Err(err) = player.set_metadata(metadata).await {
+            error!("Unable to set MPRIS metadata: {err:?}");
+        }
+    }
+
+    async fn publish_playback_status(&self) {
+        let Some(player) = self.player.get() else {
+            return;
+        };
+        if let Err(err) = player.set_can_play(self.can_play.get()).await {
+            error!("Unable to set MPRIS play capability: {err:?}");
+        }
+        if let Err(err) = player.set_playback_status(self.playback_status.get()).await {
+            error!("Unable to set MPRIS playback status: {err:?}");
+        }
+    }
+
+    async fn publish_loop_status(&self) {
+        let Some(player) = self.player.get() else {
+            return;
+        };
+        if let Err(err) = player.set_loop_status(self.loop_status.get()).await {
+            error!("Unable to set MPRIS loop status: {err:?}");
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct MprisController {
-    mpris: Rc<OnceCell<Player>>,
-    track: RefCell<Option<Track>>,
+    shared: Rc<Shared>,
     next_track_id: Cell<u64>,
 }
 
@@ -37,11 +81,17 @@ impl MprisController {
             .can_go_previous(true)
             .can_set_fullscreen(false);
 
-        let mpris = Rc::new(OnceCell::new());
+        let shared = Rc::new(Shared {
+            player: OnceCell::new(),
+            metadata: RefCell::new(Metadata::new()),
+            playback_status: Cell::new(PlaybackStatus::Stopped),
+            loop_status: Cell::new(LoopStatus::None),
+            can_play: Cell::new(false),
+        });
 
         glib::spawn_future_local(clone!(
             #[weak]
-            mpris,
+            shared,
             #[strong]
             sender,
             async move {
@@ -50,7 +100,20 @@ impl MprisController {
                     Ok(player) => {
                         setup_signals(sender, &player);
                         let mpris_task = player.run();
-                        let _ = mpris.set(player);
+                        let _ = shared.player.set(player);
+
+                        // What changed while the server was starting; the
+                        // task of the server is to be awaited right away
+                        glib::spawn_future_local(clone!(
+                            #[weak]
+                            shared,
+                            async move {
+                                shared.publish_metadata().await;
+                                shared.publish_playback_status().await;
+                                shared.publish_loop_status().await;
+                            }
+                        ));
+
                         mpris_task.await;
                     }
                 }
@@ -58,64 +121,48 @@ impl MprisController {
         ));
 
         Self {
-            mpris,
-            track: RefCell::new(None),
+            shared,
             next_track_id: Cell::new(0),
         }
     }
 
-    fn update_metadata(&self) {
+    fn track_metadata(&self, track: &Track) -> Metadata {
         let mut metadata = Metadata::new();
 
-        if let Some(track) = self.track.take() {
-            // Clients pass the id back when setting the position; a new one
-            // for each track, as the same track can be in the queue
-            // more than once
-            let track_id = self.next_track_id.get();
-            self.next_track_id.set(track_id + 1);
-            match TrackId::try_from(format!("/io/bassi/Amberol/Track/{track_id}")) {
-                Ok(id) => metadata.set_trackid(Some(id)),
-                Err(e) => error!("Invalid MPRIS track id: {e}"),
-            }
-
-            metadata.set_artist(Some(vec![track.artist()]));
-            metadata.set_title(Some(track.title()));
-            metadata.set_album(Some(track.album()));
-
-            let length = Time::from_secs(track.duration() as i64);
-            metadata.set_length(Some(length));
-
-            // MPRIS should really support passing a bytes buffer for
-            // the cover art, instead of requiring this ridiculous
-            // charade
-            if let Some(cache) = track.cover_cache() {
-                let file = gio::File::for_path(cache);
-                match file.query_info(
-                    "standard::type",
-                    gio::FileQueryInfoFlags::NONE,
-                    gio::Cancellable::NONE,
-                ) {
-                    Ok(info) if info.file_type() == gio::FileType::Regular => {
-                        metadata.set_art_url(Some(file.uri()));
-                    }
-                    _ => metadata.set_art_url(None::<String>),
-                }
-            }
-
-            self.track.replace(Some(track));
+        // Clients pass the id back when setting the position; a new one
+        // for each track, as the same track can be in the queue more than
+        // once
+        let track_id = self.next_track_id.get();
+        self.next_track_id.set(track_id + 1);
+        match TrackId::try_from(format!("/io/bassi/Amberol/Track/{track_id}")) {
+            Ok(id) => metadata.set_trackid(Some(id)),
+            Err(e) => error!("Invalid MPRIS track id: {e}"),
         }
 
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = mpris)]
-            self.mpris,
-            async move {
-                if let Some(mpris) = mpris.get()
-                    && let Err(err) = mpris.set_metadata(metadata).await
-                {
-                    error!("Unable to set MPRIS metadata: {err:?}");
+        metadata.set_artist(Some(vec![track.artist()]));
+        metadata.set_title(Some(track.title()));
+        metadata.set_album(Some(track.album()));
+
+        let length = Time::from_secs(track.duration() as i64);
+        metadata.set_length(Some(length));
+
+        // MPRIS should really support passing a bytes buffer for the cover
+        // art, instead of requiring this ridiculous charade
+        if let Some(cache) = track.cover_cache() {
+            let file = gio::File::for_path(cache);
+            match file.query_info(
+                "standard::type",
+                gio::FileQueryInfoFlags::NONE,
+                gio::Cancellable::NONE,
+            ) {
+                Ok(info) if info.file_type() == gio::FileType::Regular => {
+                    metadata.set_art_url(Some(file.uri()));
                 }
+                _ => metadata.set_art_url(None::<String>),
             }
-        ));
+        }
+
+        metadata
     }
 }
 
@@ -124,42 +171,44 @@ impl Controller for MprisController {
         let status = match state {
             PlaybackState::Playing => PlaybackStatus::Playing,
             PlaybackState::Paused => PlaybackStatus::Paused,
-            _ => PlaybackStatus::Stopped,
+            PlaybackState::Stopped => PlaybackStatus::Stopped,
         };
+        self.shared.playback_status.set(status);
+        self.shared.can_play.set(true);
 
         glib::spawn_future_local(clone!(
-            #[weak(rename_to = mpris)]
-            self.mpris,
-            async move {
-                if let Some(mpris) = mpris.get() {
-                    if let Err(err) = mpris.set_can_play(true).await {
-                        error!("Unable to set MPRIS play capability: {err:?}");
-                    }
-                    if let Err(err) = mpris.set_playback_status(status).await {
-                        error!("Unable to set MPRIS playback status: {err:?}");
-                    }
-                }
-            }
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_playback_status().await }
         ));
     }
 
     fn set_track(&self, track: &Track) {
-        self.track.replace(Some(track.clone()));
-        self.update_metadata();
+        self.shared.metadata.replace(self.track_metadata(track));
+        self.shared.can_play.set(true);
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move {
+                shared.publish_metadata().await;
+                shared.publish_playback_status().await;
+            }
+        ));
     }
 
     fn set_position(&self, position: u64, notify: bool) {
         let pos = Time::from_secs(position as i64);
-        if let Some(mpris) = self.mpris.get() {
-            mpris.set_position(pos);
+        if let Some(player) = self.shared.player.get() {
+            player.set_position(pos);
         }
         if notify {
             glib::spawn_future_local(clone!(
-                #[weak(rename_to = mpris)]
-                self.mpris,
+                #[weak(rename_to = shared)]
+                self.shared,
                 async move {
-                    if let Some(mpris) = mpris.get()
-                        && let Err(err) = mpris.seeked(pos).await
+                    if let Some(player) = shared.player.get()
+                        && let Err(err) = player.seeked(pos).await
                     {
                         error!("Unable to emit MPRIS Seeked: {err:?}");
                     }
@@ -174,17 +223,12 @@ impl Controller for MprisController {
             RepeatMode::RepeatOne => LoopStatus::Track,
             RepeatMode::RepeatAll => LoopStatus::Playlist,
         };
+        self.shared.loop_status.set(status);
 
         glib::spawn_future_local(clone!(
-            #[weak(rename_to = mpris)]
-            self.mpris,
-            async move {
-                if let Some(mpris) = mpris.get()
-                    && let Err(err) = mpris.set_loop_status(status).await
-                {
-                    error!("Unable to set MPRIS loop status: {err:?}");
-                }
-            }
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_loop_status().await }
         ));
     }
 }
