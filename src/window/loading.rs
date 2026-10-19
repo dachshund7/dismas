@@ -291,14 +291,17 @@ impl Window {
     }
 }
 
-// The audio files, and the ones in the folders and their subfolders
+// The audio files, and the ones in the folders and their subfolders. The
+// files and folders given can be symbolic links, which were picked or
+// dropped on purpose; the ones inside the folders aren't followed, as
+// they could make a loop
 fn audio_files(files: Vec<gio::File>) -> Vec<gio::File> {
     let mut queue = Vec::new();
 
     for file in files {
         if let Ok(info) = file.query_info(
             "standard::name,standard::display-name,standard::type,standard::content-type",
-            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            gio::FileQueryInfoFlags::NONE,
             gio::Cancellable::NONE,
         ) {
             match info.file_type() {
