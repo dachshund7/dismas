@@ -412,11 +412,19 @@ mod imp {
             self.obj()
                 .action_set_enabled("queue.remove-selected", false);
 
-            // The window manager moves the window, so dragging the header
-            // bars doesn't, nor those of the dialogs, which move it too
-            utils::disable_window_drag(self.obj().upcast_ref());
+            // Dragging the header bars moves the window, like in other
+            // applications, and on Wayland it's how the window is moved;
+            // the setting turns it off for window managers that move windows
+            // by themselves, like tiling ones. It applies to the header bars
+            // of the dialogs too, which move the window as well. The content
+            // of the window doesn't move it either way
+            if !self.settings.boolean("move-from-header-bars") {
+                utils::disable_window_drag(self.obj().upcast_ref());
+            }
             self.obj().connect_visible_dialog_notify(|win| {
-                if let Some(dialog) = win.visible_dialog() {
+                if let Some(dialog) = win.visible_dialog()
+                    && !win.imp().settings.boolean("move-from-header-bars")
+                {
                     utils::disable_window_drag(dialog.upcast_ref());
                 }
             });
