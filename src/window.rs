@@ -615,7 +615,7 @@ impl Window {
         win.setup_sidebar_handle();
         win.setup_drop_target();
         win.setup_select_all_shortcut();
-        win.setup_play_shortcut();
+        win.setup_key_shortcuts();
         win.setup_track_info_button();
         win.setup_library();
         win.setup_playlists();
@@ -683,52 +683,110 @@ impl Window {
     // entries keep it, to type spaces. Dialogs keep it too, as the window's
     // shortcuts don't run while one is open.
     //
-    // The release is kept from the window too, which would show the focus
-    // ring for the key, as if Space had moved the focus; and holding the
-    // key down toggles playback once, not with every repeat
-    fn setup_play_shortcut(&self) {
+    // Page Up, Page Down, Home and End scroll a list, see `scroll_list()`;
+    // the lists would move their focus instead. Text entries keep Home and
+    // End when they have text, to move the cursor; the album search has the
+    // focus while the grid shows.
+    //
+    // The releases are kept from the window too, which would show the focus
+    // ring for the key, as if it had moved the focus; and holding Space
+    // down toggles playback once, not with every repeat
+    fn setup_key_shortcuts(&self) {
         let controller = gtk::EventControllerLegacy::new();
         controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let pressed = Cell::new(false);
+        let pressed = Cell::new(None);
         controller.connect_event(move |controller, event| {
             let Some(key) = event.downcast_ref::<gdk::KeyEvent>() else {
                 return glib::Propagation::Proceed;
             };
-            if key.keyval() != gdk::Key::space
-                || key
-                    .modifier_state()
-                    .intersects(gtk::accelerator_get_default_mod_mask())
+            let keyval = key.keyval();
+            if key
+                .modifier_state()
+                .intersects(gtk::accelerator_get_default_mod_mask())
             {
                 return glib::Propagation::Proceed;
             }
 
             if event.event_type() == gdk::EventType::KeyRelease {
-                return if pressed.replace(false) {
+                return if pressed.get() == Some(keyval) {
+                    pressed.set(None);
                     glib::Propagation::Stop
                 } else {
                     glib::Propagation::Proceed
                 };
             }
-            if pressed.get() {
-                return glib::Propagation::Stop;
-            }
 
-            let widget = controller.widget().unwrap();
-            let in_entry = widget
-                .root()
-                .and_then(|root| root.focus())
-                .is_some_and(|focus| {
-                    focus.is::<gtk::Editable>()
-                        || focus.ancestor(gtk::Editable::static_type()).is_some()
-                });
-            if !in_entry && widget.activate_action("win.play", None).is_ok() {
-                pressed.set(true);
+            let win = controller.widget().and_downcast::<Window>().unwrap();
+            let focus = gtk::prelude::GtkWindowExt::focus(&win);
+            let entry = focus.as_ref().and_then(|focus| {
+                focus
+                    .clone()
+                    .downcast::<gtk::Editable>()
+                    .ok()
+                    .or_else(|| focus.ancestor(gtk::Editable::static_type()).and_downcast())
+            });
+            let in_entry = entry.is_some();
+            let in_text = entry.is_some_and(|entry| !entry.text().is_empty());
+            let handled = match keyval {
+                gdk::Key::space if pressed.get() == Some(keyval) => true,
+                gdk::Key::space => {
+                    !in_entry && WidgetExt::activate_action(&win, "win.play", None).is_ok()
+                }
+                gdk::Key::Page_Up | gdk::Key::KP_Page_Up => {
+                    win.scroll_list(focus, gtk::ScrollType::PageBackward);
+                    true
+                }
+                gdk::Key::Page_Down | gdk::Key::KP_Page_Down => {
+                    win.scroll_list(focus, gtk::ScrollType::PageForward);
+                    true
+                }
+                gdk::Key::Home | gdk::Key::KP_Home if !in_text => {
+                    win.scroll_list(focus, gtk::ScrollType::Start);
+                    true
+                }
+                gdk::Key::End | gdk::Key::KP_End if !in_text => {
+                    win.scroll_list(focus, gtk::ScrollType::End);
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                pressed.set(Some(keyval));
                 glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
             }
         });
         self.add_controller(controller);
+    }
+
+    // Scrolls a list like its scrollbar would: the list of the pane under
+    // the pointer, e.g. the album grid below the album search, and none
+    // over the player. Without the pointer over the window, the list of the
+    // pane with the focus, or else the playlist, if it's showing. The key
+    // is used up even without a list, as the focused list would scroll
+    // itself
+    fn scroll_list(&self, focus: Option<gtk::Widget>, scroll: gtk::ScrollType) {
+        let scrolled = match self.pointer_widget() {
+            Some(widget) => pane_list(&widget),
+            None => focus
+                .and_then(|widget| pane_list(&widget))
+                .or_else(|| Some(self.imp().playlist_view.queue_scrolled())),
+        };
+        if let Some(scrolled) = scrolled
+            && scrolled.is_drawable()
+        {
+            scrolled.emit_scroll_child(scroll, false);
+        }
+    }
+
+    // The widget under the pointer, if it's over the window
+    fn pointer_widget(&self) -> Option<gtk::Widget> {
+        let surface = self.surface()?;
+        let pointer = WidgetExt::display(self).default_seat()?.pointer()?;
+        let (x, y, _) = surface.device_position(&pointer)?;
+        let (dx, dy) = self.surface_transform();
+        self.pick(x - dx, y - dy, gtk::PickFlags::DEFAULT)
     }
 
     fn restore_window_state(&self) {
@@ -764,4 +822,26 @@ impl Window {
         ));
         self.imp().toast_overlay.add_toast(toast);
     }
+}
+
+// The list of the pane a widget is in; each pane, like the album grid or
+// the playlist, is a toolbar view, with its header bars and search bar
+// around the list
+fn pane_list(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+    let pane = widget.ancestor(adw::ToolbarView::static_type())?;
+    shown_scrolled_window(&pane)
+}
+
+fn shown_scrolled_window(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+    if let Some(scrolled) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+        return scrolled.is_drawable().then(|| scrolled.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        if let Some(scrolled) = shown_scrolled_window(&widget) {
+            return Some(scrolled);
+        }
+        child = widget.next_sibling();
+    }
+    None
 }

@@ -218,6 +218,10 @@ impl PlaylistView {
         self.imp().queue_selected_label.get()
     }
 
+    pub fn queue_scrolled(&self) -> gtk::ScrolledWindow {
+        self.imp().queue_scrolled.get()
+    }
+
     pub fn queue_view(&self) -> gtk::ListView {
         self.imp().queue_view.get()
     }
