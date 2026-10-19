@@ -26,7 +26,8 @@ impl AsRef<str> for CoverSize {
 }
 
 // The large cover is as wide as the waveform and the playback controls
-// under it, which don't scale with the font either
+// under it, which don't scale with the font either; the player grows it
+// and the waveform together when it has room to spare
 pub const LARGE_SIZE: i32 = 256;
 // The large cover in windows too short for it, the size of the cover
 // upstream: three quarters of the controls

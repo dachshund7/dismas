@@ -145,7 +145,8 @@ mod imp {
         fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             match orientation {
                 gtk::Orientation::Horizontal => {
-                    // We ask for as many samples we can fit within a 256 pixels wide area
+                    // We ask for as many samples we can fit within a 256 pixels wide area;
+                    // the player can make it wider, along with the cover
                     if let Some(ref peaks) = *self.peaks.borrow() {
                         let n_peaks = peaks.len() as i32;
                         let width = i32::min(n_peaks * 4, 256);
@@ -161,8 +162,17 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let (x, w) = self.obj().bars_area();
+            snapshot.save();
+            snapshot.translate(&graphene::Point::new(x as f32, 0.0));
+            self.snapshot_bars(snapshot, w as i32);
+            snapshot.restore();
+        }
+    }
+
+    impl WaveformView {
+        fn snapshot_bars(&self, snapshot: &gtk::Snapshot, w: i32) {
             let widget = self.obj();
-            let w = widget.width();
             let h = widget.height();
             if w == 0 || h == 0 {
                 return;
@@ -424,8 +434,8 @@ impl WaveformView {
             #[weak(rename_to = this)]
             self,
             move |_, x, _| {
-                let width = f64::from(this.width());
-                let position = x / width;
+                let (start, width) = this.bars_area();
+                let position = ((x - start) / width).clamp(0.0, 1.0);
                 this.imp().hover_position.replace(Some(position));
                 this.queue_draw();
             }
@@ -459,11 +469,26 @@ impl WaveformView {
         self.add_controller(key_controller);
     }
 
+    // The start and the width of the part of the widget the bars are drawn
+    // in: the bars of a track too short to fill the width are centered
+    fn bars_area(&self) -> (f64, f64) {
+        let width = f64::from(self.width());
+        let bars = self
+            .imp()
+            .peaks
+            .borrow()
+            .as_ref()
+            .filter(|peaks| !peaks.is_empty())
+            .map_or(width, |peaks| (peaks.len() as f64 * 4.0).min(width));
+        (((width - bars) / 2.0).floor(), bars)
+    }
+
     fn seek_to_coord(&self, pos: f64) {
-        let width = self.width();
+        let (start, width) = self.bars_area();
+        let fraction = ((pos - start) / width).clamp(0.0, 1.0);
         let position = match self.direction() {
-            gtk::TextDirection::Rtl => 1.0 - (pos / f64::from(width)),
-            _ => pos / f64::from(width),
+            gtk::TextDirection::Rtl => 1.0 - fraction,
+            _ => fraction,
         };
         debug!("Seeking to coord {pos} (width: {width}, position: {position})");
         self.emit_by_name::<()>("position-changed", &[&position]);

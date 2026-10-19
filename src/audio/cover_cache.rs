@@ -23,8 +23,9 @@ const COVER_SIZE: u32 = 192 * 2;
 // The cover in the main view is drawn larger than the shared cover
 // texture, so it is loaded separately for the current track; we limit its
 // size, as the original artwork can be very large, and let the renderer
-// scale it down the rest of the way
-const FULL_COVER_SIZE: u32 = 1024;
+// scale it down the rest of the way. The cover grows with the window, up
+// to about 1000 px in fullscreen, which is 2000 with a scaling factor of 2
+const FULL_COVER_SIZE: u32 = 2048;
 
 // The rows of the lists of tracks draw a small copy of the cover, at the
 // size of the row's cover with a scaling factor of 2. Drawing the shared

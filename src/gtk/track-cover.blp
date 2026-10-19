@@ -4,31 +4,26 @@
 using Gtk 4.0;
 
 template $AmberolTrackCover: Widget {
-  Box {
-    halign: center;
-    valign: center;
+  Stack cover_stack {
+    StackPage {
+      name: "no-image";
 
-    Stack cover_stack {
-      StackPage {
-        name: "no-image";
+      child: Image {
+        overflow: hidden;
+        icon-name: "folder-music-symbolic";
+        pixel-size: 64;
 
-        child: Image {
-          overflow: hidden;
-          icon-name: "folder-music-symbolic";
-          pixel-size: 64;
+        styles [
+          "card",
+          "dim-label",
+        ]
+      };
+    }
 
-          styles [
-            "card",
-            "dim-label",
-          ]
-        };
-      }
+    StackPage {
+      name: "cover-image";
 
-      StackPage {
-        name: "cover-image";
-
-        child: $AmberolCoverPicture album_image {};
-      }
+      child: $AmberolCoverPicture album_image {};
     }
   }
 }

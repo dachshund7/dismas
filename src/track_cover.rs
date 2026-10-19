@@ -47,8 +47,8 @@ mod imp {
     }
 
     // The cover takes the room that the rest of the player leaves, so that
-    // the player fits in short windows: it's large when it fits, medium
-    // when that fits, and hidden otherwise. It is always a square, as the
+    // the player fits in short windows: it's large when it fits, as large
+    // as the room it gets, medium when that fits, and hidden otherwise. It is always a square, as the
     // shadow and the rounded corners of the card are drawn around it
     impl WidgetImpl for TrackCover {
         fn request_mode(&self) -> gtk::SizeRequestMode {
@@ -76,7 +76,7 @@ mod imp {
 
             let room = (width - extra_width).min(height - extra_height);
             let size = if room >= LARGE_SIZE {
-                Some(LARGE_SIZE)
+                Some(room)
             } else if room >= MEDIUM_SIZE {
                 Some(MEDIUM_SIZE)
             } else {

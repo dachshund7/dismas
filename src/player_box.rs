@@ -11,6 +11,10 @@ use crate::{
 // The space between the parts of the player
 const SPACING: i32 = 6;
 
+// The style class of the children that grow with the cover, past their
+// natural width
+const COVER_WIDTH: &str = "cover-width";
+
 mod imp {
     use super::*;
 
@@ -34,8 +38,9 @@ mod imp {
 
     // A vertical box for the player, which gives the cover the room that the
     // rest of the player leaves: the large cover if it fits, the medium one
-    // if that fits, and none otherwise. The cover is not stretched past the
-    // size it uses, so that the player stays centered when it gets smaller
+    // if that fits, and none otherwise. When the rest of the player has
+    // its natural height, the room left grows the large cover, e.g. in
+    // fullscreen; otherwise the player stays centered around it
     // It's a widget rather than a GtkBox, as a GtkBox is laid out by its
     // layout manager, without calling size_allocate
     impl WidgetImpl for PlayerBox {
@@ -86,9 +91,26 @@ mod imp {
 
             // The rest of the player has its natural height if it fits
             let natural = cover_height + others_nat <= height - spacings;
+
+            // The room left past the natural height of the large cover makes
+            // it larger, as far as the width allows, and the waveform under
+            // it as wide, so that their edges still line up
+            let grow = children
+                .iter()
+                .find_map(|(widget, _, nat)| {
+                    widget.downcast_ref::<TrackCover>()?;
+                    if !natural || cover_height != *nat {
+                        return Some(0);
+                    }
+                    let (_, nat_width, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
+                    let free = height - spacings - others_nat - nat;
+                    Some(free.min(width - nat_width).max(0))
+                })
+                .unwrap_or(0);
+
             let child_height = |widget: &gtk::Widget, min: i32, nat: i32| {
                 if widget.is::<TrackCover>() {
-                    cover_height
+                    cover_height + grow
                 } else if natural {
                     nat
                 } else {
@@ -104,9 +126,16 @@ mod imp {
             let mut y = ((height - total) / 2).max(0);
             for (widget, min, nat) in &children {
                 let h = child_height(widget, *min, *nat);
+                let (x, w) = if widget.has_css_class(COVER_WIDTH) {
+                    let (_, nat_width, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
+                    let w = (nat_width + grow).min(width);
+                    ((width - w) / 2, w)
+                } else {
+                    (0, width)
+                };
                 let transform =
-                    gsk::Transform::new().translate(&graphene::Point::new(0.0, y as f32));
-                widget.allocate(width, h, -1, Some(transform));
+                    gsk::Transform::new().translate(&graphene::Point::new(x as f32, y as f32));
+                widget.allocate(w, h, -1, Some(transform));
                 y += h + SPACING;
             }
         }

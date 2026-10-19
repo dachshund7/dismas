@@ -45,7 +45,6 @@ template $AmberolWindow: Adw.ApplicationWindow {
               }
 
               content: $AmberolPlayerBox main_box {
-                valign: center;
                 vexpand: true;
 
                 styles [
@@ -59,18 +58,17 @@ template $AmberolWindow: Adw.ApplicationWindow {
                   spacing: 2;
                   width-request: 256;
 
-                  Box {
-                    halign: center;
+                  styles [
+                    "cover-width",
+                  ]
 
-                    $AmberolWaveformView waveform_view {
-                      can-focus: "true";
-                    }
+                  $AmberolWaveformView waveform_view {
+                    can-focus: "true";
                   }
 
                   CenterBox {
                     orientation: horizontal;
                     width-request: 256;
-                    halign: center;
 
                     [start]
                     Label elapsed_label {
