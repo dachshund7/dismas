@@ -358,6 +358,33 @@ impl Default for WaveformView {
 
 const ANIMATION_USECS: f64 = 250_000.0;
 
+// The loudest peak is drawn at the full height, but the peaks of a track
+// quieter than this, -40 dB, are not scaled up past it, so that a silent
+// track is drawn flat instead of filling the height
+const PEAK_FLOOR: f64 = 0.01;
+
+// Scales the peaks of each channel by the loudest one of that channel
+fn normalize_peaks(peaks: &[(f64, f64)]) -> Vec<PeakPair> {
+    let loudest =
+        |channel: fn(&(f64, f64)) -> f64| peaks.iter().map(channel).fold(PEAK_FLOOR, f64::max);
+    let (left, right) = (loudest(|p| p.0), loudest(|p| p.1));
+    // Anything that isn't a number counts as silence
+    let scale = |peak: f64, loudest: f64| {
+        let scaled = peak / loudest;
+        if scaled.is_nan() {
+            0.0
+        } else {
+            scaled.clamp(0.0, 1.0)
+        }
+    };
+
+    debug!("Peaks: {}", peaks.len());
+    peaks
+        .iter()
+        .map(|p| PeakPair::new(scale(p.0, left), scale(p.1, right)))
+        .collect()
+}
+
 impl WaveformView {
     pub fn new() -> Self {
         Self::default()
@@ -442,34 +469,14 @@ impl WaveformView {
         self.emit_by_name::<()>("position-changed", &[&position]);
     }
 
-    fn normalize_peaks(&self, peaks: Vec<(f64, f64)>) -> Vec<PeakPair> {
-        let right_channel: Vec<f64> = peaks.iter().map(|p| p.0).collect();
-        let left_channel: Vec<f64> = peaks.iter().map(|p| p.1).collect();
-
-        let max_left: f64 = left_channel
-            .iter()
-            .copied()
-            .fold(f64::NEG_INFINITY, f64::max);
-        let max_right: f64 = right_channel
-            .iter()
-            .copied()
-            .fold(f64::NEG_INFINITY, f64::max);
-
-        let normalized: Vec<PeakPair> = peaks
-            .iter()
-            .map(|p| PeakPair::new(p.0 / max_left, p.1 / max_right))
-            .collect();
-
-        debug!("Peaks: {}", normalized.len());
-        normalized
-    }
-
     pub fn set_peaks(&self, peaks: Option<Vec<(f64, f64)>>) {
         if let Some(tick_id) = self.imp().tick_id.replace(None) {
             tick_id.remove();
         }
 
-        let peak_pairs = peaks.map(|p| self.normalize_peaks(p));
+        // Without any peak, e.g. for a track that couldn't be decoded, the
+        // waveform is drawn flat
+        let peak_pairs = peaks.filter(|p| !p.is_empty()).map(|p| normalize_peaks(&p));
         let enable_animations = self.settings().is_gtk_enable_animations();
         if !enable_animations {
             self.imp().peaks.replace(peak_pairs);
@@ -555,5 +562,24 @@ impl WaveformView {
             false,
             glib::closure_local!(move |view: &Self, position: f64| f(view, position)),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PeakPair, normalize_peaks};
+
+    #[test]
+    fn channels_are_scaled_by_their_own_loudest_peak() {
+        assert_eq!(
+            normalize_peaks(&[(0.5, 0.1), (0.25, 0.05)]),
+            [PeakPair::new(1.0, 1.0), PeakPair::new(0.5, 0.5)]
+        );
+    }
+
+    #[test]
+    fn silence_stays_flat() {
+        let peaks = normalize_peaks(&[(0.0, 0.0), (1e-35, f64::NAN)]);
+        assert!(peaks.iter().all(|p| p.left < 1e-30 && p.right == 0.0));
     }
 }
