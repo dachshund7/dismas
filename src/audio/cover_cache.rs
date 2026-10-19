@@ -149,11 +149,7 @@ impl CoverCache {
         // caches out of the water, which will slow down loading the track into the
         // queue model
         if let Some(p) = path {
-            let names = ["Cover", "cover", "Folder", "folder"]
-                .iter()
-                .flat_map(|name| ["jpg", "png"].map(|ext| format!("{name}.{ext}")));
-            for name in names {
-                let cover_file = p.join(name);
+            for cover_file in Self::cover_files(p) {
                 debug!("Looking for external cover file: {cover_file:?}");
 
                 let Ok(metadata) = std::fs::metadata(&cover_file) else {
@@ -179,6 +175,14 @@ impl CoverCache {
         debug!("No cover art");
 
         None
+    }
+
+    // The files that can have the cover of the tracks in a folder, in the
+    // order they're looked for
+    pub fn cover_files(dir: &Path) -> impl Iterator<Item = PathBuf> {
+        ["Cover", "cover", "Folder", "folder"]
+            .into_iter()
+            .flat_map(|name| ["jpg", "png"].map(|ext| dir.join(format!("{name}.{ext}"))))
     }
 
     // The cover of the album of a track, loaded the first time one of its
@@ -278,21 +282,20 @@ impl CoverCache {
 // Saves the cover in the cache directory, for the MPRIS controller, which
 // can only pass the cover art to the desktop as a file
 fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
-    let mut path = glib::user_cache_dir();
-    path.push("amberol");
-    path.push("covers");
-    glib::mkdir_with_parents(&path, 0o755);
+    let mut dir = glib::user_cache_dir();
+    dir.push("amberol");
+    dir.push("covers");
+    glib::mkdir_with_parents(&dir, 0o755);
 
-    path.push(format!("{uuid}.png"));
-    if path.exists() {
-        return Some(path);
-    }
-
-    match image.save_png(&path) {
-        Ok(()) => {
-            debug!("Created cover data cache at {path:?}");
-            Some(path)
+    let png = match image.png_bytes() {
+        Ok(png) => png,
+        Err(e) => {
+            warn!("Unable to encode the cover: {e}");
+            return None;
         }
+    };
+    match write_cover_file(&dir, uuid, &png) {
+        Ok(path) => Some(path),
         Err(e) => {
             warn!("Unable to cache cover data: {e}");
             None
@@ -300,11 +303,79 @@ fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
     }
 }
 
+// Writes a cover to a file named after the album and a hash of the
+// picture. A changed cover gets a new file, rather than replacing the old
+// one, whose picture the desktop could have kept for the same file name;
+// the files of the album's previous covers are removed
+fn write_cover_file(dir: &Path, uuid: &str, png: &[u8]) -> Result<PathBuf, glib::Error> {
+    let hash = format!("{:x}", Sha256::digest(png));
+    let name = format!("{uuid}-{}.png", &hash[..16]);
+    let path = dir.join(&name);
+    if path.exists() {
+        return Ok(path);
+    }
+
+    glib::file_set_contents(&path, png)?;
+    debug!("Created cover data cache at {path:?}");
+
+    // Along with the file of the album's cover from before the files were
+    // named after their picture
+    let previous = |file: &str| {
+        file != name
+            && (file == format!("{uuid}.png")
+                || file
+                    .strip_prefix(uuid)
+                    .is_some_and(|rest| rest.starts_with('-') && rest.ends_with(".png")))
+    };
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_str().is_some_and(previous)
+                && let Err(e) = std::fs::remove_file(entry.path())
+            {
+                warn!("Unable to remove the old cover {:?}: {e}", entry.path());
+            }
+        }
+    }
+
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use super::CoverCache;
+    use gtk::glib;
+
+    use super::{CoverCache, write_cover_file};
+
+    #[test]
+    fn changed_covers_get_a_new_file() {
+        let dir = glib::mkdtemp("amberol-covers-XXXXXX").unwrap();
+        let files = || {
+            let mut names: Vec<String> = std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().into_string().unwrap())
+                .collect();
+            names.sort();
+            names
+        };
+        // From before the files were named after their picture, and the
+        // cover of another album
+        std::fs::write(dir.join("album.png"), b"old").unwrap();
+        std::fs::write(dir.join("other-0123456789abcdef.png"), b"other").unwrap();
+
+        let first = write_cover_file(&dir, "album", b"first").unwrap();
+        assert_eq!(write_cover_file(&dir, "album", b"first").unwrap(), first);
+        let second = write_cover_file(&dir, "album", b"second").unwrap();
+        assert_ne!(first, second);
+
+        let second_name = second.file_name().unwrap().to_str().unwrap().to_string();
+        assert_eq!(
+            files(),
+            [second_name, "other-0123456789abcdef.png".to_string()]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn covers_go_once_no_track_has_them() {

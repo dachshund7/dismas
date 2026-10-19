@@ -126,10 +126,8 @@ impl CoverImage {
         )
     }
 
-    // Saves the cover as PNG; the file is written under a temporary name,
-    // and renamed once it's complete, so that an interrupted write doesn't
-    // leave a partial cover behind
-    pub fn save_png(&self, path: &Path) -> Result<(), String> {
+    // The cover encoded as PNG
+    pub fn png_bytes(&self) -> Result<Vec<u8>, String> {
         let color_type = if self.has_alpha {
             image::ExtendedColorType::Rgba8
         } else {
@@ -147,7 +145,15 @@ impl CoverImage {
         )
         .map_err(|e| e.to_string())?;
 
-        glib::file_set_contents(path, data.get_ref()).map_err(|e| e.to_string())
+        Ok(data.into_inner())
+    }
+
+    // Saves the cover as PNG; the file is written under a temporary name,
+    // and renamed once it's complete, so that an interrupted write doesn't
+    // leave a partial cover behind
+    pub fn save_png(&self, path: &Path) -> Result<(), String> {
+        let data = self.png_bytes()?;
+        glib::file_set_contents(path, &data).map_err(|e| e.to_string())
     }
 
     pub fn into_texture(self) -> gdk::Texture {

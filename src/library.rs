@@ -518,8 +518,16 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
             let (id, first_track, has_row, cover) = row?;
             // Albums without cover art have no thumbnail, so we only check
             // that the thumbnails we created are still there
-            let removed = cover.is_some_and(|p| !Path::new(&p).exists());
-            if !has_row || removed || stale_albums.contains(&id) {
+            let made = cover.map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+            let removed = matches!(made, Some(None));
+            // A cover file next to the tracks can change without them: it's
+            // newer than the thumbnail, or the album had no cover before
+            let cover_file_changed = match made {
+                Some(Some(made)) => cover_file_time(&first_track).is_some_and(|t| t > made),
+                Some(None) => false,
+                None => cover_file_time(&first_track).is_some(),
+            };
+            if !has_row || removed || cover_file_changed || stale_albums.contains(&id) {
                 missing.push((id, first_track));
             }
         }
@@ -574,6 +582,15 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     }
 
     Ok(())
+}
+
+// When the newest cover file in the folder of a track was changed, if it
+// has any; the thumbnail is made from the first track of the album, which
+// takes its cover from these files when its tags have none
+fn cover_file_time(track: &Path) -> Option<std::time::SystemTime> {
+    CoverCache::cover_files(track.parent()?)
+        .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
+        .max()
 }
 
 fn create_thumbnail(track: &Path, dest: &Path) -> bool {
