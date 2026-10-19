@@ -121,6 +121,8 @@ mod imp {
         // The Music folder is being read
         #[property(get)]
         pub scanning: Cell<bool>,
+        // Bumped for each reload of the albums
+        pub reload_generation: Cell<u32>,
     }
 
     #[glib::object_subclass]
@@ -816,10 +818,31 @@ impl LibraryView {
         imp.add_albums_button.set_sensitive(can_add);
     }
 
-    // Reads the albums from the database
+    // Reads the albums from the database, in a separate thread; the albums
+    // of the last reload are shown, e.g. the one after a scan rather than
+    // the one before it, if it takes longer
     pub fn reload(&self) {
         let imp = self.imp();
-        let albums: Vec<Album> = library::albums().into_iter().map(Album::new).collect();
+        let generation = imp.reload_generation.get().wrapping_add(1);
+        imp.reload_generation.set(generation);
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = this)]
+            self,
+            async move {
+                let albums = gio::spawn_blocking(library::albums)
+                    .await
+                    .unwrap_or_default();
+                if this.imp().reload_generation.get() == generation {
+                    this.show_albums(albums);
+                }
+            }
+        ));
+    }
+
+    fn show_albums(&self, albums: Vec<library::AlbumInfo>) {
+        let imp = self.imp();
+        let albums: Vec<Album> = albums.into_iter().map(Album::new).collect();
         debug!("Library: {} albums", albums.len());
 
         // Keep the selection, minus the albums that are gone

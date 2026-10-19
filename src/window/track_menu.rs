@@ -10,23 +10,40 @@ impl Window {
         let Some(track) = row.track() else {
             return;
         };
-        let album_id = track.file().path().and_then(|p| library::track_album(&p));
 
+        // The album is looked up while the menu opens, and the item stays
+        // off for the tracks that are not in the album grid
+        let album_id: Rc<RefCell<Option<String>>> = Rc::default();
         let actions = gio::SimpleActionGroup::new();
         let go_to_album = gio::SimpleAction::new("go-to-album", None);
-        go_to_album.set_enabled(album_id.is_some());
+        go_to_album.set_enabled(false);
         go_to_album.connect_activate(clone!(
             #[weak(rename_to = win)]
             self,
             #[strong]
             track,
+            #[strong]
+            album_id,
             move |_, _| {
-                if let Some(album_id) = &album_id {
-                    win.go_to_album(album_id, &track.file());
+                let album_id = album_id.borrow().clone();
+                if let Some(album_id) = album_id {
+                    win.go_to_album(&album_id, &track.file());
                 }
             }
         ));
         actions.add_action(&go_to_album);
+        glib::spawn_future_local(clone!(
+            #[weak]
+            go_to_album,
+            #[strong]
+            track,
+            async move {
+                if let Some(id) = track_album(&track.file()).await {
+                    album_id.replace(Some(id));
+                    go_to_album.set_enabled(true);
+                }
+            }
+        ));
 
         let info = gio::SimpleAction::new("info", None);
         info.connect_activate(clone!(
@@ -73,21 +90,26 @@ impl Window {
         }
     }
 
-    fn playing_album(&self) -> Option<(String, gio::File)> {
-        let track = self.player()?.state().track()?;
-        let file = track.file();
-        let album_id = file.path().and_then(|p| library::track_album(&p))?;
+    async fn playing_album(&self) -> Option<(String, gio::File)> {
+        let file = self.player()?.state().track()?.file();
+        let album_id = track_album(&file).await?;
         Some((album_id, file))
     }
 
     pub(super) fn go_to_playing_album(&self) {
-        if let Some((album_id, file)) = self.playing_album() {
-            self.go_to_album(&album_id, &file);
-        }
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                if let Some((album_id, file)) = win.playing_album().await {
+                    win.go_to_album(&album_id, &file);
+                }
+            }
+        ));
     }
 
     // Going to the album of the playing track needs it in the album grid,
-    // which is looked up when the menu opens
+    // which is looked up when the menu opens; the item is off until then
     pub(super) fn setup_more_button(&self) {
         self.imp()
             .playback_control
@@ -96,8 +118,15 @@ impl Window {
                 #[weak(rename_to = win)]
                 self,
                 move |_| {
-                    let enabled = win.playing_album().is_some();
-                    win.action_set_enabled("win.go-to-album", enabled);
+                    win.action_set_enabled("win.go-to-album", false);
+                    glib::spawn_future_local(clone!(
+                        #[weak]
+                        win,
+                        async move {
+                            let found = win.playing_album().await.is_some();
+                            win.action_set_enabled("win.go-to-album", found);
+                        }
+                    ));
                 }
             ));
     }
@@ -208,4 +237,14 @@ impl Window {
             }
         }
     }
+}
+
+// The album of a track in the album grid; the database is read in a
+// separate thread
+async fn track_album(file: &gio::File) -> Option<String> {
+    let path = file.path()?;
+    gio::spawn_blocking(move || library::track_album(&path))
+        .await
+        .ok()
+        .flatten()
 }

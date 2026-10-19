@@ -440,29 +440,37 @@ impl AlbumTracks {
         imp.album_title.set_tooltip_text(Some(&album.title()));
         imp.album_artist.set_label(&album.artist());
 
-        let files: Vec<gio::File> = library::album_tracks(&album.id(), search_words)
-            .into_iter()
-            .map(gio::File::for_path)
-            .collect();
-        imp.files.replace(files.clone());
-
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
         tracks.remove_all();
+        imp.files.replace(Vec::new());
 
-        // Reading the tags of the tracks takes a moment, so it's done in a
-        // separate thread, and the tracks are shown as they come; showing
-        // another album stops it
+        // The files are in the database of the library, and reading the
+        // tags of the tracks takes a moment, so both are done in separate
+        // threads; the tracks are shown as they come, and showing another
+        // album stops it
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
-        let receiver = load_tracks(files);
+        let album_id = album.id();
+        let search_words = search_words.to_vec();
         let reveal = reveal.cloned();
         let mut revealed = false;
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
+                let paths =
+                    gio::spawn_blocking(move || library::album_tracks(&album_id, &search_words))
+                        .await
+                        .unwrap_or_default();
+                if this.imp().generation.get() != generation {
+                    return;
+                }
+                let files: Vec<gio::File> = paths.into_iter().map(gio::File::for_path).collect();
+                this.imp().files.replace(files.clone());
+
+                let receiver = load_tracks(files);
                 while let Ok(data) = receiver.recv().await {
                     if this.imp().generation.get() != generation {
                         return;
