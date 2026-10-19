@@ -736,13 +736,9 @@ impl Window {
                 return glib::Propagation::Proceed;
             };
             let keyval = key.keyval();
-            if key
-                .modifier_state()
-                .intersects(gtk::accelerator_get_default_mod_mask())
-            {
-                return glib::Propagation::Proceed;
-            }
 
+            // Before looking at the modifiers, as a key handled here can be
+            // released while one is held
             if event.event_type() == gdk::EventType::KeyRelease {
                 return if pressed.get() == Some(keyval) {
                     pressed.set(None);
@@ -750,6 +746,13 @@ impl Window {
                 } else {
                     glib::Propagation::Proceed
                 };
+            }
+
+            if key
+                .modifier_state()
+                .intersects(gtk::accelerator_get_default_mod_mask())
+            {
+                return glib::Propagation::Proceed;
             }
 
             let win = controller.widget().and_downcast::<Window>().unwrap();
