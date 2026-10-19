@@ -24,7 +24,7 @@ pub struct GstReplayGain {
 
 fn send_update_position(sender: &Sender<PlaybackAction>, clock: gst::ClockTime, notify: bool) {
     let pos = clock.seconds();
-    if let Err(e) = sender.send_blocking(PlaybackAction::UpdatePosition(pos, notify)) {
+    if let Err(e) = sender.try_send(PlaybackAction::UpdatePosition(pos, notify)) {
         error!("Failed to send UpdatePosition({pos}): {e}");
     }
 }
@@ -108,7 +108,7 @@ impl GstBackend {
                         warn!("GStreamer warning: {}", message.error());
                     }
                     gst_play::PlayMessage::EndOfStream(_) => {
-                        if let Err(e) = sender.send_blocking(PlaybackAction::PlayNext) {
+                        if let Err(e) = sender.try_send(PlaybackAction::PlayNext) {
                             error!("Failed to send PlayNext: {e}");
                         }
                     }
@@ -128,8 +128,7 @@ impl GstBackend {
                             gst_audio::StreamVolumeFormat::Cubic,
                             message.volume(),
                         );
-                        if let Err(e) = sender.send_blocking(PlaybackAction::VolumeChanged(volume))
-                        {
+                        if let Err(e) = sender.try_send(PlaybackAction::VolumeChanged(volume)) {
                             error!("Failed to send VolumeChanged({volume}): {e}");
                         }
                     }

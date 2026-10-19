@@ -94,8 +94,5 @@ fn main() -> glib::ExitCode {
 
     gst::init().expect("Failed to initialize gstreamer");
 
-    let ctx = glib::MainContext::default();
-    let _guard = ctx.acquire().unwrap();
-
     Application::new().run()
 }

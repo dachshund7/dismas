@@ -4,7 +4,7 @@
 use crate::audio::{PlaybackState, RepeatMode, Track};
 
 pub trait Controller {
-    fn set_playback_state(&self, state: &PlaybackState);
+    fn set_playback_state(&self, state: PlaybackState);
 
     fn set_track(&self, track: &Track);
     fn set_position(&self, position: u64, notify: bool);

@@ -288,7 +288,7 @@ pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {
     }
     debug!("Library scan: {} ms", now.elapsed().as_millis());
 
-    let _ = sender.send_blocking(ScanEvent::Finished);
+    let _ = sender.try_send(ScanEvent::Finished);
 }
 
 fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Result<()> {
@@ -410,7 +410,7 @@ fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Resu
         tx.commit()?;
 
         let done = (i * 200 + chunk.len()).min(total);
-        let _ = sender.send_blocking(ScanEvent::Progress(done, total));
+        let _ = sender.try_send(ScanEvent::Progress(done, total));
     }
 
     // Forget the files that are gone

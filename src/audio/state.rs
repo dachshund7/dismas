@@ -104,9 +104,9 @@ glib::wrapper! {
 }
 
 impl PlayerState {
-    pub fn set_playback_state(&self, playback_state: &PlaybackState) -> bool {
-        let old_state = self.imp().playback_state.replace(*playback_state);
-        if old_state != *playback_state {
+    pub fn set_playback_state(&self, playback_state: PlaybackState) -> bool {
+        let old_state = self.imp().playback_state.replace(playback_state);
+        if old_state != playback_state {
             self.notify_playing();
             return true;
         }
@@ -139,9 +139,8 @@ impl PlayerState {
         // We only care about two digits of precision, to avoid
         // notification cycles when we update the volume with a
         // similar value coming from the volume control
-        let old_rounded = format!("{old_volume:.2}");
-        let new_rounded = format!("{volume:.2}");
-        if old_rounded != new_rounded {
+        let hundredths = |volume: f64| (volume * 100.0).round();
+        if hundredths(old_volume) != hundredths(volume) {
             self.notify_volume();
         }
     }

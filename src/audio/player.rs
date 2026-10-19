@@ -178,7 +178,7 @@ impl AudioPlayer {
         ));
     }
 
-    fn process_action(&self, action: PlaybackAction) -> glib::ControlFlow {
+    fn process_action(&self, action: PlaybackAction) {
         match action {
             PlaybackAction::Play => self.set_playback_state(PlaybackState::Playing),
             PlaybackAction::Pause => self.set_playback_state(PlaybackState::Paused),
@@ -193,20 +193,17 @@ impl AudioPlayer {
             PlaybackAction::Repeat(mode) => self.update_repeat_mode(mode),
             PlaybackAction::Seek(offset) => self.seek_offset(offset),
             PlaybackAction::SeekTo(position) => self.seek_position_abs(position),
-            // _ => debug!("Received action {:?}", action),
         }
-
-        glib::ControlFlow::Continue
     }
 
     fn set_playback_state(&self, state: PlaybackState) {
         if let Some(current_track) = self.state.track() {
             debug!("Current track: {}", current_track.uri());
 
-            self.state.set_playback_state(&state);
+            self.state.set_playback_state(state);
 
             for c in &self.controllers {
-                c.set_playback_state(&state);
+                c.set_playback_state(state);
             }
 
             match state {
@@ -227,10 +224,10 @@ impl AudioPlayer {
 
                 self.backend.set_track_uri(Some(&next_track.uri()));
                 self.state.set_current_track(Some(next_track));
-                self.state.set_playback_state(&state);
+                self.state.set_playback_state(state);
 
                 for c in &self.controllers {
-                    c.set_playback_state(&state);
+                    c.set_playback_state(state);
                 }
 
                 match state {
@@ -242,10 +239,10 @@ impl AudioPlayer {
                 debug!("No tracks left");
                 self.backend.set_track_uri(None);
                 self.state.set_current_track(None);
-                self.state.set_playback_state(&PlaybackState::Stopped);
+                self.state.set_playback_state(PlaybackState::Stopped);
 
                 for c in &self.controllers {
-                    c.set_playback_state(&PlaybackState::Stopped);
+                    c.set_playback_state(PlaybackState::Stopped);
                 }
             }
         }
@@ -542,7 +539,7 @@ impl AudioPlayer {
     }
 
     fn present(&self) {
-        if let Err(e) = self.app_sender.send_blocking(ApplicationAction::Present) {
+        if let Err(e) = self.app_sender.try_send(ApplicationAction::Present) {
             error!("Unable to send Present: {e}");
         }
     }

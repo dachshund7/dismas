@@ -172,14 +172,12 @@ impl Application {
         ));
     }
 
-    fn process_action(&self, action: ApplicationAction) -> glib::ControlFlow {
+    fn process_action(&self, action: ApplicationAction) {
         match action {
             ApplicationAction::Present => {
                 self.present_main_window(true);
-            } // _ => debug!("Received action {:?}", action),
+            }
         }
-
-        glib::ControlFlow::Continue
     }
 
     // With `restore`, a new window restores the playlist of the last

@@ -120,7 +120,7 @@ impl MprisController {
 }
 
 impl Controller for MprisController {
-    fn set_playback_state(&self, state: &PlaybackState) {
+    fn set_playback_state(&self, state: PlaybackState) {
         let status = match state {
             PlaybackState::Playing => PlaybackStatus::Playing,
             PlaybackState::Paused => PlaybackStatus::Paused,
@@ -196,12 +196,12 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         move |player| {
             match player.playback_status() {
                 PlaybackStatus::Paused | PlaybackStatus::Stopped => {
-                    if let Err(e) = sender.send_blocking(PlaybackAction::Play) {
+                    if let Err(e) = sender.try_send(PlaybackAction::Play) {
                         error!("Unable to send Play: {e}");
                     }
                 }
                 PlaybackStatus::Playing => {
-                    if let Err(e) = sender.send_blocking(PlaybackAction::Pause) {
+                    if let Err(e) = sender.try_send(PlaybackAction::Pause) {
                         error!("Unable to send Pause: {e}");
                     }
                 }
@@ -213,7 +213,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         #[strong]
         sender,
         move |_| {
-            if let Err(e) = sender.send_blocking(PlaybackAction::Play) {
+            if let Err(e) = sender.try_send(PlaybackAction::Play) {
                 error!("Unable to send Play: {e}");
             }
         }
@@ -223,7 +223,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         #[strong]
         sender,
         move |_| {
-            if let Err(e) = sender.send_blocking(PlaybackAction::Stop) {
+            if let Err(e) = sender.try_send(PlaybackAction::Stop) {
                 error!("Unable to send Stop: {e}");
             }
         }
@@ -233,7 +233,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         #[strong]
         sender,
         move |_| {
-            if let Err(e) = sender.send_blocking(PlaybackAction::Pause) {
+            if let Err(e) = sender.try_send(PlaybackAction::Pause) {
                 error!("Unable to send Pause: {e}");
             }
         }
@@ -243,7 +243,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         #[strong]
         sender,
         move |_| {
-            if let Err(e) = sender.send_blocking(PlaybackAction::SkipPrevious) {
+            if let Err(e) = sender.try_send(PlaybackAction::SkipPrevious) {
                 error!("Unable to send SkipPrevious: {e}");
             }
         }
@@ -253,7 +253,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         #[strong]
         sender,
         move |_| {
-            if let Err(e) = sender.send_blocking(PlaybackAction::SkipNext) {
+            if let Err(e) = sender.try_send(PlaybackAction::SkipNext) {
                 error!("Unable to send SkipNext: {e}");
             }
         }
@@ -263,7 +263,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         #[strong]
         sender,
         move |_| {
-            if let Err(e) = sender.send_blocking(PlaybackAction::Raise) {
+            if let Err(e) = sender.try_send(PlaybackAction::Raise) {
                 error!("Unable to send Raise: {e}");
             }
         }
@@ -279,7 +279,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
                 LoopStatus::Playlist => RepeatMode::RepeatAll,
             };
 
-            if let Err(e) = sender.send_blocking(PlaybackAction::Repeat(mode)) {
+            if let Err(e) = sender.try_send(PlaybackAction::Repeat(mode)) {
                 error!("Unable to send Repeat({mode}): {e}");
             }
         }
@@ -296,7 +296,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
             }
 
             let position = position.as_secs() as u64;
-            if let Err(e) = sender.send_blocking(PlaybackAction::SeekTo(position)) {
+            if let Err(e) = sender.try_send(PlaybackAction::SeekTo(position)) {
                 error!("Unable to send SeekTo({position}): {e}");
             }
         }
@@ -307,7 +307,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         sender,
         move |_, offset| {
             let offset = offset.as_secs();
-            if let Err(e) = sender.send_blocking(PlaybackAction::Seek(offset)) {
+            if let Err(e) = sender.try_send(PlaybackAction::Seek(offset)) {
                 error!("Unable to send Seek({offset}): {e}");
             }
         }

@@ -4,7 +4,6 @@
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
-    fmt::{self, Display, Formatter},
     fs::File,
     io::BufReader,
     path::PathBuf,
@@ -1225,7 +1224,7 @@ pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Option<Trac
         for (index, data) in read_receiver {
             waiting.insert(index, data);
             while let Some(data) = waiting.remove(&next_index) {
-                if sender.send_blocking(data).is_err() {
+                if sender.try_send(data).is_err() {
                     return;
                 }
                 next_index += 1;
@@ -1551,19 +1550,6 @@ impl Track {
 impl Default for Track {
     fn default() -> Self {
         Self::empty()
-    }
-}
-
-impl Display for Track {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Track {{ uuid: {}, uri: {}, artist: '{}', title: '{}' }}",
-            self.uuid().unwrap(),
-            self.uri(),
-            self.artist(),
-            self.title()
-        )
     }
 }
 

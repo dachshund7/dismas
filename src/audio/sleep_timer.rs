@@ -116,7 +116,7 @@ impl SleepTimer {
         self.imp().source.take();
         self.imp().deadline.set(None);
         if let Some(sender) = self.imp().sender.get()
-            && let Err(e) = sender.send_blocking(PlaybackAction::SleepTimerExpired)
+            && let Err(e) = sender.try_send(PlaybackAction::SleepTimerExpired)
         {
             error!("Failed to send SleepTimerExpired: {e}");
         }

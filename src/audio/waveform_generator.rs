@@ -47,7 +47,7 @@ impl Default for WaveformGenerator {
 }
 
 impl Controller for WaveformGenerator {
-    fn set_playback_state(&self, _playback_state: &PlaybackState) {}
+    fn set_playback_state(&self, _playback_state: PlaybackState) {}
 
     fn set_track(&self, track: &Track) {
         self.imp().track.replace(Some(track.clone()));

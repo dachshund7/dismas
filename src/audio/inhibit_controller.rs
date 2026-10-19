@@ -23,7 +23,7 @@ impl InhibitController {
 }
 
 impl Controller for InhibitController {
-    fn set_playback_state(&self, playback_state: &PlaybackState) {
+    fn set_playback_state(&self, playback_state: PlaybackState) {
         let app = gio::Application::default()
             .expect("Failed to retrieve application singleton")
             .downcast::<gtk::Application>()
@@ -32,7 +32,7 @@ impl Controller for InhibitController {
             .active_window()
             .map(|win| win.downcast::<gtk::Window>().unwrap());
 
-        if playback_state == &PlaybackState::Playing {
+        if playback_state == PlaybackState::Playing {
             if self.cookie.get() == 0 {
                 let cookie = app.inhibit(
                     win.as_ref(),
