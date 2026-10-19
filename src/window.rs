@@ -615,6 +615,7 @@ impl Window {
         win.setup_sidebar_handle();
         win.setup_drop_target();
         win.setup_select_all_shortcut();
+        win.setup_play_shortcut();
         win.setup_library();
         win.setup_playlists();
         win.setup_provider();
@@ -674,6 +675,59 @@ impl Window {
                     .expect("Unable to store setting");
             })
             .build()]);
+    }
+
+    // Space toggles playback wherever the focus is, so it's caught before
+    // the focused widget, which would take it to activate itself; text
+    // entries keep it, to type spaces. Dialogs keep it too, as the window's
+    // shortcuts don't run while one is open.
+    //
+    // The release is kept from the window too, which would show the focus
+    // ring for the key, as if Space had moved the focus; and holding the
+    // key down toggles playback once, not with every repeat
+    fn setup_play_shortcut(&self) {
+        let controller = gtk::EventControllerLegacy::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pressed = Cell::new(false);
+        controller.connect_event(move |controller, event| {
+            let Some(key) = event.downcast_ref::<gdk::KeyEvent>() else {
+                return glib::Propagation::Proceed;
+            };
+            if key.keyval() != gdk::Key::space
+                || key
+                    .modifier_state()
+                    .intersects(gtk::accelerator_get_default_mod_mask())
+            {
+                return glib::Propagation::Proceed;
+            }
+
+            if event.event_type() == gdk::EventType::KeyRelease {
+                return if pressed.replace(false) {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                };
+            }
+            if pressed.get() {
+                return glib::Propagation::Stop;
+            }
+
+            let widget = controller.widget().unwrap();
+            let in_entry = widget
+                .root()
+                .and_then(|root| root.focus())
+                .is_some_and(|focus| {
+                    focus.is::<gtk::Editable>()
+                        || focus.ancestor(gtk::Editable::static_type()).is_some()
+                });
+            if !in_entry && widget.activate_action("win.play", None).is_ok() {
+                pressed.set(true);
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        self.add_controller(controller);
     }
 
     fn restore_window_state(&self) {
