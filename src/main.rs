@@ -64,7 +64,7 @@ fn main() -> glib::ExitCode {
     // can spawn threads (GStreamer, GIO, GTK) has been initialized yet
     unsafe {
         env::set_var("PULSE_PROP_application.icon_name", app_id);
-        env::set_var("PULSE_PROP_application.metadata().name", "Amberol");
+        env::set_var("PULSE_PROP_application.name", "Amberol");
         env::set_var("PULSE_PROP_media.role", "music");
     }
 
