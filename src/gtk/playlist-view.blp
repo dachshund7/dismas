@@ -54,6 +54,14 @@ template $AmberolPlaylistView: Widget {
         valign: center;
         tooltip-text: _("Select Tracks in the Queue");
       }
+
+      [end]
+      Button clear_button {
+        icon-name: "edit-clear-all-symbolic";
+        action-name: "queue.clear";
+        valign: center;
+        tooltip-text: _("Remove All Tracks");
+      }
     }
 
     [top]

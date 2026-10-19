@@ -41,7 +41,7 @@ impl Window {
                 row.connect_menu_requested(clone!(
                     #[weak]
                     win,
-                    move |row, x, y| win.show_track_menu(row, x, y, TrackMenu::Queue)
+                    move |row, x, y| win.show_track_menu(row, x, y)
                 ));
                 row.connect_select_requested(clone!(
                     #[weak]
@@ -299,6 +299,33 @@ impl Window {
                 .activate_action("list.scroll-to-item", Some(&current_idx.to_variant()))
                 .expect("Failed to activate action");
         }
+    }
+
+    // Shows the playing track in the queue, in the middle of the list,
+    // where it flashes, like going to the album of a track; a search that
+    // hides it is cleared
+    pub(super) fn show_playing_track(&self) {
+        let Some(track) = self.player().and_then(|p| p.state().track()) else {
+            return;
+        };
+        let view = self.imp().playlist_view.queue_view();
+        let position = || {
+            let model = view.model()?;
+            (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
+        };
+        let mut pos = position();
+        if pos.is_none() && self.queue_search() {
+            self.imp().playlist_view.queue_searchentry().set_text("");
+            self.set_queue_search(false);
+            pos = position();
+        }
+        let Some(pos) = pos else {
+            return;
+        };
+
+        self.show_playlist_view();
+        self.set_playlist_visible(true);
+        crate::queue_row::flash_track(&view, pos, &track);
     }
 
     // Moves a track above or below another one, dropped on its row. In

@@ -14,8 +14,6 @@ mod imp {
     pub struct PlaybackControl {
         // Template widgets
         #[template_child]
-        pub start_box: TemplateChild<gtk::Box>,
-        #[template_child]
         pub center_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub end_box: TemplateChild<gtk::Box>,
@@ -31,8 +29,6 @@ mod imp {
         pub volume_control: TemplateChild<VolumeControl>,
 
         #[template_child]
-        pub playlist_button: TemplateChild<gtk::ToggleButton>,
-        #[template_child]
         pub shuffle_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub repeat_button: TemplateChild<gtk::Button>,
@@ -46,6 +42,8 @@ mod imp {
         pub sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
         #[template_child]
         pub track_info_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub more_button: TemplateChild<gtk::MenuButton>,
     }
 
     #[glib::object_subclass]
@@ -134,6 +132,10 @@ impl PlaybackControl {
 
     pub fn track_info_button(&self) -> gtk::Button {
         self.imp().track_info_button.get()
+    }
+
+    pub fn more_button(&self) -> gtk::MenuButton {
+        self.imp().more_button.get()
     }
 
     pub fn close_sleep_timer(&self) {

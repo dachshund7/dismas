@@ -6,7 +6,7 @@ use crate::utils::ATTRIBUTE_HOST_PATH;
 
 impl Window {
     // The menu of a track, at the given point of its row
-    pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, kind: TrackMenu) {
+    pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64) {
         let Some(track) = row.track() else {
             return;
         };
@@ -38,65 +38,9 @@ impl Window {
         ));
         actions.add_action(&info);
 
-        let remove = gio::SimpleAction::new("remove", None);
-        remove.connect_activate(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[strong]
-            track,
-            move |_, _| {
-                win.remove_track(&track);
-                win.store_queue();
-            }
-        ));
-        actions.add_action(&remove);
-
-        let add = gio::SimpleAction::new("add", None);
-        // Like adding the whole album, not while tracks are being added
-        add.set_enabled(self.imp().album_tracks.adding_enabled());
-        add.connect_activate(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[strong]
-            track,
-            move |_, _| win.queue_tracks(vec![track.file()], QueueMode::Add)
-        ));
-        actions.add_action(&add);
-
-        let select = gio::SimpleAction::new("select", None);
-        select.set_enabled(match kind {
-            TrackMenu::Queue => !self.queue_selection(),
-            TrackMenu::Album => !self.imp().album_tracks.selection_mode(),
-        });
-        select.connect_activate(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[strong]
-            track,
-            move |_, _| match kind {
-                TrackMenu::Queue => win.toggle_queue_track(&track),
-                TrackMenu::Album => win.imp().album_tracks.toggle_track(&track),
-            }
-        ));
-        actions.add_action(&select);
-
         let menu = gio::Menu::new();
         menu.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
         menu.append(Some(&i18n("Track Information")), Some("track.info"));
-        menu.append(Some(&i18n("Select")), Some("track.select"));
-        let section = gio::Menu::new();
-        match kind {
-            TrackMenu::Queue => {
-                section.append(
-                    Some(&self.remove_from_playlist_label()),
-                    Some("track.remove"),
-                );
-            }
-            TrackMenu::Album => {
-                section.append(Some(&self.add_to_playlist_label()), Some("track.add"));
-            }
-        }
-        menu.append_section(None, &section);
 
         let popover = gtk::PopoverMenu::from_model(Some(&menu));
         popover.insert_action_group("track", Some(&actions));
@@ -127,6 +71,35 @@ impl Window {
                 self.clipboard().set_text(&s);
             }
         }
+    }
+
+    fn playing_album(&self) -> Option<(String, gio::File)> {
+        let track = self.player()?.state().track()?;
+        let file = track.file();
+        let album_id = file.path().and_then(|p| library::track_album(&p))?;
+        Some((album_id, file))
+    }
+
+    pub(super) fn go_to_playing_album(&self) {
+        if let Some((album_id, file)) = self.playing_album() {
+            self.go_to_album(&album_id, &file);
+        }
+    }
+
+    // Going to the album of the playing track needs it in the album grid,
+    // which is looked up when the menu opens
+    pub(super) fn setup_more_button(&self) {
+        self.imp()
+            .playback_control
+            .more_button()
+            .set_create_popup_func(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_| {
+                    let enabled = win.playing_album().is_some();
+                    win.action_set_enabled("win.go-to-album", enabled);
+                }
+            ));
     }
 
     pub(super) fn show_track_info(&self) {

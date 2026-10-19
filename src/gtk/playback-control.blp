@@ -14,6 +14,21 @@ template $AmberolPlaybackControl: Widget {
       halign: center;
       hexpand: true;
 
+      Button repeat_button {
+        icon-name: "media-playlist-consecutive-symbolic";
+        action-name: "queue.repeat-mode";
+        valign: center;
+        tooltip-text: _("Enable Repeat");
+
+        styles [
+          "circular",
+        ]
+
+        accessibility {
+          label: C_("a11y", "Repeat");
+        }
+      }
+
       Button previous_button {
         icon-name: "media-skip-backward-symbolic";
         action-name: "win.previous";
@@ -59,6 +74,21 @@ template $AmberolPlaybackControl: Widget {
           label: C_("a11y", "Skip forward");
         }
       }
+
+      ToggleButton shuffle_button {
+        icon-name: "media-playlist-shuffle-symbolic";
+        action-name: "queue.shuffle";
+        valign: center;
+        tooltip-text: _("Shuffle the Queue");
+
+        accessibility {
+          label: C_("a11y", "Shuffle");
+        }
+
+        styles [
+          "circular",
+        ]
+      }
     }
 
     $AmberolVolumeControl volume_control {
@@ -66,43 +96,6 @@ template $AmberolPlaybackControl: Widget {
     }
 
     CenterBox {
-      [start]
-      Box start_box {
-        halign: start;
-        spacing: 12;
-        margin-end: 18;
-
-        ToggleButton playlist_button {
-          icon-name: "view-queue-symbolic";
-          action-name: "queue.toggle";
-          valign: center;
-          tooltip-text: _("Toggle Playlist");
-
-          styles [
-            "circular",
-          ]
-
-          accessibility {
-            label: C_("a11y", "Toggle playlist");
-          }
-        }
-
-        ToggleButton shuffle_button {
-          icon-name: "media-playlist-shuffle-symbolic";
-          action-name: "queue.shuffle";
-          valign: center;
-          tooltip-text: _("Shuffle the Queue");
-
-          accessibility {
-            label: C_("a11y", "Shuffle");
-          }
-
-          styles [
-            "circular",
-          ]
-        }
-      }
-
       [end]
       Box end_box {
         halign: end;
@@ -124,6 +117,21 @@ template $AmberolPlaybackControl: Widget {
           }
         }
 
+        Button locate_button {
+          icon-name: "find-location-symbolic";
+          action-name: "win.show-playing-track";
+          valign: center;
+          tooltip-text: _("Show the Playing Track");
+
+          styles [
+            "circular",
+          ]
+
+          accessibility {
+            label: C_("a11y", "Show the playing track");
+          }
+        }
+
         Button track_info_button {
           icon-name: "help-about-symbolic";
           action-name: "win.track-info";
@@ -139,18 +147,18 @@ template $AmberolPlaybackControl: Widget {
           }
         }
 
-        Button repeat_button {
-          icon-name: "media-playlist-consecutive-symbolic";
-          action-name: "queue.repeat-mode";
+        MenuButton more_button {
+          icon-name: "view-more-symbolic";
+          menu-model: more_menu;
           valign: center;
-          tooltip-text: _("Enable Repeat");
+          tooltip-text: _("More Options");
 
           styles [
             "circular",
           ]
 
           accessibility {
-            label: C_("a11y", "Repeat");
+            label: C_("a11y", "More options");
           }
         }
       }
@@ -227,6 +235,25 @@ Popover sleep_timer_popover {
           "suggested-action",
         ]
       }
+    }
+  }
+}
+
+menu more_menu {
+  section {
+    item {
+      label: _("Copy");
+      action: "win.copy";
+    }
+
+    item {
+      label: _("Go to Album");
+      action: "win.go-to-album";
+    }
+
+    item {
+      label: _("Open Directory");
+      action: "win.open-directory";
     }
   }
 }

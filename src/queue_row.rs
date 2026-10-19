@@ -654,3 +654,73 @@ impl QueueRow {
         self.set_tooltip_text(Some(tooltip.as_str()).filter(|s| !s.is_empty()));
     }
 }
+
+// Scrolls a list to a track, places it in the middle of the list, if it can
+// scroll that far, and makes it flash for a moment, like its CSS
+// animation. The list was usually just shown, and can only scroll once
+// it has its size, so this waits for a frame where it has it; the row
+// of the track is then there in the next frame, to be centered
+pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) {
+    let frames = Cell::new(0);
+    view.add_tick_callback(clone!(
+        #[strong]
+        track,
+        move |view, _| {
+            if view.height() == 0 {
+                return glib::ControlFlow::Continue;
+            }
+            let frame = frames.get();
+            frames.set(frame + 1);
+            if frame == 0 {
+                view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+                return glib::ControlFlow::Continue;
+            }
+
+            // Only reads where the row is, as changing the rows of the
+            // list crashes GTK; a few frames in, it flashes anyway
+            let bounds = track_row(view, &track).and_then(|row| row.compute_bounds(view));
+            if bounds.is_none() && frame < 5 {
+                return glib::ControlFlow::Continue;
+            }
+            if let Some(bounds) = bounds
+                && let Some(adjustment) = view.vadjustment()
+            {
+                let middle = f64::from(bounds.y() + bounds.height() / 2.0);
+                adjustment.set_value(adjustment.value() + middle - f64::from(view.height()) / 2.0);
+            }
+
+            track.set_flashing(true);
+            glib::timeout_add_local_once(
+                std::time::Duration::from_millis(1200),
+                clone!(
+                    #[weak]
+                    track,
+                    move || track.set_flashing(false)
+                ),
+            );
+            glib::ControlFlow::Break
+        }
+    ));
+}
+
+// The row showing a track in a list, if it has one
+fn track_row(view: &gtk::ListView, track: &Track) -> Option<QueueRow> {
+    let mut child = view.first_child();
+    while let Some(widget) = child {
+        // The rows of the queue are in a SlideBin
+        let row = widget.first_child().and_then(|child| {
+            child
+                .clone()
+                .downcast::<QueueRow>()
+                .ok()
+                .or_else(|| child.first_child().and_downcast::<QueueRow>())
+        });
+        if let Some(row) = row
+            && row.track().as_ref() == Some(track)
+        {
+            return Some(row);
+        }
+        child = widget.next_sibling();
+    }
+    None
+}

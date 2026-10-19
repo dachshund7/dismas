@@ -3,7 +3,8 @@
 
 // The buttons that switch between the player, the album grid and the
 // playlists, in the header of each; the one of the visible page is
-// active, through the `win.page` action
+// active, through the `win.page` action. The playlist pane's toggle
+// is on their left, apart from them
 
 use adw::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib, prelude::*};

@@ -63,14 +63,6 @@ enum QueueMode {
     Play(u32),
 }
 
-// Where the menu of a track is shown
-#[derive(Clone, Copy)]
-enum TrackMenu {
-    Queue,
-    // The tracks of an album from the grid
-    Album,
-}
-
 mod imp {
     use super::*;
 
@@ -225,6 +217,14 @@ mod imp {
             klass.install_action_async("win.open-directory", None, async move |win, _, _| {
                 debug!("Window::win.open-directory()");
                 win.open_track_directory().await;
+            });
+            klass.install_action("win.show-playing-track", None, move |win, _, _| {
+                debug!("Window::win.show-playing-track()");
+                win.show_playing_track();
+            });
+            klass.install_action("win.go-to-album", None, move |win, _, _| {
+                debug!("Window::win.go-to-album()");
+                win.go_to_playing_album();
             });
             klass.install_action("queue.clear", None, move |win, _, _| {
                 debug!("Window::queue.clear()");
@@ -617,6 +617,7 @@ impl Window {
         win.setup_select_all_shortcut();
         win.setup_key_shortcuts();
         win.setup_track_info_button();
+        win.setup_more_button();
         win.setup_library();
         win.setup_playlists();
         win.setup_provider();

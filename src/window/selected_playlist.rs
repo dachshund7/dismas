@@ -54,17 +54,6 @@ impl Window {
         }
     }
 
-    pub(super) fn remove_from_playlist_label(&self) -> String {
-        let name = self.selected_playlist();
-        if name.is_empty() {
-            i18n("Remove from Queue")
-        } else {
-            // Translators: `{playlist}` must be left unmodified; it is
-            // expanded to the name of a playlist
-            i18n_k("Remove from {playlist}", &[("playlist", &name)])
-        }
-    }
-
     fn update_playlist_labels(&self) {
         let imp = self.imp();
         let name = self.selected_playlist();
