@@ -125,9 +125,15 @@ mod imp {
                 snapshot.save();
                 snapshot.scale(1.0 / scale_factor as f32, 1.0 / scale_factor as f32);
                 snapshot.translate(&graphene::Point::new(x as f32, y as f32));
+                // The small covers are drawn from a copy at their size, which
+                // needs no mipmaps; making them for each row is costly
+                let filter = match self.cover_size.get() {
+                    CoverSize::Large => gsk::ScalingFilter::Trilinear,
+                    CoverSize::Small => gsk::ScalingFilter::Linear,
+                };
                 snapshot.append_scaled_texture(
                     cover,
-                    gsk::ScalingFilter::Trilinear,
+                    filter,
                     &graphene::Rect::new(0.0, 0.0, w as f32, h as f32),
                 );
                 snapshot.restore();

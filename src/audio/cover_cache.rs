@@ -26,9 +26,16 @@ const COVER_SIZE: u32 = 192 * 2;
 // scale it down the rest of the way
 const FULL_COVER_SIZE: u32 = 1024;
 
+// The rows of the lists of tracks draw a small copy of the cover, at the
+// size of the row's cover with a scaling factor of 2. Drawing the shared
+// cover there would have the renderer scale it down with mipmaps in each
+// row, which made dragging the scrollbar of a long album stall
+const ROW_COVER_SIZE: u32 = 48 * 2;
+
 #[derive(Clone, Debug)]
 pub struct CoverArt {
     texture: gdk::Texture,
+    row_texture: gdk::Texture,
     palette: Vec<gdk::RGBA>,
     cache: Option<PathBuf>,
 }
@@ -36,6 +43,10 @@ pub struct CoverArt {
 impl CoverArt {
     pub fn texture(&self) -> &gdk::Texture {
         self.texture.as_ref()
+    }
+
+    pub fn row_texture(&self) -> &gdk::Texture {
+        self.row_texture.as_ref()
     }
 
     pub fn palette(&self) -> &Vec<gdk::RGBA> {
@@ -198,8 +209,10 @@ impl CoverCache {
                     // Cache the cover, so that the MPRIS controller can
                     // reference it later
                     let cache = cache_cover_art(&uuid, &image);
+                    let row_texture = image.thumbnail(ROW_COVER_SIZE)?.into_texture();
                     Some(CoverArt {
                         texture: image.into_texture(),
+                        row_texture,
                         palette,
                         cache,
                     })

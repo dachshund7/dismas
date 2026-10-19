@@ -257,7 +257,7 @@ impl QueueRow {
             .bind(self, "track-title", gtk::Widget::NONE);
         item.chain_property::<Track>("row-credits")
             .bind(self, "track-credits", gtk::Widget::NONE);
-        item.chain_property::<Track>("cover")
+        item.chain_property::<Track>("row-cover")
             .bind(self, "track-cover", gtk::Widget::NONE);
         item.chain_property::<Track>("playing")
             .bind(self, "playing", gtk::Widget::NONE);

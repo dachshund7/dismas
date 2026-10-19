@@ -1004,6 +1004,10 @@ impl TrackData {
         None
     }
 
+    pub fn row_cover_texture(&self) -> Option<&gdk::Texture> {
+        self.cover_art.as_ref().map(CoverArt::row_texture)
+    }
+
     pub fn cover_palette(&self) -> Option<&Vec<gdk::RGBA>> {
         if let Some(cover) = &self.cover_art {
             return Some(cover.palette());
@@ -1280,6 +1284,8 @@ mod imp {
         #[property(name = "row-credits", get = Self::row_credits, type = String)]
         #[property(name = "duration", get = Self::duration, type = u64)]
         #[property(name = "cover", get = Self::cover, nullable, type = Option<gdk::Texture>)]
+        // A small copy of the cover, for the rows of the lists
+        #[property(name = "row-cover", get = Self::row_cover, nullable, type = Option<gdk::Texture>)]
         pub data: RefCell<TrackData>,
         #[property(get, set = Self::set_playing, explicit_notify)]
         pub playing: Cell<bool>,
@@ -1425,6 +1431,10 @@ mod imp {
 
         fn cover(&self) -> Option<gdk::Texture> {
             self.data.borrow().cover_texture().cloned()
+        }
+
+        fn row_cover(&self) -> Option<gdk::Texture> {
+            self.data.borrow().row_cover_texture().cloned()
         }
 
         fn set_playing(&self, playing: bool) {

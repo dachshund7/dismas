@@ -24,6 +24,7 @@ const MAX_DIMENSIONS: (u32, u32) = (8192, 8192);
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 // The pixels of a decoded cover, with no padding between the rows
+#[derive(Clone)]
 pub struct CoverImage {
     width: u32,
     height: u32,
@@ -69,6 +70,11 @@ impl CoverImage {
             pixels,
         };
         cover.scaled(max_size)
+    }
+
+    // A copy of the cover, scaled down to fit in `max_size`
+    pub fn thumbnail(&self, max_size: u32) -> Option<Self> {
+        self.clone().scaled(max_size)
     }
 
     fn scaled(self, max_size: u32) -> Option<Self> {
