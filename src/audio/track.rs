@@ -114,6 +114,10 @@ pub struct TrackCredits {
     pub composers_from_description: bool,
     pub copyright: Vec<String>,
     pub musicbrainz: MusicBrainzIds,
+    // The MusicBrainz ids of the composers of the works the track
+    // performs, from the "Work Hierarchy" plugin; `None` if it didn't
+    // record them
+    pub composer_ids: Option<Vec<String>>,
 }
 
 // The ids of a track on MusicBrainz; they are only set if they are valid,
@@ -123,6 +127,8 @@ pub struct MusicBrainzIds {
     pub recording: Option<String>,
     pub release: Option<String>,
     pub work: Option<String>,
+    // The ids of the track artists
+    pub artists: Vec<String>,
 }
 
 impl MusicBrainzIds {
@@ -136,6 +142,10 @@ impl MusicBrainzIds {
             recording: id(ItemKey::MusicBrainzRecordingId),
             release: id(ItemKey::MusicBrainzReleaseId),
             work: id(ItemKey::MusicBrainzWorkId),
+            artists: tag_strings(tag, ItemKey::MusicBrainzArtistId)
+                .into_iter()
+                .filter(|id| is_mbid(id))
+                .collect(),
         }
     }
 }
@@ -146,6 +156,10 @@ impl TrackCredits {
     // know out of `tag`, so `extra` has the Vorbis comments we need
     fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
         let mut credits = Self::from_tag_items(tag);
+        credits.composer_ids = extra
+            .work_hierarchy
+            .as_deref()
+            .and_then(work_hierarchy_composer_ids);
         // The hierarchy has the numbers of every level, so the movement
         // includes them where they belong, and the work is always the
         // top-level one, whichever the plugin was set to tag
@@ -224,6 +238,7 @@ impl TrackCredits {
                 .map(ToString::to_string)
                 .collect(),
             musicbrainz: MusicBrainzIds::from_tag(tag),
+            composer_ids: None,
         }
     }
 
@@ -277,8 +292,8 @@ impl TrackCredits {
                 .genres
                 .iter()
                 .any(|g| g.eq_ignore_ascii_case("classical"));
-        let named = |c: &String| artist.is_some_and(|a| a.contains(c.as_str()));
-        if !classical || self.composers.is_empty() || self.composers.iter().all(named) {
+        let named = artist.is_some_and(|a| self.artist_is_composer(a));
+        if !classical || self.composers.is_empty() || named {
             return None;
         }
         Some(self.composers.join(", "))
@@ -305,8 +320,7 @@ impl TrackCredits {
     // would only clutter the row
     pub fn performers_of_composer(&self, artist: Option<&str>) -> Option<String> {
         let artist = artist?;
-        if self.composers.is_empty() || !self.composers.iter().all(|c| artist.contains(c.as_str()))
-        {
+        if self.composers.is_empty() || !self.artist_is_composer(artist) {
             return None;
         }
         if self
@@ -317,6 +331,17 @@ impl TrackCredits {
             return None;
         }
         Some(self.summary(Some(artist))).filter(|s| !s.is_empty())
+    }
+
+    // Whether the artist names every composer: going by their MusicBrainz
+    // ids if the tags have them, otherwise by their names
+    fn artist_is_composer(&self, artist: &str) -> bool {
+        match &self.composer_ids {
+            Some(ids) if !ids.is_empty() && !self.musicbrainz.artists.is_empty() => {
+                ids.iter().all(|id| self.musicbrainz.artists.contains(id))
+            }
+            _ => self.composers.iter().all(|c| names_composer(artist, c)),
+        }
     }
 
     pub fn summary(&self, artist: Option<&str>) -> String {
@@ -337,6 +362,29 @@ impl TrackCredits {
             .iter()
             .filter(|s| !s.is_empty())
             .join(" · ")
+    }
+}
+
+// Whether an artist names a composer: in full, or by the first and last
+// of three or more names, as MusicBrainz credits composers with their
+// middle names or patronymics but often not the artist, e.g. "Alexander
+// Borodin" for "Alexander Porfyrevich Borodin"; for tags without the ids
+// of the composers
+fn names_composer(artist: &str, composer: &str) -> bool {
+    artist.contains(composer) || short_name(composer).is_some_and(|s| artist.contains(&s))
+}
+
+// Whether a name is the composer's, in full or shortened
+fn is_composer(name: &str, composer: &str) -> bool {
+    name == composer || short_name(composer).as_deref() == Some(name)
+}
+
+// "Alexander Borodin" for "Alexander Porfyrevich Borodin"
+fn short_name(name: &str) -> Option<String> {
+    let words = name.split_whitespace().collect::<Vec<_>>();
+    match words[..] {
+        [first, _, .., last] => Some(format!("{first} {last}")),
+        _ => None,
     }
 }
 
@@ -673,6 +721,27 @@ fn work_hierarchy_labels(
         return None;
     }
     Some((top.name.to_string(), movement_name(&parts)))
+}
+
+// The ids of the composers of the works a track performs, the last in each
+// path of the "WORK_HIERARCHY" tag; `None` if the plugin that wrote it
+// didn't record them
+fn work_hierarchy_composer_ids(json: &str) -> Option<Vec<String>> {
+    let hierarchy = serde_json::from_str::<serde_json::Value>(json).ok()?;
+    if hierarchy["version"].as_u64() != Some(1) {
+        return None;
+    }
+    let mut ids = Vec::new();
+    for segment in hierarchy["segments"].as_array()? {
+        let work = segment["path"].as_array()?.last()?;
+        for composer in work["composers"].as_array()? {
+            let id = composer["id"].as_str().filter(|id| is_mbid(id))?;
+            if !ids.iter().any(|i| i == id) {
+                ids.push(id.to_string());
+            }
+        }
+    }
+    Some(ids)
 }
 
 // The name of a movement below the top-level work: the levels above it,
@@ -1330,7 +1399,7 @@ mod imp {
                 .iter()
                 .flat_map(|a| a.split(';'))
                 .map(str::trim)
-                .filter(|a| !a.is_empty() && !credits.composers.iter().any(|c| c == a))
+                .filter(|a| !a.is_empty() && !credits.composers.iter().any(|c| is_composer(a, c)))
                 .join("; ")
         }
 
@@ -1493,8 +1562,9 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        Credit, ExtraComments, MovementName, TrackCredits, album_title_search_text, is_numbered,
-        normalize_search_text, position_ranges, tag_search_text, work_hierarchy_labels,
+        Credit, ExtraComments, MovementName, MusicBrainzIds, TrackCredits, album_title_search_text,
+        is_numbered, normalize_search_text, position_ranges, tag_search_text,
+        work_hierarchy_composer_ids, work_hierarchy_labels,
     };
 
     #[test]
@@ -1819,6 +1889,93 @@ mod tests {
             classical.listed_composers(Some("The Beatles")).as_deref(),
             Some("John Lennon, Paul McCartney")
         );
+
+        // Nor if the artist names them without their middle names
+        let borodin = TrackCredits {
+            composers: vec!["Alexander Porfyrevich Borodin".to_string()],
+            genres: vec!["Classical".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(borodin.listed_composers(Some("Alexander Borodin")), None);
+        assert_eq!(
+            borodin
+                .listed_composers(Some("Alexander Glazunov"))
+                .as_deref(),
+            Some("Alexander Porfyrevich Borodin")
+        );
+    }
+
+    #[test]
+    fn composer_ids_are_read_from_the_performed_works() {
+        let json = serde_json::json!({
+            "version": 1,
+            "segments": [
+                { "path": [
+                    { "id": "w1", "composers": [{ "id": "aaaa", "name": "A" }] },
+                    { "id": "w2", "composers": [{ "id": "bbbb", "name": "B" }] },
+                ] },
+                { "path": [
+                    { "id": "w3", "composers": [
+                        { "id": "bbbb", "name": "B" }, { "id": "cccc", "name": "C" },
+                    ] },
+                ] },
+            ],
+        });
+        assert_eq!(
+            work_hierarchy_composer_ids(&json.to_string()),
+            Some(vec!["bbbb".to_string(), "cccc".to_string()])
+        );
+
+        // Tags written before the plugin recorded composers
+        let json = r#"{"version":1,"segments":[{"path":[{"id":"w1"}]}]}"#;
+        assert_eq!(work_hierarchy_composer_ids(json), None);
+        // Or by a lookup that failed
+        let json = r#"{"version":1,"segments":[{"path":[{"id":"w1","composers":null}]}]}"#;
+        assert_eq!(work_hierarchy_composer_ids(json), None);
+    }
+
+    #[test]
+    fn composer_ids_decide_whether_the_artist_is_the_composer() {
+        // The names alone would say the son is his father
+        let father = TrackCredits {
+            composers: vec!["Johann Strauss".to_string()],
+            genres: vec!["Classical".to_string()],
+            composer_ids: Some(vec!["1111".to_string()]),
+            musicbrainz: MusicBrainzIds {
+                artists: vec!["2222".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            father
+                .listed_composers(Some("Johann Strauss II"))
+                .as_deref(),
+            Some("Johann Strauss")
+        );
+
+        // And that the names don't match
+        let tchaikovsky = TrackCredits {
+            composers: vec!["Pyotr Ilyich Tchaikovsky".to_string()],
+            genres: vec!["Classical".to_string()],
+            performers: vec![Credit::parse("Sviatoslav Richter (piano)")],
+            composer_ids: Some(vec!["1111".to_string()]),
+            musicbrainz: MusicBrainzIds {
+                artists: vec!["1111".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            tchaikovsky.listed_composers(Some("P. I. Tchaikovsky")),
+            None
+        );
+        assert_eq!(
+            tchaikovsky
+                .performers_of_composer(Some("P. I. Tchaikovsky"))
+                .as_deref(),
+            Some("Sviatoslav Richter")
+        );
     }
 
     #[test]
@@ -1850,6 +2007,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(song.performers_of_composer(Some("Joni Mitchell")), None);
+
+        // Also when the artist leaves out the composer's patronymic
+        let trio = TrackCredits {
+            composers: vec!["Alexander Porfyrevich Borodin".to_string()],
+            performers: vec![
+                Credit::parse("Alexander Detisov (violin)"),
+                Credit::parse("Alexander Osokin (cello)"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            trio.performers_of_composer(Some("Alexander Borodin"))
+                .as_deref(),
+            Some("Alexander Detisov, Alexander Osokin")
+        );
     }
 
     #[test]
