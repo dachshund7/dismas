@@ -117,8 +117,8 @@ fn section_key(model: &gio::ListModel, position: u32) -> Option<(String, String)
 }
 
 // The headers of the sections in the queue: a line between each section,
-// followed by the name of the work for the movements of a work; a click
-// on the name calls `on_work_clicked` with the positions of the first
+// followed by the name of the work and its composer for the movements of
+// a work; a click on the name calls `on_work_clicked` with the positions of the first
 // movement and past the last one, and whether Ctrl was held. In lists
 // whose tracks can be moved, a track dropped on the header of a work at
 // the top of the list calls `on_drop_before_work` with the track and the
@@ -145,6 +145,19 @@ pub fn work_header_factory(
             .wrap_mode(gtk::pango::WrapMode::WordChar)
             .css_classes(["work-title"])
             .build();
+        // The rows of movements below parts of the work show the parts in
+        // place of the composer, so the composer is shown here
+        let composer_label = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .css_classes(["work-composer", "caption", "dim-label"])
+            .build();
+        let title = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
+        title.append(&work_label);
+        title.append(&composer_label);
 
         // Headers are reused for other sections, so the positions are
         // only read on click
@@ -162,7 +175,7 @@ pub fn work_header_factory(
                 on_work_clicked(header.start(), header.end(), ctrl);
             }
         ));
-        work_label.add_controller(click);
+        title.add_controller(click);
 
         // A click selects the work only in selection mode, so that's when
         // the title shows it can be clicked
@@ -174,13 +187,13 @@ pub fn work_header_factory(
                 .is_some_and(|list| list.has_css_class("selecting"));
             label.set_cursor_from_name(selecting.then_some("pointer"));
         });
-        work_label.add_controller(motion);
+        title.add_controller(motion);
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .build();
         content.append(&separator);
-        content.append(&work_label);
+        content.append(&title);
 
         if let Some(on_drop_before_work) = &on_drop_before_work {
             let drop_target = gtk::DropTarget::new(Track::static_type(), gdk::DragAction::MOVE);
@@ -237,19 +250,21 @@ pub fn work_header_factory(
             return;
         };
         let separator = content.first_child().unwrap();
-        let work_label = content.last_child().and_downcast::<gtk::Label>().unwrap();
+        let title = content.last_child().unwrap();
+        let work_label = title.first_child().and_downcast::<gtk::Label>().unwrap();
+        let composer_label = title.last_child().and_downcast::<gtk::Label>().unwrap();
 
         // Nothing to separate at the top of the queue
         separator.set_visible(header.start() > 0);
 
-        let work = header
-            .item()
-            .and_downcast::<Track>()
-            .and_then(|t| t.movement_work());
-        work_label.set_visible(work.is_some());
+        let track = header.item().and_downcast::<Track>();
+        let work = track.as_ref().and_then(Track::movement_work);
+        title.set_visible(work.is_some());
         work_label.set_label(work.as_deref().unwrap_or_default());
+        let composer = track.filter(|_| work.is_some()).map(|t| t.composer());
+        composer_label.set_label(composer.as_deref().unwrap_or_default());
 
-        content.set_visible(separator.is_visible() || work_label.is_visible());
+        content.set_visible(separator.is_visible() || title.is_visible());
     });
 
     factory.upcast()

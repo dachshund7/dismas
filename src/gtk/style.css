@@ -316,7 +316,11 @@ listview.navigation-sidebar > header separator.work-separator {
 
 listview.navigation-sidebar > header label.work-title {
   font-weight: 800;
-  margin: 6px 12px 2px 12px;
+  margin: 6px 12px 0 12px;
+}
+
+listview.navigation-sidebar > header label.work-composer {
+  margin: 0 12px 2px 12px;
 }
 
 /* Less padding at the top, where the search bar already leaves some space */

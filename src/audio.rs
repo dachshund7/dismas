@@ -69,6 +69,6 @@ pub use sleep_timer::SleepTimer;
 pub use state::PlayerState;
 pub use track::{
     FileDetails, MusicBrainzIds, Track, TrackCredits, load_tracks, normalize_search_text,
-    tag_search_text,
+    plain_commas, tag_search_text,
 };
 pub use waveform_generator::WaveformGenerator;

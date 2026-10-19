@@ -32,7 +32,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    audio::{CoverCache, normalize_search_text, tag_search_text},
+    audio::{CoverCache, normalize_search_text, plain_commas, tag_search_text},
     cover_image::CoverImage,
     i18n::i18n,
     utils,
@@ -659,8 +659,9 @@ impl TrackTags {
         TrackTags {
             album_id,
             album,
-            album_artist,
-            artist,
+            // After the id, which must not change
+            album_artist: album_artist.as_deref().map(plain_commas),
+            artist: artist.as_deref().map(plain_commas),
             artist_sort,
             year,
             disc: tag.disk(),

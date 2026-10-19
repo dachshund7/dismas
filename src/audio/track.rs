@@ -71,6 +71,11 @@ pub struct TrackCredits {
     pub work: Option<String>,
     pub movement: Option<String>,
     pub movement_number: Option<String>,
+    // The levels of the work above the movement, and the movement, when
+    // the movement is part of a part of the work, e.g. "Book I: Prelude
+    // and Fugue no. 1 in C major" and "1. Prelude"; the queue shows them
+    // on separate lines, as the movement would be cut off
+    pub movement_levels: Option<(String, String)>,
     pub composers: Vec<String>,
     pub lyricists: Vec<String>,
     pub arrangers: Vec<String>,
@@ -104,6 +109,9 @@ pub struct TrackCredits {
     pub barcodes: Vec<String>,
     pub isrcs: Vec<String>,
     pub genres: Vec<String>,
+    // Whether the composers come from the description that YouTube
+    // generated, rather than from the tags
+    pub composers_from_description: bool,
     pub copyright: Vec<String>,
     pub musicbrainz: MusicBrainzIds,
 }
@@ -135,11 +143,26 @@ impl MusicBrainzIds {
 impl TrackCredits {
     // The credits in the tags, filled in from the description that YouTube
     // generated, if the track has one; lofty leaves the tags it doesn't
-    // know out of `tag`, so `synopsis` is the "SYNOPSIS" Vorbis comment
-    fn from_tag(tag: &Tag, synopsis: Option<&str>) -> Self {
+    // know out of `tag`, so `extra` has the Vorbis comments we need
+    fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
         let mut credits = Self::from_tag_items(tag);
+        // The hierarchy has the numbers of every level, so the movement
+        // includes them where they belong, and the work is always the
+        // top-level one, whichever the plugin was set to tag
+        if let Some((work, movement)) = extra
+            .work_hierarchy
+            .as_deref()
+            .and_then(|json| work_hierarchy_labels(json, credits.movement_number.as_deref()))
+        {
+            credits.work = Some(work);
+            credits.movement = Some(movement.full());
+            credits.movement_number = None;
+            credits.movement_levels = movement.levels.map(|levels| (levels, movement.movement));
+        }
 
-        let description = synopsis
+        let description = extra
+            .synopsis
+            .as_deref()
             .into_iter()
             .chain(tag.get_strings(ItemKey::Description))
             .chain(tag.get_strings(ItemKey::Comment))
@@ -158,6 +181,7 @@ impl TrackCredits {
             movement_number: tag
                 .get_string(ItemKey::MovementNumber)
                 .map(ToString::to_string),
+            movement_levels: None,
             composers: tag_strings(tag, ItemKey::Composer),
             lyricists: tag_strings(tag, ItemKey::Lyricist),
             arrangers: tag_strings(tag, ItemKey::Arranger),
@@ -172,9 +196,7 @@ impl TrackCredits {
             remixers: tag_strings(tag, ItemKey::Remixer),
             dj_mixers: tag_strings(tag, ItemKey::MixDj),
             other_production: Vec::new(),
-            album_artist: tag
-                .get_string(ItemKey::AlbumArtist)
-                .map(ToString::to_string),
+            album_artist: tag.get_string(ItemKey::AlbumArtist).map(plain_commas),
             disc_number: tag.disk(),
             disc_total: tag.disk_total(),
             disc_subtitle: tag
@@ -202,6 +224,7 @@ impl TrackCredits {
             barcodes: tag_strings(tag, ItemKey::Barcode),
             isrcs: tag_strings(tag, ItemKey::Isrc),
             genres: tag_strings(tag, ItemKey::Genre),
+            composers_from_description: false,
             copyright: tag
                 .get_strings(ItemKey::CopyrightMessage)
                 .map(ToString::to_string)
@@ -218,6 +241,8 @@ impl TrackCredits {
             }
         }
 
+        self.composers_from_description =
+            self.composers.is_empty() && !description.composers.is_empty();
         fill(&mut self.composers, description.composers);
         fill(&mut self.lyricists, description.lyricists);
         fill(&mut self.arrangers, description.arrangers);
@@ -246,11 +271,30 @@ impl TrackCredits {
         }
     }
 
+    // The composers to show in the queue for a track that is not part of
+    // a larger work, unless the artist already names them; only for
+    // classical music, as for popular music they are the songwriters.
+    // Most classical tracks from YouTube have no genre, but their
+    // descriptions credit composers, while the tags of popular music
+    // often do
+    pub fn listed_composers(&self, artist: Option<&str>) -> Option<String> {
+        let classical = self.composers_from_description
+            || self
+                .genres
+                .iter()
+                .any(|g| g.eq_ignore_ascii_case("classical"));
+        let named = |c: &String| artist.is_some_and(|a| a.contains(c.as_str()));
+        if !classical || self.composers.is_empty() || self.composers.iter().all(named) {
+            return None;
+        }
+        Some(self.composers.join(", "))
+    }
+
     // A single line with the conductors and performers, skipping the
     // names that are already displayed as the artist
     // The movement, with its number if any, e.g. "2. Adagio"; only set if
-    // the track is part of a larger work, as tagged by the "Work & Movement"
-    // option of MusicBrainz Picard
+    // the track is part of a larger work, as tagged by MusicBrainz Picard's
+    // "Work & Movement" or "Work Hierarchy" plugins
     pub fn movement_label(&self) -> Option<String> {
         self.work.as_ref()?;
         let movement = self.movement.as_deref()?;
@@ -433,20 +477,34 @@ fn album_artist_search_text(tag: &Tag, album_artist: &str) -> String {
     text
 }
 
-// Reads a file, and the "SYNOPSIS" Vorbis comment if it has one, which
-// lofty leaves out of the tags of the `TaggedFile`
+// The Vorbis comments that lofty leaves out of the tags of the
+// `TaggedFile`, as it has no `ItemKey` for them
+#[derive(Debug, Default)]
+struct ExtraComments {
+    synopsis: Option<String>,
+    // The JSON written by the "Work Hierarchy" plugin of MusicBrainz Picard
+    work_hierarchy: Option<String>,
+}
+
+// Reads a file, and the Vorbis comments in `ExtraComments` if it has them
 fn read_tagged_file(
     probe: Probe<BufReader<File>>,
-) -> lofty::error::Result<(TaggedFile, Option<String>)> {
+) -> lofty::error::Result<(TaggedFile, ExtraComments)> {
     fn read<F: AudioFile + Into<TaggedFile>>(
         probe: Probe<BufReader<File>>,
         comments: fn(&F) -> Option<&VorbisComments>,
-    ) -> lofty::error::Result<(TaggedFile, Option<String>)> {
+    ) -> lofty::error::Result<(TaggedFile, ExtraComments)> {
         let file = F::read_from(&mut probe.into_inner(), ParseOptions::new())?;
-        let synopsis = comments(&file)
-            .and_then(|c| c.get("SYNOPSIS"))
-            .map(ToString::to_string);
-        Ok((file.into(), synopsis))
+        let get = |key| {
+            comments(&file)
+                .and_then(|c| c.get(key))
+                .map(ToString::to_string)
+        };
+        let extra = ExtraComments {
+            synopsis: get("SYNOPSIS"),
+            work_hierarchy: get("WORK_HIERARCHY"),
+        };
+        Ok((file.into(), extra))
     }
 
     match probe.file_type() {
@@ -454,8 +512,228 @@ fn read_tagged_file(
         Some(FileType::Vorbis) => read(probe, |f: &VorbisFile| Some(f.vorbis_comments())),
         Some(FileType::Speex) => read(probe, |f: &SpeexFile| Some(f.vorbis_comments())),
         Some(FileType::Flac) => read(probe, FlacFile::vorbis_comments),
-        _ => probe.read().map(|f| (f, None)),
+        _ => probe.read().map(|f| (f, ExtraComments::default())),
     }
+}
+
+// A work in a path of the "WORK_HIERARCHY" tag, from the top-level work
+// down to the one the track performs
+struct PathWork<'a> {
+    id: &'a str,
+    // The full title, e.g. "Ouvertüre nach französischer Art h-Moll, BWV
+    // 831: V. Passepied I"
+    title: &'a str,
+    // The title without the parent's, or a number matching the position,
+    // e.g. "Passepied I"
+    name: &'a str,
+    // The position in the parent work, if MusicBrainz has one
+    position: Option<u32>,
+}
+
+impl PathWork<'_> {
+    // The name with the position in front, unless the name has its own
+    // number, which is the one people know: "no. 22. Chorus" is the
+    // first number of Part II of Messiah
+    fn numbered_name(&self) -> String {
+        match self.position {
+            Some(p) if !is_numbered(self.name) => format!("{p}. {}", self.name),
+            _ => self.name.to_string(),
+        }
+    }
+
+    // The name of a level above the movement, with the number that the
+    // plugin removed from the title put back, e.g. "III. Sequentia"
+    fn level_name(&self) -> String {
+        let number = self
+            .title
+            .strip_suffix(self.name)
+            .and_then(|prefix| prefix.strip_suffix(". "))
+            .and_then(|prefix| prefix.rsplit([' ', ':']).next())
+            .filter(|n| is_numbered(&format!("{n}. ")));
+        match number {
+            Some(n) => format!("{n}. {}", self.name),
+            None => self.name.to_string(),
+        }
+    }
+}
+
+// The work and the movement to display, from the JSON written by the
+// "Work Hierarchy" plugin of MusicBrainz Picard; the movement names the
+// levels below the work. MusicBrainz doesn't always have the position of
+// a movement, so `movement_number`, the number in the tags, is used for
+// it. Returns `None` if the tags should be used instead: if the track
+// performs parts of different works, or a work without parts, which may
+// still be a movement in the tags if MusicBrainz didn't link it to its
+// parent work
+fn work_hierarchy_labels(
+    json: &str,
+    movement_number: Option<&str>,
+) -> Option<(String, MovementName)> {
+    let hierarchy = match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(h) => h,
+        Err(e) => {
+            warn!("Invalid WORK_HIERARCHY tag: {e}");
+            return None;
+        }
+    };
+    if hierarchy["version"].as_u64() != Some(1) {
+        return None;
+    }
+
+    let mut paths = hierarchy["segments"]
+        .as_array()?
+        .iter()
+        .map(|segment| {
+            segment["path"]
+                .as_array()?
+                .iter()
+                .map(|work| {
+                    Some(PathWork {
+                        id: work["id"].as_str()?,
+                        title: work["title"].as_str()?,
+                        name: work["name"].as_str()?,
+                        position: work["position"]
+                            .as_u64()
+                            .and_then(|p| u32::try_from(p).ok()),
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .filter(|path| !path.is_empty())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    if let [path] = &mut paths[..]
+        && let [_, .., movement] = &mut path[..]
+        && movement.position.is_none()
+    {
+        movement.position = movement_number.and_then(|n| n.trim().parse().ok());
+    }
+
+    let top = paths.first()?.first()?;
+    if paths.iter().any(|path| path[0].id != top.id) {
+        return None;
+    }
+
+    let parts = paths
+        .iter()
+        .map(|path| &path[1..])
+        .filter(|parts| !parts.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    Some((top.name.to_string(), movement_name(&parts)))
+}
+
+// The name of a movement below the top-level work: the levels above it,
+// if any, e.g. "Part II", and the movement, e.g. "no. 22. Chorus"
+#[derive(Debug, PartialEq)]
+struct MovementName {
+    levels: Option<String>,
+    movement: String,
+}
+
+impl MovementName {
+    fn full(&self) -> String {
+        match &self.levels {
+            Some(levels) => format!("{levels}: {}", self.movement),
+            None => self.movement.clone(),
+        }
+    }
+}
+
+// The name of the movements, from the levels below the top-level work of
+// each; the levels they share are named once, and the movements of the
+// same part are numbered together, e.g. "Atto IV: 1, 4. “Era più calmo?”
+// / “Ave Maria”"
+fn movement_name(parts: &[&[PathWork]]) -> MovementName {
+    let first = parts[0];
+    let shared = (0..first.len() - 1)
+        .take_while(|&i| {
+            parts
+                .iter()
+                .all(|p| i + 1 < p.len() && p[i].id == first[i].id)
+        })
+        .count();
+    let rest = parts.iter().map(|p| &p[shared..]).collect::<Vec<_>>();
+
+    let movements = if rest.iter().all(|p| p.len() == 1) {
+        let works = rest.iter().map(|p| &p[0]).collect::<Vec<_>>();
+        let names = works.iter().map(|w| w.name).join(" / ");
+        let positions = works.iter().map(|w| w.position).collect::<Option<Vec<_>>>();
+        match positions {
+            Some(p) if !works.iter().any(|w| is_numbered(w.name)) => {
+                format!("{}. {names}", position_ranges(&p))
+            }
+            _ => names,
+        }
+    } else {
+        rest.iter()
+            .map(|p| {
+                let (last, above) = p.split_last().expect("parts are not empty");
+                above
+                    .iter()
+                    .map(PathWork::level_name)
+                    .chain([last.numbered_name()])
+                    .join(": ")
+            })
+            .join(" / ")
+    };
+
+    MovementName {
+        levels: (shared > 0).then(|| first[..shared].iter().map(PathWork::level_name).join(": ")),
+        movement: movements,
+    }
+}
+
+// Whether a name starts with a number, e.g. "no. 22. Chorus", "Nr. 3.
+// Tragödie", "LXVII. Diffusa est", "1a. Introduction", "16: Minuet" or
+// "b. Benedictus"
+fn is_numbered(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    let after_no = ["no.", "no ", "nr.", "nr ", "nº", "n°", "№"]
+        .iter()
+        .find_map(|prefix| lower.strip_prefix(prefix));
+    if let Some(rest) = after_no {
+        return rest.trim_start().starts_with(|c: char| c.is_ascii_digit());
+    }
+
+    let end = name
+        .find(|c: char| !c.is_alphanumeric())
+        .unwrap_or(name.len());
+    let (token, after) = name.split_at(end);
+    let digits = token.trim_end_matches(|c: char| c.is_ascii_lowercase());
+    if !digits.is_empty()
+        && digits.chars().all(|c| c.is_ascii_digit())
+        && token.len() - digits.len() <= 1
+    {
+        return after.starts_with(['.', ')', ':']);
+    }
+    let roman = !token.is_empty() && token.chars().all(|c| "IVXLC".contains(c));
+    let letter = token.len() == 1 && token.chars().all(|c| c.is_ascii_lowercase());
+    (roman || letter) && after.starts_with(['.', ')'])
+}
+
+// The positions as a list where consecutive ones are joined into a range,
+// e.g. "5–6" or "1–3, 5"
+fn position_ranges(positions: &[u32]) -> String {
+    let mut ranges: Vec<(u32, u32)> = Vec::new();
+    for &p in positions {
+        match ranges.last_mut() {
+            Some((_, end)) if p == *end + 1 => *end = p,
+            _ => ranges.push((p, p)),
+        }
+    }
+
+    ranges
+        .iter()
+        .map(|&(start, end)| {
+            if start == end {
+                start.to_string()
+            } else {
+                format!("{start}–{end}")
+            }
+        })
+        .join(", ")
 }
 
 // yt-dlp stores the date of the upload as "YYYYMMDD", which is not when
@@ -467,7 +745,15 @@ fn is_upload_date(date: &str) -> bool {
 // The artists of a track, if the tags name any
 fn track_artist(tag: &Tag) -> Option<String> {
     let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");
-    (!artists.is_empty()).then_some(artists)
+    (!artists.is_empty()).then(|| plain_commas(&artists))
+}
+
+// Replaces the full-width commas in a name with plain ones: tracks
+// downloaded from YouTube separate their artists with commas, and use
+// full-width ones for the commas within a name, e.g. "Orquesta del Teatro
+// Real， Madrid", which look like large gaps
+pub fn plain_commas(name: &str) -> String {
+    name.replace('，', ",")
 }
 
 // All the values for a key, including the ones that were stored as a
@@ -640,7 +926,7 @@ impl TrackData {
             }
         };
 
-        let (tagged_file, synopsis) = match file_probe.guess_file_type() {
+        let (tagged_file, extra) = match file_probe.guess_file_type() {
             Ok(t) => match read_tagged_file(t) {
                 Ok(f) => f,
                 Err(e) => {
@@ -667,7 +953,7 @@ impl TrackData {
             artist = track_artist(tag);
             title = tag.title().map(|s| s.to_string());
             album = tag.album().map(|s| s.to_string());
-            credits = TrackCredits::from_tag(tag, synopsis.as_deref());
+            credits = TrackCredits::from_tag(tag, &extra);
             replay_gain = ReplayGain::from_tag(tag);
             tag_text = tag_search_text(tag);
             if let Some(res) = CoverCache::cover_art(&path, tag) {
@@ -683,7 +969,7 @@ impl TrackData {
                 artist = artist.or_else(|| track_artist(tag));
                 title = title.or_else(|| tag.title().map(|s| s.to_string()));
                 album = album.or_else(|| tag.album().map(|s| s.to_string()));
-                credits = TrackCredits::from_tag(tag, synopsis.as_deref());
+                credits = TrackCredits::from_tag(tag, &extra);
                 replay_gain = ReplayGain::from_tag(tag);
                 tag_text = tag_search_text(tag);
                 if let Some(res) = CoverCache::cover_art(&path, tag) {
@@ -862,10 +1148,16 @@ mod imp {
         // The movement of a larger work, if the track is one
         #[property(name = "movement", get = Self::movement, nullable, type = Option<String>)]
         // The lines in the queue: for movements, the movement and the
-        // composer, as the work is in the header of their section; otherwise
-        // the title and the artist
+        // levels of the work above it, or the performers, as the work and
+        // composer are in the header of their section; otherwise the title
+        // and the artist
         #[property(name = "row-title", get = Self::row_title, type = String)]
         #[property(name = "row-subtitle", get = Self::row_subtitle, type = String)]
+        // A third line, for movements whose second line is the levels of
+        // the work above them, with the performers, and for classical
+        // tracks that are not movements, whose second line is the
+        // composer, with the artist; empty otherwise
+        #[property(name = "row-credits", get = Self::row_credits, type = String)]
         #[property(name = "duration", get = Self::duration, type = u64)]
         #[property(name = "cover", get = Self::cover, nullable, type = Option<gdk::Texture>)]
         pub data: RefCell<TrackData>,
@@ -931,14 +1223,62 @@ mod imp {
         }
 
         fn row_title(&self) -> String {
-            self.movement().unwrap_or_else(|| self.title())
+            match self.movement_levels() {
+                Some((_, movement)) => movement,
+                None => self.movement().unwrap_or_else(|| self.title()),
+            }
         }
 
         fn row_subtitle(&self) -> String {
-            match self.movement() {
-                Some(_) => self.composer(),
-                None => self.artist(),
+            match (self.movement_levels(), self.movement()) {
+                (Some((levels, _)), _) => levels,
+                // The artist of classical releases is often the composer
+                (None, Some(_)) => Some(self.performers())
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or_else(|| self.artist()),
+                (None, None) => self.listed_composers().unwrap_or_else(|| self.artist()),
             }
+        }
+
+        fn row_credits(&self) -> String {
+            if self.movement_levels().is_some() {
+                self.performers()
+            } else if self.movement().is_none() && self.listed_composers().is_some() {
+                self.artist()
+            } else {
+                String::new()
+            }
+        }
+
+        fn listed_composers(&self) -> Option<String> {
+            let data = self.data.borrow();
+            data.credits().listed_composers(data.artist())
+        }
+
+        // The conductors and performers, or if the tags don't have them,
+        // the album artists that are not composers, e.g. "Irish Baroque
+        // Orchestra, Peter Whelan" for "George Frideric Handel; Irish
+        // Baroque Orchestra, Peter Whelan"
+        fn performers(&self) -> String {
+            let credits = self.credits();
+            if !credits.is_empty() {
+                return credits;
+            }
+            let data = self.data.borrow();
+            let credits = data.credits();
+            credits
+                .album_artist
+                .iter()
+                .flat_map(|a| a.split(';'))
+                .map(str::trim)
+                .filter(|a| !a.is_empty() && !credits.composers.iter().any(|c| c == a))
+                .join("; ")
+        }
+
+        // The levels of the work above the movement, and the movement
+        pub(super) fn movement_levels(&self) -> Option<(String, String)> {
+            self.movement()?;
+            self.data.borrow().credits().movement_levels.clone()
         }
 
         // The composers, or the artist if the track has no composer
@@ -1033,6 +1373,12 @@ impl Track {
         self.imp().movement_work()
     }
 
+    // The levels of the work above the movement, and the movement, if the
+    // queue shows them on separate lines
+    pub fn movement_levels(&self) -> Option<(String, String)> {
+        self.imp().movement_levels()
+    }
+
     // The composers, or the artist if the track has no composer
     pub fn composer(&self) -> String {
         self.imp().composer()
@@ -1079,7 +1425,10 @@ impl Display for Track {
 
 #[cfg(test)]
 mod tests {
-    use super::{TrackCredits, album_title_search_text, normalize_search_text};
+    use super::{
+        MovementName, TrackCredits, album_title_search_text, is_numbered, normalize_search_text,
+        position_ranges, work_hierarchy_labels,
+    };
 
     fn dates(date: Option<&str>, original_date: Option<&str>) -> TrackCredits {
         TrackCredits {
@@ -1087,6 +1436,308 @@ mod tests {
             original_date: original_date.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    type Work<'a> = (&'a str, &'a str, Option<u32>);
+
+    // A "WORK_HIERARCHY" tag with a segment for each path, given as the
+    // id, name and position of each work
+    fn hierarchy(paths: &[&[Work]]) -> String {
+        let segments = paths
+            .iter()
+            .map(|path| {
+                let path = path
+                    .iter()
+                    .map(|(id, name, position)| {
+                        serde_json::json!({
+                            "id": id, "title": name, "name": name, "position": position,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                serde_json::json!({ "path": path, "attributes": [] })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({ "version": 1, "segments": segments }).to_string()
+    }
+
+    fn labels(paths: &[&[Work]]) -> Option<(String, String)> {
+        work_hierarchy_labels(&hierarchy(paths), None).map(|(work, m)| (work, m.full()))
+    }
+
+    fn movement(paths: &[&[Work]]) -> Option<String> {
+        labels(paths).map(|(_, movement)| movement)
+    }
+
+    const SUITE: Work = ("bwv831", "Ouvertüre, BWV 831", None);
+    const MESSIAH: Work = ("messiah", "Messiah, HWV 56", None);
+
+    #[test]
+    fn work_hierarchy_numbers_the_movements() {
+        assert_eq!(
+            labels(&[&[SUITE, ("v", "Passepied I", Some(5))]]),
+            Some((
+                "Ouvertüre, BWV 831".to_string(),
+                "5. Passepied I".to_string()
+            ))
+        );
+        assert_eq!(
+            movement(&[
+                &[SUITE, ("v", "Passepied I", Some(5))],
+                &[SUITE, ("vi", "Passepied II", Some(6))],
+            ])
+            .as_deref(),
+            Some("5–6. Passepied I / Passepied II")
+        );
+    }
+
+    #[test]
+    fn work_hierarchy_falls_back_on_the_movement_tag() {
+        let concerto = ("op68", "Violin Concerto in D major, op. 68", None);
+        let json = hierarchy(&[&[concerto, ("ii", "Andante", None)]]);
+        assert_eq!(
+            work_hierarchy_labels(&json, Some("2"))
+                .map(|(_, m)| m.full())
+                .as_deref(),
+            Some("2. Andante")
+        );
+        assert_eq!(
+            work_hierarchy_labels(&json, None)
+                .map(|(_, m)| m.full())
+                .as_deref(),
+            Some("Andante")
+        );
+        // MusicBrainz's position is preferred
+        let json = hierarchy(&[&[concerto, ("ii", "Andante", Some(3))]]);
+        assert_eq!(
+            work_hierarchy_labels(&json, Some("2"))
+                .map(|(_, m)| m.full())
+                .as_deref(),
+            Some("3. Andante")
+        );
+    }
+
+    #[test]
+    fn work_hierarchy_puts_back_the_numbers_of_levels() {
+        let json = r#"{"version":1,"segments":[{"path":[
+            {"id":"r","title":"Requiem, op. 89","name":"Requiem, op. 89","position":null},
+            {"id":"1","title":"Requiem, op. 89: I. oddíl","name":"oddíl","position":1},
+            {"id":"3","title":"Requiem, op. 89: I. oddíl: III. Sequentia","name":"Sequentia","position":3},
+            {"id":"q","title":"Requiem, op. 89: I. oddíl: III. Sequentia: Quid sum miser","name":"Quid sum miser","position":3}
+        ]}]}"#;
+        assert_eq!(
+            work_hierarchy_labels(json, None)
+                .map(|(_, m)| m.full())
+                .as_deref(),
+            Some("I. oddíl: III. Sequentia: 3. Quid sum miser")
+        );
+    }
+
+    #[test]
+    fn work_hierarchy_numbers_the_lowest_level() {
+        let wtc = ("wtc", "The Well-Tempered Clavier", None);
+        let book = ("book1", "Book I", Some(1));
+        let pf = (
+            "pf12",
+            "Prelude and Fugue no. 12 in F minor, BWV 857",
+            Some(12),
+        );
+        assert_eq!(
+            movement(&[&[wtc, book, pf, ("p", "Prelude", Some(1))]]).as_deref(),
+            Some("Book I: Prelude and Fugue no. 12 in F minor, BWV 857: 1. Prelude")
+        );
+
+        // The levels in common are only named once
+        let otello = ("otello", "Otello", None);
+        let act = ("act4", "Atto IV", Some(5));
+        assert_eq!(
+            movement(&[
+                &[otello, act, ("a", "“Era più calmo?”", Some(1))],
+                &[otello, act, ("b", "“Ave Maria”", Some(4))],
+            ])
+            .as_deref(),
+            Some("Atto IV: 1, 4. “Era più calmo?” / “Ave Maria”")
+        );
+        let opera = ("opera", "Opera", None);
+        assert_eq!(
+            movement(&[
+                &[opera, ("act1", "Act I", Some(1)), ("f", "Finale", Some(9))],
+                &[
+                    opera,
+                    ("act2", "Act II", Some(2)),
+                    ("i", "Introduction", Some(1))
+                ],
+            ])
+            .as_deref(),
+            Some("Act I: 9. Finale / Act II: 1. Introduction")
+        );
+    }
+
+    #[test]
+    fn work_hierarchy_separates_the_levels_above_the_movement() {
+        let name = |paths: &[&[Work]]| work_hierarchy_labels(&hierarchy(paths), None).unwrap().1;
+        let wtc = ("wtc", "The Well-Tempered Clavier", None);
+        let book = ("book1", "Book I", Some(1));
+        let pf = ("pf1", "Prelude and Fugue no. 1", Some(1));
+        assert_eq!(
+            name(&[&[wtc, book, pf, ("p", "Prelude", Some(1))]]),
+            MovementName {
+                levels: Some("Book I: Prelude and Fugue no. 1".to_string()),
+                movement: "1. Prelude".to_string(),
+            }
+        );
+        assert_eq!(
+            name(&[&[SUITE, ("v", "Passepied I", Some(5))]]),
+            MovementName {
+                levels: None,
+                movement: "5. Passepied I".to_string(),
+            }
+        );
+        // Only the levels in common are above the movements
+        let opera = ("opera", "Opera", None);
+        assert_eq!(
+            name(&[
+                &[opera, ("act1", "Act I", Some(1)), ("f", "Finale", Some(9))],
+                &[
+                    opera,
+                    ("act2", "Act II", Some(2)),
+                    ("i", "Introduction", Some(1))
+                ],
+            ]),
+            MovementName {
+                levels: None,
+                movement: "Act I: 9. Finale / Act II: 1. Introduction".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn work_hierarchy_keeps_the_numbers_in_names() {
+        let part = ("part2", "Part II", Some(2));
+        let chorus = ("22", "no. 22. Chorus “Behold the Lamb of God”", Some(1));
+        assert_eq!(
+            movement(&[&[MESSIAH, part, chorus]]).as_deref(),
+            Some("Part II: no. 22. Chorus “Behold the Lamb of God”")
+        );
+        // Without a position, there is no number
+        assert_eq!(
+            movement(&[&[MESSIAH, part, ("x", "Chorus", None)]]).as_deref(),
+            Some("Part II: Chorus")
+        );
+    }
+
+    #[test]
+    fn work_hierarchy_is_ignored_when_it_does_not_fit() {
+        // Parts of different works, e.g. the same movement in two
+        // catalogues
+        assert_eq!(
+            labels(&[
+                &[("t1", "Mass, T 1", None), ("a", "Benedictus", Some(5))],
+                &[("p31", "Mass, P. 31", None), ("b", "Benedictus", Some(4))],
+            ]),
+            None
+        );
+        // A work without parts, as the tags may know its parent work
+        assert_eq!(labels(&[&[("song", "Song", None)]]), None);
+        assert_eq!(work_hierarchy_labels("not json", None), None);
+        assert_eq!(
+            work_hierarchy_labels(r#"{"version":2,"segments":[]}"#, None),
+            None
+        );
+        assert_eq!(
+            work_hierarchy_labels(r#"{"version":1,"segments":[]}"#, None),
+            None
+        );
+    }
+
+    #[test]
+    fn work_hierarchy_replaces_the_work_tags() {
+        // The plugin can tag the parent as the work, e.g. "Messiah, HWV
+        // 56: Part II", but the queue groups by the top-level work
+        let part = ("part2", "Part II", Some(2));
+        let chorus = ("22", "no. 22. Chorus", Some(1));
+        let (work, movement) = labels(&[&[MESSIAH, part, chorus]]).unwrap();
+        let credits = TrackCredits {
+            work: Some(work),
+            movement: Some(movement),
+            ..Default::default()
+        };
+        assert_eq!(credits.work.as_deref(), Some("Messiah, HWV 56"));
+        assert_eq!(
+            credits.movement_label().as_deref(),
+            Some("Part II: no. 22. Chorus")
+        );
+    }
+
+    #[test]
+    fn names_with_their_own_numbers() {
+        for name in [
+            "no. 22. Chorus",
+            "No. 9 Interlude",
+            "Nr. 3. Der arme Peter",
+            "28. Recitativo",
+            "1a. Introduction",
+            "16: (Minuet)",
+            "LXVII. Diffusa est gratia",
+            "b. Benedictus",
+            "IV) Finale",
+        ] {
+            assert!(is_numbered(name), "{name}");
+        }
+        for name in [
+            "Prelude",
+            "Nocturne",
+            "No vale la pena",
+            "1812 Overture",
+            "Credo",
+            "Vivace",
+            "I lacci tende più forti",
+            "Scena I. (no. 1) Duetto",
+            "D. 960",
+        ] {
+            assert!(!is_numbered(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn composers_are_listed_for_classical_music() {
+        let brentner = TrackCredits {
+            composers: vec!["Jan Josef Ignác Brentner".to_string()],
+            composers_from_description: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            brentner
+                .listed_composers(Some("Inégal Ensemble, Adam Viktora"))
+                .as_deref(),
+            Some("Jan Josef Ignác Brentner")
+        );
+        // Not if the artist names them already
+        assert_eq!(
+            brentner.listed_composers(Some("Jan Josef Ignác Brentner, Collegium Marianum")),
+            None
+        );
+
+        let song = TrackCredits {
+            composers: vec!["John Lennon".to_string(), "Paul McCartney".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(song.listed_composers(Some("The Beatles")), None);
+        let classical = TrackCredits {
+            genres: vec!["Baroque".to_string(), "Classical".to_string()],
+            ..song
+        };
+        assert_eq!(
+            classical.listed_composers(Some("The Beatles")).as_deref(),
+            Some("John Lennon, Paul McCartney")
+        );
+    }
+
+    #[test]
+    fn position_ranges_join_consecutive_positions() {
+        assert_eq!(position_ranges(&[5]), "5");
+        assert_eq!(position_ranges(&[5, 6]), "5–6");
+        assert_eq!(position_ranges(&[1, 2, 3, 5]), "1–3, 5");
+        assert_eq!(position_ranges(&[6, 5]), "6, 5");
     }
 
     #[test]

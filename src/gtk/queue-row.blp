@@ -79,6 +79,18 @@ template $AmberolQueueRow: Widget {
         ]
       }
 
+      // The performers, for movements whose second line is the parts of
+      // the work above them
+      Inscription track_credits_label {
+        xalign: 0;
+        text-overflow: ellipsize_end;
+        visible: false;
+
+        styles [
+          "track-artist",
+        ]
+      }
+
     }
 
     [end]

@@ -52,6 +52,14 @@ mod imp {
         )]
         pub track_artist_label: TemplateChild<gtk::Inscription>,
         #[template_child]
+        #[property(
+            name = "track-credits",
+            get = |imp: &Self| imp.track_credits_label.text().unwrap_or_default().into(),
+            set = Self::set_track_credits,
+            type = String,
+        )]
+        pub track_credits_label: TemplateChild<gtk::Inscription>,
+        #[template_child]
         pub track_playing_image: TemplateChild<gtk::Image>,
         #[template_child]
         pub drag_handle: TemplateChild<gtk::Image>,
@@ -187,6 +195,12 @@ mod imp {
             self.obj().update_tooltip();
         }
 
+        fn set_track_credits(&self, credits: String) {
+            self.track_credits_label.set_visible(!credits.is_empty());
+            self.track_credits_label.set_text(Some(&credits));
+            self.obj().update_tooltip();
+        }
+
         fn set_track_cover(&self, cover: Option<gdk::Texture>) {
             if let Some(texture) = cover {
                 self.track_cover_image.set_cover(Some(&texture));
@@ -225,6 +239,8 @@ impl QueueRow {
             .bind(self, "track-artist", gtk::Widget::NONE);
         item.chain_property::<Track>("row-title")
             .bind(self, "track-title", gtk::Widget::NONE);
+        item.chain_property::<Track>("row-credits")
+            .bind(self, "track-credits", gtk::Widget::NONE);
         item.chain_property::<Track>("cover")
             .bind(self, "track-cover", gtk::Widget::NONE);
         item.chain_property::<Track>("playing")
@@ -336,6 +352,7 @@ impl QueueRow {
                 let icon = Self::new();
                 icon.set_track_title(this.track_title());
                 icon.set_track_artist(this.track_artist());
+                icon.set_track_credits(this.track_credits());
                 icon.set_track_cover(this.track_cover());
                 icon.set_reorderable(true);
                 icon.set_width_request(this.width());
@@ -585,9 +602,11 @@ impl QueueRow {
 
     // Long titles get truncated in the queue, so we show the full
     // text of the row on hover; for movements, that includes the work from
-    // the header of their section, which may be scrolled away
+    // the header of their section, which may be scrolled away, and the
+    // levels of the work go above the movement, from the largest down
     fn update_tooltip(&self) {
         let imp = self.imp();
+        let track = self.track();
         let mut lines = vec![
             imp.track_title_label.text().unwrap_or_default().to_string(),
             imp.track_artist_label
@@ -596,7 +615,16 @@ impl QueueRow {
                 .to_string(),
         ];
 
-        if let Some(work) = self.track().and_then(|t| t.movement_work()) {
+        if track.as_ref().and_then(Track::movement_levels).is_some() {
+            lines.swap(0, 1);
+        }
+        lines.push(
+            imp.track_credits_label
+                .text()
+                .unwrap_or_default()
+                .to_string(),
+        );
+        if let Some(work) = track.and_then(|t| t.movement_work()) {
             lines.insert(0, work);
         }
 
