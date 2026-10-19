@@ -6,8 +6,6 @@ using Adw 1;
 
 template $AmberolWindow: Adw.ApplicationWindow {
   handle-menubar-accel: true;
-  width-request: 360;
-  height-request: 660;
   default-width: 800;
 
   content: $DragOverlay drag_overlay {
@@ -46,11 +44,9 @@ template $AmberolWindow: Adw.ApplicationWindow {
                 }
               }
 
-              content: Box main_box {
-                orientation: vertical;
+              content: $AmberolPlayerBox main_box {
                 valign: center;
                 vexpand: true;
-                spacing: 6;
 
                 styles [
                   "main-box",
@@ -161,7 +157,9 @@ template $AmberolWindow: Adw.ApplicationWindow {
     };
   };
 
-  Adw.Breakpoint {
+  // The condition is replaced with the width the sidebar and the content
+  // need side by side, once they're measured
+  Adw.Breakpoint narrow_breakpoint {
     condition ("max-width: 560sp")
 
     setters {

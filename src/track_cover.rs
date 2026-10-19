@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use adw::subclass::prelude::*;
-use gtk::{CompositeTemplate, glib, prelude::*};
+use gtk::{CompositeTemplate, glib, graphene, gsk, prelude::*};
 
-use crate::cover_picture::CoverPicture;
+use crate::cover_picture::{CoverPicture, LARGE_SIZE, MEDIUM_SIZE};
 
 mod imp {
     use super::*;
@@ -28,7 +28,6 @@ mod imp {
         fn class_init(klass: &mut Self::Class) {
             Self::bind_template(klass);
 
-            klass.set_layout_manager_type::<gtk::BinLayout>();
             klass.set_css_name("trackcover");
             klass.set_accessible_role(gtk::AccessibleRole::Group);
         }
@@ -47,7 +46,58 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for TrackCover {}
+    // The cover takes the room that the rest of the player leaves, so that
+    // the player fits in short windows: it's large when it fits, medium
+    // when that fits, and hidden otherwise. It is always a square, as the
+    // shadow and the rounded corners of the card are drawn around it
+    impl WidgetImpl for TrackCover {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::ConstantSize
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            let natural = self
+                .obj()
+                .first_child()
+                .map_or(0, |child| child.measure(orientation, -1).1);
+            (0, natural, -1, -1)
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
+            let Some(child) = self.obj().first_child() else {
+                return;
+            };
+
+            // The room around the image, for its margins
+            let (min_width, nat_width, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
+            let (min_height, nat_height, _, _) = child.measure(gtk::Orientation::Vertical, -1);
+            let extra_width = (nat_width - LARGE_SIZE).max(0);
+            let extra_height = (nat_height - LARGE_SIZE).max(0);
+
+            let room = (width - extra_width).min(height - extra_height);
+            let size = if room >= LARGE_SIZE {
+                Some(LARGE_SIZE)
+            } else if room >= MEDIUM_SIZE {
+                Some(MEDIUM_SIZE)
+            } else {
+                None
+            };
+
+            // Hiding the child doesn't queue a resize, unlike hiding the
+            // widget, which can't be done while allocating it
+            child.set_child_visible(size.is_some());
+            let (child_width, child_height) = match size {
+                Some(size) => (size + extra_width, size + extra_height),
+                None => (min_width, min_height),
+            };
+
+            let x = (width - child_width) / 2;
+            let y = (height - child_height) / 2;
+            let transform =
+                gsk::Transform::new().translate(&graphene::Point::new(x as f32, y as f32));
+            child.allocate(child_width, child_height, -1, Some(transform));
+        }
+    }
 }
 
 glib::wrapper! {

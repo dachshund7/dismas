@@ -15,6 +15,7 @@ mod library_view;
 mod marquee;
 mod page_switcher;
 mod playback_control;
+mod player_box;
 mod playlist_view;
 mod playlists;
 mod playlists_page;

@@ -10,6 +10,22 @@ const MIN_SIDEBAR_WIDTH: i32 = 240;
 const AUTO_SIDEBAR_WIDTH: f64 = 330.0;
 const AUTO_SIDEBAR_FRACTION: f64 = 0.4;
 
+// The smallest size of the window, even when its content fits in less
+const MIN_WINDOW_WIDTH: i32 = 360;
+const MIN_WINDOW_HEIGHT: i32 = 660;
+
+// What the content of the window needs, in pixels
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SizeLimits {
+    // The width of the sidebar and the content side by side, under which
+    // the split view collapses
+    side_by_side: i32,
+    // The size of the window, frame included, with the split view
+    // collapsed
+    min_width: i32,
+    min_height: i32,
+}
+
 impl Window {
     pub(super) fn setup_sidebar_handle(&self) {
         let imp = self.imp();
@@ -136,6 +152,86 @@ impl Window {
         imp.sidebar_handle.add_controller(drag);
 
         self.update_sidebar_width();
+
+        // What the content needs depends on the font, so it's measured
+        // once the window has its style, before it's shown
+        self.connect_realize(Self::update_size_limits);
+    }
+
+    // The sizes come from measuring the content, as they depend on the font
+    // resolution, and on the font, rather than being fixed in the template
+    fn measure_size_limits(&self) -> SizeLimits {
+        let imp = self.imp();
+        let split_view = &imp.split_view;
+        let min_width = |widget: Option<gtk::Widget>| {
+            widget.map_or(0, |w| w.measure(gtk::Orientation::Horizontal, -1).0)
+        };
+
+        // AdwOverlaySplitView gives the sidebar at least its minimum width
+        let content_width = min_width(split_view.content());
+        let sidebar_min = split_view
+            .sidebar_width_unit()
+            .to_px(split_view.min_sidebar_width(), Some(&self.settings()))
+            .ceil() as i32;
+        let sidebar_width = min_width(split_view.sidebar()).max(sidebar_min);
+
+        // The size requests of the window include its frame, drawn around
+        // its content when there is no compositor
+        let frame = |orientation| {
+            let window = self.measure(orientation, -1).1;
+            let content = imp.drag_overlay.measure(orientation, -1).1;
+            (window - content).max(0)
+        };
+
+        SizeLimits {
+            side_by_side: content_width + sidebar_width,
+            min_width: content_width.max(sidebar_width) + frame(gtk::Orientation::Horizontal),
+            min_height: imp.drag_overlay.measure(gtk::Orientation::Vertical, -1).0
+                + frame(gtk::Orientation::Vertical),
+        }
+    }
+
+    // Collapses the split view where the sidebar no longer fits next to the
+    // content, and keeps the window from getting smaller than the content
+    fn update_size_limits(&self) {
+        let imp = self.imp();
+        let limits = self.measure_size_limits();
+        if imp.size_limits.replace(Some(limits)) == Some(limits) {
+            return;
+        }
+
+        // The breakpoint applies at the widths up to and including its own
+        let condition = adw::BreakpointCondition::new_length(
+            adw::BreakpointConditionLengthType::MaxWidth,
+            f64::from(limits.side_by_side - 1),
+            adw::LengthUnit::Px,
+        );
+        imp.narrow_breakpoint.set_condition(Some(&condition));
+
+        self.set_size_request(
+            limits.min_width.max(MIN_WINDOW_WIDTH),
+            limits.min_height.max(MIN_WINDOW_HEIGHT),
+        );
+        self.queue_resize();
+    }
+
+    // Updates the limits outside of the allocation, as updating them queues
+    // a resize; the measures are cached, so checking them is cheap
+    pub(super) fn queue_size_limits_update(&self) {
+        let imp = self.imp();
+        if imp.size_limits_idle.get() || imp.size_limits.get() == Some(self.measure_size_limits()) {
+            return;
+        }
+
+        imp.size_limits_idle.set(true);
+        glib::idle_add_local_once(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move || {
+                win.imp().size_limits_idle.set(false);
+                win.update_size_limits();
+            }
+        ));
     }
 
     // Translates a point in the coordinates of the sidebar handle to the

@@ -25,14 +25,17 @@ impl AsRef<str> for CoverSize {
     }
 }
 
+// The large cover is as wide as the waveform and the playback controls
+// under it, which don't scale with the font either
+pub const LARGE_SIZE: i32 = 256;
+// The large cover in windows too short for it, the size of the cover
+// upstream: three quarters of the controls
+pub const MEDIUM_SIZE: i32 = 192;
+
 mod imp {
     use super::*;
 
-    const LARGE_SIZE: i32 = 288;
     const SMALL_SIZE: i32 = 48;
-
-    // The reference font resolution the cover sizes were designed for
-    const BASE_DPI: f64 = 96.0;
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::CoverPicture)]
@@ -74,16 +77,6 @@ mod imp {
                 ),
             );
 
-            // The large cover scales with the font resolution, so we need
-            // to resize when it changes
-            self.obj().settings().connect_gtk_xft_dpi_notify(clone!(
-                #[weak(rename_to = obj)]
-                self.obj(),
-                move |_| {
-                    obj.queue_resize();
-                }
-            ));
-
             self.obj()
                 .upcast_ref::<gtk::Accessible>()
                 .update_property(&[(gtk::accessible::Property::Label(&i18n("Cover image")))]);
@@ -97,10 +90,9 @@ mod imp {
 
         fn measure(&self, _orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             match self.cover_size.get() {
-                CoverSize::Large => {
-                    let size = (f64::from(LARGE_SIZE) * self.font_scale()).round() as i32;
-                    (size, size, -1, -1)
-                }
+                // The track cover gives the large cover the room it has,
+                // up to its size
+                CoverSize::Large => (0, LARGE_SIZE, -1, -1),
                 CoverSize::Small => (SMALL_SIZE, SMALL_SIZE, -1, -1),
             }
         }
@@ -142,20 +134,6 @@ mod imp {
     }
 
     impl CoverPicture {
-        // How the font resolution compares to the reference one; this keeps
-        // the cover in proportion with the text whether the fonts are scaled
-        // through the DPI or through the window scaling factor
-        fn font_scale(&self) -> f64 {
-            // GtkSettings:gtk-xft-dpi is in 1024ths of a dot per inch, or
-            // -1 for the default
-            let dpi = self.obj().settings().gtk_xft_dpi();
-            if dpi <= 0 {
-                return 1.0;
-            }
-
-            f64::from(dpi) / 1024.0 / BASE_DPI
-        }
-
         fn set_cover(&self, cover: Option<gdk::Texture>) {
             self.cover.replace(cover);
 

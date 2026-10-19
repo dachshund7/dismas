@@ -24,6 +24,7 @@ use adw::subclass::prelude::*;
 use glib::clone;
 use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
+use sidebar::SizeLimits;
 
 use crate::{
     album_tracks::AlbumTracks,
@@ -35,6 +36,7 @@ use crate::{
     library_view::LibraryView,
     page_switcher::PageSwitcher,
     playback_control::PlaybackControl,
+    player_box::PlayerBox,
     playlist_view::PlaylistView,
     playlists::{self, NameError},
     playlists_page::PlaylistsPage,
@@ -107,6 +109,8 @@ mod imp {
         pub album_tracks: TemplateChild<AlbumTracks>,
         #[template_child]
         pub sidebar_handle: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub narrow_breakpoint: TemplateChild<adw::Breakpoint>,
 
         pub provider: gtk::CssProvider,
         pub settings: gio::Settings,
@@ -125,6 +129,9 @@ mod imp {
         #[property(get, set = Self::set_replaygain_mode, explicit_notify, builder(ReplayGainMode::default()))]
         pub replaygain_mode: Cell<ReplayGainMode>,
         pub sidebar_width: Cell<i32>,
+        // The sizes the window is limited to, from measuring its content
+        pub size_limits: Cell<Option<SizeLimits>>,
+        pub size_limits_idle: Cell<bool>,
         #[property(get, set = Self::set_library_visible, explicit_notify)]
         pub library_visible: Cell<bool>,
         // The list of playlists, shown over the player or the album grid
@@ -326,6 +333,7 @@ mod imp {
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
+            PlayerBox::static_type();
             obj.init_template();
         }
 
@@ -348,6 +356,7 @@ mod imp {
                 sidebar_stack: TemplateChild::default(),
                 album_tracks: TemplateChild::default(),
                 sidebar_handle: TemplateChild::default(),
+                narrow_breakpoint: TemplateChild::default(),
                 queue_shuffled: Cell::new(false),
                 playlist_visible: Cell::new(true),
                 queue_selection: Cell::new(false),
@@ -357,6 +366,8 @@ mod imp {
                 queue_rows: RefCell::default(),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
                 sidebar_width: Cell::new(0),
+                size_limits: Cell::new(None),
+                size_limits_idle: Cell::new(false),
                 library_visible: Cell::new(false),
                 playlists_visible: Cell::new(false),
                 page: std::marker::PhantomData,
@@ -603,6 +614,10 @@ mod imp {
             // Keep the sidebar from eating into the space of the content
             // when the window gets narrower
             self.obj().update_sidebar_width();
+
+            // The content is measured again here, where its style is up
+            // to date, in case the font changed
+            self.obj().queue_size_limits_update();
         }
     }
     impl WindowImpl for Window {}
