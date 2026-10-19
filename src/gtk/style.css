@@ -323,9 +323,23 @@ listview.navigation-sidebar > header label.work-composer {
   margin: 0 12px 2px 12px;
 }
 
-/* Less padding at the top, where the search bar already leaves some space */
+/* The space above the albums and the tracks of the queue is a margin
+ * around the scrolled area, not padding in it, so that it stays the same
+ * when the list scrolls, instead of scrolling away with it */
+scrolledwindow.album-scroller {
+  margin-top: 6px;
+}
+
 gridview.album-grid {
-  padding: 6px 12px 12px;
+  padding: 0 12px 12px;
+}
+
+scrolledwindow.track-scroller {
+  margin-top: 6px;
+}
+
+listview.track-list {
+  padding-top: 0;
 }
 
 /* With "Match Cover Art", the colors of the window show between the
