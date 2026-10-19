@@ -44,7 +44,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 
 // The size of the covers in the grid, accounting for HiDPI
 const THUMBNAIL_SIZE: u32 = 256;
@@ -147,12 +147,13 @@ fn open() -> rusqlite::Result<Connection> {
     if version != SCHEMA_VERSION {
         // The tracks are read again; the covers of the albums are kept, as
         // they take a while to create, and the scan replaces the ones of the
-        // albums that are gone or changed
+        // albums that are gone or changed. Paths are kept as bytes, as
+        // they are not always valid UTF-8
         debug!("Library schema version {version}, recreating it");
         tx.execute_batch(
             "DROP TABLE IF EXISTS tracks;
              CREATE TABLE tracks (
-                 path TEXT PRIMARY KEY,
+                 path BLOB PRIMARY KEY,
                  mtime INTEGER NOT NULL,
                  size INTEGER NOT NULL,
                  added INTEGER NOT NULL,
@@ -178,6 +179,23 @@ fn open() -> rusqlite::Result<Connection> {
     tx.commit()?;
 
     Ok(conn)
+}
+
+// The paths of the tracks, as they're kept in the database
+fn path_bytes(path: &Path) -> &[u8] {
+    path.as_os_str().as_encoded_bytes()
+}
+
+fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        PathBuf::from(std::ffi::OsString::from_vec(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(&bytes).into_owned())
+    }
 }
 
 // The albums, sorted by artist, then year and title; the grid sorts them
@@ -273,7 +291,7 @@ pub fn album_tracks(album_id: &str, words: &[String]) -> Vec<PathBuf> {
         ))?;
         let params = std::iter::once(album_id).chain(words.iter().map(String::as_str));
         stmt.query_map(rusqlite::params_from_iter(params), |row| {
-            row.get::<_, String>(0).map(PathBuf::from)
+            row.get::<_, Vec<u8>>(0).map(path_from_bytes)
         })?
         .collect()
     };
@@ -289,11 +307,10 @@ pub fn album_tracks(album_id: &str, words: &[String]) -> Vec<PathBuf> {
 
 // The album of a track, if it's part of the library
 pub fn track_album(path: &Path) -> Option<String> {
-    let path = path.to_string_lossy();
     let query = |conn: &Connection| -> rusqlite::Result<Option<String>> {
         conn.query_row(
             "SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL",
-            [path.as_ref()],
+            [path_bytes(path)],
             |row| row.get(0),
         )
         .optional()
@@ -302,7 +319,7 @@ pub fn track_album(path: &Path) -> Option<String> {
     match with_connection(|conn| query(conn)) {
         Ok(album_id) => album_id,
         Err(e) => {
-            warn!("Unable to look up the album of {path}: {e}");
+            warn!("Unable to look up the album of {path:?}: {e}");
             None
         }
     }
@@ -337,7 +354,7 @@ fn scan_with(
         let mut stmt = conn.prepare("SELECT path, mtime, size FROM tracks")?;
         let rows = stmt.query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(0)?,
                 (row.get::<_, i64>(1)?, row.get::<_, i64>(2)?),
             ))
         })?;
@@ -372,11 +389,10 @@ fn scan_with(
         // kept when a track changes
         let added = seconds(metadata.created()).unwrap_or(mtime);
 
-        let path = path.to_string_lossy().to_string();
-        if known.get(&path) != Some(&(mtime, size)) {
+        if known.get(path_bytes(&path)) != Some(&(mtime, size)) {
             changed.push((path.clone(), mtime, size, added));
         }
-        present.insert(path);
+        present.insert(path_bytes(&path).to_vec());
     }
 
     debug!(
@@ -409,8 +425,9 @@ fn scan_with(
                   title = excluded.title, search = excluded.search",
             )?;
             for (path, mtime, size, added) in chunk {
+                let key = path_bytes(path);
                 if let Some(id) = old_album
-                    .query_row([path], |row| row.get::<_, String>(0))
+                    .query_row([key], |row| row.get::<_, String>(0))
                     .optional()?
                 {
                     stale_albums.insert(id);
@@ -419,13 +436,13 @@ fn scan_with(
                 // A changed track might have new cover art; new tracks
                 // don't make the cover of their album stale, so that the
                 // covers are kept when the whole library is read again
-                let tags = read_tags(Path::new(path));
-                if let Some(id) = tags.album_id.as_ref().filter(|_| known.contains_key(path)) {
+                let tags = read_tags(path);
+                if let Some(id) = tags.album_id.as_ref().filter(|_| known.contains_key(key)) {
                     stale_albums.insert(id.clone());
                 }
 
                 upsert.execute(params![
-                    path,
+                    key,
                     mtime,
                     size,
                     tags.album_id,
@@ -449,7 +466,7 @@ fn scan_with(
     }
 
     // Forget the files that are gone
-    let gone: Vec<String> = known
+    let gone: Vec<Vec<u8>> = known
         .keys()
         .filter(|path| !present.contains(*path))
         .cloned()
@@ -463,12 +480,12 @@ fn scan_with(
             let mut delete = tx.prepare("DELETE FROM tracks WHERE path = ?1")?;
             for path in &gone {
                 if let Some(id) = old_album
-                    .query_row([path], |row| row.get::<_, String>(0))
+                    .query_row([path.as_slice()], |row| row.get::<_, String>(0))
                     .optional()?
                 {
                     stale_albums.insert(id);
                 }
-                delete.execute([path])?;
+                delete.execute([path.as_slice()])?;
             }
         }
         tx.commit()?;
@@ -492,7 +509,7 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
+                path_from_bytes(row.get::<_, Vec<u8>>(1)?),
                 row.get::<_, Option<String>>(2)?.is_some(),
                 row.get::<_, Option<String>>(3)?,
             ))
@@ -519,8 +536,8 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
             tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
         for (id, first_track) in missing {
             let path = dir.join(format!("{id}.png"));
-            let cover = create_thumbnail(Path::new(&first_track), &path)
-                .then(|| path.to_string_lossy().to_string());
+            let cover =
+                create_thumbnail(&first_track, &path).then(|| path.to_string_lossy().to_string());
             upsert.execute(params![id, cover])?;
         }
         tx.execute(
@@ -719,7 +736,17 @@ impl TrackTags {
 
 #[cfg(test)]
 mod tests {
-    use super::is_mbid;
+    use super::{is_mbid, path_bytes, path_from_bytes};
+
+    // E.g. names from old Latin-1 rips
+    #[cfg(unix)]
+    #[test]
+    fn paths_that_are_not_utf8_round_trip() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::Path};
+
+        let path = Path::new(OsStr::from_bytes(b"/music/caf\xe9.flac"));
+        assert_eq!(path_from_bytes(path_bytes(path).to_vec()), path);
+    }
 
     #[test]
     fn only_uuids_are_musicbrainz_ids() {
