@@ -525,7 +525,13 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
 }
 
 fn create_thumbnail(track: &Path, dest: &Path) -> bool {
-    let Some(tagged_file) = Probe::open(track).ok().and_then(|p| p.read().ok()) else {
+    // The type of the file is guessed from its contents, as the extension
+    // can be wrong, e.g. Opus in an ".ogg" file
+    let tagged_file = Probe::open(track)
+        .ok()
+        .and_then(|p| p.guess_file_type().ok())
+        .and_then(|p| p.read().ok());
+    let Some(tagged_file) = tagged_file else {
         return false;
     };
     let tag = tagged_file

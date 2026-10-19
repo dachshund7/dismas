@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
-use gtk::{gdk, gio, glib, prelude::*};
+use gtk::{gdk, glib};
 use lofty::prelude::TaggedFileExt;
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
@@ -31,6 +31,10 @@ const FULL_COVER_SIZE: u32 = 1024;
 // cover there would have the renderer scale it down with mipmaps in each
 // row, which made dragging the scrollbar of a long album stall
 const ROW_COVER_SIZE: u32 = 48 * 2;
+
+// Cover files next to the tracks larger than this are not read; covers
+// are rarely more than a few megabytes, and this one could be anything
+const MAX_COVER_FILE_SIZE: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct CoverArt {
@@ -145,30 +149,29 @@ impl CoverCache {
         // caches out of the water, which will slow down loading the track into the
         // queue model
         if let Some(p) = path {
-            let ext_cover_basename = ["Cover", "cover", "Folder", "folder"];
-            let ext_cover_ext = ["jpg", "png"];
-
-            let ext_covers = ext_cover_basename
+            let names = ["Cover", "cover", "Folder", "folder"]
                 .iter()
-                .map(|&b| {
-                    ext_cover_ext
-                        .iter()
-                        .map(move |&e| format!("{b}.{e}"))
-                        .collect::<Vec<_>>()
-                })
-                .fold(vec![], |mut v, mut dat| {
-                    v.append(&mut dat);
-                    v
-                });
-            for name in ext_covers {
-                let mut cover_file = PathBuf::from(p);
-                cover_file.push(name);
+                .flat_map(|name| ["jpg", "png"].map(|ext| format!("{name}.{ext}")));
+            for name in names {
+                let cover_file = p.join(name);
                 debug!("Looking for external cover file: {cover_file:?}");
 
-                let f = gio::File::for_path(&cover_file);
-                if let Ok((res, _)) = f.load_bytes(None::<&gio::Cancellable>) {
-                    debug!("Loading cover from external cover file");
-                    return Some(res);
+                let Ok(metadata) = std::fs::metadata(&cover_file) else {
+                    continue;
+                };
+                if !metadata.is_file() {
+                    continue;
+                }
+                if metadata.len() > MAX_COVER_FILE_SIZE {
+                    warn!("Skipping cover file {cover_file:?}, which is too large");
+                    continue;
+                }
+                match std::fs::read(&cover_file) {
+                    Ok(data) => {
+                        debug!("Loading cover from external cover file");
+                        return Some(glib::Bytes::from_owned(data));
+                    }
+                    Err(e) => warn!("Unable to read cover file {cover_file:?}: {e}"),
                 }
             }
         }
@@ -254,7 +257,14 @@ impl CoverCache {
     // use the cache, and it blocks, so it must not be called on the main
     // thread
     pub fn load_full_cover(path: &Path) -> Option<gdk::Texture> {
-        let tagged_file = lofty::probe::Probe::open(path).ok()?.read().ok()?;
+        // The type of the file is guessed from its contents, as the
+        // extension can be wrong, e.g. Opus in an ".ogg" file
+        let tagged_file = lofty::probe::Probe::open(path)
+            .ok()?
+            .guess_file_type()
+            .ok()?
+            .read()
+            .ok()?;
         let tag = tagged_file
             .primary_tag()
             .or_else(|| tagged_file.first_tag())?;
