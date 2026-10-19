@@ -22,6 +22,8 @@ mod imp {
 
         pub(super) rotation_progress: Cell<f32>,
         pub(super) label_fits: Cell<bool>,
+        // Whether the label has scrolled through once since it was set
+        pub(super) scrolled: Cell<bool>,
 
         pub(super) animation: OnceCell<adw::TimedAnimation>,
 
@@ -73,24 +75,12 @@ mod imp {
                 .easing(adw::Easing::EaseInOutCubic)
                 .build();
 
-            // TODO: I think animation rest duration property can be useful in libadwaita
+            // The label scrolls through once, and then rests at its start:
+            // scrolling all the time would redraw the window continuously
             animation.connect_done(clone!(
                 #[weak]
                 widget,
-                move |_| {
-                    glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(1500),
-                        move || {
-                            let imp = widget.imp();
-                            if !imp.label_fits.get() {
-                                let animation = imp.animation.get().unwrap();
-                                if animation.state() != adw::AnimationState::Playing {
-                                    animation.play();
-                                }
-                            }
-                        },
-                    );
-                }
+                move |_| widget.imp().scrolled.set(true)
             ));
 
             self.animation.set(animation).unwrap();
@@ -225,10 +215,14 @@ mod imp {
                 self.child.set_label("");
             }
 
-            // restart animation if label was changed
+            // A new label scrolls through once again; resetting the
+            // animation doesn't count as it being done
             let animation = self.animation.get().unwrap();
-            if animation.state() == adw::AnimationState::Playing {
-                animation.skip();
+            animation.reset();
+            self.scrolled.set(false);
+            self.set_rotation_progress(0.0);
+            if !self.label_fits.get() {
+                self.start_animation();
             }
         }
 
@@ -257,20 +251,28 @@ mod imp {
 
         fn start_animation(&self) {
             let animation = self.animation.get().unwrap();
-            if animation.state() != adw::AnimationState::Playing {
-                glib::timeout_add_local_once(
-                    std::time::Duration::from_millis(1500),
-                    clone!(
-                        #[weak]
-                        animation,
-                        move || {
-                            if animation.state() != adw::AnimationState::Playing {
-                                animation.play();
-                            }
-                        },
-                    ),
-                );
+            if self.scrolled.get() || animation.state() == adw::AnimationState::Playing {
+                return;
             }
+
+            let widget = self.obj();
+            glib::timeout_add_local_once(
+                std::time::Duration::from_millis(1500),
+                clone!(
+                    #[weak]
+                    widget,
+                    move || {
+                        let imp = widget.imp();
+                        let animation = imp.animation.get().unwrap();
+                        if !imp.scrolled.get()
+                            && !imp.label_fits.get()
+                            && animation.state() != adw::AnimationState::Playing
+                        {
+                            animation.play();
+                        }
+                    },
+                ),
+            );
         }
 
         fn stop_animation(&self) {
