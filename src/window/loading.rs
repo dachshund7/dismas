@@ -49,6 +49,56 @@ impl Window {
 
     // Adds the files to the end of the queue
     pub(super) fn queue_tracks(&self, queue: Vec<gio::File>, mode: QueueMode) {
+        self.load_into_queue(queue, mode, None);
+    }
+
+    // Puts the tracks of a playlist in the queue, in place of those of the
+    // selected one, once they're read
+    pub(super) fn queue_playlist_tracks(&self, queue: Vec<gio::File>, name: &str) {
+        self.load_into_queue(queue, QueueMode::Restore, Some(name.to_string()));
+    }
+
+    // The actions on the queue are off while tracks are read, which can
+    // happen more than once at a time, e.g. dropping files while the tracks
+    // of a playlist are read; loading is "atomic"
+    fn set_loading(&self, loading: bool) {
+        let imp = self.imp();
+        let loads = imp.loads.get();
+        let loads = if loading {
+            loads + 1
+        } else {
+            loads.saturating_sub(1)
+        };
+        imp.loads.set(loads);
+        // The first load turns them off, and the last one on again
+        let first_or_last = if loading { loads == 1 } else { loads == 0 };
+        if !first_or_last {
+            return;
+        }
+
+        for action in [
+            "queue.clear",
+            "win.select-playlist",
+            "win.new-playlist",
+            "win.rename-playlist",
+            "win.delete-playlist",
+        ] {
+            self.action_set_enabled(action, !loading);
+        }
+        imp.album_tracks.set_adding_enabled(!loading);
+        imp.library_view.set_adding_enabled(!loading);
+        if loading {
+            imp.playlist_view.begin_loading();
+        } else {
+            imp.playlist_view.end_loading();
+        }
+    }
+
+    // Reads the tracks and adds them to the queue; with `switch_to`, they
+    // replace the tracks of the selected playlist with those of the one
+    // named. Only this load does that, as files can be dropped meanwhile,
+    // and their tracks go to the playlist that is selected when they're read
+    fn load_into_queue(&self, queue: Vec<gio::File>, mode: QueueMode, switch_to: Option<String>) {
         let play = matches!(mode, QueueMode::Play(_));
         if queue.is_empty() {
             self.add_toast(i18n("No available track found"));
@@ -56,17 +106,8 @@ impl Window {
             return;
         }
 
-        // Disable actions on the queue; loading is "atomic"
-        self.action_set_enabled("queue.clear", false);
-        self.action_set_enabled("win.select-playlist", false);
-        self.action_set_enabled("win.new-playlist", false);
-        self.action_set_enabled("win.rename-playlist", false);
-        self.action_set_enabled("win.delete-playlist", false);
-        self.imp().album_tracks.set_adding_enabled(false);
-        self.imp().library_view.set_adding_enabled(false);
-
+        self.set_loading(true);
         self.set_playlist_visible(true);
-        self.imp().playlist_view.begin_loading();
 
         // Begin the trace
         let now = Instant::now();
@@ -95,23 +136,13 @@ impl Window {
                     now.elapsed().as_millis()
                 );
 
-                // Re-enable the actions
-                win.action_set_enabled("queue.clear", true);
-                win.action_set_enabled("win.select-playlist", true);
-                win.action_set_enabled("win.new-playlist", true);
-                win.action_set_enabled("win.rename-playlist", true);
-                win.action_set_enabled("win.delete-playlist", true);
-                win.imp().album_tracks.set_adding_enabled(true);
-                win.imp().library_view.set_adding_enabled(true);
-
-                win.imp().playlist_view.end_loading();
+                win.set_loading(false);
 
                 // The tracks of the playlist being selected replace those
                 // of the previous one, even when none of them was found;
                 // the queue is only empty in between when some were, so
                 // it stays pending until they're added
-                let pending_playlist = win.imp().pending_playlist.borrow().clone();
-                if let Some(name) = &pending_playlist {
+                if let Some(name) = &switch_to {
                     if tracks.is_empty() {
                         win.imp().pending_playlist.take();
                     }
@@ -188,7 +219,7 @@ impl Window {
                     }
                 }
 
-                if win.imp().pending_playlist.take().is_some() {
+                if switch_to.is_some() && win.imp().pending_playlist.take().is_some() {
                     win.update_library_for_queue();
                 }
 

@@ -108,7 +108,7 @@ impl Window {
             self.replace_selected_playlist(name);
         } else {
             self.imp().pending_playlist.replace(Some(name.to_string()));
-            self.queue_tracks(files, QueueMode::Restore);
+            self.queue_playlist_tracks(files, name);
         }
     }
 

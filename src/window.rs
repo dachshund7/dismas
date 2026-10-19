@@ -150,6 +150,8 @@ mod imp {
         // The playlist whose tracks are loading, to take the place of
         // those of the selected one once they're loaded
         pub pending_playlist: RefCell<Option<String>>,
+        // The number of times tracks are being read for the queue
+        pub loads: Cell<u32>,
         // Whether the sidebar was showing before the tracks of an album
         pub sidebar_was_visible: Cell<bool>,
         // Whether the sidebar was showing before the split view collapsed
@@ -374,6 +376,7 @@ mod imp {
                 player_available: Cell::new(false),
                 starting: Cell::new(true),
                 pending_playlist: RefCell::default(),
+                loads: Cell::new(0),
                 hide_focus_after_transition: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),
                 sidebar_visible_uncollapsed: Cell::new(true),
