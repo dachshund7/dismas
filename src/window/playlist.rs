@@ -288,16 +288,24 @@ impl Window {
         }
     }
 
+    // Where a track is in the list of the queue, which only has the tracks
+    // matching the search, if there is one
+    fn queue_view_position(&self, track: &Track) -> Option<u32> {
+        let model = self.imp().playlist_view.queue_view().model()?;
+        (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
+    }
+
     pub(super) fn scroll_queue_to_track(&self) {
-        let queue_view = self.imp().playlist_view.queue_view();
-        if let Some(player) = self.player()
-            && let Some(current_idx) = player.queue().current_track_index()
-        {
-            debug!("Scrolling queue to {current_idx}");
-            queue_view
-                .upcast_ref::<gtk::Widget>()
-                .activate_action("list.scroll-to-item", Some(&current_idx.to_variant()))
-                .expect("Failed to activate action");
+        let Some(track) = self.player().and_then(|p| p.queue().current()) else {
+            return;
+        };
+        // A search can hide it
+        if let Some(pos) = self.queue_view_position(&track) {
+            debug!("Scrolling queue to {pos}");
+            self.imp()
+                .playlist_view
+                .queue_view()
+                .scroll_to(pos, gtk::ListScrollFlags::NONE, None);
         }
     }
 
@@ -309,15 +317,11 @@ impl Window {
             return;
         };
         let view = self.imp().playlist_view.queue_view();
-        let position = || {
-            let model = view.model()?;
-            (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
-        };
-        let mut pos = position();
+        let mut pos = self.queue_view_position(&track);
         if pos.is_none() && self.queue_search() {
             self.imp().playlist_view.queue_searchentry().set_text("");
             self.set_queue_search(false);
-            pos = position();
+            pos = self.queue_view_position(&track);
         }
         let Some(pos) = pos else {
             return;
