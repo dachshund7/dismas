@@ -17,15 +17,24 @@ use crate::{
     audio::normalize_search_text,
     i18n::{i18n, i18n_k, ni18n_f},
     library::{self, Album, AlbumSort, ScanEvent},
+    square_bin::SquareBin,
     utils,
 };
 
-// The size of the covers in the grid
-const CELL_COVER_SIZE: i32 = 160;
+// The covers in the grid grow with the width of the columns, between
+// these sizes
+const MIN_COVER_SIZE: i32 = 160;
+const MAX_COVER_SIZE: i32 = 240;
+
+// The space around each cover in the grid, from the margin of the cells
+// and the padding of their content in style.css, and the padding of the
+// grid on each side
+const COVER_SPACING: i32 = 2 * (8 + 8);
+const GRID_PADDING: i32 = 12;
 
 // The number of covers kept in memory, enough for a few screenfuls of
 // the grid; keeping all of them would take hundreds of megabytes
-const MAX_CACHED_COVERS: usize = 300;
+const MAX_CACHED_COVERS: usize = 100;
 
 // The pictures waiting for each cover to load, as album IDs and pictures,
 // keyed by the path of the cover
@@ -87,6 +96,8 @@ mod imp {
         pub update_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
         pub grid_view: TemplateChild<gtk::GridView>,
+        #[template_child]
+        pub grid_clamp: TemplateChild<adw::ClampScrollable>,
         #[template_child]
         pub select_all_button: TemplateChild<gtk::Button>,
         #[template_child]
@@ -273,6 +284,13 @@ impl LibraryView {
         imp.grid_view.set_model(Some(&selection));
         imp.grid_view.set_factory(Some(&self.album_factory()));
 
+        // Past the width of the most columns with the largest covers, the
+        // grid stays centered, rather than spreading the covers apart
+        let grid_width = imp.grid_view.max_columns() as i32 * (MAX_COVER_SIZE + COVER_SPACING)
+            + 2 * GRID_PADDING;
+        imp.grid_clamp.set_maximum_size(grid_width);
+        imp.grid_clamp.set_tightening_threshold(grid_width);
+
         imp.model.replace(Some(model));
         imp.filter.replace(Some(filter));
         imp.sorter.replace(Some(sorter));
@@ -377,15 +395,13 @@ impl LibraryView {
                     .vexpand(true)
                     .css_classes(["dim-label"])
                     .build();
-                let cover = gtk::Overlay::builder()
-                    .width_request(CELL_COVER_SIZE)
-                    .height_request(CELL_COVER_SIZE)
-                    .halign(gtk::Align::Center)
+                let overlay = gtk::Overlay::builder()
                     .overflow(gtk::Overflow::Hidden)
                     .css_classes(["album-cover"])
                     .child(&placeholder)
                     .build();
-                cover.add_overlay(&picture);
+                overlay.add_overlay(&picture);
+                let cover = SquareBin::new(&overlay, MIN_COVER_SIZE, MAX_COVER_SIZE);
 
                 let title = gtk::Label::builder()
                     .ellipsize(gtk::pango::EllipsizeMode::End)
@@ -411,7 +427,6 @@ impl LibraryView {
                 let content = AlbumCell::default();
                 content.set_orientation(gtk::Orientation::Vertical);
                 content.set_spacing(3);
-                content.set_width_request(CELL_COVER_SIZE);
                 content.add_css_class("album-cell");
                 content.append(&cover);
                 content.append(&title);
@@ -466,7 +481,11 @@ impl LibraryView {
                 };
                 let content = item.child().unwrap();
                 let cover = content.first_child().unwrap();
-                let picture = cover.last_child().and_downcast::<gtk::Picture>().unwrap();
+                let picture = cover
+                    .first_child()
+                    .and_then(|overlay| overlay.last_child())
+                    .and_downcast::<gtk::Picture>()
+                    .unwrap();
                 let title = cover.next_sibling().and_downcast::<gtk::Label>().unwrap();
                 let artist = content.last_child().and_downcast::<gtk::Label>().unwrap();
 

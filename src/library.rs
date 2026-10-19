@@ -46,8 +46,8 @@ use crate::{
 // the whole library is read again
 const SCHEMA_VERSION: i32 = 8;
 
-// The size of the covers in the grid, accounting for HiDPI
-const THUMBNAIL_SIZE: u32 = 256;
+// The size of the covers in the grid, twice the largest one for HiDPI
+const THUMBNAIL_SIZE: u32 = 480;
 
 pub enum ScanEvent {
     // The number of files read so far, out of the files that changed
@@ -498,6 +498,7 @@ fn scan_with(
 // tracks changed; the thumbnails are in the cache directory, so they might
 // have been removed since the last scan
 fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusqlite::Result<()> {
+    let dir = covers_dir();
     let mut missing = Vec::new();
     {
         let mut stmt = conn.prepare(
@@ -516,6 +517,11 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
         })?;
         for row in rows {
             let (id, first_track, has_row, cover) = row?;
+            // Thumbnails of another size have another name, and are made
+            // again
+            let outdated = cover
+                .as_deref()
+                .is_some_and(|p| Path::new(p) != dir.join(thumbnail_name(&id)));
             // Albums without cover art have no thumbnail, so we only check
             // that the thumbnails we created are still there
             let made = cover.map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
@@ -527,7 +533,7 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
                 Some(None) => false,
                 None => cover_file_time(&first_track).is_some(),
             };
-            if !has_row || removed || cover_file_changed || stale_albums.contains(&id) {
+            if !has_row || outdated || removed || cover_file_changed || stale_albums.contains(&id) {
                 missing.push((id, first_track));
             }
         }
@@ -535,7 +541,6 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
 
     debug!("Library: generating {} album covers", missing.len());
 
-    let dir = covers_dir();
     glib::mkdir_with_parents(&dir, 0o755);
 
     let tx = conn.transaction()?;
@@ -543,7 +548,7 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
         let mut upsert =
             tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
         for (id, first_track) in missing {
-            let path = dir.join(format!("{id}.png"));
+            let path = dir.join(thumbnail_name(&id));
             let cover =
                 create_thumbnail(&first_track, &path).then(|| path.to_string_lossy().to_string());
             upsert.execute(params![id, cover])?;
@@ -559,7 +564,12 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
     remove_unused_covers(conn, &dir)
 }
 
-// Removes the thumbnails of the albums that are gone, or whose id changed
+fn thumbnail_name(album_id: &str) -> String {
+    format!("{album_id}-{THUMBNAIL_SIZE}.png")
+}
+
+// Removes the thumbnails of the albums that are gone, or whose id changed,
+// and those of another size
 fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     let used = conn
         .prepare("SELECT path FROM covers WHERE path IS NOT NULL")?

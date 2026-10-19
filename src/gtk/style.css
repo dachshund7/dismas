@@ -342,6 +342,7 @@ scrolledwindow.album-scroller {
   margin-top: 6px;
 }
 
+/* GRID_PADDING in library_view.rs follows the padding on the sides */
 gridview.album-grid {
   padding: 0 12px 12px;
 }
@@ -354,21 +355,35 @@ listview.track-list {
   padding-top: 0;
 }
 
-/* With "Match Cover Art", the colors of the window show between the
- * covers, instead of the background of the grid */
-.main-window gridview.album-grid {
+/* The background of the grid is on the scrolled area, so that it fills
+ * the sides when the grid is narrower; with "Match Cover Art", the colors
+ * of the window show between the covers instead */
+gridview.album-grid {
   background: none;
 }
 
+scrolledwindow.album-scroller {
+  background-color: var(--view-bg-color);
+}
+
+.main-window scrolledwindow.album-scroller {
+  background: none;
+}
+
+/* The margin of the cells and the padding of their content add up to
+ * the space around the covers; COVER_SPACING in library_view.rs follows
+ * them. The margin is outside the hover highlight, so that it's the same
+ * size as the selected one */
 gridview.album-grid > child {
+  margin: 8px;
   padding: 0;
   border-radius: 12px;
 }
 
-/* The padding is on the content of the cells, which is highlighted when
- * the album is selected */
+/* The padding on the content of the cells is highlighted when the album
+ * is selected */
 gridview.album-grid .album-cell {
-  padding: 6px;
+  padding: 8px;
   border-radius: 12px;
 }
 

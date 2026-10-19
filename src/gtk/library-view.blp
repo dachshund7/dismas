@@ -98,17 +98,22 @@ template $AmberolLibraryView: Widget {
             "album-scroller",
           ]
 
-          // The grid view keeps cells for a number of rows of
-          // max-columns items, so a higher maximum makes scrolling
-          // slower even when there are fewer columns
-          child: GridView grid_view {
-            max-columns: 6;
-            min-columns: 2;
-            single-click-activate: true;
+          // The maximum size is set from the size of the covers
+          child: Adw.ClampScrollable grid_clamp {
+            unit: px;
 
-            styles [
-              "album-grid",
-            ]
+            // The grid view keeps cells for a number of rows of
+            // max-columns items, so a higher maximum makes scrolling
+            // slower even when there are fewer columns
+            child: GridView grid_view {
+              max-columns: 6;
+              min-columns: 2;
+              single-click-activate: true;
+
+              styles [
+                "album-grid",
+              ]
+            };
           };
         };
       }
