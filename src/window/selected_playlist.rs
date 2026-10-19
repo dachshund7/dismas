@@ -131,6 +131,15 @@ impl Window {
         );
     }
 
+    pub(super) fn show_save_queue_dialog(&self) {
+        self.show_playlist_name_dialog(
+            &i18n("Save the Queue as a Playlist"),
+            &i18n("_Save"),
+            "",
+            Self::save_queue_as_playlist,
+        );
+    }
+
     pub(super) fn show_rename_playlist_dialog(&self, name: &str) {
         let old_name = name.to_string();
         self.show_playlist_name_dialog(
@@ -227,6 +236,33 @@ impl Window {
             Err(e) => {
                 log::warn!("Unable to create the playlist '{name}': {e}");
                 self.add_toast(i18n("Unable to create the playlist"));
+            }
+        }
+    }
+
+    // Makes a playlist with the tracks of the queue, in the order they were
+    // added; it isn't selected, so that what's playing goes on
+    fn save_queue_as_playlist(&self, name: &str) {
+        // The queue in the player, while it's selected, or as last saved
+        let files = match self.player() {
+            Some(player) if self.selected_playlist().is_empty() => {
+                Some(player.queue().files_in_order())
+            }
+            _ => playlists::load(""),
+        };
+        let result = files
+            .ok_or_else(|| glib::Error::new(gio::IOErrorEnum::Failed, "Unable to read the queue"))
+            .and_then(|files| playlists::create_with_tracks(name, &files));
+        match result {
+            Ok(()) => {
+                self.update_playlists_page();
+                // Translators: `{playlist}` must be left unmodified; it is
+                // expanded to the name of a playlist
+                self.add_toast(i18n_k("Saved as “{playlist}”", &[("playlist", name)]));
+            }
+            Err(e) => {
+                log::warn!("Unable to save the queue as '{name}': {e}");
+                self.add_toast(i18n("Unable to save the playlist"));
             }
         }
     }

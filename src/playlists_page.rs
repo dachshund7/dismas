@@ -95,11 +95,13 @@ impl PlaylistsPage {
 }
 
 // The menu of a playlist; `name` is empty for the queue, which can't be
-// renamed or deleted, only exported
+// renamed or deleted, only saved as a playlist or exported
 fn playlist_menu_button(title: &str, name: &str) -> gtk::MenuButton {
     let target = name.to_variant();
     let menu = gio::Menu::new();
-    if !name.is_empty() {
+    if name.is_empty() {
+        menu.append(Some(&i18n("_Save as Playlist…")), Some("win.save-queue"));
+    } else {
         let rename = gio::MenuItem::new(Some(&i18n("_Rename…")), None);
         rename.set_action_and_target_value(Some("win.rename-playlist"), Some(&target));
         menu.append_item(&rename);

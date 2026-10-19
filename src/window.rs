@@ -279,6 +279,10 @@ mod imp {
                 debug!("Window::win.new-playlist()");
                 win.show_new_playlist_dialog();
             });
+            klass.install_action("win.save-queue", None, move |win, _, _| {
+                debug!("Window::win.save-queue()");
+                win.show_save_queue_dialog();
+            });
             klass.install_action("queue.select-all", None, move |win, _, _| {
                 debug!("Window::queue.select-all()");
                 win.select_all();
