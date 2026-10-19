@@ -67,7 +67,25 @@ impl WaveformGenerator {
         (*self.imp().peaks.borrow()).as_ref().cloned()
     }
 
-    fn save_peaks(&self) {
+    // Shows the peaks once the pipeline is done, and caches them if it read
+    // the whole track. The peaks of a pipeline that failed, e.g. without
+    // the decoder for the track, are not cached, so they are read again
+    // the next time; they are still shown, if there are any
+    fn finish_peaks(&self, complete: bool) {
+        if !complete {
+            if self
+                .imp()
+                .peaks
+                .borrow()
+                .as_ref()
+                .is_some_and(Vec::is_empty)
+            {
+                self.imp().peaks.replace(None);
+            }
+            self.notify_has_peaks();
+            return;
+        }
+
         if let Some(peaks) = self.peaks() {
             let Some(track) = self.imp().track.borrow().clone() else {
                 self.notify_has_peaks();
@@ -90,8 +108,9 @@ impl WaveformGenerator {
                     false,
                     gio::FileCreateFlags::NONE,
                     gio::Cancellable::NONE,
-                    move |_| {
-                        debug!("Waveform cached at: {cache:?}");
+                    move |res| match res {
+                        Ok(_) => debug!("Waveform cached at: {cache:?}"),
+                        Err((_, e)) => warn!("Unable to cache the waveform at {cache:?}: {e}"),
                     },
                 );
             }
@@ -226,7 +245,7 @@ impl WaveformGenerator {
                                 .expect("Unable to set 'null' state");
                             // We're done
                             this.imp().pipeline.replace(None);
-                            this.save_peaks();
+                            this.finish_peaks(true);
                             return glib::ControlFlow::Break;
                         }
                         MessageView::Error(err) => {
@@ -234,9 +253,8 @@ impl WaveformGenerator {
                             pipeline
                                 .set_state(gst::State::Null)
                                 .expect("Unable to set 'null' state");
-                            // We're done
                             this.imp().pipeline.replace(None);
-                            this.save_peaks();
+                            this.finish_peaks(false);
                             return glib::ControlFlow::Break;
                         }
                         MessageView::Element(element) => {
