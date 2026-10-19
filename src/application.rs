@@ -219,8 +219,10 @@ impl Application {
         self.add_action(&self.imp().settings.create_action("background-play"));
     }
 
+    // Without a window, e.g. when activated over D-Bus while playing in the
+    // background, the dialog gets a window of its own
     fn show_about(&self) {
-        let window = self.active_window().unwrap();
+        let window = self.active_window();
         let dialog = adw::AboutDialog::builder()
             .application_icon(APPLICATION_ID)
             .application_name("Amberol")
@@ -235,7 +237,7 @@ impl Application {
             .translator_credits(i18n("translator-credits"))
             .build();
 
-        dialog.present(Some(&window));
+        dialog.present(window.as_ref());
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
