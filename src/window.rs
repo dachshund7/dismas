@@ -833,14 +833,13 @@ impl Window {
     }
 
     pub fn add_toast(&self, msg: String) {
-        let toast = adw::Toast::new(&msg);
-        self.imp().toast_overlay.add_toast(toast);
+        self.imp().toast_overlay.add_toast(plain_toast(&msg));
     }
 
     // The queue can change while the toast is up, so the track is
     // looked up when the button is clicked
     pub fn add_skip_to_toast(&self, msg: String, button: String, track: &Track) {
-        let toast = adw::Toast::new(&msg);
+        let toast = plain_toast(&msg);
         toast.set_button_label(Some(&button));
         toast.connect_button_clicked(clone!(
             #[weak(rename_to = win)]
@@ -858,6 +857,12 @@ impl Window {
         ));
         self.imp().toast_overlay.add_toast(toast);
     }
+}
+
+// A toast whose title is plain text: the titles of toasts are markup by
+// default, and they can have the names of playlists, which can have "&"
+fn plain_toast(title: &str) -> adw::Toast {
+    adw::Toast::builder().title(title).use_markup(false).build()
 }
 
 // The list of the pane a widget is in; each pane, like the album grid or
