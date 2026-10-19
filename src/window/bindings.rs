@@ -196,12 +196,6 @@ impl Window {
                             win.action_set_enabled("win.next", queue.n_tracks() > 1);
                         }
 
-                        if queue.n_tracks() == 1
-                            && let Some(p) = win.player()
-                        {
-                            p.skip_next();
-                        }
-
                         win.update_queue_time();
                     }
                 ),

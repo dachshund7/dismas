@@ -151,12 +151,13 @@ impl Queue {
             self.imp().store.remove(pos as u32);
         }
 
+        // Removing a track moves the ones after it; the current track is
+        // found again first, for the handlers of the number of tracks
+        self.update_current_pos(current);
+
         if n_tracks != self.n_tracks() {
             self.notify_n_tracks();
         }
-
-        // Removing a track moves the ones after it
-        self.update_current_pos(current);
     }
 
     // Moves a track before another one, or to the end; the tracks are
@@ -450,5 +451,22 @@ mod tests {
         queue.move_track(&t[0], None);
         assert_eq!(queue.current_track_index(), Some(2));
         assert_eq!(queue.current(), Some(t[1].clone()));
+    }
+
+    #[test]
+    fn remove_track_finds_the_current_track_before_notifying() {
+        let (queue, t) = queue_of(3);
+        queue.set_current_track(Some(t[2].clone()));
+
+        // What the handlers of the number of tracks see
+        let seen = std::rc::Rc::new(Cell::new(None));
+        queue.connect_n_tracks_notify({
+            let seen = seen.clone();
+            move |queue| seen.set(Some(queue.current()))
+        });
+
+        queue.remove_track(&t[0]);
+        assert_eq!(seen.take(), Some(Some(t[2].clone())));
+        assert_eq!(queue.current_track_index(), Some(1));
     }
 }
