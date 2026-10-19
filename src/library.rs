@@ -32,7 +32,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    audio::{CoverCache, normalize_search_text, plain_commas, tag_search_text},
+    audio::{
+        CoverCache, ExtraComments, normalize_search_text, plain_commas, read_tagged_file,
+        tag_search_text,
+    },
     cover_image::CoverImage,
     i18n::i18n,
     utils,
@@ -40,7 +43,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 7;
 
 // The size of the covers in the grid, accounting for HiDPI
 const THUMBNAIL_SIZE: u32 = 256;
@@ -561,7 +564,8 @@ fn read_tags(path: &Path) -> TrackTags {
             return TrackTags::default();
         }
     };
-    let tagged_file = match probe.read() {
+    // The extra comments have the descriptions from YouTube, for searching
+    let (tagged_file, extra) = match read_tagged_file(probe, options) {
         Ok(f) => f,
         Err(e) => {
             warn!("Unable to read {path:?}: {e}");
@@ -573,7 +577,7 @@ fn read_tags(path: &Path) -> TrackTags {
         .primary_tag()
         .or_else(|| tagged_file.first_tag())
     {
-        Some(tag) => TrackTags::from_tag(tag, path),
+        Some(tag) => TrackTags::from_tag(tag, &extra, path),
         None => TrackTags::default(),
     }
 }
@@ -604,7 +608,7 @@ fn album_folder(path: &Path) -> Option<&Path> {
 }
 
 impl TrackTags {
-    fn from_tag(tag: &Tag, path: &Path) -> Self {
+    fn from_tag(tag: &Tag, extra: &ExtraComments, path: &Path) -> Self {
         let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
 
         let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
@@ -651,7 +655,7 @@ impl TrackTags {
             &[
                 tag.get_strings(ItemKey::TrackArtist).join(", "),
                 title.clone().unwrap_or_default(),
-                tag_search_text(tag),
+                tag_search_text(tag, extra),
             ]
             .join(" "),
         );
