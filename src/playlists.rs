@@ -208,6 +208,11 @@ fn format_m3u(files: &[gio::File], relative_to: Option<&Path>) -> (String, usize
             _ => None,
         };
         let line = match relative.or(path.as_deref()).and_then(Path::to_str) {
+            // Players take a line starting with "#" for a comment, and drop
+            // the spaces in front of a path
+            Some(path) if relative.is_some() && path.starts_with(['#', ' ', '\t']) => {
+                format!("./{path}")
+            }
             Some(path) => path.to_string(),
             None => file.uri().to_string(),
         };
@@ -304,6 +309,18 @@ mod tests {
         let (text, n_outside) = format_m3u(&files, Some(Path::new("/home/me/Music")));
         assert_eq!(text, "#EXTM3U\nAlbum/01 a.opus\n/home/me/Other/b.flac\n");
         assert_eq!(n_outside, 1);
+    }
+
+    #[test]
+    fn format_relative_paths_that_look_like_comments() {
+        let files = [
+            gio::File::for_path("/music/#1 Hits/a.opus"),
+            gio::File::for_path("/music/ b.opus"),
+        ];
+        let (text, _) = format_m3u(&files, Some(Path::new("/music")));
+        assert_eq!(text, "#EXTM3U\n./#1 Hits/a.opus\n./ b.opus\n");
+        let parsed = parse_m3u(&text, &gio::File::for_path("/music"));
+        assert_eq!(paths(&parsed), paths(&files));
     }
 
     #[test]
