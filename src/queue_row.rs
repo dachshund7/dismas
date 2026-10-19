@@ -203,18 +203,15 @@ mod imp {
 
         fn set_track_title(&self, title: String) {
             self.track_title_label.set_text(Some(&title));
-            self.obj().update_tooltip();
         }
 
         fn set_track_artist(&self, artist: String) {
             self.track_artist_label.set_text(Some(&artist));
-            self.obj().update_tooltip();
         }
 
         fn set_track_credits(&self, credits: String) {
             self.track_credits_label.set_visible(!credits.is_empty());
             self.track_credits_label.set_text(Some(&credits));
-            self.obj().update_tooltip();
         }
 
         fn set_track_cover(&self, cover: Option<gdk::Texture>) {
@@ -281,6 +278,19 @@ impl QueueRow {
     }
 
     fn init_widgets(&self) {
+        // The tooltip is made when it's shown: setting it as the row is bound
+        // to a track makes GTK look for the window under the pointer, which
+        // grabs the X server, for each row rebound while scrolling
+        self.set_has_tooltip(true);
+        self.connect_query_tooltip(|this, _, _, _, tooltip| {
+            let text = this.tooltip();
+            if text.is_empty() {
+                return false;
+            }
+            tooltip.set_text(Some(&text));
+            true
+        });
+
         let click = gtk::GestureClick::builder()
             .button(gdk::BUTTON_SECONDARY)
             .build();
@@ -622,7 +632,7 @@ impl QueueRow {
     // text of the row on hover; for movements, that includes the work from
     // the header of their section, which may be scrolled away, and the
     // levels of the work go above the movement, from the largest down
-    fn update_tooltip(&self) {
+    fn tooltip(&self) -> String {
         let imp = self.imp();
         let track = self.track();
         let mut lines = vec![
@@ -646,12 +656,11 @@ impl QueueRow {
             lines.insert(0, work);
         }
 
-        let tooltip = lines
+        lines
             .into_iter()
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
-            .join("\n");
-        self.set_tooltip_text(Some(tooltip.as_str()).filter(|s| !s.is_empty()));
+            .join("\n")
     }
 }
 
