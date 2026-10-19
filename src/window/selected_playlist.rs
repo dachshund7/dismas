@@ -117,7 +117,7 @@ impl Window {
     // the player, to add tracks
     pub(super) fn replace_selected_playlist(&self, name: &str) {
         if let Some(player) = self.player() {
-            player.empty_queue();
+            player.clear_queue();
         }
         self.set_selected_playlist(name);
     }

@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use gtk::{gdk, gio, glib, prelude::*};
@@ -62,14 +62,34 @@ impl CoverArt {
 // for it; the others wait for it, rather than loading it again
 type CoverSlot = Arc<OnceLock<Option<CoverArt>>>;
 
+// The cover of a track, shared with the other tracks of its album, which
+// keep it in memory: it goes once none of them is left
+#[derive(Clone, Debug)]
+pub struct AlbumCover {
+    slot: CoverSlot,
+    uuid: String,
+}
+
+impl AlbumCover {
+    // The cover art, if the album has any
+    pub fn art(&self) -> Option<&CoverArt> {
+        self.slot.get()?.as_ref()
+    }
+
+    pub fn uuid(&self) -> &str {
+        &self.uuid
+    }
+}
+
 // The covers are shared by the tracks of an album, which are loaded in
 // separate threads, so the cache is behind a mutex; it's only locked to
 // find the slot of a cover, not while loading it
 #[derive(Debug)]
 pub struct CoverCache {
     // The albums without a cover are kept as well, so that we don't look
-    // for it again for each of their tracks
-    entries: HashMap<String, CoverSlot>,
+    // for it again for each of their tracks. The tracks hold the slots, so
+    // the covers of the albums that are only browsed don't stay in memory
+    entries: HashMap<String, Weak<OnceLock<Option<CoverArt>>>>,
 }
 
 impl CoverCache {
@@ -89,7 +109,15 @@ impl CoverCache {
     }
 
     fn slot(&mut self, uuid: &str) -> CoverSlot {
-        self.entries.entry(uuid.to_string()).or_default().clone()
+        if let Some(slot) = self.entries.get(uuid).and_then(Weak::upgrade) {
+            return slot;
+        }
+
+        // Forget the covers that no track has anymore
+        self.entries.retain(|_, slot| slot.strong_count() > 0);
+        let slot = CoverSlot::default();
+        self.entries.insert(uuid.to_string(), Arc::downgrade(&slot));
+        slot
     }
 
     pub fn load_cover_art(tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
@@ -153,7 +181,7 @@ impl CoverCache {
     // The cover of the album of a track, loaded the first time one of its
     // tracks asks for it; this blocks, so it must not be called on the main
     // thread
-    pub fn cover_art(path: &Path, tag: &lofty::tag::Tag) -> Option<(CoverArt, String)> {
+    pub fn cover_art(path: &Path, tag: &lofty::tag::Tag) -> AlbumCover {
         let mut album_artist = None;
         let mut track_artist = None;
         let mut album = None;
@@ -198,7 +226,7 @@ impl CoverCache {
         let uuid = format!("{:x}", hasher.finalize());
 
         let slot = Self::global().lock().unwrap().slot(&uuid);
-        let cover = slot.get_or_init(|| {
+        slot.get_or_init(|| {
             debug!("Loading cover art for UUID: {uuid}");
             Self::load_cover_art(tag, path.parent())
                 .and_then(|data| CoverImage::decode(data, COVER_SIZE))
@@ -219,7 +247,7 @@ impl CoverCache {
                 })
         });
 
-        cover.clone().map(|c| (c, uuid))
+        AlbumCover { slot, uuid }
     }
 
     // Loads the cover art of a file again, at full resolution; this does not
@@ -234,10 +262,6 @@ impl CoverCache {
         let image = CoverImage::decode(bytes, FULL_COVER_SIZE)?;
 
         Some(image.into_texture())
-    }
-
-    pub fn clear(&mut self) {
-        self.entries.clear();
     }
 }
 
@@ -263,5 +287,26 @@ fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
             warn!("Unable to cache cover data: {e}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::CoverCache;
+
+    #[test]
+    fn covers_go_once_no_track_has_them() {
+        let mut cache = CoverCache::new();
+        let first = cache.slot("first");
+        assert!(Arc::ptr_eq(&first, &cache.slot("first")));
+
+        // The cover is dropped with the last track that had it, and its
+        // entry once another cover is looked up
+        drop(first);
+        let _second = cache.slot("second");
+        assert!(!cache.entries.contains_key("first"));
+        assert!(cache.entries.contains_key("second"));
     }
 }

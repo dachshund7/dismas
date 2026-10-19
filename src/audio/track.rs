@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     audio::{
-        cover_cache::{CoverArt, CoverCache},
+        cover_cache::{AlbumCover, CoverArt, CoverCache},
         youtube_description,
     },
     i18n::i18n,
@@ -894,8 +894,7 @@ pub struct TrackData {
     album: Option<String>,
     credits: TrackCredits,
     tag_text: String,
-    cover_art: Option<CoverArt>,
-    cover_uuid: Option<String>,
+    cover: Option<AlbumCover>,
     uuid: Option<String>,
     duration: u64,
     details: FileDetails,
@@ -983,8 +982,12 @@ impl TrackData {
         self.uuid.as_deref()
     }
 
+    // The id of the cover, if the track has one
     pub fn cover_uuid(&self) -> Option<&str> {
-        self.cover_uuid.as_deref()
+        self.cover
+            .as_ref()
+            .filter(|cover| cover.art().is_some())
+            .map(AlbumCover::uuid)
     }
 
     pub fn duration(&self) -> u64 {
@@ -995,32 +998,24 @@ impl TrackData {
         &self.details
     }
 
-    pub fn cover_texture(&self) -> Option<&gdk::Texture> {
-        if let Some(cover) = &self.cover_art {
-            return Some(cover.texture());
-        }
+    fn cover_art(&self) -> Option<&CoverArt> {
+        self.cover.as_ref()?.art()
+    }
 
-        None
+    pub fn cover_texture(&self) -> Option<&gdk::Texture> {
+        self.cover_art().map(CoverArt::texture)
     }
 
     pub fn row_cover_texture(&self) -> Option<&gdk::Texture> {
-        self.cover_art.as_ref().map(CoverArt::row_texture)
+        self.cover_art().map(CoverArt::row_texture)
     }
 
     pub fn cover_palette(&self) -> Option<&Vec<gdk::RGBA>> {
-        if let Some(cover) = &self.cover_art {
-            return Some(cover.palette());
-        }
-
-        None
+        self.cover_art().map(CoverArt::palette)
     }
 
     pub fn cover_cache(&self) -> Option<&PathBuf> {
-        if let Some(cover) = &self.cover_art {
-            return cover.cache();
-        }
-
-        None
+        self.cover_art()?.cache()
     }
 
     // Reads the tags and the cover of a track; this blocks, so it must not
@@ -1068,8 +1063,7 @@ impl TrackData {
         let mut album = None;
         let mut credits = TrackCredits::default();
         let mut tag_text = String::new();
-        let mut cover_art = None;
-        let mut cover_uuid = None;
+        let mut cover: Option<AlbumCover> = None;
         let mut replay_gain = ReplayGain::default();
         if let Some(tag) = tagged_file.primary_tag() {
             debug!("Found primary tag");
@@ -1079,10 +1073,7 @@ impl TrackData {
             credits = TrackCredits::from_tag(tag, &extra);
             replay_gain = ReplayGain::from_tag(tag);
             tag_text = tag_search_text(tag, &extra);
-            if let Some(res) = CoverCache::cover_art(&path, tag) {
-                cover_art = Some(res.0);
-                cover_uuid = Some(res.1);
-            }
+            cover = Some(CoverCache::cover_art(&path, tag));
         } else {
             warn!("Unable to load primary tag for: {uri}");
             for tag in tagged_file.tags() {
@@ -1095,9 +1086,9 @@ impl TrackData {
                 credits = TrackCredits::from_tag(tag, &extra);
                 replay_gain = ReplayGain::from_tag(tag);
                 tag_text = tag_search_text(tag, &extra);
-                if let Some(res) = CoverCache::cover_art(&path, tag) {
-                    cover_art = Some(res.0);
-                    cover_uuid = Some(res.1);
+                // The first tag with a cover has the one we keep
+                if cover.as_ref().is_none_or(|c| c.art().is_none()) {
+                    cover = Some(CoverCache::cover_art(&path, tag));
                 }
 
                 if artist.is_some() && title.is_some() {
@@ -1164,8 +1155,7 @@ impl TrackData {
             album,
             credits,
             tag_text,
-            cover_art,
-            cover_uuid,
+            cover,
             uuid,
             duration,
             details,
@@ -1243,8 +1233,7 @@ impl Default for TrackData {
             album: Some("Invalid Album".to_string()),
             credits: TrackCredits::default(),
             tag_text: String::new(),
-            cover_art: None,
-            cover_uuid: None,
+            cover: None,
             uuid: None,
             duration: 0,
             details: FileDetails::default(),

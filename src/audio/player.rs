@@ -550,14 +550,6 @@ impl AudioPlayer {
         self.queue.clear();
     }
 
-    // Empties the queue for the tracks of another playlist, keeping the
-    // covers, which switching back would need again
-    pub fn empty_queue(&self) {
-        self.stop();
-        self.state.set_current_track(None);
-        self.queue.remove_all();
-    }
-
     // Moves tracks together before another one, or to the end of the
     // queue, keeping the order they had
     pub fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
