@@ -6,26 +6,35 @@ use super::*;
 impl Window {
     // Shows the tracks of an album in the sidebar, in place of the
     // queue, so that it can be played or added to the queue
-    fn show_album_tracks(&self, album: &Album, search_words: &[String]) {
+    fn show_album_tracks(
+        &self,
+        album: &Album,
+        search_words: &[String],
+        reveal: Option<&gio::File>,
+    ) {
         let imp = self.imp();
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
             imp.sidebar_was_visible.set(self.playlist_visible());
         }
-        imp.album_tracks.show_album(album, search_words);
+        imp.album_tracks.show_album(album, search_words, reveal);
         imp.sidebar_stack.set_visible_child_name("album");
         self.set_playlist_visible(true);
     }
 
-    // Shows an album in the grid, with all its tracks in the sidebar
-    pub(super) fn go_to_album(&self, album_id: &str) {
-        // Showing the grid focuses the search, so it goes first, for the
-        // album to take the focus
-        self.set_playlists_visible(false);
-        self.set_library_visible(true);
-        let Some(album) = self.imp().library_view.reveal_album(album_id) else {
+    // Shows all the tracks of an album in the sidebar, scrolled to one of
+    // them, which flashes; the page stays, and the grid only scrolls to the
+    // album when it's showing
+    pub(super) fn go_to_album(&self, album_id: &str, track: &gio::File) {
+        let library_view = &self.imp().library_view;
+        let album = if self.library_visible() {
+            library_view.reveal_album(album_id)
+        } else {
+            library_view.album(album_id)
+        };
+        let Some(album) = album else {
             return;
         };
-        self.show_album_tracks(&album, &[]);
+        self.show_album_tracks(&album, &[], Some(track));
     }
 
     // Goes back from the tracks of an album to the queue, closing the
@@ -109,7 +118,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, album| {
-                win.show_album_tracks(album, &win.imp().library_view.search_words());
+                win.show_album_tracks(album, &win.imp().library_view.search_words(), None);
             }
         ));
 

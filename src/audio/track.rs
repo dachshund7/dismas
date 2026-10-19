@@ -1195,6 +1195,9 @@ mod imp {
         pub playing: Cell<bool>,
         #[property(get, set = Self::set_selected, explicit_notify)]
         pub selected: Cell<bool>,
+        // Briefly, to show where the track is in a list
+        #[property(get, set = Self::set_flashing, explicit_notify)]
+        pub flashing: Cell<bool>,
         pub search_key: std::cell::OnceCell<String>,
     }
 
@@ -1338,6 +1341,12 @@ mod imp {
         fn set_selected(&self, selected: bool) {
             if self.selected.replace(selected) != selected {
                 self.obj().notify_selected();
+            }
+        }
+
+        fn set_flashing(&self, flashing: bool) {
+            if self.flashing.replace(flashing) != flashing {
+                self.obj().notify_flashing();
             }
         }
     }

@@ -645,16 +645,21 @@ impl LibraryView {
         self.imp().search_words.borrow().clone()
     }
 
-    // Scrolls the grid to an album, clearing the search if it hides it
-    pub fn reveal_album(&self, album_id: &str) -> Option<Album> {
-        let imp = self.imp();
-        let album = imp
+    // The album with an id, if it's in the grid
+    pub fn album(&self, album_id: &str) -> Option<Album> {
+        self.imp()
             .model
             .borrow()
             .as_ref()?
             .iter::<Album>()
             .flatten()
-            .find(|a| a.id() == album_id)?;
+            .find(|a| a.id() == album_id)
+    }
+
+    // Scrolls the grid to an album, clearing the search if it hides it
+    pub fn reveal_album(&self, album_id: &str) -> Option<Album> {
+        let imp = self.imp();
+        let album = self.album(album_id)?;
 
         let hidden = imp
             .search_matches

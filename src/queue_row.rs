@@ -77,6 +77,9 @@ mod imp {
         // highlighted
         #[property(get, set = Self::set_selected, explicit_notify)]
         pub selected: Cell<bool>,
+        // Follows the track, which flashes to show where it is
+        #[property(get, set = Self::set_flashing, explicit_notify)]
+        pub flashing: Cell<bool>,
         // Whether the track can be dragged by its handle to another place
         // in the list
         #[property(get, set = Self::set_reorderable, explicit_notify)]
@@ -185,6 +188,19 @@ mod imp {
             }
         }
 
+        fn set_flashing(&self, flashing: bool) {
+            if flashing != self.flashing.replace(flashing) {
+                let obj = self.obj();
+                // On the row itself, like the selection
+                if flashing {
+                    obj.add_css_class("flash");
+                } else {
+                    obj.remove_css_class("flash");
+                }
+                obj.notify_flashing();
+            }
+        }
+
         fn set_track_title(&self, title: String) {
             self.track_title_label.set_text(Some(&title));
             self.obj().update_tooltip();
@@ -247,6 +263,8 @@ impl QueueRow {
             .bind(self, "playing", gtk::Widget::NONE);
         item.chain_property::<Track>("selected")
             .bind(self, "selected", gtk::Widget::NONE);
+        item.chain_property::<Track>("flashing")
+            .bind(self, "flashing", gtk::Widget::NONE);
 
         if let Some(app) = gio::Application::default().and_downcast::<Application>() {
             app.player()

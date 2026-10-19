@@ -18,9 +18,11 @@ impl Window {
         go_to_album.connect_activate(clone!(
             #[weak(rename_to = win)]
             self,
+            #[strong]
+            track,
             move |_, _| {
                 if let Some(album_id) = &album_id {
-                    win.go_to_album(album_id);
+                    win.go_to_album(album_id, &track.file());
                 }
             }
         ));

@@ -430,8 +430,9 @@ impl AlbumTracks {
     }
 
     // Shows the tracks of an album that contain every search word, or all
-    // of them without any
-    pub fn show_album(&self, album: &Album, search_words: &[String]) {
+    // of them without any; the track of `reveal`, if any, is scrolled to
+    // and flashes once it's read
+    pub fn show_album(&self, album: &Album, search_words: &[String], reveal: Option<&gio::File>) {
         let imp = self.imp();
         self.set_selection_mode(false);
 
@@ -456,6 +457,8 @@ impl AlbumTracks {
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
         let receiver = load_tracks(files);
+        let reveal = reveal.cloned();
+        let mut revealed = false;
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
@@ -473,15 +476,90 @@ impl AlbumTracks {
                     if batch.is_empty() {
                         continue;
                     }
+                    let start = tracks.n_items();
                     tracks.extend_from_slice(&batch);
 
-                    // The list keeps its first track at the top as tracks are
-                    // added, which hides the header of its work above it
-                    if let Some(adjustment) = this.imp().tracks_view.vadjustment() {
-                        adjustment.set_value(0.0);
+                    let found = reveal.as_ref().filter(|_| !revealed).and_then(|file| {
+                        let i = batch.iter().position(|track| track.file().equal(file))?;
+                        Some((start + i as u32, &batch[i]))
+                    });
+                    if let Some((pos, track)) = found {
+                        revealed = true;
+                        this.flash_track(pos, track);
+                    } else if !revealed {
+                        // The list keeps its first track at the top as
+                        // tracks are added, which hides the header of its
+                        // work above it; once a track is revealed, it stays
+                        // in view
+                        if let Some(adjustment) = this.imp().tracks_view.vadjustment() {
+                            adjustment.set_value(0.0);
+                        }
                     }
                 }
             }
         ));
     }
+
+    // Scrolls to a track, places it in the middle of the list, if it can
+    // scroll that far, and makes it flash for a moment, like its CSS
+    // animation. The list was usually just shown, and can only scroll once
+    // it has its size, so this waits for a frame where it has it; the row
+    // of the track is then there in the next frame, to be centered
+    fn flash_track(&self, pos: u32, track: &Track) {
+        let frames = Cell::new(0);
+        self.imp().tracks_view.add_tick_callback(clone!(
+            #[strong]
+            track,
+            move |view, _| {
+                if view.height() == 0 {
+                    return glib::ControlFlow::Continue;
+                }
+                let frame = frames.get();
+                frames.set(frame + 1);
+                if frame == 0 {
+                    view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+                    return glib::ControlFlow::Continue;
+                }
+
+                // Only reads where the row is, as changing the rows of the
+                // list crashes GTK; a few frames in, it flashes anyway
+                let bounds = track_row(view, &track).and_then(|row| row.compute_bounds(view));
+                if bounds.is_none() && frame < 5 {
+                    return glib::ControlFlow::Continue;
+                }
+                if let Some(bounds) = bounds
+                    && let Some(adjustment) = view.vadjustment()
+                {
+                    let middle = f64::from(bounds.y() + bounds.height() / 2.0);
+                    adjustment
+                        .set_value(adjustment.value() + middle - f64::from(view.height()) / 2.0);
+                }
+
+                track.set_flashing(true);
+                glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(1200),
+                    clone!(
+                        #[weak]
+                        track,
+                        move || track.set_flashing(false)
+                    ),
+                );
+                glib::ControlFlow::Break
+            }
+        ));
+    }
+}
+
+// The row showing a track in a list, if it has one
+fn track_row(view: &gtk::ListView, track: &Track) -> Option<QueueRow> {
+    let mut child = view.first_child();
+    while let Some(widget) = child {
+        if let Some(row) = widget.first_child().and_downcast::<QueueRow>()
+            && row.track().as_ref() == Some(track)
+        {
+            return Some(row);
+        }
+        child = widget.next_sibling();
+    }
+    None
 }

@@ -149,6 +149,18 @@ queuerow {
   border-radius: 9px;
 }
 
+/* A track that was gone to, e.g. with "Go to Album", fades in and out
+ * twice */
+queuerow.flash {
+  animation: track-flash 0.6s ease-in-out 2;
+}
+
+@keyframes track-flash {
+  50% {
+    background-color: alpha(var(--accent-bg-color), 0.35);
+  }
+}
+
 /* Where a dragged track would go: a line above or below a row, in place
  * of the theme's outline around the row */
 queuerow:drop(active) {
