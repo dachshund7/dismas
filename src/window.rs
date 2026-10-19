@@ -128,6 +128,10 @@ mod imp {
         pub queue_search: Cell<bool>,
         #[property(get, set = Self::set_replaygain_mode, explicit_notify, builder(ReplayGainMode::default()))]
         pub replaygain_mode: Cell<ReplayGainMode>,
+        // Follows the "enable-recoloring" setting, for the action of its
+        // menu item, which is off for the tracks without a cover
+        #[property(get, set = Self::set_enable_recoloring, explicit_notify, default = true)]
+        pub enable_recoloring: Cell<bool>,
         pub sidebar_width: Cell<i32>,
         // The sizes the window is limited to, from measuring its content
         pub size_limits: Cell<Option<SizeLimits>>,
@@ -332,6 +336,7 @@ mod imp {
             klass.install_property_action("queue.search", "queue-search");
             klass.install_property_action("win.page", "page");
             klass.install_property_action("win.replaygain", "replaygain-mode");
+            klass.install_property_action("win.enable-recoloring", "enable-recoloring");
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -367,6 +372,7 @@ mod imp {
                 queue_filtermodel: RefCell::default(),
                 queue_rows: RefCell::default(),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
+                enable_recoloring: Cell::new(true),
                 sidebar_width: Cell::new(0),
                 size_limits: Cell::new(None),
                 size_limits_idle: Cell::new(false),
@@ -595,6 +601,12 @@ mod imp {
             self.obj().notify_page();
         }
 
+        fn set_enable_recoloring(&self, enable: bool) {
+            if enable != self.enable_recoloring.replace(enable) {
+                self.obj().notify_enable_recoloring();
+            }
+        }
+
         fn set_replaygain_mode(&self, replaygain: ReplayGainMode) {
             if replaygain != self.replaygain_mode.replace(replaygain) {
                 let obj = self.obj();
@@ -695,21 +707,11 @@ impl Window {
             .build();
         self.add_action(&rescan);
 
-        let enable_recoloring = self.imp().settings.boolean("enable-recoloring");
-        self.add_action_entries([gio::ActionEntry::builder("enable-recoloring")
-            .state(enable_recoloring.to_variant())
-            .activate(|this: &Window, action, _| {
-                let state = action.state().unwrap();
-                let action_state: bool = state.get().unwrap();
-                let enable_recoloring = !action_state;
-                action.set_state(&enable_recoloring.to_variant());
-
-                this.imp()
-                    .settings
-                    .set_boolean("enable-recoloring", enable_recoloring)
-                    .expect("Unable to store setting");
-            })
-            .build()]);
+        // The property is the state of `win.enable-recoloring`
+        self.imp()
+            .settings
+            .bind("enable-recoloring", self, "enable-recoloring")
+            .build();
     }
 
     // Space toggles playback wherever the focus is, so it's caught before

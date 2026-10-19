@@ -214,21 +214,9 @@ impl Application {
                 .build(),
         ]);
 
-        let background_play = self.imp().settings.boolean("background-play");
-        self.add_action_entries([gio::ActionEntry::builder("background-play")
-            .state(background_play.to_variant())
-            .activate(|this: &Application, action, _| {
-                let state = action.state().unwrap();
-                let action_state: bool = state.get().unwrap();
-                let background_play = !action_state;
-                action.set_state(&background_play.to_variant());
-
-                this.imp()
-                    .settings
-                    .set_boolean("background-play", background_play)
-                    .expect("Unable to store background-play setting");
-            })
-            .build()]);
+        // The action follows the setting, which is turned off again if
+        // the portal doesn't let Amberol run in the background
+        self.add_action(&self.imp().settings.create_action("background-play"));
     }
 
     fn show_about(&self) {
