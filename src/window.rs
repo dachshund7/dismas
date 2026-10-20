@@ -321,14 +321,18 @@ mod imp {
                 "queue.remove-selected",
             );
 
-            // Esc leaves selection mode; when there is none, the key goes
-            // on to do whatever it did before
+            // Esc leaves selection mode, or else hides the playlist pane;
+            // the collapsed split view hides its pane on Esc by itself, so
+            // the pane only needs hiding here when it's beside the content
             klass.add_binding(gdk::Key::Escape, gdk::ModifierType::empty(), |win| {
                 if win.exit_selection_mode() {
-                    glib::Propagation::Stop
-                } else {
-                    glib::Propagation::Proceed
+                    return glib::Propagation::Stop;
                 }
+                if win.playlist_visible() && !win.imp().split_view.is_collapsed() {
+                    win.set_playlist_visible(false);
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
             });
 
             klass.install_property_action("queue.toggle", "playlist-visible");
