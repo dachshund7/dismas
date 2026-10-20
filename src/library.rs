@@ -60,6 +60,8 @@ pub struct ScanResult {
     // The tracks that were already known and changed, so that the queue
     // can read their tags again
     pub updated: Vec<PathBuf>,
+    // The number of tracks that are new, changed or gone
+    pub n_changed: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -509,6 +511,7 @@ fn scan_with(
     update_covers(conn, &stale_albums)?;
 
     Ok(ScanResult {
+        n_changed: changed.len() + gone.len(),
         updated: changed
             .into_iter()
             .map(|(path, ..)| path)

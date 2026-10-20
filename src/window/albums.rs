@@ -164,10 +164,26 @@ impl Window {
             self,
             move |_| win.queue_selected_albums(true)
         ));
-        library_view.connect_tracks_changed(clone!(
+        library_view.connect_scan_finished(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, uris| win.reload_changed_tracks(&uris)
+            move |_, uris, n_changed, requested| {
+                win.reload_changed_tracks(&uris);
+                if requested {
+                    let msg = if n_changed == 0 {
+                        i18n("No changes found in the Music folder")
+                    } else {
+                        ni18n_k(
+                            // Translators: the `{n}` must be left unmodified
+                            "{n} track changed in the Music folder",
+                            "{n} tracks changed in the Music folder",
+                            n_changed,
+                            &[("n", &n_changed.to_string())],
+                        )
+                    };
+                    win.add_toast(msg);
+                }
+            }
         ));
 
         // The search entry takes Esc to clear the search, so the window
@@ -183,6 +199,6 @@ impl Window {
 
         // Reading the albums can take a while, so we do it in the
         // background as soon as the window is up
-        library_view.start_scan();
+        library_view.start_scan(false);
     }
 }

@@ -4,6 +4,7 @@
 use std::{
     cell::{Cell, OnceCell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
+    rc::Rc,
 };
 
 use adw::{prelude::*, subclass::prelude::*};
@@ -198,9 +199,14 @@ mod imp {
                     Signal::builder("add-albums").build(),
                     Signal::builder("play-albums").build(),
                     // The URIs of the tracks whose files changed since the
-                    // last scan
-                    Signal::builder("tracks-changed")
-                        .param_types([Vec::<String>::static_type()])
+                    // last scan, the number of tracks that are new, changed
+                    // or gone, and whether the user asked for the scan
+                    Signal::builder("scan-finished")
+                        .param_types([
+                            Vec::<String>::static_type(),
+                            u32::static_type(),
+                            bool::static_type(),
+                        ])
                         .build(),
                 ]
             });
@@ -251,14 +257,19 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_tracks_changed<F: Fn(&Self, Vec<String>) + 'static>(
+    pub fn connect_scan_finished<F: Fn(&Self, Vec<String>, u32, bool) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
         self.connect_closure(
-            "tracks-changed",
+            "scan-finished",
             false,
-            glib::closure_local!(move |view: &Self, uris: Vec<String>| f(view, uris)),
+            glib::closure_local!(move |view: &Self,
+                                       uris: Vec<String>,
+                                       n_changed: u32,
+                                       requested: bool| {
+                f(view, uris, n_changed, requested);
+            }),
         )
     }
 
@@ -916,11 +927,17 @@ impl LibraryView {
             "empty"
         };
         imp.albums_stack.set_visible_child_name(page);
+
+        // When the grid is already showing, a thin bar at the bottom is
+        // enough
+        imp.update_progress
+            .set_visible(page == "albums" && imp.scanning.get());
     }
 
     // Shows the albums we know about, then looks for changes in the Music
-    // folder in a separate thread
-    pub fn start_scan(&self) {
+    // folder in a separate thread; `requested` is whether the user asked
+    // for it, to tell them what it found
+    pub fn start_scan(&self, requested: bool) {
         let imp = self.imp();
         if imp.scanning.get() {
             return;
@@ -937,6 +954,30 @@ impl LibraryView {
         imp.scan_progress.set_fraction(0.0);
         imp.scan_progress.set_text(None);
 
+        // Looking for the files that changed takes a while in a large
+        // folder, before there is anything to count
+        let counting = Rc::new(Cell::new(false));
+        glib::timeout_add_local(
+            std::time::Duration::from_millis(100),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                #[strong]
+                counting,
+                #[upgrade_or]
+                glib::ControlFlow::Break,
+                move || {
+                    let imp = this.imp();
+                    if counting.get() || !imp.scanning.get() {
+                        return glib::ControlFlow::Break;
+                    }
+                    imp.scan_progress.pulse();
+                    imp.update_progress.pulse();
+                    glib::ControlFlow::Continue
+                }
+            ),
+        );
+
         let (sender, receiver) = async_channel::unbounded();
         std::thread::spawn(move || library::scan(&music_dir, &sender));
 
@@ -949,6 +990,7 @@ impl LibraryView {
                     let imp = this.imp();
                     match event {
                         ScanEvent::Progress(done, total) => {
+                            counting.set(true);
                             let fraction = done as f64 / total.max(1) as f64;
                             let text = i18n_k(
                                 // Translators: the `{done}` and `{total}` must be left
@@ -959,13 +1001,7 @@ impl LibraryView {
                             );
                             imp.scan_progress.set_fraction(fraction);
                             imp.scan_progress.set_text(Some(&text));
-
-                            // When the grid is already showing, a thin bar
-                            // at the bottom is enough
                             imp.update_progress.set_fraction(fraction);
-                            imp.update_progress.set_visible(
-                                imp.albums_stack.visible_child_name().as_deref() == Some("albums"),
-                            );
                         }
                         ScanEvent::Finished(finished) => {
                             result = finished;
@@ -975,19 +1011,16 @@ impl LibraryView {
                 }
 
                 // The channel also closes if the scan panicked
-                let imp = this.imp();
                 this.set_scanning(false);
-                imp.update_progress.set_visible(false);
                 this.reload();
 
-                if !result.updated.is_empty() {
-                    let uris: Vec<String> = result
-                        .updated
-                        .iter()
-                        .map(|path| gio::File::for_path(path).uri().to_string())
-                        .collect();
-                    this.emit_by_name::<()>("tracks-changed", &[&uris]);
-                }
+                let uris: Vec<String> = result
+                    .updated
+                    .iter()
+                    .map(|path| gio::File::for_path(path).uri().to_string())
+                    .collect();
+                let n_changed = u32::try_from(result.n_changed).unwrap_or(u32::MAX);
+                this.emit_by_name::<()>("scan-finished", &[&uris, &n_changed, &requested]);
             }
         ));
     }

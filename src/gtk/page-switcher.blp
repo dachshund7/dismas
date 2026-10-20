@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 John Hamilton
 
 using Gtk 4.0;
+using Adw 1;
 
 // The children are laid out in page_switcher.rs, which shows either the
 // buttons of the pages or, where they don't fit, the menu button
@@ -31,12 +32,32 @@ template $DismasPageSwitcher: Widget {
       tooltip-text: _("Player");
     }
 
+    // A spinner takes the place of the icon while the Music folder is
+    // being read; the class keeps the padding of an icon button
     ToggleButton {
-      icon-name: "view-grid-symbolic";
       focus-on-click: false;
       action-name: "win.page";
       action-target: "'library'";
       tooltip-text: _("Albums");
+
+      styles [
+        "image-button",
+      ]
+
+      child: Stack library_stack {
+        StackPage {
+          name: "icon";
+
+          child: Image {
+            icon-name: "view-grid-symbolic";
+          };
+        }
+
+        StackPage {
+          name: "spinner";
+          child: Adw.Spinner {};
+        }
+      };
     }
 
     ToggleButton {
@@ -48,7 +69,8 @@ template $DismasPageSwitcher: Widget {
     }
   }
 
-  // The icon is the one of the visible page
+  // The icon is the one of the visible page, or a spinner while the
+  // Music folder is being read
   MenuButton pages_menu_button {
     always-show-arrow: true;
     menu-model: pages_menu;
@@ -57,6 +79,18 @@ template $DismasPageSwitcher: Widget {
     accessibility {
       label: C_("a11y", "Switch page");
     }
+
+    child: Stack pages_menu_stack {
+      StackPage {
+        name: "icon";
+        child: Image pages_menu_icon {};
+      }
+
+      StackPage {
+        name: "spinner";
+        child: Adw.Spinner {};
+      }
+    };
   }
 }
 

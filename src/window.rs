@@ -149,6 +149,11 @@ mod imp {
         // Whether there is anything to play, to go to the player
         #[property(get)]
         pub player_available: Cell<bool>,
+        // Whether the Music folder is being read, for the page switchers;
+        // the one in the album grid's header is in the window before the
+        // library view is bound, so it can't follow the view itself
+        #[property(get, set)]
+        pub library_scanning: Cell<bool>,
         // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
         // Whether to hide the focus again once the page is shown
@@ -394,6 +399,7 @@ mod imp {
                 playlists_visible: Cell::new(false),
                 page: std::marker::PhantomData,
                 player_available: Cell::new(false),
+                library_scanning: Cell::new(false),
                 starting: Cell::new(true),
                 pending_playlist: RefCell::default(),
                 loads: Cell::new(0),
@@ -421,6 +427,11 @@ mod imp {
             if APPLICATION_ID.ends_with("Devel") {
                 self.obj().add_css_class("devel");
             }
+
+            self.library_view
+                .bind_property("scanning", &*self.obj(), "library-scanning")
+                .sync_create()
+                .build();
 
             // Only in selection mode
             self.obj()
@@ -720,7 +731,7 @@ impl Window {
         rescan.connect_activate(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, _| win.imp().library_view.start_scan()
+            move |_, _| win.imp().library_view.start_scan(true)
         ));
         self.imp()
             .library_view

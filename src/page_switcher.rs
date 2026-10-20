@@ -32,7 +32,13 @@ mod imp {
         #[template_child]
         pub player_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
+        pub library_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
         pub pages_menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub pages_menu_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub pages_menu_icon: TemplateChild<gtk::Image>,
         // The bindings to the window, while the switcher is in it
         pub bindings: RefCell<Vec<glib::Binding>>,
         pub player_handler: RefCell<Option<(glib::WeakRef<gtk::Window>, glib::SignalHandlerId)>>,
@@ -160,7 +166,7 @@ mod imp {
                     .transform_to(|_, page: String| Some(page == "player"))
                     .sync_create()
                     .build(),
-                win.bind_property("page", &*self.pages_menu_button, "icon-name")
+                win.bind_property("page", &*self.pages_menu_icon, "icon-name")
                     .transform_to(|_, page: String| {
                         Some(match page.as_str() {
                             "library" => "view-grid-symbolic",
@@ -171,7 +177,16 @@ mod imp {
                     .sync_create()
                     .build(),
             ];
-            self.bindings.replace(bindings);
+            let scanning_bindings = [&*self.library_stack, &*self.pages_menu_stack].map(|stack| {
+                win.bind_property("library-scanning", stack, "visible-child-name")
+                    .transform_to(|_, scanning: bool| {
+                        Some(if scanning { "spinner" } else { "icon" })
+                    })
+                    .sync_create()
+                    .build()
+            });
+            self.bindings
+                .replace(bindings.into_iter().chain(scanning_bindings).collect());
 
             let update_player = glib::clone!(
                 #[weak]
