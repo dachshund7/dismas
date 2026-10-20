@@ -19,11 +19,11 @@ meson devenv -C _build ./src/dismas    # run uninstalled
 - **Generated `config.rs`:** `meson setup` writes `src/config.rs` from `src/config.rs.in` and copies it into the source tree. The file is gitignored. Cargo, rustfmt and clippy all need it to exist.
 - **Profiles:** the default profile builds `--release`. Cargo's target dir is `_build/src/`.
 - **Runtime dependencies:** gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20 (incl. plugins-bad), and the glycin loaders (`glycin-loaders`, plus `bwrap` outside Flatpak) to decode cover art. At build time: `blueprint-compiler`, `msgfmt` (gettext), the SQLite development files for the library database (rusqlite links against the system SQLite), and the libseccomp and fontconfig development files, which glycin links against.
-- **Flatpak:** the manifest is `io.github.dachshund7.Dismas.json`, which builds the Devel profile.
+- **Flatpak:** the manifest is `io.github.dachshund7.Dismas.json`. It builds the Devel profile, on the GNOME 51 runtime, from the folder it's in (a `dir` source, skipping the build folders), and lets Cargo download the crates during the build (`--share=network`), which Flathub wouldn't allow. Inside the sandbox, the data is under `~/.var/app/io.github.dachshund7.Dismas.Devel/`, so there's nothing to migrate from Amberol.
 
 ## Checks
 
-GitHub Actions (`.github/workflows/ci.yml`) runs these on pushes to main and on pull requests. The `lint` job runs `checks.sh` and `reuse` on Ubuntu. The `build` job builds the app with Meson and runs clippy, the tests and the data file validation in a `fedora:latest` container, because Ubuntu's GTK and libadwaita are too old. To try the `build` job locally, run its commands in `podman run fedora:latest`. There's no Flatpak job yet.
+GitHub Actions (`.github/workflows/ci.yml`) runs these on pushes to main and on pull requests. The `lint` job runs `checks.sh` and `reuse` on Ubuntu. The `build` job builds the app with Meson and runs clippy, the tests and the data file validation in a `fedora:latest` container, because Ubuntu's GTK and libadwaita are too old. The `flatpak` job builds the manifest in the `ghcr.io/flathub-infra/flatpak-github-actions:gnome-51` image and uploads `dismas-devel.flatpak` as an artifact. To try the `build` job locally, run its commands in `podman run fedora:latest`; the `flatpak` job, with `flatpak-builder` in that image (`podman run --privileged`).
 
 ```sh
 cargo fmt --all -- --check                  # needs src/config.rs; a blank line is enough (CI writes one)

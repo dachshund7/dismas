@@ -1,7 +1,7 @@
 {
     "app-id" : "io.github.dachshund7.Dismas.Devel",
     "runtime" : "org.gnome.Platform",
-    "runtime-version" : "master",
+    "runtime-version" : "51",
     "sdk" : "org.gnome.Sdk",
     "sdk-extensions" : [
         "org.freedesktop.Sdk.Extension.rust-stable"
@@ -47,8 +47,17 @@
             ],
             "sources" : [
                 {
-                    "type" : "git",
-                    "url" : "https://github.com/dachshund7/dismas.git"
+                    "type" : "dir",
+                    "path" : ".",
+                    "skip" : [
+                        "_build",
+                        "target",
+                        ".flatpak-builder",
+                        "flatpak-build",
+                        "flatpak-repo",
+                        "flatpak_app",
+                        "repo"
+                    ]
                 }
             ]
         }

@@ -85,3 +85,18 @@ jobs:
         run: >
           meson test -C _build --print-errorlogs
           "Validate desktop file" "Validate appstream file" "Validate schema file"
+
+  # A Flatpak of the development profile, for trying a change without
+  # building it; the bundle is in the artifacts of the run
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: io.github.dachshund7.Dismas.json
+          bundle: dismas-devel.flatpak

@@ -88,8 +88,18 @@ To install it, run `meson install -C _build`. By default, that installs
 system-wide, under `/usr/local`; to install it for yourself only, set up the
 build with `meson setup _build --prefix ~/.local` instead.
 
-To build a Flatpak instead, use the `io.github.dachshund7.Dismas.json`
-manifest.
+To build a Flatpak instead, with `flatpak-builder`:
+
+```sh
+flatpak-builder --user --install --install-deps-from=flathub --force-clean \
+    flatpak-build io.github.dachshund7.Dismas.json
+flatpak run io.github.dachshund7.Dismas.Devel
+```
+
+That builds the development version, which has its own ID, so it can be
+installed next to a regular build. Each CI run on GitHub also makes one, as
+`dismas-devel.flatpak` in the run's artifacts; install it with
+`flatpak install --user dismas-devel.flatpak`.
 
 Dismas has its own application ID, `io.github.dachshund7.Dismas`, so it can be
 installed alongside Amberol. On its first run, it copies Amberol's library,
