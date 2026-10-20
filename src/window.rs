@@ -299,6 +299,13 @@ mod imp {
                 debug!("Window::win.save-queue()");
                 win.show_save_queue_dialog();
             });
+            // The search button toggles the queue search, but its shortcut
+            // goes back to it when it's open; Esc closes it
+            klass.install_action("queue.find", None, move |win, _, _| {
+                debug!("Window::queue.find()");
+                win.set_queue_search(true);
+                win.imp().playlist_view.queue_searchentry().grab_focus();
+            });
             klass.install_action("queue.select-all", None, move |win, _, _| {
                 debug!("Window::queue.select-all()");
                 win.select_all();
