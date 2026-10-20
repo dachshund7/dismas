@@ -14,6 +14,7 @@ mod track_menu;
 
 use std::{
     cell::{Cell, RefCell},
+    collections::HashSet,
     path::PathBuf,
     rc::Rc,
     str::FromStr,

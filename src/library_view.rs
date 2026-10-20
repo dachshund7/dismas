@@ -16,7 +16,7 @@ use crate::{
     album_cell::AlbumCell,
     audio::normalize_search_text,
     i18n::{i18n, i18n_k, ni18n_f},
-    library::{self, Album, AlbumSort, ScanEvent},
+    library::{self, Album, AlbumSort, ScanEvent, ScanResult},
     square_bin::SquareBin,
     utils,
 };
@@ -197,6 +197,11 @@ mod imp {
                     // Add or play the tracks of the selected albums
                     Signal::builder("add-albums").build(),
                     Signal::builder("play-albums").build(),
+                    // The URIs of the tracks whose files changed since the
+                    // last scan
+                    Signal::builder("tracks-changed")
+                        .param_types([Vec::<String>::static_type()])
+                        .build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -243,6 +248,17 @@ impl LibraryView {
             "play-albums",
             false,
             glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_tracks_changed<F: Fn(&Self, Vec<String>) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "tracks-changed",
+            false,
+            glib::closure_local!(move |view: &Self, uris: Vec<String>| f(view, uris)),
         )
     }
 
@@ -928,6 +944,7 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
+                let mut result = ScanResult::default();
                 while let Ok(event) = receiver.recv().await {
                     let imp = this.imp();
                     match event {
@@ -950,7 +967,10 @@ impl LibraryView {
                                 imp.albums_stack.visible_child_name().as_deref() == Some("albums"),
                             );
                         }
-                        ScanEvent::Finished => break,
+                        ScanEvent::Finished(finished) => {
+                            result = finished;
+                            break;
+                        }
                     }
                 }
 
@@ -959,6 +979,15 @@ impl LibraryView {
                 this.set_scanning(false);
                 imp.update_progress.set_visible(false);
                 this.reload();
+
+                if !result.updated.is_empty() {
+                    let uris: Vec<String> = result
+                        .updated
+                        .iter()
+                        .map(|path| gio::File::for_path(path).uri().to_string())
+                        .collect();
+                    this.emit_by_name::<()>("tracks-changed", &[&uris]);
+                }
             }
         ));
     }

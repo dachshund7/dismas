@@ -129,6 +129,18 @@ impl PlayerState {
         self.notify_position();
     }
 
+    // Shows the new tags of the current track, after it was updated
+    pub fn track_changed(&self) {
+        self.notify_title();
+        self.notify_artist();
+        self.notify_album();
+        self.notify_credits();
+        self.notify_heading();
+        self.notify_movement();
+        self.notify_duration();
+        self.notify_cover();
+    }
+
     pub fn set_position(&self, position: u64) {
         self.imp().position.replace(position);
         self.notify_position();

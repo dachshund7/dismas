@@ -156,7 +156,7 @@ impl Window {
         self.action_set_enabled("win.enable-recoloring", false);
     }
 
-    fn update_title(&self, track: Option<&Track>) {
+    pub(super) fn update_title(&self, track: Option<&Track>) {
         if let Some(track) = track {
             self.set_title(Some(&format!("{} - {}", track.artist(), track.title())));
         } else {

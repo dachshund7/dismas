@@ -1303,7 +1303,7 @@ mod imp {
         // Briefly, to show where the track is in a list
         #[property(get, set = Self::set_flashing, explicit_notify)]
         pub flashing: Cell<bool>,
-        pub search_key: std::cell::OnceCell<String>,
+        pub search_key: RefCell<Option<String>>,
     }
 
     #[glib::object_subclass]
@@ -1481,6 +1481,28 @@ impl Track {
         glib::Object::new()
     }
 
+    // Replaces the tags with the ones read again from the file, after it
+    // changed; the track stays the same object, so it keeps its place in
+    // the queue
+    pub fn update(&self, data: TrackData) {
+        let imp = self.imp();
+        imp.data.replace(data);
+        imp.search_key.take();
+
+        self.notify_artist();
+        self.notify_title();
+        self.notify_album();
+        self.notify_credits();
+        self.notify_heading();
+        self.notify_movement();
+        self.notify_row_title();
+        self.notify_row_subtitle();
+        self.notify_row_credits();
+        self.notify_duration();
+        self.notify_cover();
+        self.notify_row_cover();
+    }
+
     pub fn equals(&self, other: &Self) -> bool {
         if self.uuid().is_some() && other.uuid().is_some() {
             self.uuid() == other.uuid()
@@ -1538,11 +1560,12 @@ impl Track {
     }
 
     // The text that searching the queue looks into, normalized with
-    // `normalize_search_text()`; computed once, as the tags don't change
+    // `normalize_search_text()`; computed once, until the tags change
     pub fn search_key(&self) -> String {
         self.imp()
             .search_key
-            .get_or_init(|| {
+            .borrow_mut()
+            .get_or_insert_with(|| {
                 let data = self.imp().data.borrow();
                 // The album title is in the tags, without the names that
                 // would make it match tracks by other people

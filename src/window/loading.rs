@@ -244,6 +244,78 @@ impl Window {
         ));
     }
 
+    // Reads the tags of the tracks in the queue and in the album shown in
+    // the sidebar again when their files changed, e.g. when a scan of the
+    // library finds new tags; the tracks are updated in place, so the
+    // lists keep their order and the current track keeps playing
+    pub(super) fn reload_changed_tracks(&self, uris: &[String]) {
+        let Some(player) = self.player() else {
+            return;
+        };
+        let shown: Vec<Track> = player
+            .queue()
+            .model()
+            .iter::<Track>()
+            .flatten()
+            .chain(self.imp().album_tracks.tracks())
+            .collect();
+
+        // The cover of their album might have changed too, and the other
+        // tracks of the album share it, so they are read again with them
+        let covers: HashSet<String> = shown
+            .iter()
+            .filter(|track| uris.contains(&track.uri()))
+            .filter_map(Track::cover_uuid)
+            .collect();
+        let tracks: Vec<Track> = shown
+            .into_iter()
+            .filter(|track| {
+                uris.contains(&track.uri())
+                    || track
+                        .cover_uuid()
+                        .is_some_and(|uuid| covers.contains(&uuid))
+            })
+            .collect();
+        if tracks.is_empty() {
+            return;
+        }
+        {
+            let mut cache = CoverCache::global().lock().unwrap();
+            for uuid in &covers {
+                cache.forget(uuid);
+            }
+        }
+
+        let receiver = load_tracks(tracks.iter().map(Track::file).collect());
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                for track in tracks {
+                    let Ok(data) = receiver.recv().await else {
+                        break;
+                    };
+                    // A file that can't be read anymore keeps its old tags
+                    let Some(data) = data else {
+                        continue;
+                    };
+                    track.update(data);
+
+                    let Some(player) = win.player() else {
+                        return;
+                    };
+                    player.queue().track_changed(&track);
+                    win.imp().album_tracks.track_changed(&track);
+                    if player.state().track().as_ref() == Some(&track) {
+                        player.current_track_changed();
+                        win.update_title(Some(&track));
+                        win.update_style(Some(&track));
+                    }
+                }
+            }
+        ));
+    }
+
     pub fn open_files(&self, files: &[gio::File]) {
         if files.is_empty() {
             self.add_toast(i18n("Unable to access files"));

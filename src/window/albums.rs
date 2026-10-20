@@ -164,6 +164,11 @@ impl Window {
             self,
             move |_| win.queue_selected_albums(true)
         ));
+        library_view.connect_tracks_changed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, uris| win.reload_changed_tracks(&uris)
+        ));
 
         // The search entry takes Esc to clear the search, so the window
         // does not get it to leave selection mode; do both, as the tracks

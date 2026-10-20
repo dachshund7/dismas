@@ -308,13 +308,25 @@ impl AlbumTracks {
         ));
     }
 
-    fn tracks(&self) -> Vec<Track> {
+    // The tracks of the album that is showing
+    pub fn tracks(&self) -> Vec<Track> {
         self.imp()
             .tracks
             .borrow()
             .as_ref()
             .map(|t| t.iter::<Track>().flatten().collect())
             .unwrap_or_default()
+    }
+
+    // Shows the new tags of a track that was updated: its row and the
+    // section of its work are made again
+    pub fn track_changed(&self, track: &Track) {
+        let tracks = self.imp().tracks.borrow().clone();
+        if let Some(tracks) = tracks
+            && let Some(pos) = tracks.find(track)
+        {
+            tracks.items_changed(pos, 1, 1);
+        }
     }
 
     // The files of the tracks, in order; in selection mode, only the

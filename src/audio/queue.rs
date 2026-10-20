@@ -100,6 +100,14 @@ impl Queue {
             .map(|pos| pos as u32)
     }
 
+    // Shows the new tags of a track that was updated: its row and the
+    // section of its work are made again
+    pub fn track_changed(&self, track: &Track) {
+        if let Some(pos) = self.position(track) {
+            self.imp().model.items_changed(pos, 1, 1);
+        }
+    }
+
     pub fn set_current_track(&self, track: Option<Track>) {
         if let Some(track) = track {
             let pos = self

@@ -113,6 +113,13 @@ impl CoverCache {
         }
     }
 
+    // Loads the cover of an album again the next time one of its tracks
+    // asks for it, e.g. after its files changed; the tracks that have the
+    // old cover keep it until they're read again
+    pub fn forget(&mut self, uuid: &str) {
+        self.entries.remove(uuid);
+    }
+
     fn slot(&mut self, uuid: &str) -> CoverSlot {
         if let Some(slot) = self.entries.get(uuid).and_then(Weak::upgrade) {
             return slot;

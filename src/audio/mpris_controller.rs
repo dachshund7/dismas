@@ -197,6 +197,16 @@ impl Controller for MprisController {
         ));
     }
 
+    fn update_track(&self, track: &Track) {
+        self.shared.metadata.replace(self.track_metadata(track));
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_metadata().await }
+        ));
+    }
+
     fn set_position(&self, position: u64, notify: bool) {
         let pos = Time::from_secs(position as i64);
         if let Some(player) = self.shared.player.get() {

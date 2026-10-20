@@ -52,7 +52,14 @@ const THUMBNAIL_SIZE: u32 = 480;
 pub enum ScanEvent {
     // The number of files read so far, out of the files that changed
     Progress(usize, usize),
-    Finished,
+    Finished(ScanResult),
+}
+
+#[derive(Debug, Default)]
+pub struct ScanResult {
+    // The tracks that were already known and changed, so that the queue
+    // can read their tags again
+    pub updated: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -329,15 +336,16 @@ pub fn track_album(path: &Path) -> Option<String> {
 // should be called from a separate thread
 pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {
     let now = Instant::now();
-    if let Err(e) = scan_internal(music_dir, sender) {
+    let result = scan_internal(music_dir, sender).unwrap_or_else(|e| {
         warn!("Unable to scan the library: {e}");
-    }
+        ScanResult::default()
+    });
     debug!("Library scan: {} ms", now.elapsed().as_millis());
 
-    let _ = sender.try_send(ScanEvent::Finished);
+    let _ = sender.try_send(ScanEvent::Finished(result));
 }
 
-fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Result<()> {
+fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Result<ScanResult> {
     with_connection(|conn| scan_with(conn, music_dir, sender))
 }
 
@@ -345,7 +353,7 @@ fn scan_with(
     conn: &mut Connection,
     music_dir: &Path,
     sender: &Sender<ScanEvent>,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<ScanResult> {
     let files = utils::load_files_from_folder(&gio::File::for_path(music_dir), true);
 
     // Find the files that are new or changed since the last scan
@@ -491,7 +499,15 @@ fn scan_with(
         tx.commit()?;
     }
 
-    update_covers(conn, &stale_albums)
+    update_covers(conn, &stale_albums)?;
+
+    Ok(ScanResult {
+        updated: changed
+            .into_iter()
+            .map(|(path, ..)| path)
+            .filter(|path| known.contains_key(path_bytes(path)))
+            .collect(),
+    })
 }
 
 // Creates the thumbnails of the albums that don't have one yet, or whose

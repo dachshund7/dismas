@@ -497,6 +497,17 @@ impl AudioPlayer {
         self.state.set_current_track(track);
     }
 
+    // Shows the new tags of the current track, after they were read again
+    pub fn current_track_changed(&self) {
+        let Some(track) = self.state.track() else {
+            return;
+        };
+        self.state.track_changed();
+        for c in &self.controllers {
+            c.update_track(&track);
+        }
+    }
+
     fn update_position(&self, position: u64, notify: bool) {
         self.state.set_position(position);
 
