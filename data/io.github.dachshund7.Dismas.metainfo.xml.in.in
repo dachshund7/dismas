@@ -66,7 +66,7 @@
   </kudos>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="2026.10" date="2026-10-19">
+    <release version="2026.10" date="2026-10-20">
       <description>
         <p>The first release of Dismas, a fork of Amberol.</p>
         <ul>
@@ -75,7 +75,7 @@
           <li>Search and reorder the queue</li>
           <li>See works, movements and performers of classical music</li>
           <li>Stop the music with a sleep timer</li>
-          <li>A new icon: a carved lute rose</li>
+          <li>A new icon: Charles Bridge and Prague Castle</li>
         </ul>
       </description>
     </release>
