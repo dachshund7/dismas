@@ -44,7 +44,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 9;
 
 // The size of the covers in the grid, twice the largest one for HiDPI
 const THUMBNAIL_SIZE: u32 = 480;
@@ -162,6 +162,7 @@ fn open() -> rusqlite::Result<Connection> {
              CREATE TABLE tracks (
                  path BLOB PRIMARY KEY,
                  mtime INTEGER NOT NULL,
+                 ctime INTEGER NOT NULL,
                  size INTEGER NOT NULL,
                  added INTEGER NOT NULL,
                  album_id TEXT,
@@ -359,11 +360,15 @@ fn scan_with(
     // Find the files that are new or changed since the last scan
     let mut known = std::collections::HashMap::new();
     {
-        let mut stmt = conn.prepare("SELECT path, mtime, size FROM tracks")?;
+        let mut stmt = conn.prepare("SELECT path, mtime, ctime, size FROM tracks")?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, Vec<u8>>(0)?,
-                (row.get::<_, i64>(1)?, row.get::<_, i64>(2)?),
+                (
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ),
             ))
         })?;
         for row in rows {
@@ -390,6 +395,7 @@ fn scan_with(
                 .map(|d| d.as_secs() as i64)
         };
         let mtime = seconds(metadata.modified()).unwrap_or_default();
+        let ctime = change_time(&metadata);
         let size = metadata.len() as i64;
         // When the file was created, so that the tracks that were in the
         // Music folder before the library existed are sorted by when they
@@ -397,8 +403,8 @@ fn scan_with(
         // kept when a track changes
         let added = seconds(metadata.created()).unwrap_or(mtime);
 
-        if known.get(path_bytes(&path)) != Some(&(mtime, size)) {
-            changed.push((path.clone(), mtime, size, added));
+        if known.get(path_bytes(&path)) != Some(&(mtime, ctime, size)) {
+            changed.push((path.clone(), mtime, ctime, size, added));
         }
         present.insert(path_bytes(&path).to_vec());
     }
@@ -421,18 +427,18 @@ fn scan_with(
             // A changed track keeps the time it was added
             let mut upsert = tx.prepare(
                 "INSERT INTO tracks
-                 (path, mtime, size, album_id, album, album_artist, artist, artist_sort,
-                  year, disc, track, title, search, added)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 (path, mtime, ctime, size, album_id, album, album_artist, artist,
+                  artist_sort, year, disc, track, title, search, added)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                  ON CONFLICT (path) DO UPDATE SET
-                  mtime = excluded.mtime, size = excluded.size,
+                  mtime = excluded.mtime, ctime = excluded.ctime, size = excluded.size,
                   album_id = excluded.album_id, album = excluded.album,
                   album_artist = excluded.album_artist, artist = excluded.artist,
                   artist_sort = excluded.artist_sort, year = excluded.year,
                   disc = excluded.disc, track = excluded.track,
                   title = excluded.title, search = excluded.search",
             )?;
-            for (path, mtime, size, added) in chunk {
+            for (path, mtime, ctime, size, added) in chunk {
                 let key = path_bytes(path);
                 if let Some(id) = old_album
                     .query_row([key], |row| row.get::<_, String>(0))
@@ -452,6 +458,7 @@ fn scan_with(
                 upsert.execute(params![
                     key,
                     mtime,
+                    ctime,
                     size,
                     tags.album_id,
                     tags.album,
@@ -508,6 +515,25 @@ fn scan_with(
             .filter(|path| known.contains_key(path_bytes(path)))
             .collect(),
     })
+}
+
+// When the file last changed, in nanoseconds: unlike the modification
+// time, taggers can't keep it from changing when they write the tags, as
+// some do to keep the files in the order they were added
+fn change_time(metadata: &std::fs::Metadata) -> i64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        metadata
+            .ctime()
+            .saturating_mul(1_000_000_000)
+            .saturating_add(metadata.ctime_nsec())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        0
+    }
 }
 
 // Creates the thumbnails of the albums that don't have one yet, or whose
