@@ -8,8 +8,12 @@ template $DismasPlaylistsPage: Widget {
   Adw.ToolbarView {
     [top]
     Adw.HeaderBar {
-      title-widget: Adw.WindowTitle {
-        title: _("Playlists");
+      // The title is left out when the window is too narrow for it, even
+      // with the buttons of the pages folded into a menu
+      title-widget: $DismasFitBin {
+        child: Adw.WindowTitle {
+          title: _("Playlists");
+        };
       };
 
       [start]

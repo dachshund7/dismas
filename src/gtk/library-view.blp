@@ -8,8 +8,12 @@ template $DismasLibraryView: Widget {
   Adw.ToolbarView {
     [top]
     Adw.HeaderBar {
-      title-widget: Adw.WindowTitle {
-        title: _("Albums");
+      // The title is left out when the window is too narrow for it, even
+      // with the buttons of the pages folded into a menu
+      title-widget: $DismasFitBin {
+        child: Adw.WindowTitle {
+          title: _("Albums");
+        };
       };
 
       [start]
@@ -107,7 +111,9 @@ template $DismasLibraryView: Widget {
             // slower even when there are fewer columns
             child: GridView grid_view {
               max-columns: 6;
-              min-columns: 2;
+              // A narrow window shows a single column, rather than being
+              // kept as wide as two
+              min-columns: 1;
               single-click-activate: true;
 
               styles [

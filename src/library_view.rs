@@ -143,6 +143,7 @@ mod imp {
         type ParentType = gtk::Widget;
 
         fn class_init(klass: &mut Self::Class) {
+            crate::fit_bin::FitBin::static_type();
             crate::page_switcher::PageSwitcher::static_type();
             Self::bind_template(klass);
 

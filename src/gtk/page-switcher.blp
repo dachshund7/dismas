@@ -3,50 +3,78 @@
 
 using Gtk 4.0;
 
+// The children are laid out in page_switcher.rs, which shows either the
+// buttons of the pages or, where they don't fit, the menu button
 template $DismasPageSwitcher: Widget {
-  Box {
-    spacing: 6;
+  ToggleButton queue_button {
+    icon-name: "view-queue-symbolic";
+    action-name: "queue.toggle";
+    tooltip-text: _("Toggle Playlist");
 
-    ToggleButton {
-      icon-name: "view-queue-symbolic";
-      action-name: "queue.toggle";
-      tooltip-text: _("Toggle Playlist");
+    accessibility {
+      label: C_("a11y", "Toggle playlist");
+    }
+  }
 
-      accessibility {
-        label: C_("a11y", "Toggle playlist");
-      }
+  // Clicking a button hides its page, so it doesn't take the focus; when
+  // the page came back, the focus would be shown on the button
+  Box pages_box {
+    styles [
+      "linked",
+    ]
+
+    // Not on the action, which would make it sensitive again whenever
+    // the action is enabled; see page_switcher.rs
+    ToggleButton player_button {
+      icon-name: "audio-x-generic-symbolic";
+      focus-on-click: false;
+      tooltip-text: _("Player");
     }
 
-    // Clicking a button hides its page, so it doesn't take the focus; when
-    // the page came back, the focus would be shown on the button
-    Box {
-      styles [
-        "linked",
-      ]
+    ToggleButton {
+      icon-name: "view-grid-symbolic";
+      focus-on-click: false;
+      action-name: "win.page";
+      action-target: "'library'";
+      tooltip-text: _("Albums");
+    }
 
-      // Not on the action, which would make it sensitive again whenever
-      // the action is enabled; see page_switcher.rs
-      ToggleButton player_button {
-        icon-name: "audio-x-generic-symbolic";
-        focus-on-click: false;
-        tooltip-text: _("Player");
-      }
+    ToggleButton {
+      icon-name: "view-list-bullet-symbolic";
+      focus-on-click: false;
+      action-name: "win.page";
+      action-target: "'playlists'";
+      tooltip-text: _("Playlists");
+    }
+  }
 
-      ToggleButton {
-        icon-name: "view-grid-symbolic";
-        focus-on-click: false;
-        action-name: "win.page";
-        action-target: "'library'";
-        tooltip-text: _("Albums");
-      }
+  // The icon is the one of the visible page
+  MenuButton pages_menu_button {
+    always-show-arrow: true;
+    menu-model: pages_menu;
+    tooltip-text: _("Switch Page");
 
-      ToggleButton {
-        icon-name: "view-list-bullet-symbolic";
-        focus-on-click: false;
-        action-name: "win.page";
-        action-target: "'playlists'";
-        tooltip-text: _("Playlists");
-      }
+    accessibility {
+      label: C_("a11y", "Switch page");
+    }
+  }
+}
+
+menu pages_menu {
+  section {
+    item {
+      label: _("_Player");
+      action: "switcher.player";
+    }
+
+    item {
+      label: _("_Albums");
+      action: "switcher.library";
+    }
+
+    item {
+      label: _("P_laylists");
+      action: "switcher.playlists";
     }
   }
 }

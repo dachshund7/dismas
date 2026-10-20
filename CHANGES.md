@@ -38,6 +38,9 @@ The first release of Dismas, a fork of Amberol's development version after
 - Renamed to Dismas, with the application ID `io.github.dachshund7.Dismas`
 - A new icon: a carved lute rose
 - The album grid replaces the start screen
+- The window gets as narrow as 360 pixels on every page: the buttons of the
+  pages fold into a menu, the titles of the pages are left out, and the album
+  grid shows a single column
 - Call the list of tracks to play the queue, and audio files "tracks"
 - Fit the player to the window, growing the cover and waveform into the
   room left
