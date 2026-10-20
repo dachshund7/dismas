@@ -40,6 +40,7 @@ use crate::{
     playlist_view::PlaylistView,
     playlists::{self, NameError},
     playlists_page::PlaylistsPage,
+    push_bin::PushBin,
     queue_row::QueueRow,
     search::SearchFilter,
     slide_bin::SlideBin,
@@ -341,6 +342,7 @@ mod imp {
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
             PlayerBox::static_type();
+            PushBin::static_type();
             obj.init_template();
         }
 

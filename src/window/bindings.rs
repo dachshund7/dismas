@@ -267,11 +267,15 @@ impl Window {
                     // when uncollapsing if it was showing before collapsing
                     let imp = win.imp();
                     if split_view.is_collapsed() {
+                        split_view.add_css_class("collapsed");
                         imp.sidebar_visible_uncollapsed
                             .set(split_view.shows_sidebar());
                         split_view.set_show_sidebar(false);
-                    } else if imp.sidebar_visible_uncollapsed.get() {
-                        split_view.set_show_sidebar(true);
+                    } else {
+                        split_view.remove_css_class("collapsed");
+                        if imp.sidebar_visible_uncollapsed.get() {
+                            split_view.set_show_sidebar(true);
+                        }
                     }
                     win.set_playlist_visible(split_view.shows_sidebar());
                     imp.playlist_view

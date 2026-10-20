@@ -19,6 +19,7 @@ mod player_box;
 mod playlist_view;
 mod playlists;
 mod playlists_page;
+mod push_bin;
 mod queue_row;
 mod search;
 mod slide_bin;

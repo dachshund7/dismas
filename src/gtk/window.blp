@@ -19,112 +19,119 @@ template $AmberolWindow: Adw.ApplicationWindow {
         // window/bindings.rs, to keep it hidden if the user hid it
         pin-sidebar: true;
 
-        content: Stack content_stack {
-          transition-type: crossfade;
+        // Drawn next to the sidebar when collapsed, as if pushed aside
+        content: $AmberolPushBin {
+          child: Stack content_stack {
+            transition-type: crossfade;
 
-          StackPage {
-            name: "player";
+            StackPage {
+              name: "player";
 
-            child: Adw.ToolbarView {
-              [top]
-              Adw.HeaderBar {
-                show-title: false;
+              child: Adw.ToolbarView {
+                [top]
+                Adw.HeaderBar {
+                  show-title: false;
 
-                [start]
-                $AmberolPageSwitcher {}
+                  [start]
+                  $AmberolPageSwitcher {}
 
-                [end]
-                MenuButton menu_button {
-                  icon-name: "open-menu-symbolic";
-                  tooltip-text: _("Main Menu");
+                  [end]
+                  MenuButton menu_button {
+                    icon-name: "open-menu-symbolic";
+                    tooltip-text: _("Main Menu");
 
-                  accessibility {
-                    label: C_("a11y", "Primary menu");
+                    accessibility {
+                      label: C_("a11y", "Primary menu");
+                    }
                   }
                 }
-              }
 
-              content: $AmberolPlayerBox main_box {
-                vexpand: true;
-
-                styles [
-                  "main-box",
-                ]
-
-                $AmberolTrackCover track_cover {}
-
-                Box {
-                  orientation: vertical;
-                  spacing: 2;
-                  width-request: 256;
+                content: $AmberolPlayerBox main_box {
+                  vexpand: true;
 
                   styles [
-                    "cover-width",
+                    "main-box",
                   ]
 
-                  $AmberolWaveformView waveform_view {
-                    can-focus: "true";
-                  }
+                  $AmberolTrackCover track_cover {}
 
-                  CenterBox {
-                    orientation: horizontal;
+                  Box {
+                    orientation: vertical;
+                    spacing: 2;
                     width-request: 256;
 
-                    [start]
-                    Label elapsed_label {
-                      label: "0:00";
+                    styles [
+                      "cover-width",
+                    ]
 
-                      accessibility {
-                        label: C_("a11y", "Elapsed time");
-                      }
-
-                      styles [
-                        "caption",
-                        "numeric",
-                      ]
+                    $AmberolWaveformView waveform_view {
+                      can-focus: "true";
                     }
 
-                    [end]
-                    Label remaining_label {
-                      label: "0:00";
+                    CenterBox {
+                      orientation: horizontal;
+                      width-request: 256;
 
-                      accessibility {
-                        label: C_("a11y", "Remaining time");
+                      [start]
+                      Label elapsed_label {
+                        label: "0:00";
+
+                        accessibility {
+                          label: C_("a11y", "Elapsed time");
+                        }
+
+                        styles [
+                          "caption",
+                          "numeric",
+                        ]
                       }
 
-                      styles [
-                        "caption",
-                        "numeric",
-                      ]
+                      [end]
+                      Label remaining_label {
+                        label: "0:00";
+
+                        accessibility {
+                          label: C_("a11y", "Remaining time");
+                        }
+
+                        styles [
+                          "caption",
+                          "numeric",
+                        ]
+                      }
                     }
                   }
-                }
 
-                $AmberolTrackDetails track_details {}
+                  $AmberolTrackDetails track_details {}
 
-                $AmberolPlaybackControl playback_control {
-                  halign: "center";
-                  margin-top: "0";
-                  margin-bottom: "24";
-                }
+                  $AmberolPlaybackControl playback_control {
+                    halign: "center";
+                    margin-top: "0";
+                    margin-bottom: "24";
+                  }
+                };
               };
-            };
-          }
+            }
 
-          StackPage {
-            name: "library";
+            StackPage {
+              name: "library";
 
-            child: $AmberolLibraryView library_view {};
-          }
+              child: $AmberolLibraryView library_view {};
+            }
 
-          StackPage {
-            name: "playlists";
+            StackPage {
+              name: "playlists";
 
-            child: $AmberolPlaylistsPage playlists_page {};
-          }
+              child: $AmberolPlaylistsPage playlists_page {};
+            }
+          };
         };
 
         sidebar: Box {
+          styles [
+            "playlist-pane",
+          ]
+
           Stack sidebar_stack {
             hexpand: true;
             transition-type: crossfade;
