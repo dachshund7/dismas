@@ -26,7 +26,7 @@ meson devenv -C _build ./src/dismas    # run uninstalled
 GitHub Actions (`.github/workflows/ci.yml`) runs these on pushes to main and on pull requests. The `lint` job runs `checks.sh` and `reuse` on Ubuntu. The `build` job runs clippy, the tests and the data file validation in a `fedora:latest` container, because Ubuntu's GTK and libadwaita are too old. To try the `build` job locally, run its commands in `podman run fedora:latest`. There's no Flatpak job yet.
 
 ```sh
-cargo fmt --all -- --check                  # needs src/config.rs; an empty file is enough
+cargo fmt --all -- --check                  # needs src/config.rs; a blank line is enough (CI writes one)
 cargo clippy --all-targets -- -D warnings   # keep it free of warnings
 cargo test                                  # unit tests are in #[cfg(test)] modules next to the code
 cargo test <name>                           # a single test

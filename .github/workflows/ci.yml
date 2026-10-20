@@ -34,9 +34,10 @@ jobs:
           tool: typos
 
       # rustfmt needs the module to exist, but not its contents, which
-      # meson setup generates
-      - name: Create an empty config.rs
-        run: touch src/config.rs
+      # meson setup generates; it takes a file with a blank line, but
+      # wants to change an empty one
+      - name: Create a placeholder config.rs
+        run: echo > src/config.rs
 
       - name: Run checks.sh
         run: build-aux/checks.sh
