@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
-## [2026.10] - 2026-10-19
+## [2026.10] - 2026-10-20
 
 The first release of Dismas, a fork of Amberol's development version after
 2026.1.
@@ -36,7 +36,7 @@ The first release of Dismas, a fork of Amberol's development version after
 ### Changed
 
 - Renamed to Dismas, with the application ID `io.github.dachshund7.Dismas`
-- A new icon: a carved lute rose
+- A new icon: Charles Bridge and Prague Castle
 - The album grid replaces the start screen
 - The window gets as narrow as 360 pixels on every page: the buttons of the
   pages fold into a menu, the titles of the pages are left out, and the album
