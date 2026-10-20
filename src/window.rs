@@ -586,8 +586,9 @@ mod imp {
                 obj.update_playlists_page();
             }
             self.update_content_page();
-            // Typing searches the albums right away
-            if self.page() == "library" && old_page != "library" {
+            // Typing searches the albums right away, and asking for the
+            // albums again goes back to their search
+            if page == "library" {
                 self.library_view.focus_search();
             }
             // The focus moves to the page, and the shortcuts would show it
