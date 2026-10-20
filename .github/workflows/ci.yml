@@ -93,7 +93,21 @@ jobs:
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
       options: --privileged
+      # The runner's disk is too small for the SDK and the build, so the
+      # biggest of its preinstalled tools, which this job doesn't use,
+      # are mounted to be removed
+      volumes:
+        - /usr/local/lib/android:/host/android
+        - /usr/share/dotnet:/host/dotnet
+        - /opt/hostedtoolcache:/host/toolcache
+        - /opt/ghc:/host/ghc
     steps:
+      - name: Free disk space
+        run: |
+          df -h /__w
+          rm -rf /host/android/* /host/dotnet/* /host/toolcache/* /host/ghc/*
+          df -h /__w
+
       - uses: actions/checkout@v7
 
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
