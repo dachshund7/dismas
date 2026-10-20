@@ -73,18 +73,23 @@ Building
 --------
 
 There are no packaged builds of Dismas, so you need to build it from
-source. You'll need Meson, Rust, `blueprint-compiler`, gettext, and the
+source. You'll need Meson, Ninja, Rust, `blueprint-compiler`, gettext, and the
 development files for gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20
 (including plugins-bad), SQLite, libseccomp and fontconfig. Decoding cover
 art needs the glycin loaders at run time, plus `bwrap` outside Flatpak.
 
 ```sh
 meson setup _build                     # add -Dprofile=development for a debug build
-meson compile -C _build
+meson compile -C _build                # or: ninja -C _build
 meson devenv -C _build ./src/dismas    # run without installing
 ```
 
-To build a Flatpak instead, use the `io.github.dachshund7.Dismas.json` manifest.
+To install it, run `meson install -C _build`. By default, that installs
+system-wide, under `/usr/local`; to install it for yourself only, set up the
+build with `meson setup _build --prefix ~/.local` instead.
+
+To build a Flatpak instead, use the `io.github.dachshund7.Dismas.json`
+manifest.
 
 Dismas has its own application ID, `io.github.dachshund7.Dismas`, so it can be
 installed alongside Amberol. On its first run, it copies Amberol's library,
@@ -93,7 +98,11 @@ alone.
 
 For a full debug log, run:
 
-    RUST_BACKTRACE=1 RUST_LOG=dismas=debug ./src/dismas
+    RUST_BACKTRACE=1 RUST_LOG=dismas=debug meson devenv -C _build ./src/dismas
+
+or, once it's installed:
+
+    RUST_BACKTRACE=1 RUST_LOG=dismas=debug dismas
 
 Contributing
 ------------
