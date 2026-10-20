@@ -724,7 +724,9 @@ fn work_hierarchy_labels(
 
 // The ids of the composers of the works a track performs, the last in each
 // path of the "WORK_HIERARCHY" tag; `None` if the plugin that wrote it
-// didn't record them
+// didn't record them. MusicBrainz often links the composer to a work but
+// not to its parts, so a work without composers takes those of its
+// nearest parent that has some, as the plugin does for the composer tags
 fn work_hierarchy_composer_ids(json: &str) -> Option<Vec<String>> {
     let hierarchy = serde_json::from_str::<serde_json::Value>(json).ok()?;
     if hierarchy["version"].as_u64() != Some(1) {
@@ -732,8 +734,20 @@ fn work_hierarchy_composer_ids(json: &str) -> Option<Vec<String>> {
     }
     let mut ids = Vec::new();
     for segment in hierarchy["segments"].as_array()? {
-        let work = segment["path"].as_array()?.last()?;
-        for composer in work["composers"].as_array()? {
+        let path = segment["path"].as_array()?;
+        let mut composers = path.last()?["composers"].as_array()?;
+        if composers.is_empty() {
+            // Parents that weren't looked up have no list
+            if let Some(parent) = path[..path.len() - 1]
+                .iter()
+                .rev()
+                .filter_map(|work| work["composers"].as_array())
+                .find(|c| !c.is_empty())
+            {
+                composers = parent;
+            }
+        }
+        for composer in composers {
             let id = composer["id"].as_str().filter(|id| is_mbid(id))?;
             if !ids.iter().any(|i| i == id) {
                 ids.push(id.to_string());
@@ -1924,6 +1938,32 @@ mod tests {
         // Or by a lookup that failed
         let json = r#"{"version":1,"segments":[{"path":[{"id":"w1","composers":null}]}]}"#;
         assert_eq!(work_hierarchy_composer_ids(json), None);
+    }
+
+    #[test]
+    fn composer_ids_are_inherited_from_the_nearest_parent() {
+        let json = serde_json::json!({
+            "version": 1,
+            "segments": [
+                { "path": [
+                    { "id": "opera", "composers": [{ "id": "aaaa" }] },
+                    { "id": "act", "composers": [{ "id": "bbbb" }] },
+                    { "id": "scene", "composers": null },
+                    { "id": "number", "composers": [] },
+                ] },
+                // A work with its own composers keeps them
+                { "path": [
+                    { "id": "suite", "composers": [{ "id": "aaaa" }] },
+                    { "id": "dance", "composers": [{ "id": "cccc" }] },
+                ] },
+                // And one with none anywhere adds nothing
+                { "path": [{ "id": "song", "composers": [] }] },
+            ],
+        });
+        assert_eq!(
+            work_hierarchy_composer_ids(&json.to_string()),
+            Some(vec!["bbbb".to_string(), "cccc".to_string()])
+        );
     }
 
     #[test]
