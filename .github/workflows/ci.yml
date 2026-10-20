@@ -45,9 +45,9 @@ jobs:
       - name: Check licensing
         uses: fsfe/reuse-action@v6
 
-  # Clippy, the unit tests, and the validation of the desktop file, the
-  # metainfo and the settings schema. These build the app, which needs a
-  # newer GTK and libadwaita than Ubuntu has, so they run in Fedora
+  # The build of the app, clippy, the unit tests, and the validation of the
+  # desktop file, the metainfo and the settings schema. The app needs a
+  # newer GTK and libadwaita than Ubuntu has, so these run in Fedora
   build:
     runs-on: ubuntu-latest
     container: fedora:latest
@@ -68,6 +68,12 @@ jobs:
       # Generates src/config.rs, which Cargo needs
       - name: Configure
         run: meson setup _build
+
+      # The release build, with the templates and the resources, as it's
+      # installed; meson test would build it anyway, but a failure would
+      # then show up under the validation
+      - name: Build
+        run: meson compile -C _build
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings

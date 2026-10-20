@@ -23,7 +23,7 @@ meson devenv -C _build ./src/dismas    # run uninstalled
 
 ## Checks
 
-GitHub Actions (`.github/workflows/ci.yml`) runs these on pushes to main and on pull requests. The `lint` job runs `checks.sh` and `reuse` on Ubuntu. The `build` job runs clippy, the tests and the data file validation in a `fedora:latest` container, because Ubuntu's GTK and libadwaita are too old. To try the `build` job locally, run its commands in `podman run fedora:latest`. There's no Flatpak job yet.
+GitHub Actions (`.github/workflows/ci.yml`) runs these on pushes to main and on pull requests. The `lint` job runs `checks.sh` and `reuse` on Ubuntu. The `build` job builds the app with Meson and runs clippy, the tests and the data file validation in a `fedora:latest` container, because Ubuntu's GTK and libadwaita are too old. To try the `build` job locally, run its commands in `podman run fedora:latest`. There's no Flatpak job yet.
 
 ```sh
 cargo fmt --all -- --check                  # needs src/config.rs; a blank line is enough (CI writes one)
