@@ -13,6 +13,7 @@ mod i18n;
 mod library;
 mod library_view;
 mod marquee;
+mod migrate;
 mod page_switcher;
 mod playback_control;
 mod player_box;
@@ -45,9 +46,9 @@ use self::application::Application;
 fn main() -> glib::ExitCode {
     let mut builder = pretty_env_logger::formatted_builder();
     if APPLICATION_ID.ends_with("Devel") {
-        builder.filter(Some("amberol"), LevelFilter::Debug);
+        builder.filter(Some("dismas"), LevelFilter::Debug);
     } else {
-        builder.filter(Some("amberol"), LevelFilter::Info);
+        builder.filter(Some("dismas"), LevelFilter::Info);
     }
     builder.init();
 
@@ -66,21 +67,21 @@ fn main() -> glib::ExitCode {
     // can spawn threads (GStreamer, GIO, GTK) has been initialized yet
     unsafe {
         env::set_var("PULSE_PROP_application.icon_name", app_id);
-        env::set_var("PULSE_PROP_application.name", "Amberol");
+        env::set_var("PULSE_PROP_application.name", "Dismas");
         env::set_var("PULSE_PROP_media.role", "music");
     }
 
     debug!("Loading resources");
     let resources = match env::var("MESON_DEVENV") {
-        Err(_) => gio::Resource::load(PKGDATADIR.to_owned() + "/amberol.gresource")
-            .expect("Unable to find amberol.gresource"),
+        Err(_) => gio::Resource::load(PKGDATADIR.to_owned() + "/dismas.gresource")
+            .expect("Unable to find dismas.gresource"),
         Ok(_) => match env::current_exe() {
             Ok(path) => {
                 let mut resource_path = path;
                 resource_path.pop();
-                resource_path.push("amberol.gresource");
+                resource_path.push("dismas.gresource");
                 gio::Resource::load(&resource_path)
-                    .expect("Unable to find amberol.gresource in devenv")
+                    .expect("Unable to find dismas.gresource in devenv")
             }
             Err(err) => {
                 error!("Unable to find the current path: {err}");
@@ -91,10 +92,12 @@ fn main() -> glib::ExitCode {
     gio::resources_register(&resources);
 
     debug!("Setting up application (profile: {PROFILE})");
-    glib::set_application_name("Amberol");
-    glib::set_program_name(Some("amberol"));
+    glib::set_application_name("Dismas");
+    glib::set_program_name(Some("dismas"));
 
     gst::init().expect("Failed to initialize gstreamer");
+
+    migrate::migrate_from_amberol();
 
     Application::new().run()
 }

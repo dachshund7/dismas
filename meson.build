@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-project('amberol', 'rust',
-  version: '2026.2',
+project('dismas', 'rust',
+  version: '2026.10',
   license: ['GPL-3.0'],
   meson_version: '>= 0.59.0',
   default_options: [ 'warning_level=2', ],
@@ -16,6 +16,8 @@ dependency('gstreamer-play-1.0', version: '>= 1.20')
 dependency('gstreamer-plugins-base-1.0', version: '>= 1.20')
 dependency('gstreamer-plugins-bad-1.0', version: '>= 1.20')
 dependency('gstreamer-bad-audio-1.0', version: '>= 1.20')
+# The library database: rusqlite links against the system SQLite
+dependency('sqlite3')
 # glycin, which decodes the covers in sandboxed loaders, links against these;
 # the loaders themselves (glycin-loaders) are only needed at runtime
 if host_machine.system() == 'linux'
@@ -51,7 +53,7 @@ else
   version_suffix = ''
 endif
 
-application_id = 'io.bassi.Amberol@0@'.format(profile)
+application_id = 'io.github.dachshund7.Dismas@0@'.format(profile)
 
 subdir('data')
 subdir('src')

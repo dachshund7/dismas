@@ -1,24 +1,12 @@
 version = 1
-SPDX-PackageName = "amberol"
-SPDX-PackageSupplier = "Emmanuele Bassi"
-SPDX-PackageDownloadLocation = "https://gitlab.gnome.org/ebassi/amberol"
+SPDX-PackageName = "dismas"
+SPDX-PackageSupplier = "John Hamilton"
+SPDX-PackageDownloadLocation = "https://github.com/dachshund7/dismas"
 
 [[annotations]]
 path = ".gitignore"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = ".gitlab-ci.yml"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "amberol.doap"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2022  Sophie Herold"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
@@ -34,63 +22,59 @@ SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = "io.bassi.Amberol.json"
+path = "CLAUDE.md"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026  John Hamilton"
+SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = "io.github.dachshund7.Dismas.json"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = "io.bassi.Amberol.Devel.json"
+path = "data/io.github.dachshund7.Dismas.metainfo.xml.in.in"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = "data/io.bassi.Amberol.metainfo.xml.in.in"
+path = "data/io.github.dachshund7.Dismas.desktop.in.in"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = "data/io.bassi.Amberol.desktop.in.in"
+path = "data/io.github.dachshund7.Dismas.gschema.xml"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = "data/io.bassi.Amberol.gschema.xml"
+path = "data/io.github.dachshund7.Dismas.service.in"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = "data/io.bassi.Amberol.service.in"
+path = "data/screenshots/**.jpg"
 precedence = "aggregate"
-SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
+SPDX-FileCopyrightText = "2026  John Hamilton"
 SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "data/screenshots/**.png"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
-SPDX-License-Identifier = "CC0-1.0"
-
-[[annotations]]
-path = "data/icons/hicolor/scalable/apps/io.bassi.Amberol.**"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2022  Jakub Steiner"
-SPDX-License-Identifier = "CC-BY-SA-3.0"
-
-[[annotations]]
-path = "data/icons/hicolor/symbolic/apps/io.bassi.Amberol.**"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "2022  Jakub Steiner"
-SPDX-License-Identifier = "CC-BY-SA-3.0"
 
 [[annotations]]
 path = "**.svg"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
+SPDX-License-Identifier = "CC-BY-SA-3.0"
+
+# The app icons carry their own copyright and license; this entry comes after
+# the one for all SVG files, so that it's the one that applies to them
+[[annotations]]
+path = ["data/icons/hicolor/scalable/apps/io.github.dachshund7.Dismas*.svg", "data/icons/hicolor/symbolic/apps/io.github.dachshund7.Dismas*.svg"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026  John Hamilton"
 SPDX-License-Identifier = "CC-BY-SA-3.0"
 
 [[annotations]]
@@ -106,7 +90,7 @@ SPDX-FileCopyrightText = "2022  Translation authors"
 SPDX-License-Identifier = "GPL-3.0-or-later"
 
 [[annotations]]
-path = "src/amberol.gresource.xml"
+path = "src/dismas.gresource.xml"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "GPL-3.0-or-later"

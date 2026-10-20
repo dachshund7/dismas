@@ -29,7 +29,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PushBin {
-        const NAME: &'static str = "AmberolPushBin";
+        const NAME: &'static str = "DismasPushBin";
         type Type = super::PushBin;
         type ParentType = adw::Bin;
     }

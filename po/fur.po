@@ -21,8 +21,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 #: data/io.bassi.Amberol.appdata.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:4
 msgid "Music Player"
@@ -39,12 +39,12 @@ msgstr "Al riprodûs musiche e nuie altri"
 
 #: data/io.bassi.Amberol.appdata.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol al è un riprodutôr musicâl cence delusions di grandece. Se tu "
-"desideris dome scoltâ la musiche disponibile sul to sisteme locâl, Amberol "
+"Dismas al è un riprodutôr musicâl cence delusions di grandece. Se tu "
+"desideris dome scoltâ la musiche disponibile sul to sisteme locâl, Dismas "
 "al è il riprodutôr musicâl che tu stâs cirint."
 
 #: data/io.bassi.Amberol.appdata.xml.in.in:14
@@ -287,8 +287,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "Scurtis di _tastiere"
 
 #: src/gtk/playback-control.ui:205
-msgid "_About Amberol"
-msgstr "_Informazions su Amberol"
+msgid "_About Dismas"
+msgstr "_Informazions su Dismas"
 
 #: src/gtk/playback-control.ui:209
 msgid "_Quit"
@@ -359,8 +359,8 @@ msgid "translator-credits"
 msgstr "Fabio Tomat <f.t.public@gmail.com>"
 
 #: src/application.rs:241
-msgid "Amberol needs to run in the background to play music"
-msgstr "Par riprodusi musiche Amberol al scugne zirâ in sotfont"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Par riprodusi musiche Dismas al scugne zirâ in sotfont"
 
 #: src/playback_control.rs:118
 msgid "Repeat All Songs"

@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2026  John Hamilton
+# SPDX-License-Identifier: CC0-1.0
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The jobs only read the code
+permissions:
+  contents: read
+
+# A new push to a branch cancels the run of the previous one
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Formatting, spelling, POTFILES.in, the order of the resources and
+  # licensing; none of these needs the app to build
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: typos
+
+      # rustfmt needs the module to exist, but not its contents, which
+      # meson setup generates
+      - name: Create an empty config.rs
+        run: touch src/config.rs
+
+      - name: Run checks.sh
+        run: build-aux/checks.sh
+
+      - name: Check licensing
+        uses: fsfe/reuse-action@v6
+
+  # Clippy, the unit tests, and the validation of the desktop file, the
+  # metainfo and the settings schema. These build the app, which needs a
+  # newer GTK and libadwaita than Ubuntu has, so they run in Fedora
+  build:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: >
+          dnf install -y --setopt=install_weak_deps=False
+          git gcc meson ninja-build rust cargo clippy
+          gtk4-devel libadwaita-devel
+          gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-bad-free-devel
+          blueprint-compiler gettext glib2-devel sqlite-devel libseccomp-devel fontconfig-devel
+          desktop-file-utils appstream
+
+      - uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Generates src/config.rs, which Cargo needs
+      - name: Configure
+        run: meson setup _build
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Validate the desktop file, metainfo and schema
+        run: >
+          meson test -C _build --print-errorlogs
+          "Validate desktop file" "Validate appstream file" "Validate schema file"

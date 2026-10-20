@@ -23,7 +23,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for WorkSectionModel {
-        const NAME: &'static str = "AmberolWorkSectionModel";
+        const NAME: &'static str = "DismasWorkSectionModel";
         type Type = super::WorkSectionModel;
         type Interfaces = (gio::ListModel, gtk::SectionModel);
     }

@@ -96,13 +96,13 @@ pub fn music_dir() -> Option<PathBuf> {
 
 fn data_dir() -> PathBuf {
     let mut dir = glib::user_data_dir();
-    dir.push("amberol");
+    dir.push("dismas");
     dir
 }
 
 fn covers_dir() -> PathBuf {
     let mut dir = glib::user_cache_dir();
-    dir.push("amberol");
+    dir.push("dismas");
     dir.push("album-covers");
     dir
 }

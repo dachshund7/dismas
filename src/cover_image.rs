@@ -233,7 +233,7 @@ mod tests {
             pixels,
         };
 
-        let dir = glib::mkdtemp("amberol-cover-XXXXXX").unwrap();
+        let dir = glib::mkdtemp("dismas-cover-XXXXXX").unwrap();
         let path = dir.join("cover.png");
         image.save_png(&path).unwrap();
         let data = glib::Bytes::from_owned(std::fs::read(&path).unwrap());

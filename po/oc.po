@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -38,12 +38,12 @@ msgstr "Legís de musica, e pas res mai"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol es un lector àudio sens cap de volontat de grandor. Se volètz sonque "
-"escotar la musica disponible sus vòstre sistèma local, alara Amberol es lo "
+"Dismas es un lector àudio sens cap de volontat de grandor. Se volètz sonque "
+"escotar la musica disponible sus vòstre sistèma local, alara Dismas es lo "
 "lector àudio que vos fa mestièr."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -189,8 +189,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Acorchis de clavièr"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "_A prepaus d’Amberol"
+msgid "_About Dismas"
+msgstr "_A prepaus d’Dismas"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -375,8 +375,8 @@ msgid "translator-credits"
 msgstr "Quentin PAGÈS"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol deu s’executar en rèireplan per legir de musica"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas deu s’executar en rèireplan per legir de musica"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

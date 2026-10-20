@@ -76,7 +76,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Album {
-        const NAME: &'static str = "AmberolAlbum";
+        const NAME: &'static str = "DismasAlbum";
         type Type = super::Album;
     }
 

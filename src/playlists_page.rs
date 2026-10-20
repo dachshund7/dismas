@@ -13,7 +13,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, CompositeTemplate)]
-    #[template(resource = "/io/bassi/Amberol/playlists-page.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/playlists-page.ui")]
     pub struct PlaylistsPage {
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
@@ -23,7 +23,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlaylistsPage {
-        const NAME: &'static str = "AmberolPlaylistsPage";
+        const NAME: &'static str = "DismasPlaylistsPage";
         type Type = super::PlaylistsPage;
         type ParentType = gtk::Widget;
 

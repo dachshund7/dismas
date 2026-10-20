@@ -21,7 +21,7 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[properties(wrapper_type = super::QueueRow)]
-    #[template(resource = "/io/bassi/Amberol/queue-row.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/queue-row.ui")]
     pub struct QueueRow {
         // Template widgets
         #[template_child]
@@ -92,7 +92,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for QueueRow {
-        const NAME: &'static str = "AmberolQueueRow";
+        const NAME: &'static str = "DismasQueueRow";
         type Type = super::QueueRow;
         type ParentType = gtk::Widget;
 

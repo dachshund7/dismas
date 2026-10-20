@@ -26,8 +26,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -46,12 +46,12 @@ msgstr "Một phần mềm không làm gì khác ngoài chơi nhạc"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol là một trình phát nhạc không khoe vẽ lung tung. Nếu như bạn cần một "
-"trình phát nhạc chạy cục bộ trên máy bạn, thì Amberol chính là thứ bạn đang "
+"Dismas là một trình phát nhạc không khoe vẽ lung tung. Nếu như bạn cần một "
+"trình phát nhạc chạy cục bộ trên máy bạn, thì Dismas chính là thứ bạn đang "
 "cần tìm."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -298,8 +298,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Phím tắt"
 
 #: src/gtk/playback-control.ui:209
-msgid "_About Amberol"
-msgstr "_Về Amberol"
+msgid "_About Dismas"
+msgstr "_Về Dismas"
 
 #: src/gtk/playback-control.ui:213
 msgid "_Quit"
@@ -393,8 +393,8 @@ msgid "translator-credits"
 msgstr "Nguyễn Tri Phương <triphuong@falcolabs.org>"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol cần quyền chạy trong nền để chơi nhạc"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas cần quyền chạy trong nền để chơi nhạc"
 
 #: src/cover_picture.rs:75
 msgid "Cover image"

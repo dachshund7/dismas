@@ -79,7 +79,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
-    #[template(resource = "/io/bassi/Amberol/library-view.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/library-view.ui")]
     #[properties(wrapper_type = super::LibraryView)]
     pub struct LibraryView {
         #[template_child]
@@ -138,7 +138,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for LibraryView {
-        const NAME: &'static str = "AmberolLibraryView";
+        const NAME: &'static str = "DismasLibraryView";
         type Type = super::LibraryView;
         type ParentType = gtk::Widget;
 

@@ -24,7 +24,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
-    #[template(resource = "/io/bassi/Amberol/album-tracks.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/album-tracks.ui")]
     #[properties(wrapper_type = super::AlbumTracks)]
     pub struct AlbumTracks {
         #[template_child]
@@ -63,7 +63,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for AlbumTracks {
-        const NAME: &'static str = "AmberolAlbumTracks";
+        const NAME: &'static str = "DismasAlbumTracks";
         type Type = super::AlbumTracks;
         type ParentType = gtk::Widget;
 

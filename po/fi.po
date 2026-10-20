@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -38,12 +38,12 @@ msgstr "Toistaa musiikkia eikä mitään muuta"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol on musiikkisoitin ilman turhia kilkkeitä. Jos haluat soittaa "
-"paikallisella tietokoneella olevaa musiikkia, Amberol on oikea valinta "
+"Dismas on musiikkisoitin ilman turhia kilkkeitä. Jos haluat soittaa "
+"paikallisella tietokoneella olevaa musiikkia, Dismas on oikea valinta "
 "sinulle."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -189,8 +189,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Pikanäppäimet"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "_Tietoja - Amberol"
+msgid "_About Dismas"
+msgstr "_Tietoja - Dismas"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -374,7 +374,8 @@ msgid "translator-credits"
 msgstr "Jiri Grönroos"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
+#, fuzzy
+msgid "Dismas needs to run in the background to play music"
 msgstr "Amberolin tulee olla käynnissä taustalla toistaakseen musiikkia"
 
 #: src/audio/inhibit_controller.rs:40

@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 #: data/io.bassi.Amberol.appdata.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:4
 msgid "Music Player"
@@ -38,12 +38,12 @@ msgstr "संगीत बजाता है और कुछ नहीं"
 
 #: data/io.bassi.Amberol.appdata.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol एक म्यूजिक प्लेयर है जिसे भव्यता का कोई भ्रम नहीं है। यदि आप केवल अपने स्थानीय "
-"सिस्टम पर उपलब्ध संगीत चलाना चाहते हैं तो Amberol वह म्यूजिक प्लेयर है जिसे आप तलाश रहे हैं।"
+"Dismas एक म्यूजिक प्लेयर है जिसे भव्यता का कोई भ्रम नहीं है। यदि आप केवल अपने स्थानीय "
+"सिस्टम पर उपलब्ध संगीत चलाना चाहते हैं तो Dismas वह म्यूजिक प्लेयर है जिसे आप तलाश रहे हैं।"
 
 #: data/io.bassi.Amberol.appdata.xml.in.in:14
 msgid "Current features:"
@@ -285,8 +285,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "कीबोर्ड शॉर्टकट (_K)"
 
 #: src/gtk/playback-control.ui:205
-msgid "_About Amberol"
-msgstr "Amberol के बारे में (_A)"
+msgid "_About Dismas"
+msgstr "Dismas के बारे में (_A)"
 
 #: src/gtk/playback-control.ui:209
 msgid "_Quit"
@@ -356,8 +356,8 @@ msgid "translator-credits"
 msgstr "Scrambled777 <weblate.scrambled777@simplelogin.com>"
 
 #: src/application.rs:241
-msgid "Amberol needs to run in the background to play music"
-msgstr "संगीत बजाने के लिए Amberol को पृष्ठभूमि में चलाने की आवश्यकता है"
+msgid "Dismas needs to run in the background to play music"
+msgstr "संगीत बजाने के लिए Dismas को पृष्ठभूमि में चलाने की आवश्यकता है"
 
 #: src/playback_control.rs:118
 msgid "Repeat All Songs"

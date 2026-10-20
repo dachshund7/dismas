@@ -22,7 +22,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
+#, fuzzy
+msgid "Dismas"
 msgstr "Амберол"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
@@ -39,9 +40,10 @@ msgid "Plays music, and nothing else"
 msgstr "Пушта музику, и ништа друго"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
+#, fuzzy
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
 "Амберол је програм за пуштање музике без разочарења о величини. Ако желите "
@@ -191,7 +193,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Пречице тастатуре"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
+#, fuzzy
+msgid "_About Dismas"
 msgstr "_О Амберолу"
 
 #: src/gtk/playback-control.blp:227
@@ -379,7 +382,8 @@ msgstr ""
 "Превод на српски језик https://гном.срб"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
+#, fuzzy
+msgid "Dismas needs to run in the background to play music"
 msgstr "Амберол мора да ради у позадини да би пуштао музику"
 
 #: src/audio/inhibit_controller.rs:40

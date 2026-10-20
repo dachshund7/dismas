@@ -23,7 +23,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlayerBox {
-        const NAME: &'static str = "AmberolPlayerBox";
+        const NAME: &'static str = "DismasPlayerBox";
         type Type = super::PlayerBox;
         type ParentType = gtk::Widget;
     }

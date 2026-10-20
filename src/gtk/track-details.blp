@@ -3,7 +3,7 @@
 
 using Gtk 4.0;
 
-template $AmberolTrackDetails: Widget {
+template $DismasTrackDetails: Widget {
   Box {
     orientation: vertical;
     spacing: 12;
@@ -14,7 +14,7 @@ template $AmberolTrackDetails: Widget {
       margin-start: 6;
       margin-end: 6;
 
-      $AmberolMarquee track_title_label {
+      $DismasMarquee track_title_label {
         width-chars: "20";
 
         styles [
@@ -22,7 +22,7 @@ template $AmberolTrackDetails: Widget {
         ]
       }
 
-      $AmberolMarquee track_movement_label {
+      $DismasMarquee track_movement_label {
         width-chars: "25";
         visible: false;
 
@@ -31,7 +31,7 @@ template $AmberolTrackDetails: Widget {
         ]
       }
 
-      $AmberolMarquee track_artist_label {
+      $DismasMarquee track_artist_label {
         width-chars: "25";
 
         styles [
@@ -39,7 +39,7 @@ template $AmberolTrackDetails: Widget {
         ]
       }
 
-      $AmberolMarquee track_album_label {
+      $DismasMarquee track_album_label {
         width-chars: "25";
 
         styles [
@@ -47,7 +47,7 @@ template $AmberolTrackDetails: Widget {
         ]
       }
 
-      $AmberolMarquee track_credits_label {
+      $DismasMarquee track_credits_label {
         width-chars: "25";
         visible: false;
 

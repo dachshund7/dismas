@@ -294,46 +294,58 @@ check_potfiles() {
     fi
 }
 
-# Check if files in src/amberol.gresource.xml are sorted alphabetically.
+# Check if files in src/dismas.gresource.xml are sorted alphabetically.
 check_resources() {
-    [ $tap -eq 0 ] && echo -e "$Checking src/amberol.gresource.xml…"
+    [ $tap -eq 0 ] && echo -e "$Checking src/dismas.gresource.xml…"
 
     local ret=0
 
-    # Get files.
+    # Get files, in groups: each <gresource> is sorted on its own, and so
+    # are the runs of files that a comment sets apart
+    local groups=() group=""
     regex="<file .*>(.*)</file>"
     while read -r line; do
         if [[ $line =~ $regex ]]; then
-            files+=("${BASH_REMATCH[1]}")
+            group+="${BASH_REMATCH[1]}"$'\n'
+        elif [[ $line == *"</gresource>"* || $line == "<!--"* ]]; then
+            groups+=("$group")
+            group=""
         fi
-    done < src/amberol.gresource.xml
+    done < src/dismas.gresource.xml
 
     # Check sorted alphabetically
-    to_sort=("${files[@]}")
-    sort
-    for i in ${!files[@]}; do
-        if [[ "${files[$i]}" != "${to_sort[$i]}" ]]; then
-            [ $tap -eq 0 ] && echo -e "$error Found file '${files[$i]#src/}' before '${to_sort[$i]#src/}' in amberol.gresource.xml"
-            [ $tap -eq 1 ] && echo "# Sorting error: '${files[$i]}' before '${to_sort[$i]}' in amberol.gresource.xml"
-            ret=1
-            break
-        fi
+    for group in "${groups[@]}"; do
+        files=()
+        while read -r file; do
+            [[ -n $file ]] && files+=("$file")
+        done <<< "$group"
+        to_sort=("${files[@]}")
+        sort
+        for i in ${!files[@]}; do
+            if [[ "${files[$i]}" != "${to_sort[$i]}" ]]; then
+                [ $tap -eq 0 ] && echo -e "$error Found file '${files[$i]#src/}' before '${to_sort[$i]#src/}' in dismas.gresource.xml"
+                [ $tap -eq 1 ] && echo "# Sorting error: '${files[$i]}' before '${to_sort[$i]}' in dismas.gresource.xml"
+                ret=1
+                break
+            fi
+        done
+        [[ $ret -eq 1 ]] && break
     done
 
     if [[ ret -eq 1 ]]; then
         if [[ $tap -eq 0 ]]; then
             echo ""
-            echo -e "  Checking src/amberol.gresource.xml result: $fail"
+            echo -e "  Checking src/dismas.gresource.xml result: $fail"
             echo "Please fix the above issues"
             exit 1
         else
-            echo "not ok 4 - amberol.gresource.xml"
+            echo "not ok 4 - dismas.gresource.xml"
         fi
     else
         if [[ $tap -eq 0 ]]; then
-            echo -e "  Checking src/amberol.gresource.xml result: $ok"
+            echo -e "  Checking src/dismas.gresource.xml result: $ok"
         else
-            echo "ok 4 - amberol.gresource.xml"
+            echo "ok 4 - dismas.gresource.xml"
         fi
     fi
 }

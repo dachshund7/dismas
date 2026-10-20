@@ -28,7 +28,8 @@ msgstr ""
 "X-Generator: Poedit 3.4.4\n"
 
 #: data/io.bassi.Amberol.desktop.in.in:3 data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
+#, fuzzy
+msgid "Dismas"
 msgstr "أمبرول"
 
 #: data/io.bassi.Amberol.desktop.in.in:4
@@ -47,9 +48,10 @@ msgid "Plays music, and nothing else"
 msgstr "شَغِّل الموسيقى، ولا شيء آخر"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
+#, fuzzy
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to play "
-"music available on your local system then Amberol is the music player you are "
+"Dismas is a music player with no delusions of grandeur. If you just want to play "
+"music available on your local system then Dismas is the music player you are "
 "looking for."
 msgstr ""
 "أمبِرول هو مُشغِّل موسيقى خالٍ من وهم العظمة. إذا كنتَ ترغبُ فقط في تشغيل الموسيقى "
@@ -295,7 +297,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "اخت_صارت لوحة المفاتيح"
 
 #: src/gtk/playback-control.ui:205
-msgid "_About Amberol"
+#, fuzzy
+msgid "_About Dismas"
 msgstr "_عَنْ أمبِرول"
 
 #: src/gtk/playback-control.ui:209
@@ -393,7 +396,8 @@ msgstr ""
 "أحمد النجماوي <iramosu@protonmail.com>"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
+#, fuzzy
+msgid "Dismas needs to run in the background to play music"
 msgstr "يتطلب أمبِرول العمل في الخلفية لتشغيل الموسيقى"
 
 #: src/cover_picture.rs:75

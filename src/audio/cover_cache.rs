@@ -284,7 +284,7 @@ impl CoverCache {
 // can only pass the cover art to the desktop as a file
 fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
     let mut dir = glib::user_cache_dir();
-    dir.push("amberol");
+    dir.push("dismas");
     dir.push("covers");
     glib::mkdir_with_parents(&dir, 0o755);
 
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn changed_covers_get_a_new_file() {
-        let dir = glib::mkdtemp("amberol-covers-XXXXXX").unwrap();
+        let dir = glib::mkdtemp("dismas-covers-XXXXXX").unwrap();
         let files = || {
             let mut names: Vec<String> = std::fs::read_dir(&dir)
                 .unwrap()

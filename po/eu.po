@@ -18,8 +18,8 @@ msgstr "Project-Id-Version: amberol main\n"
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -36,10 +36,10 @@ msgstr "Musika erreproduzitzen du, besterik ez"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
-msgstr "Amberol handinahirik gabeko musika-erreproduzigailu bat da. Zure sistema lokalean duzun musika entzun nahi baduzu, Amberol da behar duzun erreproduzigailua."
+msgstr "Dismas handinahirik gabeko musika-erreproduzigailu bat da. Zure sistema lokalean duzun musika entzun nahi baduzu, Dismas da behar duzun erreproduzigailua."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
 msgid "Current features:"
@@ -184,8 +184,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "La_sterbideak"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "Amberol aplikazioari _buruz"
+msgid "_About Dismas"
+msgstr "Dismas aplikazioari _buruz"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -362,8 +362,8 @@ msgid "translator-credits"
 msgstr "translator-credits"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol atzeko planoan exekutatu behar da musika erreproduzitu ahal izateko"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas atzeko planoan exekutatu behar da musika erreproduzitu ahal izateko"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

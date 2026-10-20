@@ -4,7 +4,7 @@
 using Gtk 4.0;
 using Adw 1;
 
-template $AmberolLibraryView: Widget {
+template $DismasLibraryView: Widget {
   Adw.ToolbarView {
     [top]
     Adw.HeaderBar {
@@ -13,7 +13,7 @@ template $AmberolLibraryView: Widget {
       };
 
       [start]
-      $AmberolPageSwitcher {}
+      $DismasPageSwitcher {}
 
       [end]
       MenuButton menu_button {
@@ -52,7 +52,7 @@ template $AmberolLibraryView: Widget {
         hexpand: true;
 
         child: SearchEntry search_entry {
-          placeholder-text: _("Search Albums");
+          placeholder-text: _("Search albums");
         };
       };
     }

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>@APPLICATION_ID@</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Dismas</name>
+  <summary>Play your music library and playlists</summary>
+  <description>
+    <p>
+      Dismas is a music player for your local music. It is a fork of Amberol,
+      by Emmanuele Bassi, that adds a library and playlists.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>an album grid of your Music folder, with search and sorting</li>
+      <li>playlists, with M3U import and export</li>
+      <li>a queue you can search and reorder</li>
+      <li>work, movement and performer details for classical music</li>
+      <li>a sleep timer</li>
+      <li>UI recoloring using the album art</li>
+      <li>shuffle and repeat</li>
+      <li>MPRIS integration</li>
+    </ul>
+  </description>
+  <branding>
+    <color type="primary" scheme_preference="light">#e8c393</color>
+    <color type="primary" scheme_preference="dark">#5e3716</color>
+  </branding>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The player, with the queue</caption>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas2.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>The album grid</caption>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas3.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>A narrow window</caption>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas6.jpg</image>
+    </screenshot>
+  </screenshots>
+  <launchable type="desktop-id">@APPLICATION_ID@.desktop</launchable>
+  <url type="homepage">https://github.com/dachshund7/dismas</url>
+  <url type="bugtracker">https://github.com/dachshund7/dismas/issues</url>
+  <url type="vcs-browser">https://github.com/dachshund7/dismas</url>
+  <developer_name>John Hamilton</developer_name>
+  <developer id="io.github.dachshund7">
+    <name>John Hamilton</name>
+  </developer>
+  <translation type="gettext">dismas</translation>
+  <custom>
+    <value key="Purism::form_factor">mobile</value>
+  </custom>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </recommends>
+  <kudos>
+    <kudo>ModernToolkit</kudo>
+    <kudo>Notifications</kudo>
+  </kudos>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="2026.10" date="2026-10-19">
+      <description>
+        <p>The first release of Dismas, a fork of Amberol.</p>
+        <ul>
+          <li>Browse the albums in your Music folder</li>
+          <li>Save, import and export playlists</li>
+          <li>Search and reorder the queue</li>
+          <li>See works, movements and performers of classical music</li>
+          <li>Stop the music with a sleep timer</li>
+          <li>A new icon: a carved lute rose</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+  <provides>@APPLICATION_ID@.desktop</provides>
+</component>

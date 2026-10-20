@@ -24,33 +24,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
 
 [[package]]
-name = "amberol"
-version = "0.1.0"
-dependencies = [
- "ashpd",
- "async-channel",
- "color-thief",
- "futures",
- "gettext-rs",
- "glycin",
- "gstreamer",
- "gstreamer-audio",
- "gstreamer-play",
- "gtk4",
- "image",
- "itertools 0.14.0",
- "libadwaita",
- "lofty",
- "log",
- "mpris-server",
- "pretty_env_logger",
- "rand 0.10.2",
- "rusqlite",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "ashpd"
 version = "0.13.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -521,6 +494,33 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+]
+
+[[package]]
+name = "dismas"
+version = "0.1.0"
+dependencies = [
+ "ashpd",
+ "async-channel",
+ "color-thief",
+ "futures",
+ "gettext-rs",
+ "glycin",
+ "gstreamer",
+ "gstreamer-audio",
+ "gstreamer-play",
+ "gtk4",
+ "image",
+ "itertools 0.14.0",
+ "libadwaita",
+ "lofty",
+ "log",
+ "mpris-server",
+ "pretty_env_logger",
+ "rand 0.10.2",
+ "rusqlite",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

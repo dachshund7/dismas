@@ -1,8 +1,8 @@
 [Desktop Entry]
-Name=Amberol
+Name=Dismas
 GenericName=Music Player
-TryExec=amberol
-Exec=amberol %U
+TryExec=dismas
+Exec=dismas %U
 Icon=@APPLICATION_ID@
 Terminal=false
 Type=Application

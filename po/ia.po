@@ -27,8 +27,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -45,13 +45,13 @@ msgstr "Reproduce musica e nihil plus"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol es un reproductor de musica sin delusion de grandiositate. Si tu "
+"Dismas es un reproductor de musica sin delusion de grandiositate. Si tu "
 "solmente vole reproducer musica disponibile in tu systema local, alora "
-"Amberol es le reproductor que tu sta cercante."
+"Dismas es le reproductor que tu sta cercante."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
 msgid "Current features:"
@@ -197,8 +197,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "Vias breve de claviero"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "_A proposito de Amberol"
+msgid "_About Dismas"
+msgstr "_A proposito de Dismas"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -382,8 +382,8 @@ msgid "translator-credits"
 msgstr "Emilio Sepúlveda <emism.translations@gmail.com>"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol necessita executar se in le fundo pro reproducer musica"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas necessita executar se in le fundo pro reproducer musica"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

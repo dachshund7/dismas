@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -37,9 +37,10 @@ msgid "Plays music, and nothing else"
 msgstr "సంగీతం మాత్రమే ప్లే చేస్తుంది, మరేమీ కాదు."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
+#, fuzzy
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
 "ఆంబరోల్ అనేది ఆడంబరమైన భ్రమలు లేని ఒక మ్యూజిక్ ప్లేయర్. మీరు మీ స్థానిక సిస్టమ్‌లో అందుబాటులో ఉన్న "
@@ -188,8 +189,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "కీబోర్డ్ షార్ట్‌కట్‌లు (_K)"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "Amberol గురించి (_A)"
+msgid "_About Dismas"
+msgstr "Dismas గురించి (_A)"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -373,7 +374,8 @@ msgid "translator-credits"
 msgstr "Aryan Karamtoth"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
+#, fuzzy
+msgid "Dismas needs to run in the background to play music"
 msgstr "సంగీతాన్ని ప్లే చేయడానికి అంబెరోల్ బాక్గ్రౌండ్లో నడవాలి"
 
 #: src/audio/inhibit_controller.rs:40

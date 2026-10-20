@@ -16,7 +16,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, CompositeTemplate)]
-    #[template(resource = "/io/bassi/Amberol/track-info-dialog.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/track-info-dialog.ui")]
     pub struct TrackInfoDialog {
         #[template_child]
         pub work_group: TemplateChild<adw::PreferencesGroup>,
@@ -36,7 +36,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for TrackInfoDialog {
-        const NAME: &'static str = "AmberolTrackInfoDialog";
+        const NAME: &'static str = "DismasTrackInfoDialog";
         type Type = super::TrackInfoDialog;
         type ParentType = adw::Dialog;
 

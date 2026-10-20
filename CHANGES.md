@@ -12,6 +12,48 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+## [2026.10] - 2026-10-19
+
+The first release of Dismas, a fork of Amberol's development version after
+2026.1.
+
+### Added
+
+- An album grid of the Music folder, with search, sorting by artist, title,
+  year or date added, and a track list for each album
+- Playlists: save the queue as a playlist, create, rename and delete
+  playlists, and switch between them on the Playlists page
+- Import and export playlists as M3U files, with paths relative to the
+  playlist's folder
+- Search every tag of the tracks in the queue
+- Reorder the queue by dragging tracks, and select ranges with Shift+click
+- Work, movement, composer, performer and production credits for classical
+  music, including the tags of the Work Hierarchy plugin for Picard
+- A sleep timer, which can let the last track finish
+- A track menu, and a track information dialog
+- Copy the library, queue, playlists and settings of Amberol on the first run
+
+### Changed
+
+- Renamed to Dismas, with the application ID `io.github.dachshund7.Dismas`
+- A new icon: a carved lute rose
+- The album grid replaces the start screen
+- Call the list of tracks to play the queue, and audio files "tracks"
+- Fit the player to the window, growing the cover and waveform into the
+  room left
+- Toggle playback with Space
+- Load tracks in parallel worker threads, and decode cover art in sandboxed
+  glycin loaders
+- Scale each channel of the waveform by its own loudest peak
+
+### Fixed
+
+- Don't crash on paths that aren't valid UTF-8, files without a local path,
+  or tags that make the reader panic
+- Keep the shuffled order in step with changes to the queue
+- Keep the MPRIS cover and the album thumbnails up to date
+- Support setting the position over MPRIS
+
 ## [2026.1] - 2026-04-05
 
 ### Changed
@@ -323,7 +365,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- Add the directory MIME type to the list of supported typs [#202]
+- Add the directory MIME type to the list of supported types [#202]
 - Explicitly remove action bar background [!95]
 - Make sure to maintain aspect ratio of cover art pixbuf [#208]
 

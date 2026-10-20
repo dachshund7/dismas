@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -38,12 +38,12 @@ msgstr "დაუკარით მუსიკა და არაფერი
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol-ი მუსიკის დამკვრელია განდიდების მანიის გარეშე. თუ თქვენ უბრალოდ "
-"თქვენს კომპიუტერში არსებული მუსიკის დაკვრა გნებავთ, Amberol -ი ზუსტად ისაა, "
+"Dismas-ი მუსიკის დამკვრელია განდიდების მანიის გარეშე. თუ თქვენ უბრალოდ "
+"თქვენს კომპიუტერში არსებული მუსიკის დაკვრა გნებავთ, Dismas -ი ზუსტად ისაა, "
 "რასაც ეძებთ."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -189,8 +189,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "კლავიატურის მალსახმობები"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "Amberol-ის _შესახებ"
+msgid "_About Dismas"
+msgstr "Dismas-ის _შესახებ"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -374,8 +374,8 @@ msgid "translator-credits"
 msgstr "მთარგმნელის შესახებ"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol-ს მუსიკის დასაკრავად ფონურად გაშვება სჭირდება"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas-ს მუსიკის დასაკრავად ფონურად გაშვება სჭირდება"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

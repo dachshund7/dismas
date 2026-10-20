@@ -22,8 +22,8 @@ msgstr ""
 "X-Generator: Poedit 3.9\n"
 
 #: data/io.bassi.Amberol.desktop.in.in:2 data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -40,12 +40,12 @@ msgstr "Spielt Musik ab, und sonst nichts"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to play "
-"music available on your local system then Amberol is the music player you are looking "
+"Dismas is a music player with no delusions of grandeur. If you just want to play "
+"music available on your local system then Dismas is the music player you are looking "
 "for."
 msgstr ""
-"Amberol ist eine Musikwiedergabe, die sich nicht für großartig hält. Falls Sie einfach "
-"nur Musik auf Ihrem Computer wiedergeben wollen, ist Amberol die Musikwiedergabe, die "
+"Dismas ist eine Musikwiedergabe, die sich nicht für großartig hält. Falls Sie einfach "
+"nur Musik auf Ihrem Computer wiedergeben wollen, ist Dismas die Musikwiedergabe, die "
 "Sie suchen."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -191,8 +191,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Tastenkürzel"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "_Info zu Amberol"
+msgid "_About Dismas"
+msgstr "_Info zu Dismas"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -380,8 +380,8 @@ msgstr ""
 "Konstantin Tutsch <konstantin.tutsch@disroot.org>, 2022."
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol muss im Hintergrund laufen, um Musik wiedergeben zu können"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas muss im Hintergrund laufen, um Musik wiedergeben zu können"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

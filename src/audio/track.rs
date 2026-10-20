@@ -1294,7 +1294,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Track {
-        const NAME: &'static str = "AmberolTrack";
+        const NAME: &'static str = "DismasTrack";
         type Type = super::Track;
     }
 

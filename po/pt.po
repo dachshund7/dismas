@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 #: data/io.bassi.Amberol.appdata.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:4
 msgid "Music Player"
@@ -40,12 +40,12 @@ msgstr "Toca música e nada mais"
 
 #: data/io.bassi.Amberol.appdata.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"O Amberol é um reprodutor de música sem ilusões de grandeza. Se simplesmente "
-"quer reproduzir as músicas disponíveis no seu sistema local, então o Amberol "
+"O Dismas é um reprodutor de música sem ilusões de grandeza. Se simplesmente "
+"quer reproduzir as músicas disponíveis no seu sistema local, então o Dismas "
 "é o reprodutor de música que estava à procura."
 
 #: data/io.bassi.Amberol.appdata.xml.in.in:14
@@ -288,8 +288,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Teclas de atalho"
 
 #: src/gtk/playback-control.ui:205
-msgid "_About Amberol"
-msgstr "_Acerca do Amberol"
+msgid "_About Dismas"
+msgstr "_Acerca do Dismas"
 
 #: src/gtk/playback-control.ui:209
 msgid "_Quit"
@@ -360,9 +360,9 @@ msgid "translator-credits"
 msgstr "Hugo Carvalho <hugokarvalho@hotmail.com>"
 
 #: src/application.rs:239
-msgid "Amberol needs to run in the background to play music"
+msgid "Dismas needs to run in the background to play music"
 msgstr ""
-"O Amberol precisa de estar a ser executado em segundo plano para reproduzir "
+"O Dismas precisa de estar a ser executado em segundo plano para reproduzir "
 "música"
 
 #: src/playback_control.rs:118

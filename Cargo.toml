@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 [package]
-name = "amberol"
-authors = ["Emmanuele Bassi <ebassi@gnome.org>"]
+name = "dismas"
+authors = ["John Hamilton <jlhamilton@gmail.com>", "Emmanuele Bassi <ebassi@gnome.org>"]
 version = "0.1.0"
 edition = "2024"
 

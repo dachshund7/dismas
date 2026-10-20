@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -38,12 +38,12 @@ msgstr "Zenét játszik, és semmi több"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Az Amberol egy nagyzási képzelgések nélküli zenelejátszó. Ha csak a helyi "
-"rendszerén elérhető zenéket szeretné lejátszani, akkor az Amberol lesz az a "
+"Az Dismas egy nagyzási képzelgések nélküli zenelejátszó. Ha csak a helyi "
+"rendszerén elérhető zenéket szeretné lejátszani, akkor az Dismas lesz az a "
 "zenelejátszó, amelyet keres."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -190,8 +190,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Gyorsbillentyűk"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "Az Amberol _névjegye"
+msgid "_About Dismas"
+msgstr "Az Dismas _névjegye"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -377,7 +377,8 @@ msgid "translator-credits"
 msgstr "Úr Balázs <ur dot balazs at fsf dot hu>, 2022."
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
+#, fuzzy
+msgid "Dismas needs to run in the background to play music"
 msgstr "Az Amberolnak a háttérben kell futnia a zene lejátszásához"
 
 #: src/audio/inhibit_controller.rs:40

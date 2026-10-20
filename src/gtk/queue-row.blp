@@ -3,7 +3,7 @@
 
 using Gtk 4.0;
 
-template $AmberolQueueRow: Widget {
+template $DismasQueueRow: Widget {
   Box {
     // The whole height of the row can be grabbed, not just the icon
     Image drag_handle {
@@ -43,7 +43,7 @@ template $AmberolQueueRow: Widget {
       StackPage {
         name: "cover";
 
-        child: $AmberolCoverPicture track_cover_image {
+        child: $DismasCoverPicture track_cover_image {
           cover-size: "1";
           halign: "center";
           valign: "center";

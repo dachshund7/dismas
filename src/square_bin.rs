@@ -20,7 +20,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for SquareBin {
-        const NAME: &'static str = "AmberolSquareBin";
+        const NAME: &'static str = "DismasSquareBin";
         type Type = super::SquareBin;
         type ParentType = gtk::Widget;
     }

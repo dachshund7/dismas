@@ -22,7 +22,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for SlideBin {
-        const NAME: &'static str = "AmberolSlideBin";
+        const NAME: &'static str = "DismasSlideBin";
         type Type = super::SlideBin;
         type ParentType = gtk::Widget;
 

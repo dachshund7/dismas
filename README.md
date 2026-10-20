@@ -1,84 +1,125 @@
-Amberol
-=======
+Dismas
+======
 
-![Application icon](./data/icons/hicolor/scalable/apps/io.bassi.Amberol.svg)
+![Application icon](./data/icons/hicolor/scalable/apps/io.github.dachshund7.Dismas.svg)
 
-A small and simple sound and music player that is well integrated with GNOME.
+A music player written in Rust with GTK4 and libadwaita. It fits in well on
+GNOME desktops.
 
-Amberol aspires to be as small, unintrusive, and simple as possible. It does
-not manage your music collection; it does not let you manage playlists, smart
-or otherwise; it does not let you edit the metadata for your tracks; it does
-not show you lyrics for your tracks, or the Wikipedia page for your bands.
+Dismas is a fork of [Amberol](https://gitlab.gnome.org/World/amberol) by
+Emmanuele Bassi. Upstream Amberol sets out to play music and nothing else: it
+doesn't manage a collection or playlists. Dismas keeps its look and its
+GStreamer core, and adds the library and playlist features that upstream
+deliberately leaves out.
 
-Amberol plays music, and nothing else.
+![The player, with the queue](./data/screenshots/dismas2.jpg)
+![The album grid, searched](./data/screenshots/dismas3.jpg)
+![A narrow window](./data/screenshots/dismas6.jpg)
 
-![Full UI](./data/screenshots/amberol-full.png)
-![Compact UI](./data/screenshots/amberol-compact.png)
+Dismas is not affiliated with the upstream project. Please don't report its
+bugs upstream or send its changes there. Upstream doesn't accept
+contributions made with AI tools, and much of Dismas was written with Claude.
 
-Flatpak builds
---------------
-
-The recommended way of installing Amberol is through Flatpak. If you don't have
-Flatpak installed, you can get it from [the Flatpak website](https://flatpak.org/setup).
-
-You can install stable builds of Amberol from [Flathub](https://flathub.org)
-by using this command:
-
-    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-    flatpak install flathub io.bassi.Amberol
-
-<a href="https://flathub.org/apps/details/io.bassi.Amberol"><img src="https://flathub.org/api/badge?svg&locale=en" width="200"/></a>
-
-Getting in touch
+What Dismas adds
 ----------------
 
-If you have questions about Amberol, you can join the [`#amberol:gnome.org`](https://matrix.to/#/#amberol:gnome.org)
-channel on Matrix, or use the [GNOME Discourse instance](https://discourse.gnome.org/c/applications/7).
+- **Album grid:** browse the albums in your Music folder, sorted by artist,
+  title, year or date added, and select albums or tracks to play or add to
+  the queue.
+- **Search by any tag:** searching the albums or the queue looks in every
+  tag of the tracks, not just the title, artist and album. Find a recording
+  by its conductor, soloist, orchestra, ensemble, composer, work or label,
+  and combine them: "Karajan Brahms" finds the tracks with both. Case and
+  accents don't matter, so "dvorak" finds Dvořák. Searching the albums shows
+  each album with only the tracks that match.
+- **Playlists:** save the queue as a playlist, and create, rename and delete
+  playlists. Switch between them on the Playlists page. Import and export M3U
+  playlists. Exported paths are relative to the playlist's folder, so you can
+  copy a playlist along with the music to another device.
+- **Queue editing:** drag tracks to reorder them, and select ranges with
+  Shift+click.
+- **Classical music:** shows work and movement names (including the tags written
+  by the [Work Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin
+  for Picard), composers and performers, and production credits in the track
+  information.
+- **Sleep timer:** stops the music after a set number of minutes. It can stop
+  right away, or let the track that's playing when time runs out finish
+  first.
+- **Layout:** the player fits itself to the window, and the cover and waveform
+  grow into any spare room.
+- **Robustness:** tags and covers load in parallel worker threads, and cover
+  art is decoded in sandboxed [glycin](https://gitlab.gnome.org/GNOME/glycin)
+  loaders. Unreadable files, odd tags and file names that aren't valid UTF-8
+  are skipped rather than crashing the app.
+
+Keyboard shortcuts
+------------------
+
+| Shortcut            | Action                        |
+|---------------------|-------------------------------|
+| Space               | Play / pause                  |
+| Ctrl+B / Ctrl+N     | Previous / next track         |
+| Ctrl+← / Ctrl+→     | Seek backward / forward       |
+| Ctrl+1 / 2 / 3      | Player / albums / playlists   |
+| Ctrl+F              | Search the queue              |
+| Ctrl+G              | Search the albums             |
+| Ctrl+I              | Track information             |
+| Ctrl+R              | Shuffle                       |
+| Ctrl+L              | Clear the queue               |
+| F9                  | Show or hide the playlist pane |
+| Ctrl+Q              | Quit                          |
+
+Building
+--------
+
+There are no packaged builds of Dismas, so you need to build it from
+source. You'll need Meson, Rust, `blueprint-compiler`, gettext, and the
+development files for gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20
+(including plugins-bad), SQLite, libseccomp and fontconfig. Decoding cover
+art needs the glycin loaders at run time, plus `bwrap` outside Flatpak.
+
+```sh
+meson setup _build                     # add -Dprofile=development for a debug build
+meson compile -C _build
+meson devenv -C _build ./src/dismas    # run without installing
+```
+
+To build a Flatpak instead, use the `io.github.dachshund7.Dismas.json` manifest.
+
+Dismas has its own application ID, `io.github.dachshund7.Dismas`, so it can be
+installed alongside Amberol. On its first run, it copies Amberol's library,
+queue, playlists and settings, if it finds them; Amberol's own copies are left
+alone.
+
+For a full debug log, run:
+
+    RUST_BACKTRACE=1 RUST_LOG=dismas=debug ./src/dismas
 
 Contributing
 ------------
 
-Please, see the [contribution guide](./CONTRIBUTING.md) if you wish to report
-and issue, fix a bug, or implement a new feature.
-
-How to obtain debugging information
------------------------------------
-
-Run Amberol from your terminal using:
-
-    RUST_BACKTRACE=1 RUST_LOG=amberol=debug flatpak run io.bassi.Amberol
-
-to obtain a full debug log.
+See the [contribution guide](./CONTRIBUTING.md). Contributions made with AI
+tools are welcome.
 
 Translations
 ------------
 
-Amberol is translated on the [GNOME translation platform](https://l10n.gnome.org/module/amberol).
+Strings inherited from upstream Amberol come with its translations. Strings
+added in Dismas appear in English until someone translates them here, and so do
+translations that spelled or declined the name "Amberol" in a way that couldn't
+simply be swapped for "Dismas".
 
-You should contact the coordinator of [the localization team for your language](https://l10n.gnome.org/teams/)
-if you have questions.
+Why is it called "Dismas"?
+--------------------------
 
-For more information, please see the [GNOME Translation Project Welcome page](https://welcome.gnome.org/team/translation/).
-
-Code of conduct
----------------
-
-Amberol follows the GNOME project [Code of Conduct](./code-of-conduct.md). All
-communications in project spaces, such as the issue tracker or
-[Discourse](https://discourse.gnome.org) are expected to follow it.
-
-Why is it called "Amberol"?
----------------------------
-
-The name comes from the the [Blue Amberol
-Records](https://en.wikipedia.org/wiki/Blue_Amberol_Records), a type of cylinder
-records made of (blue) nitrocellulose, capable of playback durations of around
-four minutes, just about the length of the average track since 1990.
+It's named after [Jan Dismas
+Zelenka](https://en.wikipedia.org/wiki/Jan_Dismas_Zelenka) (1679–1745), the
+Czech Baroque composer who worked at the court in Dresden.
 
 Copyright and licensing
 -----------------------
 
-Copyright 2022  Emmanuele Bassi
+Copyright 2022  Emmanuele Bassi, and the contributors to Amberol and Dismas
 
-Amberol is released under the terms of the GNU General Public License, either
-version 3.0 or, at your option, any later version.
+Released under the terms of the GNU General Public License, either version 3.0
+or, at your option, any later version.

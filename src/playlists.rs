@@ -23,7 +23,7 @@ pub enum NameError {
 }
 
 fn data_dir() -> PathBuf {
-    glib::user_data_dir().join("amberol")
+    glib::user_data_dir().join("dismas")
 }
 
 fn playlists_dir() -> PathBuf {

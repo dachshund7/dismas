@@ -23,7 +23,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for AlbumCell {
-        const NAME: &'static str = "AmberolAlbumCell";
+        const NAME: &'static str = "DismasAlbumCell";
         type Type = super::AlbumCell;
         type ParentType = gtk::Box;
     }

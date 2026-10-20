@@ -41,7 +41,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for SleepTimer {
-        const NAME: &'static str = "AmberolSleepTimer";
+        const NAME: &'static str = "DismasSleepTimer";
         type Type = super::SleepTimer;
     }
 

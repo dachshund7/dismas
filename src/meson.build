@@ -5,8 +5,8 @@ subdir('gtk')
 
 pkgdatadir = get_option('prefix') / get_option('datadir') / meson.project_name()
 
-gnome.compile_resources('amberol',
-  'amberol.gresource.xml',
+gnome.compile_resources('dismas',
+  'dismas.gresource.xml',
   gresource_bundle: true,
   dependencies: blueprints,
   install: true,
@@ -15,7 +15,7 @@ gnome.compile_resources('amberol',
 
 conf = configuration_data()
 conf.set_quoted('VERSION', '@0@@1@'.format(meson.project_version(), version_suffix))
-conf.set_quoted('GETTEXT_PACKAGE', 'amberol')
+conf.set_quoted('GETTEXT_PACKAGE', 'dismas')
 conf.set_quoted('LOCALEDIR', get_option('prefix') / get_option('localedir'))
 conf.set_quoted('PKGDATADIR', pkgdatadir)
 conf.set_quoted('APPLICATION_ID', application_id)

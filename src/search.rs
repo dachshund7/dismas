@@ -30,7 +30,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for SearchFilter {
-        const NAME: &'static str = "AmberolSearchFilter";
+        const NAME: &'static str = "DismasSearchFilter";
         type Type = super::SearchFilter;
         type ParentType = gtk::Filter;
     }

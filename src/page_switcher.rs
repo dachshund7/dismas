@@ -15,7 +15,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, CompositeTemplate)]
-    #[template(resource = "/io/bassi/Amberol/page-switcher.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/page-switcher.ui")]
     pub struct PageSwitcher {
         #[template_child]
         pub player_button: TemplateChild<gtk::ToggleButton>,
@@ -25,7 +25,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PageSwitcher {
-        const NAME: &'static str = "AmberolPageSwitcher";
+        const NAME: &'static str = "DismasPageSwitcher";
         type Type = super::PageSwitcher;
         type ParentType = gtk::Widget;
 

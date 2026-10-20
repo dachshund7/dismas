@@ -22,8 +22,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -42,12 +42,12 @@ msgstr "Müzik çalar, daha çoğu değil"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol, görkem sanrıları olmayan bir müzik çalardır. Yalnızca yerel "
-"sisteminizdeki müzikleri çalmak istiyorsanız, Amberol aradığınız müzik "
+"Dismas, görkem sanrıları olmayan bir müzik çalardır. Yalnızca yerel "
+"sisteminizdeki müzikleri çalmak istiyorsanız, Dismas aradığınız müzik "
 "çalardır."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -196,8 +196,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Klavye Kısayolları"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "Amberol _Hakkında"
+msgid "_About Dismas"
+msgstr "Dismas _Hakkında"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -385,8 +385,8 @@ msgstr ""
 "Sabri Ünal <yakushabb@gmail.com>"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol, müzik çalmak için arka planda çalışmalıdır"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas, müzik çalmak için arka planda çalışmalıdır"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

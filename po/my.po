@@ -20,7 +20,8 @@ msgstr ""
 "X-Poedit-SourceCharset: UTF-8\n"
 
 #: data/io.bassi.Amberol.desktop.in.in:2 data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
+#, fuzzy
+msgid "Dismas"
 msgstr "အန်ဘာရော"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
@@ -37,9 +38,10 @@ msgid "Plays music, and nothing else"
 msgstr "သီချင်းဖွင့်ပေးယုံကလွဲပြီး ကျန်တာလုပ်မရပါ"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
+#, fuzzy
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to play music available on your "
-"local system then Amberol is the music player you are looking for."
+"Dismas is a music player with no delusions of grandeur. If you just want to play music available on your "
+"local system then Dismas is the music player you are looking for."
 msgstr ""
 "အန်ဘာရောသည် ဟိတ်ကြီးဟန်ကြီးမရှိသော သီချင်းဖွင့်ကိရိယာတစ်ခုဖြစ်သည်။ သင့်စက်တွင်းမှာရှိသော တေးသီးချင်းများကိုသာ နားဆင်လိုပါက အန်ဘာရောကိုသာ အသုံးပြုလိုက်ပါ။"
 
@@ -186,7 +188,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "ကီး_ဘုတ်ဖြတ်လမ်းခလုတ်များ"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
+#, fuzzy
+msgid "_About Dismas"
 msgstr "အန်ဘာရော_အကြောင်း"
 
 #: src/gtk/playback-control.blp:227
@@ -365,7 +368,8 @@ msgid "translator-credits"
 msgstr "ဇေယျာလွင်"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
+#, fuzzy
+msgid "Dismas needs to run in the background to play music"
 msgstr "နောက်ကွယ်တွင် သီချင်းဖွင့်နိုင်ရန် အန်ဘာရောကို နောက်ကွယ်တွင် မောင်းနှင်နေဖို့ လိုအပ်သည်"
 
 #: src/audio/inhibit_controller.rs:40

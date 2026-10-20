@@ -4,7 +4,7 @@
 using Gtk 4.0;
 using Adw 1;
 
-template $AmberolWindow: Adw.ApplicationWindow {
+template $DismasWindow: Adw.ApplicationWindow {
   handle-menubar-accel: true;
   default-width: 800;
 
@@ -20,7 +20,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
         pin-sidebar: true;
 
         // Drawn next to the sidebar when collapsed, as if pushed aside
-        content: $AmberolPushBin {
+        content: $DismasPushBin {
           child: Stack content_stack {
             transition-type: crossfade;
 
@@ -33,7 +33,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
                   show-title: false;
 
                   [start]
-                  $AmberolPageSwitcher {}
+                  $DismasPageSwitcher {}
 
                   [end]
                   MenuButton menu_button {
@@ -46,14 +46,14 @@ template $AmberolWindow: Adw.ApplicationWindow {
                   }
                 }
 
-                content: $AmberolPlayerBox main_box {
+                content: $DismasPlayerBox main_box {
                   vexpand: true;
 
                   styles [
                     "main-box",
                   ]
 
-                  $AmberolTrackCover track_cover {}
+                  $DismasTrackCover track_cover {}
 
                   Box {
                     orientation: vertical;
@@ -64,7 +64,7 @@ template $AmberolWindow: Adw.ApplicationWindow {
                       "cover-width",
                     ]
 
-                    $AmberolWaveformView waveform_view {
+                    $DismasWaveformView waveform_view {
                       can-focus: "true";
                     }
 
@@ -102,9 +102,9 @@ template $AmberolWindow: Adw.ApplicationWindow {
                     }
                   }
 
-                  $AmberolTrackDetails track_details {}
+                  $DismasTrackDetails track_details {}
 
-                  $AmberolPlaybackControl playback_control {
+                  $DismasPlaybackControl playback_control {
                     halign: "center";
                     margin-top: "0";
                     margin-bottom: "24";
@@ -116,13 +116,13 @@ template $AmberolWindow: Adw.ApplicationWindow {
             StackPage {
               name: "library";
 
-              child: $AmberolLibraryView library_view {};
+              child: $DismasLibraryView library_view {};
             }
 
             StackPage {
               name: "playlists";
 
-              child: $AmberolPlaylistsPage playlists_page {};
+              child: $DismasPlaylistsPage playlists_page {};
             }
           };
         };
@@ -139,13 +139,13 @@ template $AmberolWindow: Adw.ApplicationWindow {
             StackPage {
               name: "playlist";
 
-              child: $AmberolPlaylistView playlist_view {};
+              child: $DismasPlaylistView playlist_view {};
             }
 
             StackPage {
               name: "album";
 
-              child: $AmberolAlbumTracks album_tracks {};
+              child: $DismasAlbumTracks album_tracks {};
             }
           }
 

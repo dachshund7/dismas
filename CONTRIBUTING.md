@@ -1,230 +1,169 @@
 # Contribution guidelines
 
-Thank you for considering contributing to the Amberol project!
+Thank you for considering contributing to Dismas, a fork of Amberol!
 
-Following these guidelines helps to communicate that you respect the time of
-the developers managing and developing this free software project. In return,
-they should reciprocate that respect in addressing your issue, assessing
-changes, and helping you finalize your pull requests.
+You can help by reporting bugs, suggesting features, improving the
+documentation, translating the strings added in Dismas, or writing code.
 
-There are many ways to contribute, from improving the documentation,
-submitting bug reports and feature requests, localizing the user interface, or
-writing code which can be incorporated into Amberol itself.
+Dismas is separate from [upstream Amberol](https://gitlab.gnome.org/World/amberol).
+Report problems with Dismas here, not to the upstream project, and don't send
+its changes upstream: upstream has its own contribution policy, which doesn't
+allow AI-generated work.
 
-The issue tracker is meant to be used for actionable issues only. Please,
-don't use the issue tracker for support questions. Feel free to use the
-[GNOME Discourse forum](https://discourse.gnome.org) to ask your questions.
+## Reporting bugs
 
-## How to report bugs
+Open an issue on this repository's issue tracker, and include:
 
-Issues should only be reported [on the project page](https://gitlab.gnome.org/World/Amberol/issues/).
+ 0. the commit you built from
+ 0. your operating system, and whether you're running a Flatpak or a native build
+ 0. the steps to reproduce the issue
+ 0. what you expected to happen
+ 0. what happened instead; screenshots are welcome
 
-### Bug reports
+If the issue includes a crash, also include:
 
-If you're reporting a bug make sure to list:
+ 0. any warnings printed in the terminal
+ 0. a backtrace, from GDB or LLDB, or from running with `RUST_BACKTRACE=1`
 
- 0. which version of Amberol are you using?
- 0. which operating system are you using?
- 0. how did you install Amberol?
- 0. the necessary steps to reproduce the issue
- 0. the expected outcome
- 0. a description of the behavior; screenshots are also welcome
+Screen recordings are welcome as well, but describe the problem in enough
+detail that someone can reproduce it without watching the video.
 
-If the issue includes a crash, you should also include:
-
- 0. the eventual warnings printed on the terminal
- 0. a backtrace, obtained with tools such as GDB or LLDB
-
-It is fine to include screenshots of screen recordings to demonstrate
-an issue that is best to understand visually, but please don't just
-attach screen recordings without further details into issues. It is
-essential that the problem is described in enough detail to reproduce
-it without watching a video.
-
-For small issues, such as:
-
- - spelling/grammar fixes in the documentation
- - typo correction
- - comment clean ups
- - changes to metadata files (CI, `.gitignore`)
- - build system changes
- - source tree clean ups and reorganizations
-
-You should directly open a merge request instead of filing a new issue.
+For small fixes, such as typos, comment clean-ups, CI or build changes, open a
+pull request directly without filing an issue first.
 
 ### Security issues
 
-If you have a security issue, please mark it as confidential in the issue
-tracker, to ensure that only the maintainers can see it.
+Report security issues privately, through GitHub's private vulnerability
+reporting, rather than in a public issue.
 
 ### Features and enhancements
 
-Feature discussion can be open ended and require high bandwidth channels; if
-you are proposing a new feature on the issue tracker, make sure to make
-an actionable proposal, and list:
+When you propose a feature, explain:
 
  0. what you're trying to achieve
- 0. prior art, in other applications
- 0. design and theming changes
+ 0. how other applications handle it, if they do
+ 0. any design changes it needs
 
-When in doubt, you should open an issue to discuss your changes and ask
-questions before opening your code editor and hacking away; this way you'll get
-feedback from the project maintainers, if they have any, and you will avoid
-spending unnecessary effort.
+For anything big, open an issue to discuss it before you start writing code.
+
+## Use of AI tools
+
+Contributions made with AI tools such as Claude are welcome, in code,
+documentation, issues and artwork. Much of Dismas was written that way.
+
+You remain responsible for what you submit:
+
+ - **Understand it.** Read and review the changes before opening a pull
+   request, and be ready to explain them and answer questions about them.
+ - **Test it.** Build the app, run it, and run the checks below. Don't submit
+   changes you haven't tried.
+ - **Keep it focused.** One change per pull request, matching the style of the
+   code around it. Don't include unrelated reformatting or rewrites.
+ - **Credit it.** Note AI assistance in the commit message with a
+   `Co-Authored-By:` trailer naming the tool, for example:
+
+   ```plain
+   Co-Authored-By: Claude <noreply@anthropic.com>
+   ```
+
+The repository has a [`CLAUDE.md`](./CLAUDE.md) file describing how the code
+is organized. It is written for Claude Code, but people will find it useful
+too.
 
 ## Your first contribution
 
 ### Prerequisites
 
-If you want to contribute to the Amberol project, you will need to have the
-development tools appropriate for your operating system, including:
+You will need:
 
- - Python 3.x
- - Meson
- - Ninja
- - the Rust compiler
- - Cargo
+ - Meson and Ninja
+ - the Rust compiler and Cargo
+ - `blueprint-compiler` and gettext
+ - the development files for gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20
+   (including plugins-bad), SQLite, libseccomp and fontconfig
+ - the glycin loaders, plus `bwrap` outside Flatpak, to decode cover art
 
-### Dependencies
-
-You will also need the various dependencies needed to build Amberol from
-source. You will find the compile time dependencies in the
-[`Cargo.toml`](./Cargo.toml) file, while the run time dependencies are listed
-in the [`meson.build`](./meson.build) file.
-
-You are strongly encouraged to use GNOME Builder to build and run Amberol,
-as it knows how to download and build all the dependencies necessary.
+GNOME Builder can also build the project from the Flatpak manifest,
+`io.github.dachshund7.Dismas.json`, and download the dependencies for you.
 
 ### Getting started
 
-You should start by forking the Amberol repository from the GitLab web UI;
-then you can select *Clone Repository* from GNOME Builder and use your
-fork's URL as the repository URL.
-
-GNOME Builder will find all the dependencies and download them for you.
-
-----
-
-If you want to use another development environment, you will need to clone
-the repository manually; make sure to have an account on GNOME's GitLab
-instance, and that you have an SSH key associated to that account:
+Fork this repository on GitHub and clone your fork:
 
 ```sh
-$ git clone git@ssh.gitlab.gnome.org:yourusername/amberol.git
-$ cd amberol
+$ git clone git@github.com:yourusername/dismas.git
+$ cd dismas
 ```
 
-To compile the Git version of Amberol on your system, you will need to
-configure your build using Meson:
+Configure and build with Meson, which runs Cargo itself:
 
 ```sh
-$ meson setup _builddir .
-$ meson compile -C _builddir
+$ meson setup _build
+$ meson compile -C _build
 ```
 
-Meson will search for all the required dependencies during the setup
-step, and will run Cargo in the compile step.
-
-You can run Amberol uninstalled by using the Meson devenv command:
+Run the app without installing it:
 
 ```sh
-$ meson devenv -C _builddir
-$ ./src/amberol
-$ exit
+$ meson devenv -C _build ./src/dismas
 ```
 
-----
+Run `meson setup` before using Cargo directly. It generates `src/config.rs`,
+which Cargo, rustfmt and clippy need.
 
-You can now switch to a new branch to work on Amberol:
+Create a branch to work on:
 
 ```sh
-$ git switch -C your-branch
+$ git switch -c your-branch
 ```
 
-Once you've finished working on the bug fix or feature, push the branch
-to your Git repository and open a new merge request, to let the Amberol
-maintainers review your contribution.
+When you're done, push the branch to your fork and open a pull request.
 
-Remember that the Amberol is maintained by volunteers, so it might take a
-little while to get reviews or feedback. Don't be discouraged, and feel
-free to join the `#amberol:gnome.org` channel on Matrix for any issue you
-may find.
+### Checks
 
-### Coding style
+CI runs these on every pull request, but it's quicker to run them before you
+push:
 
-Amberol uses the standard Rust coding style. You can use:
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+build-aux/checks.sh                # formatting and spelling
+reuse lint                         # licensing headers
+```
 
-    cargo +nightly fmt --all
+Every source file needs `SPDX-FileCopyrightText` and `SPDX-License-Identifier`
+headers.
 
-To ensure that your contribution is following the expected format.
+### Translations
 
-Amberol has an additional set of checks available in the
-[`checks.sh`](./build-aux/checks.sh) tool.
+The `po/*.po` files come from upstream Amberol's translators, so leave the
+existing translations alone. If you add translatable files, list them in
+`po/POTFILES.in`.
 
 ### Commit messages
 
-The expected format for git commit messages is as follows:
+Format commit messages like this:
 
 ```plain
 Short explanation of the commit
 
-Longer explanation explaining exactly what's changed, whether any
-external or private interfaces changed, what bugs were fixed (with bug
-tracker reference if applicable) and so forth. Be concise but not too
-brief.
+Longer explanation of exactly what changed, whether any external or
+private interfaces changed, what bugs were fixed (with an issue reference
+if there is one) and so forth. Be concise but not too brief.
 
 Closes #1234
 ```
 
- - Always add a brief description of the commit to the _first_ line of
- the commit and terminate by two newlines (it will work without the
- second newline, but that is not nice for the interfaces).
+ - The first line is a single sentence of at most 72 characters. Start it
+ with a capital letter, unless it starts with a lowercase identifier, and
+ don't end it with a period. Follow it with a blank line.
 
- - First line (the brief description) must only be one sentence and
- should start with a capital letter unless it starts with a lowercase
- symbol or identifier. Don't use a trailing period either. Don't exceed
- 72 characters.
+ - The body is ordinary prose. Explain **why** you changed something; the
+ diff already shows how.
 
- - The main description (the body) is normal prose and should use normal
- punctuation and capital letters where appropriate. Consider the commit
- message as an email sent to the developers (or yourself, six months
- down the line) detailing **why** you changed something. There's no need
- to specify the **how**: the changes can be inlined.
+ - If the commit addresses an issue, use `Closes #1234` or `Fixes #1234`, and
+ GitHub will close the issue when the pull request is merged.
 
- - When committing code on behalf of others use the `--author` option, e.g.
- `git commit -a --author "Joe Coder <joe@coder.org>"` and `--signoff`.
-
- - If your commit is addressing an issue, use the
- [GitLab syntax](https://docs.gitlab.com/ce/user/project/issues/managing_issues.html#default-closing-pattern)
- to automatically close the issue when merging the commit with the upstream
- repository:
-
-```plain
-Closes #1234
-Fixes #1234
-Closes: https://gitlab.gnome.org/World/amberol/-/issues/123
-```
-
- - If you have a merge request with multiple commits and none of them
- completely fixes an issue, you should add a reference to the issue in
- the commit message, e.g. `Bug: #1234`, and use the automatic issue
- closing syntax in the description of the merge request.
-
-## Use of Generative AI
-
-This project does not allow contributions generated by large languages
-models (LLMs) and chatbots. This ban includes, but is not limited to, tools
-like ChatGPT, Claude, Copilot, DeepSeek, and Devin AI. We are taking these
-steps as precaution due to the potential negative influence of AI generated
-content on quality, as well as likely copyright violations.
-
-This ban of AI generated content applies to all parts of the projects,
-including, but not limited to, code, documentation, issues, and artworks.
-An exception applies for purely translating texts for issues and comments to
-English.
-
-AI tools can be used to answer questions and find information. However, we
-encourage contributors to avoid them in favor of using [existing documentation](https://developer.gnome.org)
-and our [chats and forums](https://welcome.gnome.org). Since AI generated
-information is frequently misleading or false, we cannot supply support on
-anything referencing AI output.
+ - When committing someone else's work, use `--author`, e.g.
+ `git commit --author "Joe Coder <joe@coder.org>"`.

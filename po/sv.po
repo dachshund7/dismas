@@ -21,8 +21,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -39,12 +39,12 @@ msgstr "Spelar upp musik helt enkelt"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol är en musikspelare utan storhetsvansinne. Om du helt enkelt vill "
-"spela upp musik på ditt system så är Amberol musikspelaren för dig."
+"Dismas är en musikspelare utan storhetsvansinne. Om du helt enkelt vill "
+"spela upp musik på ditt system så är Dismas musikspelaren för dig."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
 msgid "Current features:"
@@ -189,8 +189,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Tangentbordsgenvägar"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "_Om Amberol"
+msgid "_About Dismas"
+msgstr "_Om Dismas"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -379,8 +379,8 @@ msgstr ""
 "<tp-sv@listor.tp-sv.se>."
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol behöver köras i bakgrunden för att spela upp musik"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas behöver köras i bakgrunden för att spela upp musik"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

@@ -20,8 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -38,12 +38,12 @@ msgstr "Reprodueix música i res més"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol és un reproductor de música sense deliris de grandesa. Si voleu "
-"reproduir música disponible al vostre sistema local únicament, Amberol és el "
+"Dismas és un reproductor de música sense deliris de grandesa. Si voleu "
+"reproduir música disponible al vostre sistema local únicament, Dismas és el "
 "reproductor de música que busqueu."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
@@ -191,8 +191,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Dreceres de teclat"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "_Quant a l'Amberol"
+msgid "_About Dismas"
+msgstr "_Quant a l'Dismas"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -380,8 +380,8 @@ msgstr ""
 "Victor Dargallo <victordargallo@disroot.org>"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "L'Amberol necessita córrer en segon pla per a reproduir música"
+msgid "Dismas needs to run in the background to play music"
+msgstr "L'Dismas necessita córrer en segon pla per a reproduir música"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

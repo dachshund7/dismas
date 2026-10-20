@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<schemalist gettext-domain="amberol">
-  <enum id="io.bassi.Amberol.ReplayGainMode">
+<schemalist gettext-domain="dismas">
+  <enum id="io.github.dachshund7.Dismas.ReplayGainMode">
     <value nick="album" value="0"/>
     <value nick="track" value="1"/>
     <value nick="off" value="2"/>
   </enum>
-  <enum id="io.bassi.Amberol.AlbumSort">
+  <enum id="io.github.dachshund7.Dismas.AlbumSort">
     <value nick="artist" value="0"/>
     <value nick="title" value="1"/>
     <value nick="year" value="2"/>
     <value nick="added" value="3"/>
   </enum>
-  <enum id="io.bassi.Amberol.SortOrder">
+  <enum id="io.github.dachshund7.Dismas.SortOrder">
     <value nick="ascending" value="0"/>
     <value nick="descending" value="1"/>
   </enum>
-	<schema id="io.bassi.Amberol" path="/io/bassi/Amberol/">
+	<schema id="io.github.dachshund7.Dismas" path="/io/github/dachshund7/Dismas/">
 	  <key name="window-width" type="i">
 	    <default>600</default>
 	  </key>
@@ -30,7 +30,7 @@
 	  <key name="enable-recoloring" type="b">
 	    <default>true</default>
 	  </key>
-    <key name="replay-gain" enum="io.bassi.Amberol.ReplayGainMode">
+    <key name="replay-gain" enum="io.github.dachshund7.Dismas.ReplayGainMode">
       <default>'off'</default>
     </key>
 	  <key name="background-play" type="b">
@@ -62,12 +62,12 @@
 	    <summary>Width of the playlist sidebar</summary>
 	    <description>The width of the playlist sidebar, in pixels; 0 means the width is computed automatically</description>
 	  </key>
-	  <key name="album-sort" enum="io.bassi.Amberol.AlbumSort">
+	  <key name="album-sort" enum="io.github.dachshund7.Dismas.AlbumSort">
 	    <default>'artist'</default>
 	    <summary>What the albums are sorted by</summary>
 	    <description>The albums in the grid are sorted by artist, title, year, or the date they were added to the Music folder</description>
 	  </key>
-	  <key name="album-sort-order" enum="io.bassi.Amberol.SortOrder">
+	  <key name="album-sort-order" enum="io.github.dachshund7.Dismas.SortOrder">
 	    <default>'ascending'</default>
 	    <summary>The direction the albums are sorted in</summary>
 	    <description>Whether the albums in the grid are sorted in ascending or descending order</description>

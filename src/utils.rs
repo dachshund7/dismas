@@ -14,7 +14,7 @@ pub const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
 
 // The main menu, for the menu buttons of each page
 pub fn primary_menu() -> gio::MenuModel {
-    gtk::Builder::from_resource("/io/bassi/Amberol/primary-menu.ui")
+    gtk::Builder::from_resource("/io/github/dachshund7/Dismas/primary-menu.ui")
         .object("primary_menu")
         .expect("The main menu is in the resources")
 }

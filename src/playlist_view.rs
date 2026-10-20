@@ -16,7 +16,7 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default, CompositeTemplate)]
-    #[template(resource = "/io/bassi/Amberol/playlist-view.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/playlist-view.ui")]
     pub struct PlaylistView {
         #[template_child]
         pub title_label: TemplateChild<gtk::Label>,
@@ -53,7 +53,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlaylistView {
-        const NAME: &'static str = "AmberolPlaylistView";
+        const NAME: &'static str = "DismasPlaylistView";
         type Type = super::PlaylistView;
         type ParentType = gtk::Widget;
 
@@ -131,7 +131,7 @@ impl PlaylistView {
 
     // The list isn't told that the drag left it when the track is dropped,
     // so the scrolling also stops when the drag ends; tracks are only
-    // dragged within Amberol, so the drag is known
+    // dragged within Dismas, so the drag is known
     fn watch_drag_end(&self, motion: &gtk::DropControllerMotion) {
         let Some(drag) = motion.drop().and_then(|drop| drop.drag()) else {
             return;

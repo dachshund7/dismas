@@ -27,8 +27,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -45,12 +45,12 @@ msgstr "Gwari ilow, ha travyth ken"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol yw gwarier ilow heb kammgrysyansow. Mar mynnowgh gwari ilow kavadow "
-"war dha system leel, Amberol yw an gwarier ilow rag ty."
+"Dismas yw gwarier ilow heb kammgrysyansow. Mar mynnowgh gwari ilow kavadow "
+"war dha system leel, Dismas yw an gwarier ilow rag ty."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
 msgid "Current features:"
@@ -195,8 +195,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Kesunyansow Bysowek"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
-msgstr "_A-dro dhe Amberol"
+msgid "_About Dismas"
+msgstr "_A-dro dhe Dismas"
 
 #: src/gtk/playback-control.blp:227
 msgid "_Quit"
@@ -380,8 +380,8 @@ msgid "translator-credits"
 msgstr "Flynn"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Res yw dhe Amberol eksekutya yn kilva rag gwari ilow"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Res yw dhe Dismas eksekutya yn kilva rag gwari ilow"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

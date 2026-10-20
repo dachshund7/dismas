@@ -1,6 +1,6 @@
-data/io.bassi.Amberol.desktop.in.in
-data/io.bassi.Amberol.gschema.xml
-data/io.bassi.Amberol.metainfo.xml.in.in
+data/io.github.dachshund7.Dismas.desktop.in.in
+data/io.github.dachshund7.Dismas.gschema.xml
+data/io.github.dachshund7.Dismas.metainfo.xml.in.in
 src/gtk/album-tracks.blp
 src/gtk/library-view.blp
 src/gtk/page-switcher.blp
@@ -24,6 +24,8 @@ src/playback_control.rs
 src/playlists_page.rs
 src/queue_row.rs
 src/track_info_dialog.rs
-src/window.rs
+src/window/loading.rs
 src/window/selected_playlist.rs
+src/window/selection.rs
 src/window/sleep_timer.rs
+src/window/track_menu.rs

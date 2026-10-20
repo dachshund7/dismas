@@ -20,7 +20,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
+#, fuzzy
+msgid "Dismas"
 msgstr "Amberolo"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
@@ -37,9 +38,10 @@ msgid "Plays music, and nothing else"
 msgstr "Ludas muzikon, kaj nenion alian"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
+#, fuzzy
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
 "Amberolo estas muzikludilo sen grandiozaj ambicioj. Se vi simple volas ludi "
@@ -189,7 +191,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Klavaraj ŝparvojoj"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
+#, fuzzy
+msgid "_About Dismas"
 msgstr "_Pri Amberolo"
 
 #: src/gtk/playback-control.blp:227
@@ -369,7 +372,8 @@ msgid "translator-credits"
 msgstr "Kristjan SCHMIDT"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
+#, fuzzy
+msgid "Dismas needs to run in the background to play music"
 msgstr "Amberolo devas funkcii en la fono por ludi muzikon"
 
 #: src/audio/inhibit_controller.rs:40

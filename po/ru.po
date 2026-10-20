@@ -21,8 +21,8 @@ msgstr ""
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
-msgid "Amberol"
-msgstr "Amberol"
+msgid "Dismas"
+msgstr "Dismas"
 
 #: data/io.bassi.Amberol.desktop.in.in:3
 msgid "Music Player"
@@ -41,13 +41,13 @@ msgstr "Воспроизводит музыку и ничего больше"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:9
 msgid ""
-"Amberol is a music player with no delusions of grandeur. If you just want to "
-"play music available on your local system then Amberol is the music player "
+"Dismas is a music player with no delusions of grandeur. If you just want to "
+"play music available on your local system then Dismas is the music player "
 "you are looking for."
 msgstr ""
-"Amberol - это музыкальный проигрыватель без мании величия. Если вы просто "
+"Dismas - это музыкальный проигрыватель без мании величия. Если вы просто "
 "хотите воспроизводить музыку, доступную в вашей локальной системе, то "
-"Amberol - это тот музыкальный проигрыватель, который вы ищете."
+"Dismas - это тот музыкальный проигрыватель, который вы ищете."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
 msgid "Current features:"
@@ -193,7 +193,8 @@ msgid "_Keyboard Shortcuts"
 msgstr "_Комбинации клавиш"
 
 #: src/gtk/playback-control.blp:222
-msgid "_About Amberol"
+#, fuzzy
+msgid "_About Dismas"
 msgstr "_О приложении"
 
 #: src/gtk/playback-control.blp:227
@@ -378,8 +379,8 @@ msgid "translator-credits"
 msgstr "Aleksandr Melman <alexmelman88@gmail.com>, 2022-2023"
 
 #: src/application.rs:255
-msgid "Amberol needs to run in the background to play music"
-msgstr "Amberol должен работать в фоновом режиме для воспроизведения музыки"
+msgid "Dismas needs to run in the background to play music"
+msgstr "Dismas должен работать в фоновом режиме для воспроизведения музыки"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"

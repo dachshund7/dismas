@@ -1,12 +1,12 @@
 {
-    "app-id" : "io.bassi.Amberol.Devel",
+    "app-id" : "io.github.dachshund7.Dismas.Devel",
     "runtime" : "org.gnome.Platform",
     "runtime-version" : "master",
     "sdk" : "org.gnome.Sdk",
     "sdk-extensions" : [
         "org.freedesktop.Sdk.Extension.rust-stable"
     ],
-    "command" : "amberol",
+    "command" : "dismas",
     "finish-args" : [
         "--share=ipc",
         "--socket=fallback-x11",
@@ -23,7 +23,7 @@
         "env" : {
             "G_MESSAGES_DEBUG" : "none",
             "RUST_BACKTRACE" : "1",
-            "RUST_LOG" : "amberol=debug,glib=debug"
+            "RUST_LOG" : "dismas=debug,glib=debug"
         }
     },
     "cleanup" : [
@@ -39,7 +39,7 @@
     ],
     "modules" : [
         {
-            "name" : "amberol",
+            "name" : "dismas",
             "builddir" : true,
             "buildsystem" : "meson",
             "config-opts": [
@@ -48,7 +48,7 @@
             "sources" : [
                 {
                     "type" : "git",
-                    "url" : "https://gitlab.gnome.org/ebassi/amberol.git"
+                    "url" : "https://github.com/dachshund7/dismas.git"
                 }
             ]
         }

@@ -73,7 +73,7 @@ mod imp {
 
     #[derive(CompositeTemplate, glib::Properties)]
     #[properties(wrapper_type = super::Window)]
-    #[template(resource = "/io/bassi/Amberol/window.ui")]
+    #[template(resource = "/io/github/dachshund7/Dismas/window.ui")]
     pub struct Window {
         // Template widgets
         #[template_child]
@@ -178,7 +178,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Window {
-        const NAME: &'static str = "AmberolWindow";
+        const NAME: &'static str = "DismasWindow";
         type Type = super::Window;
         type ParentType = adw::ApplicationWindow;
 

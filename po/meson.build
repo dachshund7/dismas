@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 i18n.gettext(
-  'amberol',
+  'dismas',
   args: [
     '--keyword=i18n',
     '--keyword=i18n_f',

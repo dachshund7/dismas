@@ -71,7 +71,7 @@ pub struct MprisController {
 impl MprisController {
     pub fn new(sender: Sender<PlaybackAction>) -> Self {
         let builder = Player::builder(APPLICATION_ID)
-            .identity("Amberol")
+            .identity("Dismas")
             .desktop_entry(APPLICATION_ID)
             .can_raise(true)
             .can_play(false)
@@ -134,7 +134,7 @@ impl MprisController {
         // once
         let track_id = self.next_track_id.get();
         self.next_track_id.set(track_id + 1);
-        match TrackId::try_from(format!("/io/bassi/Amberol/Track/{track_id}")) {
+        match TrackId::try_from(format!("/io/github/dachshund7/Dismas/Track/{track_id}")) {
             Ok(id) => metadata.set_trackid(Some(id)),
             Err(e) => error!("Invalid MPRIS track id: {e}"),
         }

@@ -160,7 +160,7 @@ impl Window {
         if let Some(track) = track {
             self.set_title(Some(&format!("{} - {}", track.artist(), track.title())));
         } else {
-            self.set_title(Some("Amberol"));
+            self.set_title(Some("Dismas"));
         }
     }
 
