@@ -9,7 +9,7 @@ use std::{
 
 use async_channel::{Receiver, Sender};
 use glib::clone;
-use gtk::glib;
+use gtk::{glib, prelude::*};
 use log::{debug, error};
 
 use crate::{
@@ -34,6 +34,8 @@ pub enum PlaybackAction {
     Seek(i64),
     SeekTo(u64),
     PlayNext,
+    // The track handed over to the backend started playing
+    TrackAdvanced(u64, String),
     SleepTimerExpired,
 
     Raise,
@@ -157,8 +159,44 @@ impl AudioPlayer {
         });
 
         res.clone().setup_channel();
+        res.setup_next_uri();
 
         res
+    }
+
+    // Tells the backend the next track whenever it could change
+    fn setup_next_uri(self: &Rc<Self>) {
+        self.queue.model().connect_items_changed(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, _, _, _| this.update_next_uri()
+        ));
+        self.queue.connect_current_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.update_next_uri()
+        ));
+        self.queue.connect_repeat_mode_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.update_next_uri()
+        ));
+        self.sleep_timer.connect_finishing_track_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.update_next_uri()
+        ));
+    }
+
+    // The music stops at the end of the track for the sleep timer
+    fn update_next_uri(&self) {
+        let next_track = if self.sleep_timer.finishing_track() {
+            None
+        } else {
+            self.queue.peek_next_track()
+        };
+        self.backend
+            .set_next_uri(next_track.map(|t| t.uri()).as_deref());
     }
 
     fn setup_channel(self: Rc<Self>) {
@@ -188,6 +226,7 @@ impl AudioPlayer {
             PlaybackAction::UpdatePosition(pos, notify) => self.update_position(pos, notify),
             PlaybackAction::VolumeChanged(vol) => self.update_volume(vol),
             PlaybackAction::PlayNext => self.play_next(),
+            PlaybackAction::TrackAdvanced(generation, uri) => self.track_advanced(generation, &uri),
             PlaybackAction::SleepTimerExpired => self.sleep_timer_expired(),
             PlaybackAction::Raise => self.present(),
             PlaybackAction::Repeat(mode) => self.update_repeat_mode(mode),
@@ -216,14 +255,8 @@ impl AudioPlayer {
             if let Some(next_track) = self.queue.next_track() {
                 debug!("Next track: {}", next_track.uri());
 
-                for c in &self.controllers {
-                    c.set_track(&next_track);
-                }
-
-                next_track.set_playing(true);
-
                 self.backend.set_track_uri(Some(&next_track.uri()));
-                self.state.set_current_track(Some(next_track));
+                self.show_track(next_track);
                 self.state.set_playback_state(state);
 
                 for c in &self.controllers {
@@ -258,6 +291,41 @@ impl AudioPlayer {
         }
 
         self.skip_next();
+    }
+
+    // Follows the track that the backend went on to without a gap
+    fn track_advanced(&self, generation: u64, uri: &str) {
+        // The player loaded another track since
+        if generation != self.backend.generation() {
+            return;
+        }
+
+        // The queue changed after the track was handed over, or the sleep
+        // timer ran out: go on as at the end of the track, loading the
+        // track that comes next
+        let follows = self.queue.peek_next_track().is_some_and(|t| t.uri() == uri);
+        if !follows || self.sleep_timer.finishing_track() {
+            self.play_next();
+            return;
+        }
+
+        if let Some(current_track) = self.state.track() {
+            current_track.set_playing(false);
+        }
+        if let Some(next_track) = self.queue.next_track() {
+            debug!("Playing next (gapless): {}", next_track.uri());
+            self.show_track(next_track);
+        }
+        self.backend.confirm_switch(uri);
+    }
+
+    // Shows the track as the one playing
+    fn show_track(&self, track: Track) {
+        for c in &self.controllers {
+            c.set_track(&track);
+        }
+        track.set_playing(true);
+        self.state.set_current_track(Some(track));
     }
 
     // Pausing keeps the position, to go on from there later
@@ -328,17 +396,11 @@ impl AudioPlayer {
                 self.set_playback_state(PlaybackState::Paused);
             }
 
-            for c in &self.controllers {
-                c.set_track(&prev_track);
-            }
-
             self.backend.set_track_uri(Some(&prev_track.uri()));
             self.backend.seek_start();
 
             debug!("Marking '{}' as playing", prev_track.uri());
-            prev_track.set_playing(true);
-
-            self.state.set_current_track(Some(prev_track));
+            self.show_track(prev_track);
 
             if was_playing {
                 self.set_playback_state(PlaybackState::Playing);
@@ -369,16 +431,9 @@ impl AudioPlayer {
                 self.set_playback_state(PlaybackState::Paused);
             }
 
-            for c in &self.controllers {
-                c.set_track(&next_track);
-            }
-
             self.backend.set_track_uri(Some(&next_track.uri()));
             self.backend.seek_start();
-
-            next_track.set_playing(true);
-
-            self.state.set_current_track(Some(next_track));
+            self.show_track(next_track);
 
             if was_playing {
                 self.set_playback_state(PlaybackState::Playing);
@@ -409,16 +464,9 @@ impl AudioPlayer {
                 self.set_playback_state(PlaybackState::Paused);
             }
 
-            for c in &self.controllers {
-                c.set_track(&track);
-            }
-
             self.backend.set_track_uri(Some(&track.uri()));
             self.backend.seek_start();
-
-            track.set_playing(true);
-
-            self.state.set_current_track(Some(track));
+            self.show_track(track);
 
             if was_playing {
                 self.set_playback_state(PlaybackState::Playing);

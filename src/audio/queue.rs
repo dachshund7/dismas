@@ -289,38 +289,41 @@ impl Queue {
         self.advance(repeat_mode)
     }
 
-    fn advance(&self, repeat_mode: RepeatMode) -> Option<Track> {
-        let store = &self.imp().model;
+    // The track that `next_track` would go to, without going there
+    pub fn peek_next_track(&self) -> Option<Track> {
+        self.track_at(self.next_pos(self.imp().repeat_mode.get())?)
+    }
 
-        let n_tracks = store.n_items();
+    fn advance(&self, repeat_mode: RepeatMode) -> Option<Track> {
+        if self.is_empty() {
+            return None;
+        }
+
+        let next = self.next_pos(repeat_mode);
+        self.imp().current_pos.replace(next);
+        self.notify_current();
+        self.track_at(next?)
+    }
+
+    // The position after the current track, or the first one if there
+    // is no current track
+    fn next_pos(&self, repeat_mode: RepeatMode) -> Option<u32> {
+        let n_tracks = self.imp().model.n_items();
         if n_tracks == 0 {
             return None;
         }
 
-        if let Some(current) = self.current_track_index() {
-            let next: Option<u32> = match repeat_mode {
-                RepeatMode::Consecutive if current < n_tracks - 1 => Some(current + 1),
-                RepeatMode::Consecutive if current == n_tracks - 1 => None,
-                RepeatMode::RepeatOne => Some(current),
-                RepeatMode::RepeatAll if current < n_tracks - 1 => Some(current + 1),
-                RepeatMode::RepeatAll if current == n_tracks - 1 => Some(0),
-                _ => None,
-            };
+        let Some(current) = self.current_track_index() else {
+            return Some(0);
+        };
 
-            if let Some(next) = next {
-                self.imp().current_pos.replace(Some(next));
-                self.notify_current();
-                self.track_at(next)
-            } else {
-                self.imp().current_pos.replace(None);
-                self.notify_current();
-                None
-            }
-        } else {
-            // Return the first track
-            self.imp().current_pos.replace(Some(0));
-            self.notify_current();
-            self.track_at(0)
+        match repeat_mode {
+            RepeatMode::Consecutive if current < n_tracks - 1 => Some(current + 1),
+            RepeatMode::Consecutive if current == n_tracks - 1 => None,
+            RepeatMode::RepeatOne => Some(current),
+            RepeatMode::RepeatAll if current < n_tracks - 1 => Some(current + 1),
+            RepeatMode::RepeatAll if current == n_tracks - 1 => Some(0),
+            _ => None,
         }
     }
 
@@ -478,5 +481,41 @@ mod tests {
         queue.remove_track(&t[0]);
         assert_eq!(seen.take(), Some(Some(t[2].clone())));
         assert_eq!(queue.current_track_index(), Some(1));
+    }
+
+    #[test]
+    fn peek_next_track_follows_the_repeat_mode() {
+        let (queue, t) = queue_of(3);
+
+        // Without a current track, the first one
+        assert_eq!(queue.peek_next_track(), Some(t[0].clone()));
+        assert_eq!(queue.current_track_index(), None);
+
+        queue.set_current_track(Some(t[2].clone()));
+        assert_eq!(queue.peek_next_track(), None);
+
+        queue.set_repeat_mode(RepeatMode::RepeatAll);
+        assert_eq!(queue.peek_next_track(), Some(t[0].clone()));
+
+        queue.set_repeat_mode(RepeatMode::RepeatOne);
+        assert_eq!(queue.peek_next_track(), Some(t[2].clone()));
+
+        assert_eq!(queue.current_track_index(), Some(2));
+    }
+
+    #[test]
+    fn peek_next_track_is_where_next_track_goes() {
+        for mode in [
+            RepeatMode::Consecutive,
+            RepeatMode::RepeatAll,
+            RepeatMode::RepeatOne,
+        ] {
+            let (queue, _) = queue_of(3);
+            queue.set_repeat_mode(mode);
+            for _ in 0..5 {
+                let peeked = queue.peek_next_track();
+                assert_eq!(queue.next_track(), peeked, "{mode}");
+            }
+        }
     }
 }

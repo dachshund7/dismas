@@ -58,6 +58,7 @@ jobs:
           git gcc meson ninja-build rust cargo clippy
           gtk4-devel libadwaita-devel
           gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-bad-free-devel
+          gstreamer1-plugins-good
           blueprint-compiler gettext glib2-devel sqlite-devel libseccomp-devel fontconfig-devel
           desktop-file-utils appstream
 
