@@ -5,7 +5,7 @@ use std::cell::{Cell, OnceCell, RefCell};
 
 use adw::subclass::prelude::*;
 use glib::{clone, subclass::Signal};
-use gtk::{CompositeTemplate, gdk, gio, glib, prelude::*};
+use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 
 use crate::{
     application::Application,
@@ -756,15 +756,12 @@ pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) {
 
             // Only reads where the row is, as changing the rows of the
             // list crashes GTK; a few frames in, it flashes anyway
-            let bounds = track_row(view, &track).and_then(|row| row.compute_bounds(view));
+            let bounds = track_bounds(view, &track);
             if bounds.is_none() && frame < 5 {
                 return glib::ControlFlow::Continue;
             }
-            if let Some(bounds) = bounds
-                && let Some(adjustment) = view.vadjustment()
-            {
-                let middle = f64::from(bounds.y() + bounds.height() / 2.0);
-                adjustment.set_value(adjustment.value() + middle - f64::from(view.height()) / 2.0);
+            if let Some(bounds) = bounds {
+                center_bounds(view, &bounds);
             }
 
             track.set_flashing(true);
@@ -779,6 +776,84 @@ pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) {
             glib::ControlFlow::Break
         }
     ));
+}
+
+// Shows the playing track in the list, keeping the rows around it in view:
+// the list stays where it is if the row is in it, scrolls just enough if
+// it's cut off, and centers it if it's further away. Right after the list
+// is filled, e.g. switching playlists, its rows aren't laid out, and
+// scrolling to one right away would make it the top row, so this waits
+// for frames where they are
+pub fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCallbackId {
+    let frames = Cell::new(0);
+    let centering = Cell::new(false);
+    view.add_tick_callback(clone!(
+        #[strong]
+        track,
+        move |view, _| {
+            if view.height() == 0 {
+                return glib::ControlFlow::Continue;
+            }
+            let frame = frames.get();
+            frames.set(frame + 1);
+
+            let bounds = track_bounds(view, &track);
+            if centering.get() {
+                // Scrolled to it in the previous frame
+                if let Some(bounds) = bounds {
+                    center_bounds(view, &bounds);
+                }
+                if bounds.is_some() || frame >= 5 {
+                    return glib::ControlFlow::Break;
+                }
+                return glib::ControlFlow::Continue;
+            }
+
+            let height = view.height() as f32;
+            match bounds {
+                Some(b) if b.y() >= 0.0 && b.y() + b.height() <= height => {}
+                Some(_) => {
+                    if let Some(pos) = track_position(view, &track) {
+                        view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+                    }
+                }
+                // The rows can be laid out in the next frame
+                None if frame < 1 => return glib::ControlFlow::Continue,
+                None => {
+                    // A search can hide it
+                    if let Some(pos) = track_position(view, &track) {
+                        view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+                        centering.set(true);
+                        return glib::ControlFlow::Continue;
+                    }
+                }
+            }
+            glib::ControlFlow::Break
+        }
+    ))
+}
+
+// Where a track is in a list, which can be filtered by a search
+fn track_position(view: &gtk::ListView, track: &Track) -> Option<u32> {
+    let model = view.model()?;
+    (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
+}
+
+// Where the row of a track is in the list, if it has one. Right after the
+// list is filled, a row can be there without being laid out, at the top
+// and without a height, which isn't where it will be
+fn track_bounds(view: &gtk::ListView, track: &Track) -> Option<graphene::Rect> {
+    track_row(view, track)
+        .and_then(|row| row.compute_bounds(view))
+        .filter(|bounds| bounds.height() > 0.0)
+}
+
+// Scrolls the list to put the row in its middle, as far as it can scroll
+fn center_bounds(view: &gtk::ListView, bounds: &graphene::Rect) {
+    if let Some(adjustment) = view.vadjustment() {
+        let middle = f64::from(bounds.y() + bounds.height() / 2.0);
+        adjustment.set_value(adjustment.value() + middle - f64::from(view.height()) / 2.0);
+    }
 }
 
 // The row showing a track in a list, if it has one

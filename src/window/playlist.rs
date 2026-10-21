@@ -334,18 +334,18 @@ impl Window {
         (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
     }
 
+    // Only the last track to go to is scrolled to, e.g. skipping several
     pub(super) fn scroll_queue_to_track(&self) {
+        let imp = self.imp();
+        if let Some(tick) = imp.queue_scroll_tick.take() {
+            tick.remove();
+        }
         let Some(track) = self.player().and_then(|p| p.queue().current()) else {
             return;
         };
-        // A search can hide it
-        if let Some(pos) = self.queue_view_position(&track) {
-            debug!("Scrolling queue to {pos}");
-            self.imp()
-                .playlist_view
-                .queue_view()
-                .scroll_to(pos, gtk::ListScrollFlags::NONE, None);
-        }
+        let view = imp.playlist_view.queue_view();
+        let tick = crate::queue_row::reveal_track(&view, &track);
+        imp.queue_scroll_tick.replace(Some(tick));
     }
 
     // Shows the playing track in the queue, in the middle of the list,

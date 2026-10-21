@@ -162,6 +162,8 @@ mod imp {
         // The playlist whose tracks are loading, to take the place of
         // those of the selected one once they're loaded
         pub pending_playlist: RefCell<Option<String>>,
+        // Scrolling the queue to the playing track, once it's laid out
+        pub queue_scroll_tick: RefCell<Option<gtk::TickCallbackId>>,
         // The number of times tracks are being read for the queue
         pub loads: Cell<u32>,
         // Whether the sidebar was showing before the tracks of an album
@@ -403,6 +405,7 @@ mod imp {
                 library_scanning: Cell::new(false),
                 starting: Cell::new(true),
                 pending_playlist: RefCell::default(),
+                queue_scroll_tick: RefCell::default(),
                 loads: Cell::new(0),
                 hide_focus_after_transition: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),
