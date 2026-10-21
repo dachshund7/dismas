@@ -9,8 +9,6 @@ template $DismasWindow: Adw.ApplicationWindow {
   default-width: 800;
 
   content: $DragOverlay drag_overlay {
-    title: _("Drop a track to add it to the queue");
-
     child: Adw.ToastOverlay toast_overlay {
       child: Adw.OverlaySplitView split_view {
         max-sidebar-width: 330;

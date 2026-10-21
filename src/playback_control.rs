@@ -76,13 +76,13 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
 
-            // Clicking the button again restores the order of the queue,
+            // Clicking the button again restores the order of the tracks,
             // so the tooltip says what the next click does
             self.shuffle_button.connect_active_notify(|button| {
                 let tooltip = if button.is_active() {
-                    i18n("Unshuffle the Queue")
+                    i18n("Unshuffle Tracks")
                 } else {
-                    i18n("Shuffle the Queue")
+                    i18n("Shuffle Tracks")
                 };
                 button.set_tooltip_text(Some(&tooltip));
             });

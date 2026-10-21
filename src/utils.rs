@@ -53,6 +53,17 @@ pub fn set_playlist_button_label(button: &gtk::Button, label: &str) {
     }
 }
 
+// A playlist name to put in a sentence, cut short with "…" if it's long,
+// e.g. in a title, where it would make several lines
+pub fn short_playlist_name(name: &str) -> String {
+    const MAX_CHARS: usize = 30;
+    if name.chars().count() <= MAX_CHARS {
+        return name.to_string();
+    }
+    let short: String = name.chars().take(MAX_CHARS - 1).collect();
+    format!("{}…", short.trim_end())
+}
+
 // Selects the tracks of a list from `from` to `to`, both included, in the
 // order of the list; returns false if either is not in it
 pub fn select_track_range(model: &gio::ListModel, from: &Track, to: &Track) -> bool {
@@ -215,5 +226,27 @@ pub fn disable_window_drag(widget: &gtk::Widget) {
     while let Some(widget) = child {
         disable_window_drag(&widget);
         child = widget.next_sibling();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_short_playlist_names() {
+        assert_eq!(short_playlist_name("Mix"), "Mix");
+        let name = "a".repeat(30);
+        assert_eq!(short_playlist_name(&name), name);
+    }
+
+    #[test]
+    fn cuts_long_playlist_names() {
+        let short = short_playlist_name(&"é".repeat(40));
+        assert_eq!(short, format!("{}…", "é".repeat(29)));
+        assert_eq!(short.chars().count(), 30);
+        // No space before the ellipsis
+        let name = format!("{} {}", "a".repeat(28), "b".repeat(10));
+        assert_eq!(short_playlist_name(&name), format!("{}…", "a".repeat(28)));
     }
 }

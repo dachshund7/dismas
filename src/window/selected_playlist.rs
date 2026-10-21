@@ -57,12 +57,49 @@ impl Window {
     fn update_playlist_labels(&self) {
         let imp = self.imp();
         let name = self.selected_playlist();
-        let title = if name.is_empty() { i18n("Queue") } else { name };
+        let title = if name.is_empty() {
+            i18n("Queue")
+        } else {
+            name.clone()
+        };
         imp.playlist_view.set_title(&title);
 
         let add_label = self.add_to_playlist_label();
         imp.album_tracks.set_add_label(&add_label);
         imp.library_view.set_add_label(&add_label);
+
+        // The tooltips and the drop target name the list they're about
+        let (close, back, drop) = if name.is_empty() {
+            (
+                i18n("Close the Queue"),
+                i18n("Back to the Queue"),
+                i18n("Drop a track to add it to the queue"),
+            )
+        } else {
+            let args = [("playlist", name.as_str())];
+            // The tooltips show the whole name, like those of the buttons
+            // that add tracks, but it would fill the window when dropping
+            let short_name = utils::short_playlist_name(&name);
+            (
+                // Translators: `{playlist}` must be left unmodified; it is
+                // expanded to the name of a playlist
+                i18n_k("Close {playlist}", &args),
+                // Translators: `{playlist}` must be left unmodified; it is
+                // expanded to the name of a playlist
+                i18n_k("Back to {playlist}", &args),
+                // Translators: `{playlist}` must be left unmodified; it is
+                // expanded to the name of a playlist
+                i18n_k(
+                    "Drop a track to add it to {playlist}",
+                    &[("playlist", short_name.as_str())],
+                ),
+            )
+        };
+        imp.playlist_view
+            .back_button()
+            .set_tooltip_text(Some(&close));
+        imp.album_tracks.set_back_tooltip(&back);
+        imp.drag_overlay.set_title(drop);
     }
 
     // Saves the tracks of the queue to the selected playlist

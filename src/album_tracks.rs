@@ -426,6 +426,11 @@ impl AlbumTracks {
         imp.add_button.set_sensitive(can_add);
     }
 
+    // The tooltip of the button that goes back to the selected playlist
+    pub fn set_back_tooltip(&self, tooltip: &str) {
+        self.imp().back_button.set_tooltip_text(Some(tooltip));
+    }
+
     // The label of the button that adds the tracks to the selected playlist
     pub fn set_add_label(&self, label: &str) {
         utils::set_playlist_button_label(&self.imp().add_button, label);
