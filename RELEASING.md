@@ -29,7 +29,7 @@ QA Plan
   - Save the queue as a playlist; create, rename, delete
   - Switch between playlists
   - Import and export M3U
-  - Restore the playlist at startup
+  - Restore the queue at startup, resuming paused at the same track and position
 6. Desktop
   - Media keys and the media controls of the desktop (MPRIS)
   - Playing in the background

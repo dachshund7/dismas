@@ -100,6 +100,16 @@ impl Queue {
             .map(|pos| pos as u32)
     }
 
+    // The position of a track in the order the tracks were added, even
+    // when shuffled; the same file added twice is two tracks
+    pub fn position_in_order(&self, track: &Track) -> Option<u32> {
+        self.imp()
+            .store
+            .iter::<Track>()
+            .position(|s| s.is_ok_and(|s| s == *track))
+            .map(|pos| pos as u32)
+    }
+
     // Shows the new tags of a track that was updated: its row and the
     // section of its work are made again
     pub fn track_changed(&self, track: &Track) {

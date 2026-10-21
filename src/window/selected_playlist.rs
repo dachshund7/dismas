@@ -275,6 +275,7 @@ impl Window {
             self.add_toast(i18n("Unable to rename the playlist"));
             return;
         }
+        ResumePoint::rename(&self.imp().settings, name, new_name);
 
         if self.selected_playlist() == name {
             self.set_selected_playlist(new_name);

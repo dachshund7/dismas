@@ -6,9 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Playback resumes where it was at startup, paused at the same track and
+  position
+
 ### Changed
 
+- "Restore Playlist at Startup" is now "Restore Queue at Startup": a
+  selected saved playlist always reopens, even with the setting off
+
 ### Fixed
+
+- With "Restore Queue at Startup" off, opening the window again while
+  playing in the background replaced the queue with the playing tracks
 
 ### Removed
 

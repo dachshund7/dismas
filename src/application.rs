@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use adw::prelude::AdwDialogExt;
 use adw::subclass::prelude::*;
@@ -16,6 +20,7 @@ use crate::{
     audio::AudioPlayer,
     config::{APPLICATION_ID, VERSION},
     i18n::i18n,
+    resume_point::ResumePoint,
     utils,
     window::Window,
 };
@@ -23,6 +28,10 @@ use crate::{
 pub enum ApplicationAction {
     Present,
 }
+
+// How often the position is saved while playing, in case Dismas doesn't
+// get to save it when it quits
+const RESUME_POINT_INTERVAL: Duration = Duration::from_secs(30);
 
 mod imp {
     use super::*;
@@ -33,6 +42,8 @@ mod imp {
         pub receiver: RefCell<Option<Receiver<ApplicationAction>>>,
         pub background_hold: RefCell<Option<gio::ApplicationHoldGuard>>,
         pub settings: gio::Settings,
+        pub resume_point_pending: Cell<bool>,
+        pub resume_point_saved: Cell<Instant>,
     }
 
     #[glib::object_subclass]
@@ -50,6 +61,8 @@ mod imp {
                 receiver,
                 background_hold: RefCell::default(),
                 settings: utils::settings_manager(),
+                resume_point_pending: Cell::new(false),
+                resume_point_saved: Cell::new(Instant::now()),
             }
         }
     }
@@ -62,6 +75,7 @@ mod imp {
             obj.setup_channel();
             obj.setup_gactions();
             obj.setup_settings();
+            obj.setup_resume_point();
 
             obj.set_accels_for_action("app.quit", &["<primary>q"]);
 
@@ -88,6 +102,26 @@ mod imp {
             self.parent_startup();
 
             gtk::Window::set_default_icon_name(APPLICATION_ID);
+
+            // Logging out ends Dismas this way, which quits, so that it
+            // saves where playback was
+            glib_unix::unix_signal_add_local_once(
+                libc::SIGTERM,
+                clone!(
+                    #[weak(rename_to = app)]
+                    self.obj(),
+                    move || app.quit()
+                ),
+            );
+        }
+
+        fn shutdown(&self) {
+            self.obj().save_resume_point();
+            // The settings are written in the background, which would
+            // stop with the process
+            gio::Settings::sync();
+
+            self.parent_shutdown();
         }
 
         fn activate(&self) {
@@ -153,6 +187,77 @@ impl Application {
         );
 
         let _dummy = self.imp().settings.boolean("background-play");
+    }
+
+    // Saves where playback was when it pauses, stops, goes to another track,
+    // or the tracks move, and now and then while playing
+    fn setup_resume_point(&self) {
+        let player = self.player();
+        let state = player.state();
+        for property in ["playing", "track"] {
+            state.connect_notify_local(
+                Some(property),
+                clone!(
+                    #[weak(rename_to = app)]
+                    self,
+                    move |_, _| app.queue_resume_point_save()
+                ),
+            );
+        }
+        state.connect_notify_local(
+            Some("position"),
+            clone!(
+                #[weak(rename_to = app)]
+                self,
+                move |state, _| {
+                    let saved = app.imp().resume_point_saved.get();
+                    if state.playing() && saved.elapsed() >= RESUME_POINT_INTERVAL {
+                        app.queue_resume_point_save();
+                    }
+                }
+            ),
+        );
+        player.queue().model().connect_items_changed(clone!(
+            #[weak(rename_to = app)]
+            self,
+            move |_, _, _, _| app.queue_resume_point_save()
+        ));
+    }
+
+    // Changes come in bursts, e.g. pausing, going to the next track and
+    // playing again; they're saved once, after the queue has changed
+    fn queue_resume_point_save(&self) {
+        if self.imp().resume_point_pending.replace(true) {
+            return;
+        }
+        glib::idle_add_local_once(clone!(
+            #[weak(rename_to = app)]
+            self,
+            move || app.save_resume_point()
+        ));
+    }
+
+    // Without a track, the last point stays: it can't be found in the
+    // playlist anymore, so it's harmless
+    fn save_resume_point(&self) {
+        let imp = self.imp();
+        imp.resume_point_pending.set(false);
+        imp.resume_point_saved.set(Instant::now());
+
+        let state = imp.player.state();
+        let Some(track) = state.track() else {
+            return;
+        };
+        let Some(index) = imp.player.queue().position_in_order(&track) else {
+            return;
+        };
+        ResumePoint {
+            playlist: imp.settings.string("selected-playlist").into(),
+            uri: track.uri(),
+            index,
+            position: state.position().try_into().unwrap_or(u32::MAX),
+        }
+        .store(&imp.settings);
     }
 
     fn setup_channel(&self) {

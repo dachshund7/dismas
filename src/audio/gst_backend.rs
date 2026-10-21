@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::cell::Cell;
+
 use async_channel::Sender;
 use glib::clone;
 use gst::prelude::*;
@@ -14,6 +16,8 @@ pub struct GstBackend {
     sender: Sender<PlaybackAction>,
     gst_player: gst_play::Play,
     replaygain: Option<GstReplayGain>,
+    // Where the track goes on from once it plays, after the last session
+    resume_position: Cell<Option<u64>>,
 }
 
 #[derive(Debug)]
@@ -83,6 +87,7 @@ impl GstBackend {
             sender,
             gst_player,
             replaygain: GstReplayGain::new().ok(),
+            resume_position: Cell::default(),
         };
 
         res.setup_signals();
@@ -141,6 +146,7 @@ impl GstBackend {
     }
 
     pub fn set_track_uri(&self, uri: Option<&str>) {
+        self.resume_position.take();
         self.gst_player.set_uri(uri);
     }
 
@@ -149,6 +155,7 @@ impl GstBackend {
         let position = gst::ClockTime::from_seconds(position);
         let duration = gst::ClockTime::from_seconds(duration);
 
+        self.resume_position.take();
         let destination = match direction {
             SeekDirection::Backwards if position >= offset => position.checked_sub(offset),
             SeekDirection::Backwards if position < offset => Some(gst::ClockTime::from_seconds(0)),
@@ -167,15 +174,29 @@ impl GstBackend {
     }
 
     pub fn seek_position(&self, position: u64) {
+        self.resume_position.take();
         self.gst_player.seek(gst::ClockTime::from_seconds(position));
     }
 
     pub fn seek_start(&self) {
+        self.resume_position.take();
         self.gst_player.seek(gst::ClockTime::from_seconds(0));
+    }
+
+    // The track starts at the position once it plays, unless it's moved
+    // or changed before. Getting it ready to play now, paused, could leave
+    // PulseAudio waiting for it to start, and the track stuck at the
+    // position, if it starts a few seconds later
+    pub fn resume_at(&self, position: u64) {
+        self.resume_position.set(Some(position));
     }
 
     pub fn play(&self) {
         self.gst_player.play();
+        // GstPlay seeks once the track is ready to play
+        if let Some(position) = self.resume_position.take() {
+            self.gst_player.seek(gst::ClockTime::from_seconds(position));
+        }
     }
 
     pub fn pause(&self) {
@@ -183,6 +204,7 @@ impl GstBackend {
     }
 
     pub fn stop(&self) {
+        self.resume_position.take();
         self.gst_player.stop();
     }
 

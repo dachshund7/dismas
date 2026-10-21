@@ -21,41 +21,55 @@ impl Window {
         imp.content_stack.set_transition_type(transition);
     }
 
-    // Restores the playlist selected in the last session, if the user
-    // wants it; otherwise, starts with an empty queue
+    // Opens the playlist selected in the last session: a saved one always,
+    // and the queue if the user wants it; otherwise, it starts empty
     pub fn restore_playlist_on_startup(&self) {
+        // A window opened again while playing in the background
+        if !self.queue_is_empty() {
+            self.end_startup();
+            return;
+        }
+
         if !self.imp().settings.boolean("restore-playlist") {
-            // Adding tracks to a saved playlist that wasn't loaded would
-            // replace its tracks
-            self.select_queue_to_play();
             // The queue of the last session is gone, rather than coming
             // back when switching to the queue
-            self.store_queue();
-            self.end_startup();
-        } else if self.queue_is_empty() {
-            self.restore_playlist();
-        } else {
-            self.end_startup();
+            playlists::save("", &[]);
+            if self.selected_playlist().is_empty() {
+                self.end_startup();
+                return;
+            }
         }
+        self.restore_playlist();
     }
 
+    // Goes on from where playback was, if the track is still there
     fn restore_playlist(&self) {
-        // The saved queue is empty after clearing the queue
-        match playlists::load(&self.selected_playlist()) {
-            Some(tracks) if !tracks.is_empty() => self.queue_tracks(tracks, QueueMode::Restore),
+        let name = self.selected_playlist();
+        match playlists::load(&name) {
+            // The saved queue is empty after clearing the queue
+            Some(files) if !files.is_empty() => {
+                let resume = ResumePoint::load(&self.imp().settings).for_playlist(&name);
+                self.load_into_queue(files, QueueMode::Restore, None, resume);
+            }
+            // Unreadable: adding tracks would replace the ones in its file.
+            // The queue is always there, so this doesn't loop
+            None if !name.is_empty() => {
+                self.set_selected_playlist("");
+                self.restore_playlist();
+            }
             _ => self.end_startup(),
         }
     }
 
     // Adds the files to the end of the queue
     pub(super) fn queue_tracks(&self, queue: Vec<gio::File>, mode: QueueMode) {
-        self.load_into_queue(queue, mode, None);
+        self.load_into_queue(queue, mode, None, None);
     }
 
     // Puts the tracks of a playlist in the queue, in place of those of the
     // selected one, once they're read
     pub(super) fn queue_playlist_tracks(&self, queue: Vec<gio::File>, name: &str) {
-        self.load_into_queue(queue, QueueMode::Restore, Some(name.to_string()));
+        self.load_into_queue(queue, QueueMode::Restore, Some(name.to_string()), None);
     }
 
     // The actions on the queue are off while tracks are read, which can
@@ -97,8 +111,15 @@ impl Window {
     // Reads the tracks and adds them to the queue; with `switch_to`, they
     // replace the tracks of the selected playlist with those of the one
     // named. Only this load does that, as files can be dropped meanwhile,
-    // and their tracks go to the playlist that is selected when they're read
-    fn load_into_queue(&self, queue: Vec<gio::File>, mode: QueueMode, switch_to: Option<String>) {
+    // and their tracks go to the playlist that is selected when they're read.
+    // With `resume`, playback is paused where it was, in the empty queue
+    fn load_into_queue(
+        &self,
+        queue: Vec<gio::File>,
+        mode: QueueMode,
+        switch_to: Option<String>,
+        resume: Option<ResumePoint>,
+    ) {
         let play = matches!(mode, QueueMode::Play(_));
         if queue.is_empty() {
             self.add_toast(i18n("No available track found"));
@@ -175,7 +196,20 @@ impl Window {
                         player.skip_to(first_added + start);
                         player.play();
                     } else if was_empty {
-                        player.skip_to(0);
+                        let resume_at = resume.and_then(|r| {
+                            let uris: Vec<String> = tracks.iter().map(Track::uri).collect();
+                            Some((r.find_track(&uris)?, r.position))
+                        });
+                        match resume_at {
+                            Some((pos, position)) => {
+                                // Shuffling isn't restored, so the order
+                                // is the one the tracks were added in
+                                debug_assert!(!queue.is_shuffled());
+                                player.skip_to(pos);
+                                player.resume_at(position.into());
+                            }
+                            None => player.skip_to(0),
+                        }
                     }
                     if mode == QueueMode::Add {
                         // Show where the album went, even if the

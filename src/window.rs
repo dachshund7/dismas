@@ -43,6 +43,7 @@ use crate::{
     playlists_page::PlaylistsPage,
     push_bin::PushBin,
     queue_row::QueueRow,
+    resume_point::ResumePoint,
     search::SearchFilter,
     slide_bin::SlideBin,
     track_cover::TrackCover,

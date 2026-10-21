@@ -23,6 +23,7 @@ mod playlists;
 mod playlists_page;
 mod push_bin;
 mod queue_row;
+mod resume_point;
 mod search;
 mod slide_bin;
 mod square_bin;

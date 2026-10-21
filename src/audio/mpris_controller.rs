@@ -27,6 +27,7 @@ struct Shared {
     playback_status: Cell<PlaybackStatus>,
     loop_status: Cell<LoopStatus>,
     can_play: Cell<bool>,
+    position: Cell<Time>,
 }
 
 impl Shared {
@@ -87,6 +88,7 @@ impl MprisController {
             playback_status: Cell::new(PlaybackStatus::Stopped),
             loop_status: Cell::new(LoopStatus::None),
             can_play: Cell::new(false),
+            position: Cell::new(Time::ZERO),
         });
 
         glib::spawn_future_local(clone!(
@@ -100,6 +102,8 @@ impl MprisController {
                     Ok(player) => {
                         setup_signals(sender, &player);
                         let mpris_task = player.run();
+                        // Not published, as it changes too often: read when asked
+                        player.set_position(shared.position.get());
                         let _ = shared.player.set(player);
 
                         // What changed while the server was starting; the
@@ -209,6 +213,7 @@ impl Controller for MprisController {
 
     fn set_position(&self, position: u64, notify: bool) {
         let pos = Time::from_secs(position as i64);
+        self.shared.position.set(pos);
         if let Some(player) = self.shared.player.get() {
             player.set_position(pos);
         }

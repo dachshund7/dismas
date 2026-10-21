@@ -477,6 +477,26 @@ impl AudioPlayer {
         self.backend.seek_position(pos);
     }
 
+    // Shows the track paused at the position of the last session; the
+    // backend only gets it ready when it plays
+    pub fn resume_at(&self, position: u64) {
+        let duration = self.state.duration();
+        let position = if duration > 0 && position >= duration {
+            0
+        } else {
+            position
+        };
+        // Shown and saved right away
+        self.update_position(position, false);
+        if position > 0 {
+            self.backend.resume_at(position);
+        }
+        self.state.set_playback_state(PlaybackState::Paused);
+        for c in &self.controllers {
+            c.set_playback_state(PlaybackState::Paused);
+        }
+    }
+
     pub fn queue(&self) -> &Queue {
         &self.queue
     }
