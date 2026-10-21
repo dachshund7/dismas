@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - Playback resumes where it was at startup, paused at the same track and
   position
+- The toast after saving the queue as a playlist has an Open button, to
+  switch to the new playlist without interrupting playback
 
 ### Changed
 

@@ -278,7 +278,8 @@ impl Window {
     }
 
     // Makes a playlist with the tracks of the queue, in the order they were
-    // added; it isn't selected, so that what's playing goes on
+    // added; it isn't selected, so that what's playing goes on, and the
+    // queue can be cleared without emptying it. The toast can open it
     fn save_queue_as_playlist(&self, name: &str) {
         // The queue in the player, while it's selected, or as last saved
         let files = match self.player() {
@@ -295,12 +296,41 @@ impl Window {
                 self.update_playlists_page();
                 // Translators: `{playlist}` must be left unmodified; it is
                 // expanded to the name of a playlist
-                self.add_toast(i18n_k("Saved as “{playlist}”", &[("playlist", name)]));
+                let message = i18n_k("Saved as “{playlist}”", &[("playlist", name)]);
+                let name = name.to_string();
+                self.add_toast_with_button(message, i18n("Open"), move |win| {
+                    win.open_saved_queue(&name);
+                });
             }
             Err(e) => {
                 log::warn!("Unable to save the queue as '{name}': {e}");
                 self.add_toast(i18n("Unable to save the playlist"));
             }
+        }
+    }
+
+    // Selects the playlist the queue was saved as. While the queue is
+    // selected with the same tracks, they're already in the player, so
+    // they keep playing; otherwise they're loaded from the playlist
+    fn open_saved_queue(&self, name: &str) {
+        // It could have been renamed or deleted while the toast was up
+        if !playlists::exists(name) {
+            self.add_toast(i18n("Unable to open the playlist"));
+            return;
+        }
+
+        let unchanged = self.selected_playlist().is_empty()
+            && self.player().is_some_and(|player| {
+                let queue = player.queue().files_in_order();
+                playlists::load(name).is_some_and(|files| {
+                    files.len() == queue.len() && files.iter().zip(&queue).all(|(a, b)| a.equal(b))
+                })
+            });
+        if unchanged {
+            ResumePoint::rename(&self.imp().settings, "", name);
+            self.set_selected_playlist(name);
+        } else {
+            self.select_playlist(name);
         }
     }
 

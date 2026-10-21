@@ -874,6 +874,22 @@ impl Window {
         self.imp().toast_overlay.add_toast(plain_toast(&msg));
     }
 
+    pub(super) fn add_toast_with_button(
+        &self,
+        msg: String,
+        button: String,
+        clicked: impl Fn(&Self) + 'static,
+    ) {
+        let toast = plain_toast(&msg);
+        toast.set_button_label(Some(&button));
+        toast.connect_button_clicked(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| clicked(&win)
+        ));
+        self.imp().toast_overlay.add_toast(toast);
+    }
+
     // The queue can change while the toast is up, so the track is
     // looked up when the button is clicked
     pub fn add_skip_to_toast(&self, msg: String, button: String, track: &Track) {
