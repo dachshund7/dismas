@@ -48,7 +48,7 @@ impl Window {
         match playlists::load(&name) {
             // The saved queue is empty after clearing the queue
             Some(files) if !files.is_empty() => {
-                let resume = ResumePoint::load(&self.imp().settings).for_playlist(&name);
+                let resume = ResumePoint::load(&self.imp().settings, &name);
                 self.load_into_queue(files, QueueMode::Restore, None, resume);
             }
             // Unreadable: adding tracks would replace the ones in its file.
@@ -67,9 +67,10 @@ impl Window {
     }
 
     // Puts the tracks of a playlist in the queue, in place of those of the
-    // selected one, once they're read
+    // selected one, once they're read; it goes on from where it was
     pub(super) fn queue_playlist_tracks(&self, queue: Vec<gio::File>, name: &str) {
-        self.load_into_queue(queue, QueueMode::Restore, Some(name.to_string()), None);
+        let resume = ResumePoint::load(&self.imp().settings, name);
+        self.load_into_queue(queue, QueueMode::Restore, Some(name.to_string()), resume);
     }
 
     // The actions on the queue are off while tracks are read, which can

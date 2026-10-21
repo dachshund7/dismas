@@ -20,7 +20,8 @@ use crate::{
     audio::AudioPlayer,
     config::{APPLICATION_ID, VERSION},
     i18n::i18n,
-    resume_point::ResumePoint,
+    playlists,
+    resume_point::{ResumePoint, ResumePoints},
     utils,
     window::Window,
 };
@@ -237,9 +238,11 @@ impl Application {
         ));
     }
 
-    // Without a track, the last point stays: it can't be found in the
-    // playlist anymore, so it's harmless
-    fn save_resume_point(&self) {
+    // Saves the point of the selected playlist. Without a track, the last
+    // point stays: it can't be found in the playlist anymore, so it's
+    // harmless. The window saves it right before switching playlists, as
+    // the one at idle would be the point of the next playlist
+    pub(crate) fn save_resume_point(&self) {
         let imp = self.imp();
         imp.resume_point_pending.set(false);
         imp.resume_point_saved.set(Instant::now());
@@ -251,13 +254,18 @@ impl Application {
         let Some(index) = imp.player.queue().position_in_order(&track) else {
             return;
         };
-        ResumePoint {
-            playlist: imp.settings.string("selected-playlist").into(),
+        // A deleted playlist could still be playing, while the queue
+        // loads; its point would come back
+        let playlist: String = imp.settings.string("selected-playlist").into();
+        if !playlist.is_empty() && !playlists::exists(&playlist) {
+            return;
+        }
+        let point = ResumePoint {
             uri: track.uri(),
             index,
             position: state.position().try_into().unwrap_or(u32::MAX),
-        }
-        .store(&imp.settings);
+        };
+        ResumePoints::update(&imp.settings, |points| points.set(&playlist, point));
     }
 
     fn setup_channel(&self) {

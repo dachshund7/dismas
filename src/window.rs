@@ -43,7 +43,7 @@ use crate::{
     playlists_page::PlaylistsPage,
     push_bin::PushBin,
     queue_row::QueueRow,
-    resume_point::ResumePoint,
+    resume_point::{ResumePoint, ResumePoints},
     search::SearchFilter,
     slide_bin::SlideBin,
     track_cover::TrackCover,
@@ -709,6 +709,15 @@ impl Window {
         win.set_default_widget(Some(&win.imp().playback_control.play_button()));
 
         win
+    }
+
+    // Saves where playback is in the selected playlist, right away
+    fn save_resume_point(&self) {
+        if let Some(app) = self.application() {
+            app.downcast::<crate::application::Application>()
+                .unwrap()
+                .save_resume_point();
+        }
     }
 
     fn player(&self) -> Option<Rc<AudioPlayer>> {

@@ -16,6 +16,10 @@ impl Window {
         if !selected.is_empty() && !playlists::exists(&selected) {
             self.set_selected_playlist("");
         }
+        // Or any other, e.g. outside the app, leaving its point behind
+        ResumePoints::update(&self.imp().settings, |points| {
+            points.retain_playlists(&playlists::names());
+        });
         self.update_playlist_labels();
         self.update_playlists_menu();
     }
@@ -194,6 +198,10 @@ impl Window {
     // tracks of the new one; with none, the album grid takes the place of
     // the player, to add tracks
     pub(super) fn replace_selected_playlist(&self, name: &str) {
+        // Where the previous one was, to go back to it: the save at idle
+        // would come after the switch. Its tracks played until now, while
+        // those of the new one were read
+        self.save_resume_point();
         if let Some(player) = self.player() {
             player.clear_queue();
         }
@@ -369,7 +377,8 @@ impl Window {
                 })
             });
         if unchanged {
-            ResumePoint::rename(&self.imp().settings, "", name);
+            // The queue still has the same tracks, and keeps its point
+            ResumePoints::update(&self.imp().settings, |points| points.copy("", name));
             self.set_selected_playlist(name);
         } else {
             self.select_playlist(name);
@@ -384,7 +393,9 @@ impl Window {
             self.add_toast(i18n("Unable to rename the playlist"));
             return;
         }
-        ResumePoint::rename(&self.imp().settings, name, new_name);
+        ResumePoints::update(&self.imp().settings, |points| {
+            points.rename(name, new_name);
+        });
 
         if self.selected_playlist() == name {
             self.set_selected_playlist(new_name);
@@ -429,6 +440,7 @@ impl Window {
             self.add_toast(i18n("Unable to delete the playlist"));
             return;
         }
+        ResumePoints::update(&self.imp().settings, |points| points.remove(name));
 
         if self.selected_playlist() == name {
             self.select_playlist("");

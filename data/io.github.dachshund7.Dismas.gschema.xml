@@ -41,10 +41,10 @@
 	    <summary>Restore the queue on startup</summary>
 	    <description>Whether the queue keeps its tracks from the last session. A selected saved playlist is always reopened. Opening the application with files replaces the queue</description>
 	  </key>
-	  <key name="resume-point" type="(ssuu)">
-	    <default>("", "", 0, 0)</default>
-	    <summary>Where playback was</summary>
-	    <description>The playlist (empty for the queue), the URI of the current track, its index in the order the tracks were added, and the position in seconds, to go on from there when the playlist is opened at startup</description>
+	  <key name="resume-points" type="a{s(suu)}">
+	    <default>{}</default>
+	    <summary>Where playback was in each playlist</summary>
+	    <description>By playlist name (empty for the queue): the URI of the current track, its index in the order the tracks were added, and the position in seconds, to go on from there when the playlist is opened, at startup or when switching back to it</description>
 	  </key>
 	  <key name="selected-playlist" type="s">
 	    <default>""</default>

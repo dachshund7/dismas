@@ -1,20 +1,21 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Where playback was, kept in the resume-point setting, to go on from
-// there when the playlist is opened at startup. It's only used when it
-// names the playlist being opened and its track is found in it, so a
-// stale one is harmless, and it's never reset
+// Where playback was in each playlist, kept in the resume-points setting,
+// to go on from there when the playlist is opened, at startup or when
+// switching back to it. A point is only used when its track is found in
+// the playlist, so a stale one is harmless; they follow the playlists when
+// they're renamed, and go with them when they're deleted
+
+use std::collections::HashMap;
 
 use gtk::{gio, prelude::*};
 use log::warn;
 
-const KEY: &str = "resume-point";
+const KEY: &str = "resume-points";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResumePoint {
-    // Empty for the queue
-    pub playlist: String,
     pub uri: String,
     // In the order the tracks were added, even when shuffled
     pub index: u32,
@@ -23,46 +24,9 @@ pub struct ResumePoint {
 }
 
 impl ResumePoint {
-    pub fn load(settings: &gio::Settings) -> Self {
-        let (playlist, uri, index, position) = settings.get::<(String, String, u32, u32)>(KEY);
-        Self {
-            playlist,
-            uri,
-            index,
-            position,
-        }
-    }
-
-    pub fn store(&self, settings: &gio::Settings) {
-        if *self == Self::load(settings) {
-            return;
-        }
-        let value = (
-            self.playlist.as_str(),
-            self.uri.as_str(),
-            self.index,
-            self.position,
-        );
-        if let Err(e) = settings.set(KEY, value) {
-            warn!("Unable to store the resume point: {e}");
-        }
-    }
-
-    // The point, if it's in the playlist
-    pub fn for_playlist(self, name: &str) -> Option<Self> {
-        (self.playlist == name && !self.uri.is_empty()).then_some(self)
-    }
-
-    // The point follows the playlist to its new name
-    pub fn rename(settings: &gio::Settings, name: &str, new_name: &str) {
-        let point = Self::load(settings);
-        if point.playlist == name {
-            Self {
-                playlist: new_name.to_string(),
-                ..point
-            }
-            .store(settings);
-        }
+    // The point of the playlist, empty for the queue
+    pub fn load(settings: &gio::Settings, playlist: &str) -> Option<Self> {
+        ResumePoints::load(settings).get(playlist).cloned()
     }
 
     // The position of the track among the URIs of the playlist: the one at
@@ -78,13 +42,90 @@ impl ResumePoint {
     }
 }
 
+// The points by playlist name, empty for the queue
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ResumePoints(HashMap<String, ResumePoint>);
+
+impl ResumePoints {
+    pub fn load(settings: &gio::Settings) -> Self {
+        let points = settings.get::<HashMap<String, (String, u32, u32)>>(KEY);
+        Self(
+            points
+                .into_iter()
+                .map(|(playlist, (uri, index, position))| {
+                    let point = ResumePoint {
+                        uri,
+                        index,
+                        position,
+                    };
+                    (playlist, point)
+                })
+                .collect(),
+        )
+    }
+
+    // Stored every 30 s while playing, so unchanged points aren't written
+    pub fn store(&self, settings: &gio::Settings) {
+        if *self == Self::load(settings) {
+            return;
+        }
+        let points: HashMap<&str, (&str, u32, u32)> = self
+            .0
+            .iter()
+            .map(|(playlist, p)| (playlist.as_str(), (p.uri.as_str(), p.index, p.position)))
+            .collect();
+        if let Err(e) = settings.set(KEY, points) {
+            warn!("Unable to store the resume points: {e}");
+        }
+    }
+
+    // Loads the points, changes them, and stores them if they changed
+    pub fn update(settings: &gio::Settings, change: impl FnOnce(&mut Self)) {
+        let mut points = Self::load(settings);
+        change(&mut points);
+        points.store(settings);
+    }
+
+    pub fn get(&self, playlist: &str) -> Option<&ResumePoint> {
+        self.0.get(playlist).filter(|p| !p.uri.is_empty())
+    }
+
+    pub fn set(&mut self, playlist: &str, point: ResumePoint) {
+        self.0.insert(playlist.to_string(), point);
+    }
+
+    pub fn remove(&mut self, playlist: &str) {
+        self.0.remove(playlist);
+    }
+
+    // The point follows the playlist to its new name
+    pub fn rename(&mut self, playlist: &str, new_name: &str) {
+        if let Some(point) = self.0.remove(playlist) {
+            self.0.insert(new_name.to_string(), point);
+        }
+    }
+
+    // A playlist made with the same tracks starts where the other one is
+    pub fn copy(&mut self, playlist: &str, new_name: &str) {
+        if let Some(point) = self.0.get(playlist).cloned() {
+            self.0.insert(new_name.to_string(), point);
+        }
+    }
+
+    // Drops the points of playlists that are gone, e.g. removed outside
+    // the app; the queue is always there
+    pub fn retain_playlists(&mut self, names: &[String]) {
+        self.0
+            .retain(|playlist, _| playlist.is_empty() || names.contains(playlist));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn point(uri: &str, index: u32) -> ResumePoint {
         ResumePoint {
-            playlist: String::new(),
             uri: uri.to_string(),
             index,
             position: 90,
@@ -125,13 +166,60 @@ mod tests {
     }
 
     #[test]
-    fn only_applies_to_its_playlist() {
-        let point = ResumePoint {
-            playlist: "Mix".to_string(),
-            ..point("file:///a", 0)
-        };
-        assert!(point.clone().for_playlist("").is_none());
-        assert_eq!(point.clone().for_playlist("Mix"), Some(point));
-        assert!(ResumePoint::default().for_playlist("").is_none());
+    fn keeps_a_point_per_playlist() {
+        let mut points = ResumePoints::default();
+        points.set("", point("file:///a", 0));
+        points.set("Mix", point("file:///b", 1));
+        assert_eq!(points.get(""), Some(&point("file:///a", 0)));
+        assert_eq!(points.get("Mix"), Some(&point("file:///b", 1)));
+        assert_eq!(points.get("Other"), None);
+
+        points.set("Mix", point("file:///c", 2));
+        assert_eq!(points.get("Mix"), Some(&point("file:///c", 2)));
+        assert_eq!(points.get(""), Some(&point("file:///a", 0)));
+    }
+
+    #[test]
+    fn ignores_a_point_without_a_track() {
+        let mut points = ResumePoints::default();
+        points.set("", ResumePoint::default());
+        assert_eq!(points.get(""), None);
+    }
+
+    #[test]
+    fn renaming_moves_the_point() {
+        let mut points = ResumePoints::default();
+        points.set("Mix", point("file:///a", 0));
+        points.rename("Mix", "Road Trip");
+        assert_eq!(points.get("Mix"), None);
+        assert_eq!(points.get("Road Trip"), Some(&point("file:///a", 0)));
+
+        // Renaming a playlist without a point leaves the others alone
+        points.rename("Other", "Road Trip");
+        assert_eq!(points.get("Road Trip"), Some(&point("file:///a", 0)));
+    }
+
+    #[test]
+    fn copying_keeps_the_point() {
+        let mut points = ResumePoints::default();
+        points.set("", point("file:///a", 3));
+        points.copy("", "Saved");
+        assert_eq!(points.get(""), Some(&point("file:///a", 3)));
+        assert_eq!(points.get("Saved"), Some(&point("file:///a", 3)));
+    }
+
+    #[test]
+    fn drops_the_points_of_playlists_that_are_gone() {
+        let mut points = ResumePoints::default();
+        points.set("", point("file:///a", 0));
+        points.set("Mix", point("file:///b", 0));
+        points.set("Gone", point("file:///c", 0));
+        points.retain_playlists(&["Mix".to_string()]);
+        assert!(points.get("").is_some());
+        assert!(points.get("Mix").is_some());
+        assert_eq!(points.get("Gone"), None);
+
+        points.remove("Mix");
+        assert_eq!(points.get("Mix"), None);
     }
 }
