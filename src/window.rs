@@ -726,6 +726,26 @@ impl Window {
     fn setup_actions(&self) {
         self.add_action(&self.imp().settings.create_action("restore-playlist"));
 
+        // Like `win.select-playlist`, with the selected playlist as its
+        // state, for the menu of the playlist pane's title to mark it
+        let selected = gio::SimpleAction::new_stateful(
+            "selected-playlist",
+            Some(glib::VariantTy::STRING),
+            &self.selected_playlist().to_variant(),
+        );
+        selected.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, param| {
+                debug!("Window::win.selected-playlist()");
+                if let Some(name) = param.and_then(String::from_variant) {
+                    win.set_playlists_visible(false);
+                    win.select_playlist(&name);
+                }
+            }
+        ));
+        self.add_action(&selected);
+
         // In the main menu of every page, as new music can be added while
         // the player is showing; it's off while the folder is being read
         let rescan = gio::SimpleAction::new("rescan-library", None);

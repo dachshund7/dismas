@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 
 use adw::subclass::prelude::*;
 use glib::clone;
-use gtk::{CompositeTemplate, gdk, glib, prelude::*};
+use gtk::{CompositeTemplate, gdk, gio, glib, prelude::*};
 
 // How close to the top or bottom of the queue a dragged track scrolls it,
 // and how fast at most, in pixels per frame
@@ -18,6 +18,8 @@ mod imp {
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/playlist-view.ui")]
     pub struct PlaylistView {
+        #[template_child]
+        pub title_menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub title_label: TemplateChild<gtk::Label>,
         #[template_child]
@@ -82,6 +84,7 @@ mod imp {
 
             self.obj().setup_searchbar();
             self.obj().setup_autoscroll();
+            self.obj().setup_title_menu();
         }
     }
 
@@ -188,6 +191,21 @@ impl PlaylistView {
         Self::default()
     }
 
+    // The time left under the title opens its menu too, as part of the
+    // title, without making the button as wide as it, which would cut it
+    fn setup_title_menu(&self) {
+        let click = gtk::GestureClick::new();
+        click.connect_released(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |gesture, _, _, _| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                this.imp().title_menu_button.popup();
+            }
+        ));
+        self.imp().queue_length_label.add_controller(click);
+    }
+
     fn setup_searchbar(&self) {
         let entry = self.imp().queue_searchentry.get();
         self.imp().queue_searchbar.connect_entry(&entry);
@@ -196,6 +214,11 @@ impl PlaylistView {
     // The name of the selected playlist
     pub fn set_title(&self, title: &str) {
         self.imp().title_label.set_label(title);
+    }
+
+    // The playlists the title switches to
+    pub fn set_playlists_menu(&self, menu: &gio::MenuModel) {
+        self.imp().title_menu_button.set_menu_model(Some(menu));
     }
 
     pub fn back_button(&self) -> gtk::Button {

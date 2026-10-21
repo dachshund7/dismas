@@ -17,6 +17,7 @@ impl Window {
             self.set_selected_playlist("");
         }
         self.update_playlist_labels();
+        self.update_playlists_menu();
     }
 
     // The name of the selected playlist, empty for the queue
@@ -31,6 +32,7 @@ impl Window {
             .set_string("selected-playlist", name)
             .expect("Unable to store setting");
         self.update_playlist_labels();
+        self.update_playlists_menu();
         if self.playlists_visible() {
             self.update_playlists_page();
         }
@@ -40,6 +42,45 @@ impl Window {
         self.imp()
             .playlists_page
             .set_playlists(&playlists::names(), &self.selected_playlist());
+    }
+
+    // The menu of the playlist pane's title, to switch playlists without
+    // going through the Playlists page; it's rebuilt whenever they change,
+    // even while the page is hidden
+    pub(super) fn update_playlists_menu(&self) {
+        let selected = self.selected_playlist();
+        if let Some(action) = self
+            .lookup_action("selected-playlist")
+            .and_downcast::<gio::SimpleAction>()
+        {
+            action.set_state(&selected.to_variant());
+        }
+
+        let playlists = gio::Menu::new();
+        let queue = gio::MenuItem::new(Some(&i18n("Queue")), None);
+        queue.set_action_and_target_value(Some("win.selected-playlist"), Some(&"".to_variant()));
+        playlists.append_item(&queue);
+        for name in playlists::names() {
+            // Underscores in names would be taken for mnemonics
+            let item = gio::MenuItem::new(Some(&name.replace('_', "__")), None);
+            item.set_action_and_target_value(
+                Some("win.selected-playlist"),
+                Some(&name.to_variant()),
+            );
+            playlists.append_item(&item);
+        }
+
+        let manage = gio::Menu::new();
+        let item = gio::MenuItem::new(Some(&i18n("_Manage Playlists…")), None);
+        item.set_action_and_target_value(Some("win.page"), Some(&"playlists".to_variant()));
+        manage.append_item(&item);
+
+        let menu = gio::Menu::new();
+        menu.append_section(None, &playlists);
+        menu.append_section(None, &manage);
+        self.imp()
+            .playlist_view
+            .set_playlists_menu(menu.upcast_ref());
     }
 
     // The label of the buttons that add tracks to the selected playlist
@@ -294,6 +335,7 @@ impl Window {
         match result {
             Ok(()) => {
                 self.update_playlists_page();
+                self.update_playlists_menu();
                 // Translators: `{playlist}` must be left unmodified; it is
                 // expanded to the name of a playlist
                 let message = i18n_k("Saved as “{playlist}”", &[("playlist", name)]);
@@ -348,6 +390,7 @@ impl Window {
             self.set_selected_playlist(new_name);
         } else {
             self.update_playlists_page();
+            self.update_playlists_menu();
         }
     }
 
@@ -392,6 +435,8 @@ impl Window {
         } else {
             self.update_playlists_page();
         }
+        // Even while the queue loads in its place
+        self.update_playlists_menu();
     }
 
     // Makes a saved playlist of an M3U playlist, like one from another
@@ -436,6 +481,7 @@ impl Window {
             return;
         }
         self.update_playlists_page();
+        self.update_playlists_menu();
 
         let n_missing = (n_entries - found.len()) as u32;
         let message = if n_missing == 0 {

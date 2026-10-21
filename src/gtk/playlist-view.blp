@@ -16,16 +16,32 @@ template $DismasPlaylistView: Widget {
         tooltip-text: _("Search Tracks");
       }
 
+      // The title switches to another playlist, as going back to the
+      // queue would otherwise take a trip through the Playlists page
+      // queue would otherwise take a trip through the Playlists page. The
+      // time left stays out of it, keeping the whole width of the title
       title-widget: Box queue_length_box {
         orientation: vertical;
         valign: center;
 
-        Label title_label {
-          ellipsize: end;
-          label: _("Queue");
+        MenuButton title_menu_button {
+          always-show-arrow: true;
+          can-shrink: true;
+          halign: center;
+          tooltip-text: _("Switch Playlist");
+
+          child: Label title_label {
+            ellipsize: end;
+            label: _("Queue");
+
+            styles [
+              "heading",
+            ]
+          };
 
           styles [
-            "heading",
+            "flat",
+            "playlist-title",
           ]
         }
 

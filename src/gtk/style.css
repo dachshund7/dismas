@@ -83,6 +83,14 @@ playbackcontrol menubutton.sleep-timer-on > button:checked {
   background-image: image(color-mix(in srgb, currentColor 20%, transparent));
 }
 
+/* The title of the playlist pane switches playlists; it's only a little
+ * taller than its label, to keep the time left under it within the header
+ * bar, and wider, as the time left is apart from it */
+menubutton.playlist-title > button {
+  min-height: 0;
+  padding: 2px 12px;
+}
+
 queuerow .currently-playing {
   padding-left: 6px;
   font-weight: 700;
