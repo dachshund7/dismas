@@ -65,8 +65,11 @@ impl Window {
         queue.set_action_and_target_value(Some("win.selected-playlist"), Some(&"".to_variant()));
         playlists.append_item(&queue);
         for name in playlists::names() {
-            // Underscores in names would be taken for mnemonics
-            let item = gio::MenuItem::new(Some(&name.replace('_', "__")), None);
+            // Shortened like where tracks are dropped, as a menu is as
+            // wide as its longest item; underscores in names would be taken
+            // for mnemonics
+            let label = utils::short_playlist_name(&name).replace('_', "__");
+            let item = gio::MenuItem::new(Some(&label), None);
             item.set_action_and_target_value(
                 Some("win.selected-playlist"),
                 Some(&name.to_variant()),
@@ -289,6 +292,7 @@ impl Window {
                     Err(NameError::Invalid) => {
                         i18n("The name can't start with a dot, or have slashes or line breaks")
                     }
+                    Err(NameError::TooLong) => i18n("The name is too long"),
                     Err(NameError::Exists) => i18n("A playlist with this name already exists"),
                 };
                 error_label.set_label(&message);

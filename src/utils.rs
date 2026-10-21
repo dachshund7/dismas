@@ -53,6 +53,27 @@ pub fn set_playlist_button_label(button: &gtk::Button, label: &str) {
     }
 }
 
+// Shows the tooltip of the widget on several lines when it's long, e.g.
+// with the name of a long playlist, which GTK shows on a single line, as
+// wide as the screen. Connected once; it shows whatever tooltip the widget
+// has at the time
+pub fn wrap_tooltip(widget: &impl IsA<gtk::Widget>) {
+    widget.connect_query_tooltip(|widget, _, _, _, tooltip| {
+        let Some(text) = widget.tooltip_text() else {
+            return false;
+        };
+        let label = gtk::Label::builder()
+            .label(text.as_str())
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .max_width_chars(50)
+            .xalign(0.0)
+            .build();
+        tooltip.set_custom(Some(&label));
+        true
+    });
+}
+
 // A playlist name to put in a sentence, cut short with "…" if it's long,
 // e.g. in a title, where it would make several lines
 pub fn short_playlist_name(name: &str) -> String {

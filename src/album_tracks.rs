@@ -113,6 +113,9 @@ mod imp {
             let obj = self.obj();
             obj.setup_list();
             obj.connect_signals();
+            // They name the selected playlist
+            utils::wrap_tooltip(&*self.back_button);
+            utils::wrap_tooltip(&*self.add_button);
         }
 
         fn signals() -> &'static [Signal] {

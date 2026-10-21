@@ -85,6 +85,8 @@ mod imp {
             self.obj().setup_searchbar();
             self.obj().setup_autoscroll();
             self.obj().setup_title_menu();
+            // It names the selected playlist
+            crate::utils::wrap_tooltip(&*self.back_button);
         }
     }
 

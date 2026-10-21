@@ -19,6 +19,8 @@ pub enum NameError {
     Empty,
     // Characters that can't be in a file name, or a hidden file
     Invalid,
+    // Longer than a file name can be
+    TooLong,
     Exists,
 }
 
@@ -67,6 +69,8 @@ pub fn check_name(name: &str) -> Result<(), NameError> {
         Err(NameError::Empty)
     } else if !is_valid_name(name) {
         Err(NameError::Invalid)
+    } else if !fits_file_name(name) {
+        Err(NameError::TooLong)
     } else if exists(name) {
         Err(NameError::Exists)
     } else {
@@ -75,11 +79,12 @@ pub fn check_name(name: &str) -> Result<(), NameError> {
 }
 
 fn is_valid_name(name: &str) -> bool {
-    !name.starts_with('.')
-        && !name.contains(['/', '\\'])
-        && !name.chars().any(char::is_control)
-        // File names are limited to 255 bytes
-        && name.len() + EXTENSION.len() < 255
+    !name.starts_with('.') && !name.contains(['/', '\\']) && !name.chars().any(char::is_control)
+}
+
+// File names are limited to 255 bytes
+fn fits_file_name(name: &str) -> bool {
+    name.len() + EXTENSION.len() < 255
 }
 
 // Creates an empty playlist; the name has been checked with `check_name()`
@@ -347,7 +352,10 @@ mod tests {
         assert_eq!(check_name(".hidden"), Err(NameError::Invalid));
         assert_eq!(check_name("a/b"), Err(NameError::Invalid));
         assert_eq!(check_name("a\nb"), Err(NameError::Invalid));
-        assert_eq!(check_name(&"x".repeat(300)), Err(NameError::Invalid));
+        assert_eq!(check_name(&"x".repeat(300)), Err(NameError::TooLong));
+        // Limited in bytes, which characters can take several of
+        assert_eq!(check_name(&"é".repeat(126)), Err(NameError::TooLong));
+        assert_eq!(check_name(&"x".repeat(250)), Ok(()));
         assert!(is_valid_name("Road trip: 2026 (best)"));
     }
 }

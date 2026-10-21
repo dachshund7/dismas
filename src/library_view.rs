@@ -187,6 +187,8 @@ mod imp {
             obj.setup_grid();
             obj.setup_actions();
             obj.connect_signals();
+            // It names the selected playlist
+            crate::utils::wrap_tooltip(&*self.add_albums_button);
         }
 
         fn signals() -> &'static [Signal] {
