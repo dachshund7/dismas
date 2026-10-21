@@ -356,6 +356,18 @@ impl Window {
         player.move_tracks(&tracks, before.as_ref());
         self.store_queue();
 
+        // Dragging works in the queue, so the focus goes to the dropped
+        // track; not when the drag starts, as focusing a row that's cut off
+        // scrolls it from under the pointer
+        let queue_view = self.imp().playlist_view.queue_view();
+        if let Some(model) = queue_view.model()
+            && let Some(pos) = (0..model.n_items())
+                .find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
+        {
+            queue_view.scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
+            queue_view.grab_focus();
+        }
+
         // The rows get their new places when the list is laid out, before
         // it's drawn, so they can still be drawn in their old places first
         let Some(clock) = self.imp().playlist_view.queue_view().frame_clock() else {

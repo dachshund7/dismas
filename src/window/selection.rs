@@ -141,18 +141,24 @@ impl Window {
     }
 
     // Ctrl+A selects all the items of the list with the focus: the album
-    // grid, the tracks of an album, or the queue
+    // grid, the tracks of an album, or the queue. Selecting tracks in the
+    // queue goes on whatever has the focus, which can stay in the search
+    // entry of the grid while they're clicked. An empty playlist, whose
+    // pane stays open, leaves it to the grid
     pub(super) fn select_all(&self) {
         let imp = self.imp();
         let focus = gtk::prelude::GtkWindowExt::focus(self);
         let focus_in = |widget: &gtk::Widget| focus.as_ref().is_some_and(|f| f.is_ancestor(widget));
         let sidebar_page = imp.sidebar_stack.visible_child_name();
+        let queue_shown = self.playlist_visible() && sidebar_page.as_deref() == Some("playlist");
 
-        if self.library_visible() && focus_in(imp.library_view.upcast_ref()) {
+        if queue_shown && self.queue_selection() {
+            self.select_all_queue_tracks();
+        } else if self.library_visible() && focus_in(imp.library_view.upcast_ref()) {
             imp.library_view.select_all();
         } else if focus_in(imp.album_tracks.upcast_ref()) {
             imp.album_tracks.select_all();
-        } else if self.playlist_visible() && sidebar_page.as_deref() == Some("playlist") {
+        } else if queue_shown && !self.queue_is_empty() {
             self.select_all_queue_tracks();
         } else if self.playlist_visible() && sidebar_page.as_deref() == Some("album") {
             imp.album_tracks.select_all();

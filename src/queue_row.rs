@@ -333,6 +333,7 @@ impl QueueRow {
                 // Instead of activating the row, which plays the track or
                 // toggles its selection
                 gesture.set_state(gtk::EventSequenceState::Claimed);
+                this.grab_row_focus();
                 this.emit_by_name::<()>(signal, &[]);
             }
         ));
@@ -432,11 +433,18 @@ impl QueueRow {
 
         // A click on the handle doesn't play the track like a click on the
         // rest of the row; grouped with the drag source, which still gets
-        // the press
+        // the press. A click that didn't drag the track focuses the row
+        // once it's released, when scrolling it into view can't move it
+        // from under the pointer
         let click = gtk::GestureClick::new();
         click.connect_pressed(|gesture, _, _, _| {
             gesture.set_state(gtk::EventSequenceState::Claimed);
         });
+        click.connect_released(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, _, _, _| this.grab_row_focus()
+        ));
         // Gestures can only be grouped once they're on the same widget
         handle.add_controller(click.clone());
         click.group_with(&drag_source);
@@ -510,6 +518,25 @@ impl QueueRow {
             return None;
         }
         Some(above)
+    }
+
+    // The modifier clicks the row claims don't reach the list, which moves
+    // the focus to the row clicked; so that Ctrl+A goes to the queue after
+    // them. The focus goes to the list's item holding the row, the first
+    // focusable widget above it. Presses on the handle leave the focus, as
+    // the list scrolls a row that's cut off into view when it's focused,
+    // which would move it under the pointer as a drag starts; the row is
+    // focused when the click is released, and the window focuses a
+    // dropped track
+    fn grab_row_focus(&self) {
+        let mut widget = self.parent();
+        while let Some(w) = widget {
+            if w.is_focusable() {
+                w.grab_focus();
+                return;
+            }
+            widget = w.parent();
+        }
     }
 
     // Whether the row is the first movement of a work, under its header

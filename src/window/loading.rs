@@ -90,8 +90,8 @@ impl Window {
             return;
         }
 
+        self.update_queue_actions();
         for action in [
-            "queue.clear",
             "win.select-playlist",
             "win.new-playlist",
             "win.rename-playlist",

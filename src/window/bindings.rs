@@ -194,6 +194,7 @@ impl Window {
                             win.action_set_enabled("win.play", true);
                             win.action_set_enabled("win.previous", true);
                             win.action_set_enabled("win.next", queue.n_tracks() > 1);
+                            win.update_queue_actions();
                         }
 
                         win.update_queue_time();
@@ -393,6 +394,15 @@ impl Window {
             .set_key_capture_widget(Some(self.upcast_ref::<gtk::Widget>()));
     }
 
+    // The pane's Remove All and Select buttons do nothing without
+    // tracks, and Remove All waits for the tracks being loaded
+    pub(super) fn update_queue_actions(&self) {
+        let empty = self.queue_is_empty();
+        let loading = self.imp().loads.get() > 0;
+        self.action_set_enabled("queue.clear", !empty && !loading);
+        self.action_set_enabled("queue.select", !empty);
+    }
+
     // The initial state of the playback actions
     pub(super) fn set_initial_state(&self) {
         if let Some(player) = self.player() {
@@ -402,6 +412,7 @@ impl Window {
             self.action_set_enabled("win.next", !queue.is_last_track());
 
             self.action_set_enabled("queue.shuffle", queue.n_tracks() > 1);
+            self.update_queue_actions();
             self.action_set_enabled("win.replaygain", player.replaygain_available());
 
             let replaygain = self.imp().settings.enum_("replay-gain").into();
