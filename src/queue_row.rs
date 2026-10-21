@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 
 use adw::subclass::prelude::*;
 use glib::{clone, subclass::Signal};
@@ -13,6 +13,19 @@ use crate::{
     cover_picture::CoverPicture,
     i18n::{ni18n_f, pi18n},
 };
+
+// The drag that Esc cancelled. The windowing system can go on with it until
+// the button is released (on X11, it does), so the rows refuse its drop
+thread_local! {
+    static CANCELLED_DRAG: RefCell<glib::WeakRef<gdk::Drag>> = RefCell::default();
+}
+
+fn is_cancelled(target: &gtk::DropTarget) -> bool {
+    let Some(drag) = target.current_drop().and_then(|drop| drop.drag()) else {
+        return false;
+    };
+    CANCELLED_DRAG.with_borrow(|cancelled| cancelled.upgrade().as_ref() == Some(&drag))
+}
 
 mod imp {
     use std::sync::LazyLock;
@@ -86,6 +99,8 @@ mod imp {
         pub reorderable: Cell<bool>,
         // Where the handle was pressed, for the drag icon
         pub drag_start: Cell<(f64, f64)>,
+        // The handle's, to cancel a drag
+        pub drag_source: OnceCell<gtk::DragSource>,
         // The list item showing the row, for its position in the list
         pub list_item: glib::WeakRef<gtk::ListItem>,
     }
@@ -430,6 +445,7 @@ impl QueueRow {
             }
         ));
         handle.add_controller(drag_source.clone());
+        let _ = self.imp().drag_source.set(drag_source.clone());
 
         // A click on the handle doesn't play the track like a click on the
         // rest of the row; grouped with the drag source, which still gets
@@ -455,8 +471,8 @@ impl QueueRow {
             self,
             #[upgrade_or]
             gdk::DragAction::empty(),
-            move |_, _, y| {
-                let position = this.drop_position(y);
+            move |target, _, y| {
+                let position = this.drop_position(y).filter(|_| !is_cancelled(target));
                 this.show_drop_position(position);
                 if position.is_some() {
                     gdk::DragAction::MOVE
@@ -475,8 +491,11 @@ impl QueueRow {
             self,
             #[upgrade_or]
             false,
-            move |_, value, _, y| {
+            move |target, value, _, y| {
                 this.show_drop_position(None);
+                if is_cancelled(target) {
+                    return false;
+                }
                 let Ok(track) = value.get::<Track>() else {
                     return false;
                 };
@@ -520,14 +539,37 @@ impl QueueRow {
         Some(above)
     }
 
+    // Cancels the drag of the track, if it's being dragged, and says if it
+    // was. The dragged track slides back to its place, but the windowing
+    // system can go on with the drag until the button is released, so the
+    // rows refuse its drop
+    pub fn cancel_drag(&self) -> bool {
+        let Some(source) = self.imp().drag_source.get() else {
+            return false;
+        };
+        let Some(drag) = source.drag() else {
+            return false;
+        };
+        CANCELLED_DRAG.with_borrow(|cancelled| cancelled.set(Some(&drag)));
+        source.drag_cancel();
+        // As after a drop, the focus goes to the track that was dragged
+        self.grab_row_focus();
+        true
+    }
+
+    // Hides the line of a drop that won't happen
+    pub fn hide_drop_position(&self) {
+        self.show_drop_position(None);
+    }
+
     // The modifier clicks the row claims don't reach the list, which moves
     // the focus to the row clicked; so that Ctrl+A goes to the queue after
     // them. The focus goes to the list's item holding the row, the first
     // focusable widget above it. Presses on the handle leave the focus, as
     // the list scrolls a row that's cut off into view when it's focused,
     // which would move it under the pointer as a drag starts; the row is
-    // focused when the click is released, and the window focuses a
-    // dropped track
+    // focused when the click is released or the drag cancelled, and the
+    // window focuses a dropped track
     fn grab_row_focus(&self) {
         let mut widget = self.parent();
         while let Some(w) = widget {
