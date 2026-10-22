@@ -324,11 +324,19 @@ impl GstBackend {
             gapless.generation += 1;
             gapless.handed = None;
             gapless.started = false;
-            gapless.pending_loads += 1;
-            gapless.loaded_at = Some(Instant::now());
             gapless.current_uri = uri.map(str::to_owned);
+            if uri.is_some() {
+                gapless.pending_loads += 1;
+                gapless.loaded_at = Some(Instant::now());
+            }
         }
-        self.gst_player.set_uri(uri);
+        // Without a track, playbin is only stopped: given no URI, it
+        // checks it anyway, and GLib warns about it. As GstPlay isn't
+        // loading anything, no load is counted
+        match uri {
+            Some(uri) => self.gst_player.set_uri(Some(uri)),
+            None => self.gst_player.stop(),
+        }
     }
 
     // The track that playbin gets once this one is about to finish
