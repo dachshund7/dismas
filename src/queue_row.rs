@@ -799,11 +799,11 @@ pub fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCallbackId 
 
             let bounds = track_bounds(view, &track);
             if centering.get() {
-                // Scrolled to it in the previous frame
-                if let Some(bounds) = bounds {
-                    center_bounds(view, &bounds);
-                }
-                if bounds.is_some() || frame >= 5 {
+                // Scrolled to it in a previous frame; where the row is can
+                // take a few frames to settle, so it's centered again until
+                // the list stops moving
+                let moved = bounds.as_ref().is_some_and(|b| center_bounds(view, b));
+                if (bounds.is_some() && !moved) || frame >= 10 {
                     return glib::ControlFlow::Break;
                 }
                 return glib::ControlFlow::Continue;
@@ -812,9 +812,16 @@ pub fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCallbackId 
             let height = view.height() as f32;
             match bounds {
                 Some(b) if b.y() >= 0.0 && b.y() + b.height() <= height => {}
-                Some(_) => {
-                    if let Some(pos) = track_position(view, &track) {
-                        view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+                // Scrolling to the row itself could leave the header of
+                // its work out
+                Some(b) => {
+                    if let Some(adjustment) = view.vadjustment() {
+                        let offset = if b.y() < 0.0 {
+                            b.y()
+                        } else {
+                            b.y() + b.height() - height
+                        };
+                        adjustment.set_value(adjustment.value() + f64::from(offset));
                     }
                 }
                 // The rows can be laid out in the next frame
@@ -839,25 +846,67 @@ fn track_position(view: &gtk::ListView, track: &Track) -> Option<u32> {
     (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
 }
 
-// Where the row of a track is in the list, if it has one. Right after the
-// list is filled, a row can be there without being laid out, at the top
-// and without a height, which isn't where it will be
+// Where the row of a track is in the list, if it has one, with the header
+// above it if it's the first movement of a work. Right after the list is
+// filled, a row can be there without being laid out, at the top and
+// without a height, which isn't where it will be
 fn track_bounds(view: &gtk::ListView, track: &Track) -> Option<graphene::Rect> {
-    track_row(view, track)
-        .and_then(|row| row.compute_bounds(view))
-        .filter(|bounds| bounds.height() > 0.0)
-}
-
-// Scrolls the list to put the row in its middle, as far as it can scroll
-fn center_bounds(view: &gtk::ListView, bounds: &graphene::Rect) {
-    if let Some(adjustment) = view.vadjustment() {
-        let middle = f64::from(bounds.y() + bounds.height() / 2.0);
-        adjustment.set_value(adjustment.value() + middle - f64::from(view.height()) / 2.0);
+    let (item, row) = track_item(view, track)?;
+    let bounds = row
+        .compute_bounds(view)
+        .filter(|bounds| bounds.height() > 0.0)?;
+    if !row.starts_work() {
+        return Some(bounds);
     }
+    if let Some(header) = item
+        .compute_bounds(view)
+        .and_then(|item| header_above(view, item.y()))
+    {
+        return Some(header.union(&bounds));
+    }
+    // The header of the first work can be out of the list's view, without
+    // being laid out: everything above the first row goes with it
+    if track_position(view, track) == Some(0)
+        && let Some(adjustment) = view.vadjustment()
+    {
+        let top = (adjustment.lower() - adjustment.value()) as f32;
+        let height = bounds.y() + bounds.height() - top;
+        return Some(graphene::Rect::new(bounds.x(), top, bounds.width(), height));
+    }
+    Some(bounds)
 }
 
-// The row showing a track in a list, if it has one
-fn track_row(view: &gtk::ListView, track: &Track) -> Option<QueueRow> {
+// The header of a section ending where a row starts, if it's laid out
+fn header_above(view: &gtk::ListView, top: f32) -> Option<graphene::Rect> {
+    let mut child = view.first_child();
+    while let Some(widget) = child {
+        if widget.type_().name() == "GtkListHeaderWidget"
+            && let Some(bounds) = widget.compute_bounds(view)
+            && bounds.height() > 0.0
+            && (bounds.y() + bounds.height() - top).abs() < 1.0
+        {
+            return Some(bounds);
+        }
+        child = widget.next_sibling();
+    }
+    None
+}
+
+// Scrolls the list to put the row in its middle, as far as it can scroll,
+// and says whether the list moved
+fn center_bounds(view: &gtk::ListView, bounds: &graphene::Rect) -> bool {
+    let Some(adjustment) = view.vadjustment() else {
+        return false;
+    };
+    let old = adjustment.value();
+    let middle = f64::from(bounds.y() + bounds.height() / 2.0);
+    adjustment.set_value(old + middle - f64::from(view.height()) / 2.0);
+    (adjustment.value() - old).abs() >= 1.0
+}
+
+// The row showing a track in a list, if it has one, and the child of the
+// list holding it
+fn track_item(view: &gtk::ListView, track: &Track) -> Option<(gtk::Widget, QueueRow)> {
     let mut child = view.first_child();
     while let Some(widget) = child {
         // The rows of the queue are in a SlideBin
@@ -871,7 +920,7 @@ fn track_row(view: &gtk::ListView, track: &Track) -> Option<QueueRow> {
         if let Some(row) = row
             && row.track().as_ref() == Some(track)
         {
-            return Some(row);
+            return Some((widget, row));
         }
         child = widget.next_sibling();
     }
