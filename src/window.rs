@@ -35,7 +35,7 @@ use crate::{
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album},
-    library_view::LibraryView,
+    library_view::{AlbumDrag, LibraryView},
     page_switcher::PageSwitcher,
     playback_control::PlaybackControl,
     player_box::PlayerBox,
@@ -183,6 +183,9 @@ mod imp {
         // The header of the work at the top of the queue, when files would
         // go above it
         pub file_drop_header: glib::WeakRef<gtk::Widget>,
+        // The pane was shown for dragging albums, and is hidden again if
+        // they aren't dropped
+        pub pane_opened_for_drag: Cell<bool>,
 
         pub notify_playing_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_position_id: RefCell<Option<glib::SignalHandlerId>>,
@@ -412,6 +415,7 @@ mod imp {
                 queue_rows: RefCell::default(),
                 file_drop_row: glib::WeakRef::new(),
                 file_drop_header: glib::WeakRef::new(),
+                pane_opened_for_drag: Cell::new(false),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
                 enable_recoloring: Cell::new(true),
                 sidebar_width: Cell::new(0),

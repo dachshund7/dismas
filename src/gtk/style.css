@@ -418,6 +418,34 @@ gridview.album-grid .album-cover {
   background-color: alpha(currentColor, 0.08);
 }
 
+/* The albums being dragged */
+gridview.album-grid .album-cell.dragging,
+gridview.album-grid.dragging-selection .album-cell.selected-item {
+  opacity: 0.5;
+}
+
+/* The copy of an album that follows the pointer while it's dragged, with
+ * the number of albums when there are several; it isn't rounded, as the
+ * corners show as black without a compositor */
+.album-drag-icon {
+  padding: 6px;
+  background-color: var(--window-bg-color);
+}
+
+.album-drag-icon .album-cover {
+  border-radius: 6px;
+  background-color: alpha(currentColor, 0.08);
+}
+
+.album-drag-icon label.drag-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+  font-weight: bold;
+  font-size: 85%;
+}
+
 gridview.album-grid label.album-title {
   font-weight: 600;
   margin-top: 3px;

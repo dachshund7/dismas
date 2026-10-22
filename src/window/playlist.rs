@@ -198,10 +198,11 @@ impl Window {
                 ));
         }
 
-        // Esc cancels dragging a track. The drag doesn't always get the key
-        // itself (on X11 it reaches the window), so it's caught before the
-        // panes and the window, which would leave selection mode or hide
-        // the playlist pane, leaving the track with nowhere to be dropped
+        // Esc cancels dragging a track, or albums from the grid. The drag
+        // doesn't always get the key itself (on X11 it reaches the window),
+        // so it's caught before the panes and the window, which would leave
+        // selection mode or hide the playlist pane, leaving the track with
+        // nowhere to be dropped
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         keys.connect_key_pressed(clone!(
@@ -210,7 +211,8 @@ impl Window {
             #[upgrade_or]
             glib::Propagation::Proceed,
             move |_, key, _, _| {
-                if key == gdk::Key::Escape && win.cancel_queue_drag() {
+                if key == gdk::Key::Escape && (win.cancel_queue_drag() || win.cancel_albums_drag())
+                {
                     glib::Propagation::Stop
                 } else {
                     glib::Propagation::Proceed
@@ -218,6 +220,16 @@ impl Window {
             }
         ));
         self.add_controller(keys);
+    }
+
+    // The albums dragged from the grid don't go anywhere, and the lines
+    // that showed where they'd go are hidden
+    fn cancel_albums_drag(&self) -> bool {
+        if !self.imp().library_view.cancel_drag() {
+            return false;
+        }
+        self.end_file_drop();
+        true
     }
 
     fn cancel_queue_drag(&self) -> bool {

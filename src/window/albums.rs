@@ -87,17 +87,9 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             async move {
-                let Ok(paths) = gio::spawn_blocking(move || {
-                    albums
-                        .iter()
-                        .flat_map(|(id, words)| library::album_tracks(id, words))
-                        .collect::<Vec<_>>()
-                })
-                .await
-                else {
+                let Some(files) = album_files(albums).await else {
                     return;
                 };
-                let files = paths.into_iter().map(gio::File::for_path).collect();
 
                 if play {
                     win.select_queue_to_play();
@@ -111,8 +103,49 @@ impl Window {
         ));
     }
 
+    // Adds the tracks of albums dragged from the grid to the queue, before
+    // a track, or at the end
+    pub(super) fn add_dragged_albums(&self, drag: AlbumDrag, before: Option<Track>) {
+        // Like the Add button, which the selected ones could have gone to
+        if drag.selection {
+            self.imp().library_view.set_selection_mode(false);
+        }
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                if let Some(files) = album_files(drag.albums).await {
+                    win.load_into_queue(files, QueueMode::Add, None, None, None, before);
+                }
+            }
+        ));
+    }
+
     pub(super) fn setup_library(&self) {
         let library_view = self.imp().library_view.get();
+
+        // Albums are dropped on the playlist pane, which is shown while
+        // they're dragged, and hidden again if they weren't dropped
+        library_view.connect_albums_drag_begin(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| {
+                if !win.playlist_visible() {
+                    win.show_playlist_view();
+                    win.set_playlist_visible(true);
+                    win.imp().pane_opened_for_drag.set(true);
+                }
+            }
+        ));
+        library_view.connect_albums_drag_end(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| {
+                if win.imp().pane_opened_for_drag.take() {
+                    win.set_playlist_visible(false);
+                }
+            }
+        ));
 
         library_view.connect_album_activated(clone!(
             #[weak(rename_to = win)]
@@ -201,4 +234,19 @@ impl Window {
         // background as soon as the window is up
         library_view.start_scan(false);
     }
+}
+
+// The files of the tracks of albums, with the words of the search each was
+// selected in, as only the tracks that match it are added; reading them
+// from the library takes a while, so it's done in a separate thread
+async fn album_files(albums: Vec<(String, Vec<String>)>) -> Option<Vec<gio::File>> {
+    let paths = gio::spawn_blocking(move || {
+        albums
+            .iter()
+            .flat_map(|(id, words)| library::album_tracks(id, words))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .ok()?;
+    Some(paths.into_iter().map(gio::File::for_path).collect())
 }

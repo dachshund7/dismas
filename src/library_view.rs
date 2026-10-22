@@ -41,6 +41,20 @@ const MAX_CACHED_COVERS: usize = 100;
 // keyed by the path of the cover
 type PendingCovers = HashMap<String, Vec<(String, glib::WeakRef<gtk::Picture>)>>;
 
+// The size of the cover on the copy of an album that follows the pointer
+// while it's dragged
+const DRAG_COVER_SIZE: i32 = 64;
+
+// The albums dragged from the grid, with the words of the search each was
+// selected in, like the ones the Add button adds, and whether they are
+// the selected ones; only Dismas takes them
+#[derive(Clone, Debug, glib::Boxed)]
+#[boxed_type(name = "DismasAlbumDrag")]
+pub struct AlbumDrag {
+    pub albums: Vec<(String, Vec<String>)>,
+    pub selection: bool,
+}
+
 // The covers loaded most recently
 #[derive(Debug, Default)]
 pub struct TextureCache {
@@ -119,6 +133,8 @@ mod imp {
         pub selection_anchor: glib::WeakRef<Album>,
         // Tracks are being added to the queue
         pub loading: Cell<bool>,
+        // The drag source of the album being dragged, to cancel the drag
+        pub drag_source: RefCell<Option<gtk::DragSource>>,
 
         pub model: RefCell<Option<gio::ListStore>>,
         pub filter: RefCell<Option<gtk::CustomFilter>>,
@@ -200,6 +216,9 @@ mod imp {
                     // Add or play the tracks of the selected albums
                     Signal::builder("add-albums").build(),
                     Signal::builder("play-albums").build(),
+                    // Albums started or stopped being dragged
+                    Signal::builder("albums-drag-begin").build(),
+                    Signal::builder("albums-drag-end").build(),
                     // The URIs of the tracks whose files changed since the
                     // last scan, the number of tracks that are new, changed
                     // or gone, and whether the user asked for the scan
@@ -254,6 +273,22 @@ impl LibraryView {
     pub fn connect_play_albums<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "play-albums",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_albums_drag_begin<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "albums-drag-begin",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_albums_drag_end<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "albums-drag-end",
             false,
             glib::closure_local!(move |view: &Self| f(view)),
         )
@@ -489,6 +524,7 @@ impl LibraryView {
                     }
                 ));
                 content.add_controller(click);
+                this.setup_album_drag(&content, item, &picture);
 
                 item.set_child(Some(&content));
 
@@ -528,6 +564,88 @@ impl LibraryView {
         ));
 
         factory.upcast()
+    }
+
+    // An album is dragged to a place in the playlist pane; in selection
+    // mode, a selected album takes the other selected ones with it. On a
+    // touchscreen, dragging scrolls the grid instead
+    fn setup_album_drag(&self, cell: &AlbumCell, item: &gtk::ListItem, picture: &gtk::Picture) {
+        let drag_source = gtk::DragSource::new();
+        drag_source.set_actions(gdk::DragAction::COPY);
+        drag_source.connect_prepare(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            item,
+            #[upgrade_or]
+            None,
+            move |source, _, _| {
+                if this.imp().loading.get()
+                    || source
+                        .current_event_device()
+                        .is_some_and(|device| device.source() == gdk::InputSource::Touchscreen)
+                {
+                    return None;
+                }
+                let album = item.item().and_downcast::<Album>()?;
+                let selection = this.selection_mode() && album.selected();
+                let albums = if selection {
+                    this.selected_albums()
+                } else {
+                    vec![(album.id(), this.search_words())]
+                };
+                let drag = AlbumDrag { albums, selection };
+                Some(gdk::ContentProvider::for_value(&drag.to_value()))
+            }
+        ));
+        drag_source.connect_drag_begin(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            cell,
+            #[weak]
+            picture,
+            move |source, drag| {
+                let n_albums = drag
+                    .content()
+                    .value(AlbumDrag::static_type())
+                    .ok()
+                    .and_then(|value| value.get::<AlbumDrag>().ok())
+                    .map_or(1, |drag| drag.albums.len());
+                gtk::DragIcon::for_drag(drag).set_child(Some(&album_drag_icon(
+                    picture.paintable().as_ref(),
+                    n_albums,
+                )));
+                drag.set_hotspot(DRAG_COVER_SIZE / 2, DRAG_COVER_SIZE / 2);
+
+                // The dragged albums fade in the grid
+                cell.add_css_class("dragging");
+                if n_albums > 1 {
+                    this.imp().grid_view.add_css_class("dragging-selection");
+                }
+                this.imp().drag_source.replace(Some(source.clone()));
+                this.emit_by_name::<()>("albums-drag-begin", &[]);
+            }
+        ));
+        drag_source.connect_drag_end(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            cell,
+            move |_, _, _| {
+                cell.remove_css_class("dragging");
+                this.imp().grid_view.remove_css_class("dragging-selection");
+                this.imp().drag_source.take();
+                this.emit_by_name::<()>("albums-drag-end", &[]);
+            }
+        ));
+        cell.add_controller(drag_source);
+    }
+
+    // Cancels dragging albums, and says if they were being dragged
+    pub fn cancel_drag(&self) -> bool {
+        let source = self.imp().drag_source.borrow().clone();
+        source.is_some_and(|source| utils::cancel_drag(&source))
     }
 
     // Sets the cover of the album on the picture, once it has been loaded
@@ -1029,4 +1147,54 @@ impl LibraryView {
             }
         ));
     }
+}
+
+// The copy of an album that follows the pointer while it's dragged: its
+// cover, with the number of albums when there are several
+fn album_drag_icon(cover: Option<&gdk::Paintable>, n_albums: usize) -> gtk::Widget {
+    let icon = gtk::Box::builder()
+        .spacing(8)
+        .css_classes(["album-drag-icon"])
+        .build();
+    let frame = gtk::Overlay::builder()
+        .width_request(DRAG_COVER_SIZE)
+        .height_request(DRAG_COVER_SIZE)
+        .overflow(gtk::Overflow::Hidden)
+        .css_classes(["album-cover"])
+        .child(
+            &gtk::Image::builder()
+                .icon_name("folder-music-symbolic")
+                .pixel_size(32)
+                .css_classes(["dim-label"])
+                .build(),
+        )
+        .build();
+    if let Some(cover) = cover {
+        let picture = gtk::Picture::builder()
+            .paintable(cover)
+            .content_fit(gtk::ContentFit::Cover)
+            .can_shrink(true)
+            .build();
+        frame.add_overlay(&picture);
+    }
+    icon.append(&frame);
+
+    if n_albums > 1 {
+        let n_albums = n_albums as u32;
+        icon.append(
+            &gtk::Label::builder()
+                .label(ni18n_f(
+                    // Translators: The '{}' must be left unmodified, and
+                    // it is expanded to the number of albums being dragged
+                    "{} album",
+                    "{} albums",
+                    n_albums,
+                    &[&n_albums.to_string()],
+                ))
+                .valign(gtk::Align::Center)
+                .css_classes(["drag-count"])
+                .build(),
+        );
+    }
+    icon.upcast()
 }

@@ -124,7 +124,7 @@ impl Window {
     // With `replaced`, the tracks took the place of those, and the toast
     // can put them back. With `insert_before`, they go before that track,
     // or at the end if it was removed meanwhile
-    fn load_into_queue(
+    pub(super) fn load_into_queue(
         &self,
         queue: Vec<gio::File>,
         mode: QueueMode,
@@ -443,15 +443,20 @@ impl Window {
     }
 
     // A single target takes the files dropped anywhere on the window, and
-    // decides from where they are what they do: on X11 the widgets aren't
-    // told that the drag left them once it's dropped, so a second target
-    // that took the drag without getting the drop would keep it, and turn
-    // the next one down
+    // the albums dragged from the grid, and decides from where they are
+    // what they do: on X11 the widgets aren't told that the drag left them
+    // once it's dropped, so a second target that took the drag without
+    // getting the drop would keep it, and turn the next one down
     pub(super) fn setup_drop_target(&self) {
         let drop_target = gtk::DropTarget::builder()
             .name("file-drop-target")
             .actions(gdk::DragAction::COPY)
-            .formats(&gdk::ContentFormats::for_type(gdk::FileList::static_type()))
+            .formats(
+                &gdk::ContentFormatsBuilder::new()
+                    .add_type(gdk::FileList::static_type())
+                    .add_type(AlbumDrag::static_type())
+                    .build(),
+            )
             .build();
 
         let show = clone!(
@@ -459,9 +464,20 @@ impl Window {
             self,
             #[upgrade_or]
             gdk::DragAction::empty(),
-            move |_: &gtk::DropTarget, x: f64, y: f64| {
-                win.show_file_drop(x, y);
-                gdk::DragAction::COPY
+            move |target: &gtk::DropTarget, x: f64, y: f64| {
+                let drop = target.current_drop();
+                let place = if utils::is_drag_cancelled(drop.as_ref()) {
+                    None
+                } else {
+                    win.file_drop_at(x, y, drags_albums(drop.as_ref()))
+                };
+                let droppable = place.is_some();
+                win.show_file_drop(place, x, y);
+                if droppable {
+                    gdk::DragAction::COPY
+                } else {
+                    gdk::DragAction::empty()
+                }
             }
         );
         drop_target.connect_enter(show.clone());
@@ -482,7 +498,21 @@ impl Window {
             self,
             #[upgrade_or]
             false,
-            move |_, value, x, y| {
+            move |target, value, x, y| {
+                if utils::is_drag_cancelled(target.current_drop().as_ref()) {
+                    return false;
+                }
+
+                // Albums only go to the pane, which keeps the pane open
+                if let Ok(drag) = value.get::<AlbumDrag>() {
+                    let Some(place) = win.file_drop_at(x, y, true) else {
+                        return false;
+                    };
+                    win.imp().pane_opened_for_drag.set(false);
+                    win.add_dragged_albums(drag, win.drop_before(&place));
+                    return true;
+                }
+
                 let Ok(file_list) = value.get::<gdk::FileList>() else {
                     return false;
                 };
@@ -492,26 +522,19 @@ impl Window {
                 }
 
                 let files = file_list.files();
-                match win.file_drop_at(x, y) {
-                    FileDrop::Zones if win.imp().drag_overlay.in_play_zone(x, y) => {
+                match win.file_drop_at(x, y, false) {
+                    Some(FileDrop::Zones) if win.imp().drag_overlay.in_play_zone(x, y) => {
                         win.play_dropped_files(files);
                     }
-                    FileDrop::Zones => win.add_files_to_queue(files, QueueMode::Show, None),
+                    Some(FileDrop::Zones) => {
+                        win.add_files_to_queue(files, QueueMode::Show, None);
+                    }
                     // Browsing the albums goes on
-                    FileDrop::Place(row, above) => {
-                        let before = row.track().and_then(|target| {
-                            if above {
-                                Some(target)
-                            } else {
-                                win.player()?.queue().next_in_order(&target)
-                            }
-                        });
+                    Some(place) => {
+                        let before = win.drop_before(&place);
                         win.add_files_to_queue(files, QueueMode::Add, before);
                     }
-                    FileDrop::AboveWork(row) => {
-                        win.add_files_to_queue(files, QueueMode::Add, row.track());
-                    }
-                    FileDrop::End => win.add_files_to_queue(files, QueueMode::Add, None),
+                    None => return false,
                 }
                 true
             }
@@ -547,22 +570,48 @@ impl Window {
         });
     }
 
-    // What files dropped at a point of the window would do; the point is
-    // relative to the drag overlay, which has the whole window. While the
-    // queue is shuffled, there is no place to put them in
-    fn file_drop_at(&self, x: f64, y: f64) -> FileDrop {
-        let imp = self.imp();
-        if self.queue_shuffled() {
-            return FileDrop::Zones;
+    // What files, or albums, dropped at a point of the window would do, if
+    // they can be dropped there; the point is relative to the drag overlay,
+    // which has the whole window. Files dropped elsewhere than on the pane
+    // go to the zones, and so do all of them while the queue is shuffled,
+    // as there is no place to put them in; albums only go to the pane,
+    // since the grid has buttons to add and play them
+    fn file_drop_at(&self, x: f64, y: f64, albums: bool) -> Option<FileDrop> {
+        let pane_drop = self.pane_drop_at(x, y);
+        if albums {
+            pane_drop
+        } else if self.queue_shuffled() {
+            Some(FileDrop::Zones)
+        } else {
+            Some(pane_drop.unwrap_or(FileDrop::Zones))
         }
-        let Some(picked) = imp.drag_overlay.pick(x, y, gtk::PickFlags::DEFAULT) else {
-            return FileDrop::Zones;
-        };
+    }
+
+    // Where in the queue something dropped at a point of the playlist pane
+    // would go, if the point is on it
+    fn pane_drop_at(&self, x: f64, y: f64) -> Option<FileDrop> {
+        let imp = self.imp();
+        let picked = imp.drag_overlay.pick(x, y, gtk::PickFlags::DEFAULT)?;
         let pane = imp.playlist_pane.upcast_ref::<gtk::Widget>();
         if picked != *pane && !picked.is_ancestor(pane) {
-            return FileDrop::Zones;
+            return None;
         }
-        self.queue_drop_place(&picked, y).unwrap_or(FileDrop::End)
+        if self.queue_shuffled() {
+            return Some(FileDrop::End);
+        }
+        Some(self.queue_drop_place(&picked, y).unwrap_or(FileDrop::End))
+    }
+
+    // The track that what's dropped goes before, or `None` for the end
+    fn drop_before(&self, place: &FileDrop) -> Option<Track> {
+        match place {
+            FileDrop::Place(row, true) | FileDrop::AboveWork(row) => row.track(),
+            FileDrop::Place(row, false) => {
+                let target = row.track()?;
+                self.player()?.queue().next_in_order(&target)
+            }
+            FileDrop::End | FileDrop::Zones => None,
+        }
     }
 
     // Where in the queue files dropped at a point of the pane would go, if
@@ -617,12 +666,15 @@ impl Window {
         })
     }
 
-    // Shows what files dropped at a point would do: a line between the
-    // tracks of the queue where they'd go, the outline of the pane when
-    // they'd go at the end, or the zones
-    fn show_file_drop(&self, x: f64, y: f64) {
+    // Shows what dropping at a point would do: a line between the tracks
+    // of the queue where they'd go, the outline of the pane when they'd go
+    // at the end, the zones, or nothing when they can't be dropped there
+    fn show_file_drop(&self, place: Option<FileDrop>, x: f64, y: f64) {
         let imp = self.imp();
-        let drop = self.file_drop_at(x, y);
+        let Some(drop) = place else {
+            self.end_file_drop();
+            return;
+        };
 
         let row = match &drop {
             FileDrop::Place(row, _) => Some(row),
@@ -704,7 +756,7 @@ impl Window {
 
     // The queue isn't told when the drag leaves it after a drop, so it
     // stops scrolling here too
-    fn end_file_drop(&self) {
+    pub(super) fn end_file_drop(&self) {
         let imp = self.imp();
         if let Some(row) = imp.file_drop_row.upgrade() {
             row.hide_drop_position();
@@ -715,6 +767,11 @@ impl Window {
         imp.drag_overlay.hide_zones();
         imp.playlist_view.stop_autoscroll();
     }
+}
+
+// Whether albums from the grid are dragged, rather than files
+fn drags_albums(drop: Option<&gdk::Drop>) -> bool {
+    drop.is_some_and(|drop| drop.formats().contains_type(AlbumDrag::static_type()))
 }
 
 // How far a height is from a row

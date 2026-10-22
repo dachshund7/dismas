@@ -12,19 +12,11 @@ use crate::{
     audio::Track,
     cover_picture::CoverPicture,
     i18n::{ni18n_f, pi18n},
+    utils,
 };
 
-// The drag that Esc cancelled. The windowing system can go on with it until
-// the button is released (on X11, it does), so the rows refuse its drop
-thread_local! {
-    static CANCELLED_DRAG: RefCell<glib::WeakRef<gdk::Drag>> = RefCell::default();
-}
-
 fn is_cancelled(target: &gtk::DropTarget) -> bool {
-    let Some(drag) = target.current_drop().and_then(|drop| drop.drag()) else {
-        return false;
-    };
-    CANCELLED_DRAG.with_borrow(|cancelled| cancelled.upgrade().as_ref() == Some(&drag))
+    utils::is_drag_cancelled(target.current_drop().as_ref())
 }
 
 mod imp {
@@ -547,11 +539,9 @@ impl QueueRow {
         let Some(source) = self.imp().drag_source.get() else {
             return false;
         };
-        let Some(drag) = source.drag() else {
+        if !utils::cancel_drag(source) {
             return false;
-        };
-        CANCELLED_DRAG.with_borrow(|cancelled| cancelled.set(Some(&drag)));
-        source.drag_cancel();
+        }
         // As after a drop, the focus goes to the track that was dragged
         self.grab_row_focus();
         true

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use core::cmp::Ordering;
+use std::cell::RefCell;
 
-use gtk::{gio, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use log::{debug, warn};
 
 use crate::{audio::Track, config::APPLICATION_ID};
@@ -11,6 +12,30 @@ use crate::{audio::Track, config::APPLICATION_ID};
 // The path of a file outside the sandbox, for the files that came through
 // the document portal
 pub const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
+
+// The drag that Esc cancelled. The windowing system can go on with it until
+// the button is released (on X11, it does), so its drop is refused
+thread_local! {
+    static CANCELLED_DRAG: RefCell<glib::WeakRef<gdk::Drag>> = RefCell::default();
+}
+
+// Cancels the drag of a source, if it's dragging, and says if it was
+pub fn cancel_drag(source: &gtk::DragSource) -> bool {
+    let Some(drag) = source.drag() else {
+        return false;
+    };
+    CANCELLED_DRAG.with_borrow(|cancelled| cancelled.set(Some(&drag)));
+    source.drag_cancel();
+    true
+}
+
+// Whether a drop is the one of a drag that was cancelled
+pub fn is_drag_cancelled(drop: Option<&gdk::Drop>) -> bool {
+    let Some(drag) = drop.and_then(gdk::Drop::drag) else {
+        return false;
+    };
+    CANCELLED_DRAG.with_borrow(|cancelled| cancelled.upgrade().as_ref() == Some(&drag))
+}
 
 // The main menu, for the menu buttons of each page
 pub fn primary_menu() -> gio::MenuModel {
