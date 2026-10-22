@@ -115,7 +115,7 @@ impl ksni::Tray for DismasTray {
     }
 
     fn icon_name(&self) -> String {
-        APPLICATION_ID.into()
+        format!("{APPLICATION_ID}-tray")
     }
 
     fn category(&self) -> ksni::Category {

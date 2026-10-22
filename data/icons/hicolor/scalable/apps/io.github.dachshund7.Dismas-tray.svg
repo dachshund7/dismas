@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-FileCopyrightText: 2026  John Hamilton
+SPDX-License-Identifier: CC-BY-SA-3.0
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+<path d="M5 8 V1.5 L13 0.5 V7.5 H12 V2.62 L6 3.37 V8Z" fill="#4a9ae0"/>
+<path d="M2.02 8.68 A2 1.45 -20 0 1 5.78 7.32 A2 1.45 -20 0 1 2.02 8.68Z" fill="#4a9ae0"/>
+<path d="M9.02 8.18 A2 1.45 -20 0 1 12.78 6.82 A2 1.45 -20 0 1 9.02 8.18Z" fill="#4a9ae0"/>
+<path d="M0 11 H16 V16 H13 A5 3 0 0 0 3 16 H0Z" fill="#4a9ae0"/>
+</svg>
