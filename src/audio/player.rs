@@ -478,7 +478,7 @@ impl AudioPlayer {
             // within a seek backward step, otherwise we just
             // restart the track
             if self.state.position() >= 10 {
-                self.backend.seek_start();
+                self.show_start(self.backend.seek_start());
                 return;
             }
 
@@ -499,7 +499,6 @@ impl AudioPlayer {
             }
 
             self.backend.set_track_uri(Some(&prev_track.uri()));
-            self.backend.seek_start();
 
             debug!("Marking '{}' as playing", prev_track.uri());
             self.show_track(prev_track);
@@ -539,7 +538,6 @@ impl AudioPlayer {
             }
 
             self.backend.set_track_uri(Some(&next_track.uri()));
-            self.backend.seek_start();
             self.show_track(next_track);
 
             if was_playing {
@@ -572,7 +570,6 @@ impl AudioPlayer {
             }
 
             self.backend.set_track_uri(Some(&track.uri()));
-            self.backend.seek_start();
             self.show_track(track);
 
             if was_playing {
@@ -587,23 +584,31 @@ impl AudioPlayer {
 
     fn seek(&self, offset: u64, direction: SeekDirection) {
         self.finished.set(false);
-        self.backend.seek(
+        self.show_start(self.backend.seek(
             self.state.position(),
             self.state.duration(),
             offset,
             direction,
-        );
+        ));
     }
 
     pub fn seek_start(&self) {
         self.finished.set(false);
         let position = self.state.position() + 1;
-        self.backend.seek(
+        self.show_start(self.backend.seek(
             position,
             self.state.duration(),
             position,
             SeekDirection::Backwards,
-        );
+        ));
+    }
+
+    // A track that hasn't played yet isn't moved, only the position it
+    // will start at, which the backend doesn't report
+    fn show_start(&self, start: Option<u64>) {
+        if let Some(position) = start {
+            self.update_position(position, true);
+        }
     }
 
     pub fn seek_backwards(&self) {
@@ -627,13 +632,13 @@ impl AudioPlayer {
         let duration = self.state.duration() as f64;
         let pos = (duration * position).clamp(0.0, duration);
         self.finished.set(false);
-        self.backend.seek_position(pos as u64);
+        self.show_start(self.backend.seek_position(pos as u64));
     }
 
     pub fn seek_position_abs(&self, position: u64) {
         let pos = u64::min(position, self.state.duration());
         self.finished.set(false);
-        self.backend.seek_position(pos);
+        self.show_start(self.backend.seek_position(pos));
     }
 
     // Shows the track paused at the position of the last session; the

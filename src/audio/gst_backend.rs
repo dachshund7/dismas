@@ -82,8 +82,9 @@ pub struct GstBackend {
     sender: Sender<PlaybackAction>,
     gst_player: gst_play::Play,
     replaygain: Option<GstReplayGain>,
-    // Where the track goes on from once it plays, after the last session
-    resume_position: Cell<Option<u64>>,
+    // Where the track starts once it plays, if it hasn't since it was
+    // loaded: GstPlay would only seek once it's ready to play
+    start_position: Cell<Option<u64>>,
     gapless: Arc<Mutex<Gapless>>,
 }
 
@@ -180,7 +181,7 @@ impl GstBackend {
             sender,
             gst_player,
             replaygain: GstReplayGain::new().ok(),
-            resume_position: Cell::default(),
+            start_position: Cell::default(),
             gapless: Arc::default(),
         };
 
@@ -318,7 +319,7 @@ impl GstBackend {
     }
 
     pub fn set_track_uri(&self, uri: Option<&str>) {
-        self.resume_position.take();
+        self.start_position.set(uri.map(|_| 0));
         {
             let mut gapless = self.gapless();
             gapless.generation += 1;
@@ -356,12 +357,20 @@ impl GstBackend {
         gapless.current_uri = Some(uri.to_owned());
     }
 
-    pub fn seek(&self, position: u64, duration: u64, offset: u64, direction: SeekDirection) {
+    // The seeks return the position the track will start at, if it hasn't
+    // played yet, which the player shows itself, as GstPlay only reports
+    // positions once the track is ready
+    pub fn seek(
+        &self,
+        position: u64,
+        duration: u64,
+        offset: u64,
+        direction: SeekDirection,
+    ) -> Option<u64> {
         let offset = gst::ClockTime::from_seconds(offset);
         let position = gst::ClockTime::from_seconds(position);
         let duration = gst::ClockTime::from_seconds(duration);
 
-        self.resume_position.take();
         let destination = match direction {
             SeekDirection::Backwards if position >= offset => position.checked_sub(offset),
             SeekDirection::Backwards if position < offset => Some(gst::ClockTime::from_seconds(0)),
@@ -374,19 +383,26 @@ impl GstBackend {
             _ => None,
         };
 
-        if let Some(destination) = destination {
+        self.seek_to(destination?)
+    }
+
+    pub fn seek_position(&self, position: u64) -> Option<u64> {
+        self.seek_to(gst::ClockTime::from_seconds(position))
+    }
+
+    pub fn seek_start(&self) -> Option<u64> {
+        self.seek_to(gst::ClockTime::ZERO)
+    }
+
+    fn seek_to(&self, destination: gst::ClockTime) -> Option<u64> {
+        if self.start_position.get().is_some() {
+            let position = destination.seconds();
+            self.start_position.set(Some(position));
+            Some(position)
+        } else {
             self.gst_player.seek(destination);
+            None
         }
-    }
-
-    pub fn seek_position(&self, position: u64) {
-        self.resume_position.take();
-        self.gst_player.seek(gst::ClockTime::from_seconds(position));
-    }
-
-    pub fn seek_start(&self) {
-        self.resume_position.take();
-        self.gst_player.seek(gst::ClockTime::from_seconds(0));
     }
 
     // The track starts at the position once it plays, unless it's moved
@@ -394,13 +410,15 @@ impl GstBackend {
     // PulseAudio waiting for it to start, and the track stuck at the
     // position, if it starts a few seconds later
     pub fn resume_at(&self, position: u64) {
-        self.resume_position.set(Some(position));
+        self.start_position.set(Some(position));
     }
 
     pub fn play(&self) {
         self.gst_player.play();
         // GstPlay seeks once the track is ready to play
-        if let Some(position) = self.resume_position.take() {
+        if let Some(position) = self.start_position.take()
+            && position > 0
+        {
             self.gst_player.seek(gst::ClockTime::from_seconds(position));
         }
     }
@@ -416,7 +434,7 @@ impl GstBackend {
         if current_uri.is_some() {
             self.set_track_uri(current_uri.as_deref());
         } else {
-            self.resume_position.take();
+            self.start_position.take();
             self.gst_player.stop();
         }
     }
