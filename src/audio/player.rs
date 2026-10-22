@@ -76,6 +76,27 @@ impl Display for RepeatMode {
     }
 }
 
+// As the repeat-mode setting stores them
+impl From<i32> for RepeatMode {
+    fn from(value: i32) -> Self {
+        match value {
+            1 => Self::RepeatAll,
+            2 => Self::RepeatOne,
+            _ => Self::Consecutive,
+        }
+    }
+}
+
+impl From<RepeatMode> for i32 {
+    fn from(value: RepeatMode) -> Self {
+        match value {
+            RepeatMode::Consecutive => 0,
+            RepeatMode::RepeatAll => 1,
+            RepeatMode::RepeatOne => 2,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "DismasReplayGainMode")]
 pub enum ReplayGainMode {
@@ -175,6 +196,12 @@ impl AudioPlayer {
             backend.set_volume(volume);
         }
 
+        let repeat_mode = RepeatMode::from(settings.enum_("repeat-mode"));
+        queue.set_repeat_mode(repeat_mode);
+        for c in &controllers {
+            c.set_repeat_mode(repeat_mode);
+        }
+
         let res = Rc::new(Self {
             app_sender,
             receiver,
@@ -210,7 +237,15 @@ impl AudioPlayer {
         self.queue.connect_repeat_mode_notify(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.update_next_track()
+            move |queue| {
+                this.update_next_track();
+                if let Err(e) = this
+                    .settings
+                    .set_enum("repeat-mode", queue.repeat_mode().into())
+                {
+                    error!("Unable to save the repeat mode: {e}");
+                }
+            }
         ));
         self.sleep_timer.connect_finishing_track_notify(clone!(
             #[weak(rename_to = this)]
@@ -753,5 +788,22 @@ impl AudioPlayer {
 
     pub fn replaygain_available(&self) -> bool {
         self.backend.replaygain_available()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeat_mode_round_trips_through_the_setting() {
+        for mode in [
+            RepeatMode::Consecutive,
+            RepeatMode::RepeatAll,
+            RepeatMode::RepeatOne,
+        ] {
+            assert_eq!(RepeatMode::from(i32::from(mode)), mode);
+        }
+        assert_eq!(RepeatMode::from(7), RepeatMode::Consecutive);
     }
 }

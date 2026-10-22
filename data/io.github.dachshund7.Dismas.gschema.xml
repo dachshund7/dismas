@@ -5,6 +5,11 @@
     <value nick="track" value="1"/>
     <value nick="off" value="2"/>
   </enum>
+  <enum id="io.github.dachshund7.Dismas.RepeatMode">
+    <value nick="consecutive" value="0"/>
+    <value nick="repeat-all" value="1"/>
+    <value nick="repeat-one" value="2"/>
+  </enum>
   <enum id="io.github.dachshund7.Dismas.AlbumSort">
     <value nick="artist" value="0"/>
     <value nick="title" value="1"/>
@@ -38,6 +43,11 @@
 	    <default>1.0</default>
 	    <summary>The volume</summary>
 	    <description>The playback volume, as the volume slider shows it</description>
+	  </key>
+	  <key name="repeat-mode" enum="io.github.dachshund7.Dismas.RepeatMode">
+	    <default>'consecutive'</default>
+	    <summary>The repeat mode</summary>
+	    <description>Whether playback stops at the end of the queue, repeats all of it, or repeats the current track</description>
 	  </key>
 	  <key name="background-play" type="b">
 	    <default>true</default>
