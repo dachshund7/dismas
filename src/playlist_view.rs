@@ -106,9 +106,24 @@ impl Default for PlaylistView {
 }
 
 impl PlaylistView {
-    // GTK doesn't scroll lists while dragging, so a track dragged near the
-    // top or bottom of the queue scrolls it, faster closer to the edge
+    // A track or files dragged near the top or bottom of the queue scroll
+    // it, faster closer to the edge. GTK's own scrolling of lists while
+    // dragging is taken out: it only stops when the drag leaves the list,
+    // which it doesn't after a drop on X11, so a drop near the edge kept
+    // pushing the list there for good
     fn setup_autoscroll(&self) {
+        let queue_view = &*self.imp().queue_view;
+        let gtk_autoscroll: Vec<gtk::EventController> = queue_view
+            .observe_controllers()
+            .iter::<glib::Object>()
+            .flatten()
+            .filter_map(|c| c.downcast::<gtk::DropControllerMotion>().ok())
+            .map(Cast::upcast)
+            .collect();
+        for controller in &gtk_autoscroll {
+            queue_view.remove_controller(controller);
+        }
+
         let motion = gtk::DropControllerMotion::new();
         motion.connect_motion(clone!(
             #[weak(rename_to = this)]
