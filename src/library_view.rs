@@ -818,16 +818,18 @@ impl LibraryView {
     }
 
     // The selected albums, in the order of the grid, with the words of
-    // the search each was selected in
+    // the search each was selected in; a new search clears the selection,
+    // so the selected albums are all shown
     pub fn selected_albums(&self) -> Vec<(String, Vec<String>)> {
         let imp = self.imp();
         let selected = imp.selected.borrow();
-        let Some(model) = imp.model.borrow().clone() else {
+        let Some(model) = imp.grid_view.model() else {
             return Vec::new();
         };
-        model
-            .iter::<Album>()
-            .flatten()
+        // The items of the selection model are typed as GObject, so
+        // `iter::<Album>()` would panic
+        (0..model.n_items())
+            .filter_map(|i| model.item(i).and_downcast::<Album>())
             .filter_map(|album| {
                 let id = album.id();
                 selected.get(&id).map(|words| (id, words.clone()))
