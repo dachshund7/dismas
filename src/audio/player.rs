@@ -9,7 +9,7 @@ use std::{
 
 use async_channel::{Receiver, Sender};
 use glib::clone;
-use gtk::{glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 use log::{debug, error};
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -20,6 +20,7 @@ use crate::{
         Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, SleepTimer,
         Track, WaveformGenerator,
     },
+    utils,
 };
 
 // One step of the volume, by the slider, the keyboard or the tray
@@ -123,6 +124,7 @@ pub struct AudioPlayer {
     state: PlayerState,
     sleep_timer: SleepTimer,
     waveform_generator: WaveformGenerator,
+    settings: gio::Settings,
     // Whether the last track of the queue played to its end; playing
     // again then starts over
     finished: Cell<bool>,
@@ -163,6 +165,16 @@ impl AudioPlayer {
         let queue = Queue::default();
         let state = PlayerState::default();
 
+        // PulseAudio only restores the volume when the first track plays;
+        // given one, it keeps it. Until a volume is saved, PulseAudio's
+        // stays, rather than the default
+        let settings = utils::settings_manager();
+        if settings.user_value("volume").is_some() {
+            let volume = settings.double("volume");
+            state.set_volume(volume);
+            backend.set_volume(volume);
+        }
+
         let res = Rc::new(Self {
             app_sender,
             receiver,
@@ -172,6 +184,7 @@ impl AudioPlayer {
             state,
             sleep_timer,
             waveform_generator,
+            settings,
             finished: Cell::new(false),
         });
 
@@ -661,6 +674,9 @@ impl AudioPlayer {
     fn update_volume(&self, volume: f64) {
         debug!("Updating volume to: {volume}");
         self.state.set_volume(volume);
+        if let Err(e) = self.settings.set_double("volume", volume.clamp(0.0, 1.0)) {
+            error!("Unable to save the volume: {e}");
+        }
     }
 
     pub fn set_volume(&self, volume: f64) {
