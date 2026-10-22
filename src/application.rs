@@ -16,6 +16,8 @@ use glib::clone;
 use gtk::{gdk, gio, glib, prelude::*};
 use log::{debug, warn};
 
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use crate::x11_stacking::{self, Visibility};
 use crate::{
     audio::AudioPlayer,
     config::{APPLICATION_ID, VERSION},
@@ -168,10 +170,12 @@ impl Default for Application {
     }
 }
 
-// Whether the window can be seen. GTK doesn't know about desktops: on
-// X11, window managers unmap the windows of the other desktops without
-// telling it
-fn shows_on_screen(window: &Window) -> bool {
+// Whether a click on the tray icon closes the window, rather than bringing
+// it up: when it has the focus, or when it's on screen and nothing covers
+// it, as moving to the tray can give the focus to another window when the
+// focus follows the pointer. GTK knows neither about desktops nor about
+// the windows of other apps, so on X11 the window manager is asked
+fn closes_on_click(window: &Window) -> bool {
     if !window.is_visible() {
         return false;
     }
@@ -189,7 +193,19 @@ fn shows_on_screen(window: &Window) -> bool {
     {
         return false;
     }
-    !on_other_desktop(&surface)
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    if let Some(x11_surface) = surface.downcast_ref::<gdk_x11::X11Surface>() {
+        let xid = u32::try_from(x11_surface.xid()).unwrap_or_default();
+        return match x11_stacking::visibility(xid) {
+            Some(Visibility::Hidden) => false,
+            Some(Visibility::Covered) => window.is_active(),
+            Some(Visibility::Uncovered) => true,
+            // Without the order of the windows
+            None => !on_other_desktop(&surface),
+        };
+    }
+    // On Wayland, apps aren't told which windows cover theirs
+    true
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -353,11 +369,9 @@ impl Application {
             }
             ApplicationAction::ToggleWindow(token) => {
                 // Playback goes on, as the tray is only shown while Dismas
-                // plays in the background. Whether the window has the focus
-                // doesn't matter: moving to the tray can give it to another
-                // window when the focus follows the pointer
+                // plays in the background
                 if let Some(window) = self.active_window().and_downcast::<Window>()
-                    && shows_on_screen(&window)
+                    && closes_on_click(&window)
                 {
                     window.close();
                 } else {

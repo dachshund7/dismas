@@ -35,6 +35,8 @@ mod volume_control;
 mod waveform_view;
 mod window;
 mod work_sections;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+mod x11_stacking;
 
 use std::env;
 

@@ -35,6 +35,7 @@ ashpd = { version = "0.13", default-features = false, features = [
 ] }
 gdk-x11 = { package = "gdk4-x11", version = "0.11" }
 ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
+x11rb = "0.14"
 
 [dependencies.adw]
 package = "libadwaita"
