@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     fmt::{self, Display, Formatter},
     rc::Rc,
 };
@@ -116,6 +116,9 @@ pub struct AudioPlayer {
     state: PlayerState,
     sleep_timer: SleepTimer,
     waveform_generator: WaveformGenerator,
+    // Whether the last track of the queue played to its end; playing
+    // again then starts over
+    finished: Cell<bool>,
 }
 
 impl fmt::Debug for AudioPlayer {
@@ -156,6 +159,7 @@ impl AudioPlayer {
             state,
             sleep_timer,
             waveform_generator,
+            finished: Cell::new(false),
         });
 
         res.clone().setup_channel();
@@ -238,6 +242,10 @@ impl AudioPlayer {
     }
 
     fn set_playback_state(&self, state: PlaybackState) {
+        if state == PlaybackState::Playing && self.finished.take() {
+            self.start_over();
+        }
+
         if let Some(current_track) = self.state.track() {
             debug!("Current track: {}", current_track.uri());
 
@@ -292,15 +300,36 @@ impl AudioPlayer {
             self.set_playback_state(PlaybackState::Paused);
         }
 
-        // At the end of the queue, the track stays, stopped at its start,
-        // rather than going back to the first one
+        // At the end of the queue, the track stays, at its end, until
+        // playing again starts over
         if self.state.track().is_some() && self.queue.peek_next_track().is_none() {
             self.set_playback_state(PlaybackState::Stopped);
-            self.update_position(0, true);
+            self.update_position(self.state.duration(), true);
+            self.finished.set(true);
             return;
         }
 
         self.skip_next();
+    }
+
+    // Goes on after the queue finished: to the track after the last one,
+    // if tracks were added or it repeats since, or else to the first one
+    fn start_over(&self) {
+        if self.queue.peek_next_track().is_some() {
+            self.skip_next();
+        } else if self.queue.current_track_index() != Some(0) {
+            self.skip_to(0);
+        } else {
+            self.update_position(0, true);
+        }
+    }
+
+    // The track and position to go on from in a later session
+    pub fn resume_point(&self) -> Option<(Track, u64)> {
+        if self.finished.get() {
+            return Some((self.queue.first_in_order()?, 0));
+        }
+        Some((self.state.track()?, self.state.position()))
     }
 
     // Follows the track that the backend went on to without a gap
@@ -331,6 +360,7 @@ impl AudioPlayer {
 
     // Shows the track as the one playing
     fn show_track(&self, track: Track) {
+        self.finished.set(false);
         for c in &self.controllers {
             c.set_track(&track);
         }
@@ -494,6 +524,7 @@ impl AudioPlayer {
     }
 
     fn seek(&self, offset: u64, direction: SeekDirection) {
+        self.finished.set(false);
         self.backend.seek(
             self.state.position(),
             self.state.duration(),
@@ -503,6 +534,7 @@ impl AudioPlayer {
     }
 
     pub fn seek_start(&self) {
+        self.finished.set(false);
         let position = self.state.position() + 1;
         self.backend.seek(
             position,
@@ -532,11 +564,13 @@ impl AudioPlayer {
     pub fn seek_position_rel(&self, position: f64) {
         let duration = self.state.duration() as f64;
         let pos = (duration * position).clamp(0.0, duration);
+        self.finished.set(false);
         self.backend.seek_position(pos as u64);
     }
 
     pub fn seek_position_abs(&self, position: u64) {
         let pos = u64::min(position, self.state.duration());
+        self.finished.set(false);
         self.backend.seek_position(pos);
     }
 
@@ -545,6 +579,10 @@ impl AudioPlayer {
     pub fn resume_at(&self, position: u64) {
         let duration = self.state.duration();
         let position = if duration > 0 && position >= duration {
+            // The queue finished in the last session, and starts over
+            if self.queue.peek_next_track().is_none() {
+                self.skip_to(0);
+            }
             0
         } else {
             position
@@ -639,6 +677,7 @@ impl AudioPlayer {
     }
 
     pub fn clear_queue(&self) {
+        self.finished.set(false);
         self.stop();
         self.state.set_current_track(None);
         self.queue.clear();

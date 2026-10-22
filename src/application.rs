@@ -247,8 +247,7 @@ impl Application {
         imp.resume_point_pending.set(false);
         imp.resume_point_saved.set(Instant::now());
 
-        let state = imp.player.state();
-        let Some(track) = state.track() else {
+        let Some((track, position)) = imp.player.resume_point() else {
             return;
         };
         let Some(index) = imp.player.queue().position_in_order(&track) else {
@@ -263,7 +262,7 @@ impl Application {
         let point = ResumePoint {
             uri: track.uri(),
             index,
-            position: state.position().try_into().unwrap_or(u32::MAX),
+            position: position.try_into().unwrap_or(u32::MAX),
         };
         ResumePoints::update(&imp.settings, |points| points.set(&playlist, point));
     }

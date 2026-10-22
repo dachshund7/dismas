@@ -87,6 +87,11 @@ impl Queue {
             .collect()
     }
 
+    // The first track in the order they were added, even when shuffled
+    pub fn first_in_order(&self) -> Option<Track> {
+        self.imp().store.item(0).and_downcast()
+    }
+
     pub fn track_at(&self, pos: u32) -> Option<Track> {
         self.imp().model.item(pos).and_downcast()
     }
