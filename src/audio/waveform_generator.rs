@@ -50,7 +50,13 @@ impl Controller for WaveformGenerator {
     fn set_playback_state(&self, _playback_state: PlaybackState) {}
 
     fn set_track(&self, track: &Track) {
-        self.imp().track.replace(Some(track.clone()));
+        // A track that repeats keeps its peaks, or the pipeline making them,
+        // which starts them empty
+        let imp = self.imp();
+        if imp.track.borrow().as_ref() == Some(track) && imp.peaks.borrow().is_some() {
+            return;
+        }
+        imp.track.replace(Some(track.clone()));
         self.load_peaks();
     }
 
