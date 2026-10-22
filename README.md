@@ -68,7 +68,7 @@ Keyboard shortcuts
 | Shortcut            | Action                        |
 |---------------------|-------------------------------|
 | Space               | Play / pause                  |
-| Ctrl+B / Ctrl+N     | Previous / next track         |
+| Ctrl+P / Ctrl+N     | Previous / next track         |
 | Ctrl+← / Ctrl+→     | Seek backward / forward       |
 | Ctrl+1 / 2 / 3      | Player / albums / playlists   |
 | Ctrl+F              | Search the queue              |

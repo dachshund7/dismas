@@ -96,7 +96,7 @@ mod imp {
             obj.set_accels_for_action("win.seek-forward", &["<primary>Right"]);
             obj.set_accels_for_action("win.volume-up", &["<primary>Up"]);
             obj.set_accels_for_action("win.volume-down", &["<primary>Down"]);
-            obj.set_accels_for_action("win.previous", &["<primary>b"]);
+            obj.set_accels_for_action("win.previous", &["<primary>p"]);
             obj.set_accels_for_action("win.next", &["<primary>n"]);
             obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
