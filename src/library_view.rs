@@ -625,6 +625,7 @@ impl LibraryView {
                 entry.set_text("");
             }
         ));
+        crate::utils::focus_on_clear(&imp.search_entry);
 
         imp.select_all_button.connect_clicked(clone!(
             #[weak(rename_to = this)]

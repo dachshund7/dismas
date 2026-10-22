@@ -74,6 +74,25 @@ pub fn wrap_tooltip(widget: &impl IsA<gtk::Widget>) {
     });
 }
 
+// Puts the cursor in a search entry when its clear icon is clicked. GTK
+// clears the text but leaves the focus where it was, e.g. on the player
+pub fn focus_on_clear(entry: &gtk::SearchEntry) {
+    let click = gtk::GestureClick::new();
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    click.connect_pressed(|gesture, _, x, y| {
+        let Some(entry) = gesture.widget() else {
+            return;
+        };
+        let on_icon = entry
+            .pick(x, y, gtk::PickFlags::DEFAULT)
+            .is_some_and(|w| w.is::<gtk::Image>());
+        if on_icon && !entry.state_flags().contains(gtk::StateFlags::FOCUS_WITHIN) {
+            entry.grab_focus();
+        }
+    });
+    entry.add_controller(click);
+}
+
 // A playlist name to put in a sentence, cut short with "…" if it's long,
 // e.g. in a title, where it would make several lines
 pub fn short_playlist_name(name: &str) -> String {

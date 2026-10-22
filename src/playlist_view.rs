@@ -211,6 +211,7 @@ impl PlaylistView {
     fn setup_searchbar(&self) {
         let entry = self.imp().queue_searchentry.get();
         self.imp().queue_searchbar.connect_entry(&entry);
+        crate::utils::focus_on_clear(&entry);
     }
 
     // The name of the selected playlist
