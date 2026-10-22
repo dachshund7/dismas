@@ -22,6 +22,9 @@ use crate::{
     },
 };
 
+// One step of the volume, by the slider, the keyboard or the tray
+pub const VOLUME_STEP: f64 = 0.05;
+
 #[derive(Clone, Debug)]
 pub enum PlaybackAction {
     Play,
@@ -32,6 +35,8 @@ pub enum PlaybackAction {
 
     UpdatePosition(u64, bool),
     VolumeChanged(f64),
+    // A number of volume steps, negative to lower it
+    StepVolume(i32),
     Repeat(RepeatMode),
     Seek(i64),
     SeekTo(u64),
@@ -239,6 +244,7 @@ impl AudioPlayer {
             PlaybackAction::SkipNext => self.skip_next(),
             PlaybackAction::UpdatePosition(pos, notify) => self.update_position(pos, notify),
             PlaybackAction::VolumeChanged(vol) => self.update_volume(vol),
+            PlaybackAction::StepVolume(steps) => self.step_volume(steps),
             PlaybackAction::PlayNext => self.play_next(),
             PlaybackAction::TrackAdvanced(generation, uri) => self.track_advanced(generation, &uri),
             PlaybackAction::SleepTimerExpired => self.sleep_timer_expired(),
@@ -659,6 +665,14 @@ impl AudioPlayer {
 
     pub fn set_volume(&self, volume: f64) {
         self.backend.set_volume(volume);
+    }
+
+    // Shown right away, so that quick steps add up before the backend
+    // reports the volume
+    fn step_volume(&self, steps: i32) {
+        let volume = (self.state.volume() + f64::from(steps) * VOLUME_STEP).clamp(0.0, 1.0);
+        self.state.set_volume(volume);
+        self.set_volume(volume);
     }
 
     pub fn toggle_repeat_mode(&self) {

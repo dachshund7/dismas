@@ -60,6 +60,18 @@ struct DismasTray {
     app_sender: Sender<ApplicationAction>,
     snapshot: Snapshot,
     labels: Labels,
+    // Whether the tray is Plasma's, which scrolls the other way
+    plasma: bool,
+    // Plasma's scrolling that doesn't make a step yet
+    scrolled: i32,
+}
+
+// Plasma sends the angle the wheel turned, as Qt gives it
+const PLASMA_NOTCH: i32 = 120;
+
+fn in_plasma() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .is_ok_and(|desktops| desktops.split(':').any(|desktop| desktop == "KDE"))
 }
 
 // On Wayland, a window only comes to the front with an activation token.
@@ -128,6 +140,27 @@ impl ksni::Tray for DismasTray {
     // A middle click
     fn secondary_activate(&mut self, _x: i32, _y: i32) {
         self.play_pause();
+    }
+
+    // One volume step per notch of the wheel. Trays disagree on the
+    // direction: Plasma sends the wheel's angle, up as positive, and a
+    // touchpad sends small parts of a notch; the others send a step at a
+    // time, down as positive, as GTK does (waybar, snixembed)
+    fn scroll(&mut self, delta: i32, orientation: ksni::Orientation) {
+        if orientation != ksni::Orientation::Vertical {
+            return;
+        }
+        let steps = if self.plasma {
+            self.scrolled += delta;
+            let steps = self.scrolled / PLASMA_NOTCH;
+            self.scrolled %= PLASMA_NOTCH;
+            steps
+        } else {
+            -delta.signum()
+        };
+        if steps != 0 {
+            self.send(PlaybackAction::StepVolume(steps));
+        }
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
@@ -212,6 +245,8 @@ impl Shared {
             app_sender: self.app_sender.clone(),
             snapshot: self.snapshot.borrow().clone(),
             labels: Labels::new(),
+            plasma: in_plasma(),
+            scrolled: 0,
         };
         glib::spawn_future_local(clone!(
             #[weak(rename_to = shared)]

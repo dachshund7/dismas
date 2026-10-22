@@ -8,6 +8,8 @@ use glib::clone;
 use gtk::{CompositeTemplate, glib, prelude::*};
 use log::debug;
 
+use crate::audio::VOLUME_STEP;
+
 mod imp {
     use glib::subclass::Signal;
     use std::sync::LazyLock;
@@ -129,7 +131,7 @@ impl VolumeControl {
         let adj = gtk::Adjustment::builder()
             .lower(0.0)
             .upper(1.0)
-            .step_increment(0.05)
+            .step_increment(VOLUME_STEP)
             .value(1.0)
             .build();
         self.imp().volume_scale.set_adjustment(&adj);

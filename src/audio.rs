@@ -67,6 +67,7 @@ mod youtube_description;
 
 pub use player::{
     AudioPlayer, PlaybackAction, PlaybackState, RepeatMode, ReplayGainMode, SeekDirection,
+    VOLUME_STEP,
 };
 pub use queue::Queue;
 pub use shuffle::ShuffleListModel;
