@@ -60,7 +60,7 @@ jobs:
           gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-bad-free-devel
           gstreamer1-plugins-good
           blueprint-compiler gettext glib2-devel sqlite-devel libseccomp-devel fontconfig-devel
-          desktop-file-utils appstream
+          desktop-file-utils appstream shared-mime-info
 
       - uses: actions/checkout@v7
 

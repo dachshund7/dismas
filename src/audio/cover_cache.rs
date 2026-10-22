@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
-use gtk::{gdk, glib};
+use gtk::{gdk, gio, glib};
 use lofty::prelude::TaggedFileExt;
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
@@ -132,65 +132,86 @@ impl CoverCache {
         slot
     }
 
-    pub fn load_cover_art(tag: &lofty::tag::Tag, path: Option<&Path>) -> Option<glib::Bytes> {
-        if let Some(picture) = tag.get_picture_type(lofty::picture::PictureType::CoverFront) {
-            debug!("Found CoverFront");
-            return Some(glib::Bytes::from(picture.data()));
-        }
+    // The cover of a track, scaled down to fit in `max_size`: the first of
+    // the pictures in its tags and the cover files in its folder that
+    // decodes, so that a broken or unsupported one doesn't hide the next
+    pub fn load_cover(
+        tag: &lofty::tag::Tag,
+        dir: Option<&Path>,
+        max_size: u32,
+    ) -> Option<CoverImage> {
+        use lofty::picture::PictureType;
+
+        let front = tag
+            .get_picture_type(PictureType::CoverFront)
+            .map(|picture| glib::Bytes::from(picture.data()));
         // If we don't have a CoverFront picture, we fall back to Other
         // and BandLogo types
-        for picture in tag.pictures() {
-            let cover_art = match picture.pic_type() {
-                lofty::picture::PictureType::Other => Some(glib::Bytes::from(picture.data())),
-                lofty::picture::PictureType::BandLogo => Some(glib::Bytes::from(picture.data())),
-                _ => None,
-            };
-
-            if cover_art.is_some() {
-                debug!("Found fallback");
-                return cover_art;
-            }
-        }
-
+        let fallbacks = tag
+            .pictures()
+            .iter()
+            .filter(|picture| {
+                matches!(
+                    picture.pic_type(),
+                    PictureType::Other | PictureType::BandLogo
+                )
+            })
+            .map(|picture| glib::Bytes::from(picture.data()));
         // We always favour the cover art in the track metadata because it's going
         // to be in a hot cache; looking for a separate file will blow a bunch of
         // caches out of the water, which will slow down loading the track into the
-        // queue model
-        if let Some(p) = path {
-            for cover_file in Self::cover_files(p) {
-                debug!("Looking for external cover file: {cover_file:?}");
+        // queue model. The files are only read if the pictures don't decode
+        let files = dir
+            .into_iter()
+            .flat_map(Self::cover_files)
+            .filter_map(|file| read_cover_file(&file));
 
-                let Ok(metadata) = std::fs::metadata(&cover_file) else {
-                    continue;
-                };
-                if !metadata.is_file() {
-                    continue;
-                }
-                if metadata.len() > MAX_COVER_FILE_SIZE {
-                    warn!("Skipping cover file {cover_file:?}, which is too large");
-                    continue;
-                }
-                match std::fs::read(&cover_file) {
-                    Ok(data) => {
-                        debug!("Loading cover from external cover file");
-                        return Some(glib::Bytes::from_owned(data));
-                    }
-                    Err(e) => warn!("Unable to read cover file {cover_file:?}: {e}"),
-                }
-            }
+        let cover = front
+            .into_iter()
+            .chain(fallbacks)
+            .chain(files)
+            .find_map(|data| CoverImage::decode(data, max_size));
+        if cover.is_none() {
+            debug!("No cover art");
         }
-
-        debug!("No cover art");
-
-        None
+        cover
     }
 
     // The files that can have the cover of the tracks in a folder, in the
-    // order they're looked for
+    // order they're looked for. The folder is read, as the case of their
+    // names varies, and any image type is taken, since glycin goes by the
+    // contents; the common types come first among files of the same name
     pub fn cover_files(dir: &Path) -> impl Iterator<Item = PathBuf> {
-        ["Cover", "cover", "Folder", "folder"]
+        const NAMES: [&str; 2] = ["cover", "folder"];
+
+        let mut files: Vec<(usize, u8, PathBuf)> = std::fs::read_dir(dir)
             .into_iter()
-            .flat_map(|name| ["jpg", "png"].map(|ext| dir.join(format!("{name}.{ext}"))))
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                let stem = path.file_stem()?.to_str()?;
+                let ext = path.extension()?.to_str()?;
+                let name_rank = NAMES
+                    .iter()
+                    .position(|name| stem.eq_ignore_ascii_case(name))?;
+                let (mime_type, _) = gio::content_type_guess(Some(&path), None);
+                if !mime_type.starts_with("image/") {
+                    return None;
+                }
+                let ext_rank =
+                    if ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg") {
+                        0
+                    } else if ext.eq_ignore_ascii_case("png") {
+                        1
+                    } else {
+                        2
+                    };
+                Some((name_rank, ext_rank, path))
+            })
+            .collect();
+        files.sort();
+        files.into_iter().map(|(_, _, path)| path)
     }
 
     // The cover of the album of a track, loaded the first time one of its
@@ -243,23 +264,21 @@ impl CoverCache {
         let slot = Self::global().lock().unwrap().slot(&uuid);
         slot.get_or_init(|| {
             debug!("Loading cover art for UUID: {uuid}");
-            Self::load_cover_art(tag, path.parent())
-                .and_then(|data| CoverImage::decode(data, COVER_SIZE))
-                .and_then(|image| {
-                    // The color palette we use for styling the UI; we want
-                    // both the texture and the palette
-                    let palette = image.palette()?;
-                    // Cache the cover, so that the MPRIS controller can
-                    // reference it later
-                    let cache = cache_cover_art(&uuid, &image);
-                    let row_texture = image.thumbnail(ROW_COVER_SIZE)?.into_texture();
-                    Some(CoverArt {
-                        texture: image.into_texture(),
-                        row_texture,
-                        palette,
-                        cache,
-                    })
+            Self::load_cover(tag, path.parent(), COVER_SIZE).and_then(|image| {
+                // The color palette we use for styling the UI; we want
+                // both the texture and the palette
+                let palette = image.palette()?;
+                // Cache the cover, so that the MPRIS controller can
+                // reference it later
+                let cache = cache_cover_art(&uuid, &image);
+                let row_texture = image.thumbnail(ROW_COVER_SIZE)?.into_texture();
+                Some(CoverArt {
+                    texture: image.into_texture(),
+                    row_texture,
+                    palette,
+                    cache,
                 })
+            })
         });
 
         AlbumCover { slot, uuid }
@@ -280,10 +299,30 @@ impl CoverCache {
         let tag = tagged_file
             .primary_tag()
             .or_else(|| tagged_file.first_tag())?;
-        let bytes = Self::load_cover_art(tag, path.parent())?;
-        let image = CoverImage::decode(bytes, FULL_COVER_SIZE)?;
+        let image = Self::load_cover(tag, path.parent(), FULL_COVER_SIZE)?;
 
         Some(image.into_texture())
+    }
+}
+
+// Reads a cover file next to the tracks, unless it's too large
+fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
+    debug!("Looking for external cover file: {file:?}");
+
+    let metadata = std::fs::metadata(file).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    if metadata.len() > MAX_COVER_FILE_SIZE {
+        warn!("Skipping cover file {file:?}, which is too large");
+        return None;
+    }
+    match std::fs::read(file) {
+        Ok(data) => Some(glib::Bytes::from_owned(data)),
+        Err(e) => {
+            warn!("Unable to read cover file {file:?}: {e}");
+            None
+        }
     }
 }
 
@@ -352,7 +391,7 @@ fn write_cover_file(dir: &Path, uuid: &str, png: &[u8]) -> Result<PathBuf, glib:
 mod tests {
     use std::sync::Arc;
 
-    use gtk::glib;
+    use gtk::{glib, prelude::*};
 
     use super::{CoverCache, write_cover_file};
 
@@ -382,6 +421,46 @@ mod tests {
             files(),
             [second_name, "other-0123456789abcdef.png".to_string()]
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cover_files_match_any_case_and_image_type() {
+        let dir = glib::mkdtemp("dismas-cover-files-XXXXXX").unwrap();
+        for name in [
+            "Folder.JPEG",
+            "COVER.png",
+            "cover.JPG",
+            "cover.webp",
+            "cover.txt",
+            "back.jpg",
+            "notes.txt",
+        ] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+
+        let names: Vec<String> = CoverCache::cover_files(&dir)
+            .map(|path| path.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            ["cover.JPG", "COVER.png", "cover.webp", "Folder.JPEG"]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn undecodable_cover_files_fall_through() {
+        let dir = glib::mkdtemp("dismas-cover-files-XXXXXX").unwrap();
+        std::fs::write(dir.join("cover.bmp"), b"not an image").unwrap();
+        image::RgbImage::from_pixel(8, 4, image::Rgb([255, 0, 0]))
+            .save(dir.join("folder.png"))
+            .unwrap();
+
+        let tag = lofty::tag::Tag::new(lofty::tag::TagType::Id3v2);
+        let cover = CoverCache::load_cover(&tag, Some(&dir), 384).unwrap();
+        let texture = cover.into_texture();
+        assert_eq!((texture.width(), texture.height()), (8, 4));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

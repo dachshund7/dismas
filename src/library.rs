@@ -13,7 +13,7 @@ mod album;
 
 use std::{
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     time::{Instant, UNIX_EPOCH},
 };
@@ -37,7 +37,6 @@ use crate::{
         CoverCache, ExtraComments, normalize_search_text, plain_commas, read_tagged_file,
         tag_search_text,
     },
-    cover_image::CoverImage,
     i18n::i18n,
     utils,
 };
@@ -545,6 +544,7 @@ fn change_time(metadata: &std::fs::Metadata) -> i64 {
 fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusqlite::Result<()> {
     let dir = covers_dir();
     let mut missing = Vec::new();
+    let mut cover_times = HashMap::new();
     {
         let mut stmt = conn.prepare(
             "SELECT t.album_id, MIN(t.path), c.album_id, c.path
@@ -572,11 +572,18 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
             let made = cover.map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
             let removed = matches!(made, Some(None));
             // A cover file next to the tracks can change without them: it's
-            // newer than the thumbnail, or the album had no cover before
+            // newer than the thumbnail, or the album had no cover before. The
+            // folder is read once, as albums can share one
+            let mut cover_time = || {
+                let dir = first_track.parent()?;
+                *cover_times
+                    .entry(dir.to_path_buf())
+                    .or_insert_with(|| cover_file_time(dir))
+            };
             let cover_file_changed = match made {
-                Some(Some(made)) => cover_file_time(&first_track).is_some_and(|t| t > made),
+                Some(Some(made)) => cover_time().is_some_and(|t| t > made),
                 Some(None) => false,
-                None => cover_file_time(&first_track).is_some(),
+                None => cover_time().is_some(),
             };
             if !has_row || outdated || removed || cover_file_changed || stale_albums.contains(&id) {
                 missing.push((id, first_track));
@@ -639,11 +646,11 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     Ok(())
 }
 
-// When the newest cover file in the folder of a track was changed, if it
+// When the newest cover file in a folder of tracks was changed, if it
 // has any; the thumbnail is made from the first track of the album, which
 // takes its cover from these files when its tags have none
-fn cover_file_time(track: &Path) -> Option<std::time::SystemTime> {
-    CoverCache::cover_files(track.parent()?)
+fn cover_file_time(dir: &Path) -> Option<std::time::SystemTime> {
+    CoverCache::cover_files(dir)
         .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
         .max()
 }
@@ -662,11 +669,9 @@ fn create_thumbnail(track: &Path, dest: &Path) -> bool {
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
 
-    let bytes = match tag {
-        Some(tag) => CoverCache::load_cover_art(tag, track.parent()),
-        None => None,
-    };
-    let Some(image) = bytes.and_then(|b| CoverImage::decode(b, THUMBNAIL_SIZE)) else {
+    let Some(image) =
+        tag.and_then(|tag| CoverCache::load_cover(tag, track.parent(), THUMBNAIL_SIZE))
+    else {
         return false;
     };
 
