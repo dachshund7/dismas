@@ -187,6 +187,18 @@ queuerow.drop-below {
   box-shadow: 0 2px var(--accent-bg-color);
 }
 
+/* Above the first row, the line would be out of the list, which clips it,
+ * so it's inside the row, like on the header of a work at the top */
+queuerow.drop-above.first {
+  box-shadow: inset 0 2px var(--accent-bg-color);
+}
+
+/* Files dragged over the pane go where the line shows, or at the end
+ * where the pane has the outline of the theme's drop targets */
+.playlist-pane.drop-at-end {
+  box-shadow: inset 0 0 0 1px var(--accent-bg-color);
+}
+
 /* A track dropped on the header of a work at the top of the queue goes
  * above it */
 listview.track-list > header box.drop-above {

@@ -440,7 +440,7 @@ impl Window {
             .collect()
     }
 
-    fn mapped_queue_rows(&self) -> Vec<SlideBin> {
+    pub(super) fn mapped_queue_rows(&self) -> Vec<SlideBin> {
         self.imp()
             .queue_rows
             .borrow()

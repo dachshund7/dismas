@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: 2022  Maximiliano Sandoval R <msandova@gnome.org>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use gtk::{gdk, glib, prelude::*, subclass::prelude::*};
+// The zones shown over the window while files are dragged over it: the
+// larger one adds the files, and the one below it plays them. The window
+// has the drop target, and tells the overlay where to show the zones, as
+// files dragged over the playlist pane go in between its tracks instead
+
+use gtk::{glib, graphene, prelude::*, subclass::prelude::*};
 
 mod imp {
     use std::cell::RefCell;
@@ -20,6 +25,7 @@ mod imp {
         )]
         pub overlay: gtk::Overlay,
         pub revealer: gtk::Revealer,
+        pub zones: gtk::Box,
         #[property(
             name = "title",
             get = |imp: &Self| imp.status.title(),
@@ -36,9 +42,8 @@ mod imp {
             type = glib::GString,
         )]
         pub play_status: adw::StatusPage,
-        #[property(get, set = Self::set_drop_target, explicit_notify, nullable)]
-        pub drop_target: RefCell<Option<gtk::DropTarget>>,
-        pub handler_ids: RefCell<Vec<glib::SignalHandlerId>>,
+        // The widget blurred under the zones
+        pub blurred: RefCell<Option<gtk::Widget>>,
     }
 
     #[glib::object_subclass]
@@ -76,73 +81,35 @@ mod imp {
             self.play_status.add_css_class("drop-zone");
             self.play_status.add_css_class("compact");
 
-            let zones = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            zones.add_css_class("drop-zones");
-            zones.append(&self.status);
-            zones.append(&self.play_status);
-            self.revealer.set_child(Some(&zones));
+            self.zones.set_orientation(gtk::Orientation::Vertical);
+            self.zones.add_css_class("drop-zones");
+            self.zones.append(&self.status);
+            self.zones.append(&self.play_status);
+            self.revealer.set_child(Some(&self.zones));
         }
 
         fn dispose(&self) {
             self.overlay.unparent();
         }
     }
+
+    impl WidgetImpl for DragOverlay {}
+
     impl DragOverlay {
-        fn set_drop_target(&self, drop_target: Option<gtk::DropTarget>) {
-            let obj = self.obj();
-
-            if let Some(target) = self.drop_target.take() {
-                obj.remove_controller(&target);
-
-                for handler_id in self.handler_ids.take() {
-                    target.disconnect(handler_id);
-                }
+        pub(super) fn set_blurred(&self, widget: Option<&gtk::Widget>) {
+            if self.blurred.borrow().as_ref() == widget {
+                return;
             }
-
-            if let Some(ref drop_target) = drop_target {
-                let handler_id = drop_target.connect_current_drop_notify(glib::clone!(
-                    #[weak(rename_to = revealer)]
-                    self.revealer,
-                    #[weak(rename_to = overlay)]
-                    self.overlay,
-                    #[weak(rename_to = obj)]
-                    obj,
-                    move |target| {
-                        let reveal = target.current_drop().is_some();
-                        revealer.set_reveal_child(reveal);
-                        if reveal {
-                            overlay.child().unwrap().add_css_class("blurred");
-                        } else {
-                            overlay.child().unwrap().remove_css_class("blurred");
-                            obj.imp().highlight_zone(None);
-                        }
-                    }
-                ));
-                // The zone under the pointer is the one the tracks go to
-                let highlight = glib::clone!(
-                    #[weak(rename_to = obj)]
-                    obj,
-                    #[upgrade_or]
-                    gdk::DragAction::empty(),
-                    move |_: &gtk::DropTarget, x: f64, y: f64| {
-                        obj.imp().highlight_zone(Some(obj.in_play_zone(x, y)));
-                        gdk::DragAction::COPY
-                    }
-                );
-                let enter_id = drop_target.connect_enter(highlight.clone());
-                let motion_id = drop_target.connect_motion(highlight);
-                self.handler_ids
-                    .replace(vec![handler_id, enter_id, motion_id]);
-
-                obj.add_controller(drop_target.clone());
+            if let Some(old) = self.blurred.replace(widget.cloned()) {
+                old.remove_css_class("blurred");
             }
-
-            self.drop_target.replace(drop_target);
-            obj.notify_drop_target();
+            if let Some(widget) = widget {
+                widget.add_css_class("blurred");
+            }
         }
 
         // With `None`, neither is, when nothing is dragged over them
-        fn highlight_zone(&self, play: Option<bool>) {
+        pub(super) fn highlight_zone(&self, play: Option<bool>) {
             for (zone, is_play) in [(&self.status, false), (&self.play_status, true)] {
                 if play == Some(is_play) {
                     zone.add_css_class("active");
@@ -152,8 +119,6 @@ mod imp {
             }
         }
     }
-
-    impl WidgetImpl for DragOverlay {}
 }
 
 glib::wrapper! {
@@ -173,6 +138,31 @@ impl DragOverlay {
         Self::default()
     }
 
+    // Shows the zones across the overlay from `left` to `right`, over the
+    // widget that is blurred, and highlights the one under a point; both
+    // are relative to the overlay
+    pub fn show_zones(&self, left: f32, right: f32, blurred: &gtk::Widget, x: f64, y: f64) {
+        let imp = self.imp();
+        let margin_start = left.round() as i32;
+        let margin_end = (self.width() - right.round() as i32).max(0);
+        if imp.zones.margin_start() != margin_start {
+            imp.zones.set_margin_start(margin_start);
+        }
+        if imp.zones.margin_end() != margin_end {
+            imp.zones.set_margin_end(margin_end);
+        }
+        imp.set_blurred(Some(blurred));
+        imp.revealer.set_reveal_child(true);
+        imp.highlight_zone(Some(self.in_play_zone(x, y)));
+    }
+
+    pub fn hide_zones(&self) {
+        let imp = self.imp();
+        imp.revealer.set_reveal_child(false);
+        imp.set_blurred(None);
+        imp.highlight_zone(None);
+    }
+
     // Whether a point, relative to the overlay, is in the zone that plays
     // the tracks; before the zones are first shown, they have no bounds
     // yet, and the tracks are added
@@ -180,8 +170,6 @@ impl DragOverlay {
         self.imp()
             .play_status
             .compute_bounds(self)
-            .is_some_and(|bounds| {
-                bounds.contains_point(&gtk::graphene::Point::new(x as f32, y as f32))
-            })
+            .is_some_and(|bounds| bounds.contains_point(&graphene::Point::new(x as f32, y as f32)))
     }
 }

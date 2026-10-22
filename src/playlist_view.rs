@@ -151,7 +151,8 @@ impl PlaylistView {
 
     // The list isn't told that the drag left it when the track is dropped,
     // so the scrolling also stops when the drag ends; tracks are only
-    // dragged within Dismas, so the drag is known
+    // dragged within Dismas, so the drag is known. The drag of files from
+    // another app isn't, and the window's drop target stops it instead
     fn watch_drag_end(&self, motion: &gtk::DropControllerMotion) {
         let Some(drag) = motion.drop().and_then(|drop| drop.drag()) else {
             return;
@@ -178,6 +179,11 @@ impl PlaylistView {
             move |_| stop()
         ));
         drag.connect_cancel(move |_, _| stop());
+    }
+
+    // For drags from other apps, whose end isn't known
+    pub fn stop_autoscroll(&self) {
+        self.set_autoscroll_speed(0.0);
     }
 
     fn set_autoscroll_speed(&self, speed: f64) {

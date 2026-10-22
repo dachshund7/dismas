@@ -528,7 +528,7 @@ impl QueueRow {
     // between the movement and the header with the name of the work, but
     // tracks that are not part of the work go above the header; tracks go
     // there by being dropped below the row before the header instead
-    fn drop_position(&self, y: f64) -> Option<bool> {
+    pub fn drop_position(&self, y: f64) -> Option<bool> {
         if !self.reorderable() {
             return None;
         }
@@ -562,6 +562,11 @@ impl QueueRow {
         self.show_drop_position(None);
     }
 
+    // Shows the line where files dragged over the pane would go
+    pub fn show_drop_line(&self, above: bool) {
+        self.show_drop_position(Some(above));
+    }
+
     // The modifier clicks the row claims don't reach the list, which moves
     // the focus to the row clicked; so that Ctrl+A goes to the queue after
     // them. The focus goes to the list's item holding the row, the first
@@ -579,6 +584,29 @@ impl QueueRow {
             }
             widget = w.parent();
         }
+    }
+
+    // Where the row is in its list
+    pub fn position(&self) -> Option<u32> {
+        self.imp().list_item.upgrade().map(|item| item.position())
+    }
+
+    // The header with the name of the work the row starts, if it's laid out
+    pub fn work_header(&self) -> Option<gtk::Widget> {
+        if !self.starts_work() {
+            return None;
+        }
+        let view = self.ancestor(gtk::ListView::static_type())?;
+        // The child of the list holding the row
+        let mut item = self.clone().upcast::<gtk::Widget>();
+        while let Some(parent) = item.parent()
+            && parent != view
+        {
+            item = parent;
+        }
+        let view = view.downcast::<gtk::ListView>().ok()?;
+        let top = item.compute_bounds(&view)?.y();
+        header_above(&view, top).map(|(header, _)| header)
     }
 
     // Whether the row is the first movement of a work, under its header
@@ -600,9 +628,13 @@ impl QueueRow {
 
     // A line above or below the row, where a dragged track would go
     fn show_drop_position(&self, above: Option<bool>) {
+        // The line above the first row would be out of the list, which
+        // clips it, so it's on the row instead
+        let first = above == Some(true) && self.position() == Some(0);
         for (class, shown) in [
             ("drop-above", above == Some(true)),
             ("drop-below", above == Some(false)),
+            ("first", first),
         ] {
             if shown {
                 self.add_css_class(class);
@@ -858,7 +890,7 @@ fn track_bounds(view: &gtk::ListView, track: &Track) -> Option<graphene::Rect> {
     if !row.starts_work() {
         return Some(bounds);
     }
-    if let Some(header) = item
+    if let Some((_, header)) = item
         .compute_bounds(view)
         .and_then(|item| header_above(view, item.y()))
     {
@@ -876,8 +908,9 @@ fn track_bounds(view: &gtk::ListView, track: &Track) -> Option<graphene::Rect> {
     Some(bounds)
 }
 
-// The header of a section ending where a row starts, if it's laid out
-fn header_above(view: &gtk::ListView, top: f32) -> Option<graphene::Rect> {
+// The header of a section ending where a row starts, if it's laid out,
+// and where it is
+fn header_above(view: &gtk::ListView, top: f32) -> Option<(gtk::Widget, graphene::Rect)> {
     let mut child = view.first_child();
     while let Some(widget) = child {
         if widget.type_().name() == "GtkListHeaderWidget"
@@ -885,7 +918,7 @@ fn header_above(view: &gtk::ListView, top: f32) -> Option<graphene::Rect> {
             && bounds.height() > 0.0
             && (bounds.y() + bounds.height() - top).abs() < 1.0
         {
-            return Some(bounds);
+            return Some((widget, bounds));
         }
         child = widget.next_sibling();
     }

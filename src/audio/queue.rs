@@ -162,6 +162,19 @@ impl Queue {
         self.notify_n_tracks();
     }
 
+    // Inserts tracks before another one, in the order they were added, or
+    // at the end if it's not there anymore; the current track stays
+    pub fn insert_tracks(&self, tracks: &[Track], before: Option<&Track>) {
+        let Some(pos) = before.and_then(|before| self.position_in_order(before)) else {
+            self.add_tracks(tracks);
+            return;
+        };
+        let current = self.current();
+        self.imp().store.splice(pos, 0, tracks);
+        self.notify_n_tracks();
+        self.update_current_pos(current);
+    }
+
     pub fn remove_track(&self, track: &Track) {
         let n_tracks = self.n_tracks();
         let current = self.current();
@@ -397,6 +410,7 @@ impl Queue {
 mod tests {
     use super::*;
     use crate::audio::track::TrackData;
+    use std::{cell::RefCell, rc::Rc};
 
     fn queue_of(n: usize) -> (Queue, Vec<Track>) {
         let queue = Queue::default();
@@ -412,6 +426,55 @@ mod tests {
                 tracks.iter().position(|t| *t == track).unwrap()
             })
             .collect()
+    }
+
+    #[test]
+    fn insert_tracks_before_a_track_or_at_the_end() {
+        let (queue, mut t) = queue_of(3);
+        let new: Vec<Track> = (0..2).map(|_| Track::new(TrackData::default())).collect();
+        t.extend(new.iter().cloned());
+
+        queue.insert_tracks(&new[..1], Some(&t[1]));
+        assert_eq!(order(&queue, &t), [0, 3, 1, 2]);
+
+        queue.insert_tracks(&new[1..], None);
+        assert_eq!(order(&queue, &t), [0, 3, 1, 2, 4]);
+    }
+
+    #[test]
+    fn insert_tracks_keeps_the_current_track() {
+        let (queue, t) = queue_of(3);
+        queue.set_current_track(Some(t[1].clone()));
+        let new: Vec<Track> = (0..2).map(|_| Track::new(TrackData::default())).collect();
+
+        queue.insert_tracks(&new, Some(&t[0]));
+        assert_eq!(queue.current(), Some(t[1].clone()));
+        assert_eq!(queue.current_track_index(), Some(3));
+    }
+
+    #[test]
+    fn insert_tracks_before_a_removed_track_goes_at_the_end() {
+        let (queue, mut t) = queue_of(3);
+        queue.remove_track(&t[1]);
+        let new = Track::new(TrackData::default());
+        t.push(new.clone());
+
+        queue.insert_tracks(std::slice::from_ref(&new), Some(&t[1]));
+        assert_eq!(order(&queue, &t), [0, 2, 3]);
+    }
+
+    #[test]
+    fn insert_tracks_is_one_change() {
+        let (queue, t) = queue_of(3);
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        queue.model().connect_items_changed({
+            let changes = changes.clone();
+            move |_, position, removed, added| changes.borrow_mut().push((position, removed, added))
+        });
+        let new: Vec<Track> = (0..2).map(|_| Track::new(TrackData::default())).collect();
+
+        queue.insert_tracks(&new, Some(&t[1]));
+        assert_eq!(*changes.borrow(), [(1, 0, 2)]);
     }
 
     #[test]

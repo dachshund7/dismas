@@ -112,6 +112,8 @@ mod imp {
         #[template_child]
         pub album_tracks: TemplateChild<AlbumTracks>,
         #[template_child]
+        pub playlist_pane: TemplateChild<gtk::Box>,
+        #[template_child]
         pub sidebar_handle: TemplateChild<gtk::Box>,
         #[template_child]
         pub narrow_breakpoint: TemplateChild<adw::Breakpoint>,
@@ -176,6 +178,11 @@ mod imp {
         // The rows of the queue, to slide them to their new places when
         // tracks are moved
         pub queue_rows: RefCell<Vec<glib::WeakRef<SlideBin>>>,
+        // The row showing where files dragged over the pane would go
+        pub file_drop_row: glib::WeakRef<QueueRow>,
+        // The header of the work at the top of the queue, when files would
+        // go above it
+        pub file_drop_header: glib::WeakRef<gtk::Widget>,
 
         pub notify_playing_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_position_id: RefCell<Option<glib::SignalHandlerId>>,
@@ -393,6 +400,7 @@ mod imp {
                 playlists_page: TemplateChild::default(),
                 sidebar_stack: TemplateChild::default(),
                 album_tracks: TemplateChild::default(),
+                playlist_pane: TemplateChild::default(),
                 sidebar_handle: TemplateChild::default(),
                 narrow_breakpoint: TemplateChild::default(),
                 queue_shuffled: Cell::new(false),
@@ -402,6 +410,8 @@ mod imp {
                 queue_search: Cell::new(false),
                 queue_filtermodel: RefCell::default(),
                 queue_rows: RefCell::default(),
+                file_drop_row: glib::WeakRef::new(),
+                file_drop_header: glib::WeakRef::new(),
                 replaygain_mode: Cell::new(ReplayGainMode::default()),
                 enable_recoloring: Cell::new(true),
                 sidebar_width: Cell::new(0),
@@ -706,6 +716,8 @@ impl Window {
         win.setup_playlist();
         win.setup_sidebar_handle();
         win.setup_drop_target();
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        win.setup_x11_drop_shape();
         win.setup_select_all_shortcut();
         win.setup_key_shortcuts();
         win.setup_track_info_button();
