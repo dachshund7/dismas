@@ -11,4 +11,6 @@ pub trait Controller {
     fn update_track(&self, _track: &Track) {}
     fn set_position(&self, position: u64, notify: bool);
     fn set_repeat_mode(&self, repeat: RepeatMode);
+    // Whether a track comes after the current one
+    fn set_can_go_next(&self, _can_go_next: bool) {}
 }

@@ -159,42 +159,44 @@ impl AudioPlayer {
         });
 
         res.clone().setup_channel();
-        res.setup_next_uri();
+        res.setup_next_track();
 
         res
     }
 
-    // Tells the backend the next track whenever it could change
-    fn setup_next_uri(self: &Rc<Self>) {
+    // Tells the backend and the controllers about the next track whenever
+    // it could change
+    fn setup_next_track(self: &Rc<Self>) {
         self.queue.model().connect_items_changed(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_, _, _, _| this.update_next_uri()
+            move |_, _, _, _| this.update_next_track()
         ));
         self.queue.connect_current_notify(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.update_next_uri()
+            move |_| this.update_next_track()
         ));
         self.queue.connect_repeat_mode_notify(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.update_next_uri()
+            move |_| this.update_next_track()
         ));
         self.sleep_timer.connect_finishing_track_notify(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.update_next_uri()
+            move |_| this.update_next_track()
         ));
     }
 
     // The music stops at the end of the track for the sleep timer
-    fn update_next_uri(&self) {
-        let next_track = if self.sleep_timer.finishing_track() {
-            None
-        } else {
-            self.queue.peek_next_track()
-        };
+    fn update_next_track(&self) {
+        let next_track = self.queue.peek_next_track();
+        for c in &self.controllers {
+            c.set_can_go_next(next_track.is_some());
+        }
+
+        let next_track = next_track.filter(|_| !self.sleep_timer.finishing_track());
         self.backend
             .set_next_uri(next_track.map(|t| t.uri()).as_deref());
     }

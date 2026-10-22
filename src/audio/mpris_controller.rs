@@ -27,6 +27,7 @@ struct Shared {
     playback_status: Cell<PlaybackStatus>,
     loop_status: Cell<LoopStatus>,
     can_play: Cell<bool>,
+    can_go_next: Cell<bool>,
     position: Cell<Time>,
 }
 
@@ -50,6 +51,15 @@ impl Shared {
         }
         if let Err(err) = player.set_playback_status(self.playback_status.get()).await {
             error!("Unable to set MPRIS playback status: {err:?}");
+        }
+    }
+
+    async fn publish_can_go_next(&self) {
+        let Some(player) = self.player.get() else {
+            return;
+        };
+        if let Err(err) = player.set_can_go_next(self.can_go_next.get()).await {
+            error!("Unable to set MPRIS next capability: {err:?}");
         }
     }
 
@@ -78,7 +88,7 @@ impl MprisController {
             .can_play(false)
             .can_pause(true)
             .can_seek(true)
-            .can_go_next(true)
+            .can_go_next(false)
             .can_go_previous(true)
             .can_set_fullscreen(false);
 
@@ -88,6 +98,7 @@ impl MprisController {
             playback_status: Cell::new(PlaybackStatus::Stopped),
             loop_status: Cell::new(LoopStatus::None),
             can_play: Cell::new(false),
+            can_go_next: Cell::new(false),
             position: Cell::new(Time::ZERO),
         });
 
@@ -115,6 +126,7 @@ impl MprisController {
                                 shared.publish_metadata().await;
                                 shared.publish_playback_status().await;
                                 shared.publish_loop_status().await;
+                                shared.publish_can_go_next().await;
                             }
                         ));
 
@@ -230,6 +242,19 @@ impl Controller for MprisController {
                 }
             ));
         }
+    }
+
+    fn set_can_go_next(&self, can_go_next: bool) {
+        // The queue changes often, e.g. while tracks are added
+        if self.shared.can_go_next.replace(can_go_next) == can_go_next {
+            return;
+        }
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_can_go_next().await }
+        ));
     }
 
     fn set_repeat_mode(&self, repeat: RepeatMode) {
