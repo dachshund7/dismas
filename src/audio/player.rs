@@ -290,6 +290,14 @@ impl AudioPlayer {
             self.set_playback_state(PlaybackState::Paused);
         }
 
+        // At the end of the queue, the track stays, stopped at its start,
+        // rather than going back to the first one
+        if self.state.track().is_some() && self.queue.peek_next_track().is_none() {
+            self.set_playback_state(PlaybackState::Stopped);
+            self.update_position(0, true);
+            return;
+        }
+
         self.skip_next();
     }
 
@@ -409,6 +417,11 @@ impl AudioPlayer {
     }
 
     pub fn skip_next(&self) {
+        // Nothing follows the last track, as the Next button is off there;
+        // media keys get here too
+        if self.state.track().is_some() && self.queue.peek_next_track().is_none() {
+            return;
+        }
         self.play_next_track(Queue::next_track);
     }
 
