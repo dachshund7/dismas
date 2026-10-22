@@ -3,18 +3,22 @@
 
 // Gapless playback goes around GstPlay, to the playbin it wraps: GstPlay
 // only loads a track by stopping the pipeline first. When the track is
-// about to finish, the next one is handed to playbin, which plays it
-// right after, and the player follows once it starts. Without a next
-// track, the track ends, and the player loads the next one itself.
+// about to finish, the next one is handed to playbin, which plays it right
+// after, and the player follows once it starts. Without a next track, the
+// track ends, and the player loads the next one itself.
 //
-// GstPlay loads tracks and stops on its own thread, after these calls
-// return, so a track handed over meanwhile is forgotten once it says the
-// new one is loaded. Stopping loads the track again, as playbin would
-// otherwise keep the one that was handed over
+// GstPlay changes the state of the pipeline on its own thread, which can
+// wait for the streaming thread the track is handed over from while that
+// one waits for it, so a track is only handed over while the pipeline
+// doesn't change state. GstPlay also loads tracks on its thread, after
+// these calls return, so none is handed over until it says each track is
+// loaded. Stopping loads the track again, as playbin would otherwise keep
+// the one that was handed over
 
 use std::{
     cell::Cell,
     sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant},
 };
 
 use async_channel::Sender;
@@ -25,6 +29,9 @@ use log::{debug, error, warn};
 
 use crate::audio::{PlaybackAction, ReplayGainMode, SeekDirection};
 
+// How long after loading a track the next one can be handed over
+const HAND_OVER_AFTER_LOAD: Duration = Duration::from_millis(500);
+
 #[derive(Debug, Default)]
 struct Gapless {
     // The track after the one the player shows
@@ -34,13 +41,40 @@ struct Gapless {
     handed: Option<String>,
     // Whether the handed track started playing
     started: bool,
-    // Whether GstPlay is yet to load a track
-    loading: bool,
+    // The tracks GstPlay is yet to load; each says when it's loaded
+    pending_loads: u32,
+    // When the player last loaded a track
+    loaded_at: Option<Instant>,
     // The track the pipeline plays
     current_uri: Option<String>,
     // Changes whenever the player loads a track itself, so it can tell
     // the tracks that started before
     generation: u64,
+}
+
+// The state lock of an element, held unless someone else holds it
+struct StateLock(gst::Element);
+
+impl StateLock {
+    fn try_lock(element: &gst::Element) -> Option<Self> {
+        // SAFETY: the lock is part of the element, which outlives the guard
+        let locked = unsafe {
+            let element_ptr = element.as_ptr();
+            gst::glib::ffi::g_rec_mutex_trylock(&raw mut (*element_ptr).state_lock)
+                != gst::glib::ffi::GFALSE
+        };
+        locked.then(|| Self(element.clone()))
+    }
+}
+
+impl Drop for StateLock {
+    fn drop(&mut self) {
+        // SAFETY: locked in try_lock, on this thread
+        unsafe {
+            let element_ptr = self.0.as_ptr();
+            gst::glib::ffi::g_rec_mutex_unlock(&raw mut (*element_ptr).state_lock);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -166,29 +200,37 @@ impl GstBackend {
         // From a streaming thread
         let gapless = self.gapless.clone();
         pipeline.connect("about-to-finish", false, move |args| {
+            let playbin = args[0].get::<gst::Element>().unwrap();
+            // Until the track is handed over, the pipeline can't change state
+            let Some(_state_lock) = StateLock::try_lock(&playbin) else {
+                debug!("Not handing over the next track while the pipeline changes state");
+                return None;
+            };
             let next_uri = {
-                let gapless = gapless.lock().unwrap();
-                if gapless.loading || gapless.handed.is_some() {
+                let mut gapless = gapless.lock().unwrap();
+                if gapless.pending_loads > 0 || gapless.handed.is_some() {
                     return None;
                 }
-                gapless.next_uri.clone()?
-            };
+                // Loading a track right after one is handed over can leave
+                // GstPlay waiting forever, and tracks are loaded one after
+                // the other while skipping
+                if gapless
+                    .loaded_at
+                    .is_some_and(|at| at.elapsed() < HAND_OVER_AFTER_LOAD)
+                {
+                    return None;
+                }
+                let next_uri = gapless.next_uri.clone()?;
 
-            // A missing track would stop the pipeline before this one ends
-            if !gio::File::for_uri(&next_uri).query_exists(gio::Cancellable::NONE) {
-                return None;
-            }
-
-            {
-                let mut gapless = gapless.lock().unwrap();
-                if gapless.loading || gapless.handed.is_some() {
+                // A missing track would stop the pipeline before this one ends
+                if !gio::File::for_uri(&next_uri).query_exists(gio::Cancellable::NONE) {
                     return None;
                 }
                 gapless.handed = Some(next_uri.clone());
-            }
+                next_uri
+            };
 
             debug!("Handing over the next track: {next_uri}");
-            let playbin = args[0].get::<gst::Element>().unwrap();
             playbin.set_property("uri", &next_uri);
             None
         });
@@ -234,7 +276,7 @@ impl GstBackend {
                         let mut gapless = gapless.lock().unwrap();
                         gapless.handed = None;
                         gapless.started = false;
-                        gapless.loading = false;
+                        gapless.pending_loads = gapless.pending_loads.saturating_sub(1);
                     }
                     gst_play::PlayMessage::Error(message) => {
                         error!("GStreamer error: {}", message.error());
@@ -282,7 +324,8 @@ impl GstBackend {
             gapless.generation += 1;
             gapless.handed = None;
             gapless.started = false;
-            gapless.loading = true;
+            gapless.pending_loads += 1;
+            gapless.loaded_at = Some(Instant::now());
             gapless.current_uri = uri.map(str::to_owned);
         }
         self.gst_player.set_uri(uri);
