@@ -905,10 +905,16 @@ fn center_bounds(view: &gtk::ListView, bounds: &graphene::Rect) -> bool {
 }
 
 // The row showing a track in a list, if it has one, and the child of the
-// list holding it
+// list holding it. The list keeps some rows out of its view, e.g. the one
+// of the item it tracks, hidden where they last were, which isn't where
+// they are now
 fn track_item(view: &gtk::ListView, track: &Track) -> Option<(gtk::Widget, QueueRow)> {
     let mut child = view.first_child();
     while let Some(widget) = child {
+        if !widget.is_child_visible() {
+            child = widget.next_sibling();
+            continue;
+        }
         // The rows of the queue are in a SlideBin
         let row = widget.first_child().and_then(|child| {
             child
