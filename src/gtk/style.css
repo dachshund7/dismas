@@ -216,10 +216,19 @@ dragoverlay {
   box-shadow: none;
 }
 
-.drag-overlay-status-page {
-  background-color: color-mix(in srgb, var(--accent-bg-color) 50%, transparent);
+.drop-zones {
+  border-spacing: 6px;
+}
+
+.drop-zone {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 30%, transparent);
   color: var(--accent-fg-color);
   padding: 32px;
+  transition: background-color 150ms ease;
+}
+
+.drop-zone.active {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 50%, transparent);
 }
 
 .blurred {

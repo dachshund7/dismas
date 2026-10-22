@@ -9,6 +9,9 @@ template $DismasWindow: Adw.ApplicationWindow {
   default-width: 800;
 
   content: $DragOverlay drag_overlay {
+    // Always in place of the queue, like an album's Play button
+    play-title: _("Drop a track to play it now");
+
     child: Adw.ToastOverlay toast_overlay {
       child: Adw.OverlaySplitView split_view {
         max-sidebar-width: 330;

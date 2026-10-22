@@ -49,7 +49,7 @@ impl Window {
             // The saved queue is empty after clearing the queue
             Some(files) if !files.is_empty() => {
                 let resume = ResumePoint::load(&self.imp().settings, &name);
-                self.load_into_queue(files, QueueMode::Restore, None, resume);
+                self.load_into_queue(files, QueueMode::Restore, None, resume, None);
             }
             // Unreadable: adding tracks would replace the ones in its file.
             // The queue is always there, so this doesn't loop
@@ -63,14 +63,20 @@ impl Window {
 
     // Adds the files to the end of the queue
     pub(super) fn queue_tracks(&self, queue: Vec<gio::File>, mode: QueueMode) {
-        self.load_into_queue(queue, mode, None, None);
+        self.load_into_queue(queue, mode, None, None, None);
     }
 
     // Puts the tracks of a playlist in the queue, in place of those of the
     // selected one, once they're read; it goes on from where it was
     pub(super) fn queue_playlist_tracks(&self, queue: Vec<gio::File>, name: &str) {
         let resume = ResumePoint::load(&self.imp().settings, name);
-        self.load_into_queue(queue, QueueMode::Restore, Some(name.to_string()), resume);
+        self.load_into_queue(
+            queue,
+            QueueMode::Restore,
+            Some(name.to_string()),
+            resume,
+            None,
+        );
     }
 
     // The actions on the queue are off while tracks are read, which can
@@ -113,15 +119,19 @@ impl Window {
     // replace the tracks of the selected playlist with those of the one
     // named. Only this load does that, as files can be dropped meanwhile,
     // and their tracks go to the playlist that is selected when they're read.
-    // With `resume`, playback is paused where it was, in the empty queue
+    // With `resume`, playback is paused where it was, in the empty queue.
+    // With `replaced`, the tracks took the place of those, and the toast
+    // can put them back
     fn load_into_queue(
         &self,
         queue: Vec<gio::File>,
         mode: QueueMode,
         switch_to: Option<String>,
         resume: Option<ResumePoint>,
+        replaced: Option<ReplacedQueue>,
     ) {
         let play = matches!(mode, QueueMode::Play(_));
+        let replacing = replaced.is_some();
         if queue.is_empty() {
             self.add_toast(i18n("No available track found"));
             self.end_startup();
@@ -171,8 +181,16 @@ impl Window {
                     win.replace_selected_playlist(name);
                 }
 
-                if tracks.is_empty() {
+                // Replacing tells about it even without tracks, as the
+                // queue was emptied already
+                if let Some(replaced) = replaced {
+                    win.add_replaced_toast(tracks.len(), replaced);
+                } else if tracks.is_empty() {
                     win.add_toast(i18n("No tracks found"));
+                }
+
+                if tracks.is_empty() {
+                    // Nothing to add
                 } else if let Some(player) = win.player() {
                     let queue = player.queue();
                     let was_empty = queue.is_empty();
@@ -221,9 +239,11 @@ impl Window {
                     }
 
                     // Restoring the queue at startup is quiet, and
-                    // doesn't start playing
+                    // doesn't start playing; replacing has a toast of its own
                     if mode == QueueMode::Restore {
                         // Nothing to announce
+                    } else if replacing {
+                        // Its toast is up already
                     } else if tracks.len() == 1 {
                         // Allow jumping to the track we just added
                         // If we added a single track, and the queue was empty, we
@@ -277,6 +297,50 @@ impl Window {
                 }
             }
         ));
+    }
+
+    // Plays the audio files, and the ones in the folders, in place of the
+    // tracks of the queue, like an album's Play button; nothing is replaced
+    // until some are found
+    fn play_dropped_files(&self, files: Vec<gio::File>) {
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                let Ok(queue) = gio::spawn_blocking(move || audio_files(files)).await else {
+                    return;
+                };
+                if queue.is_empty() {
+                    win.add_toast(i18n("No available track found"));
+                    return;
+                }
+
+                let replaced = win.replaced_queue();
+                win.select_queue_to_play();
+                win.clear_queue();
+                win.show_playlist_view();
+                win.load_into_queue(queue, QueueMode::Play(0), None, None, Some(replaced));
+            }
+        ));
+    }
+
+    fn add_replaced_toast(&self, n_tracks: usize, replaced: ReplacedQueue) {
+        let msg = if n_tracks == 0 {
+            i18n("No tracks found")
+        } else {
+            ni18n_f(
+                // Translators: the `{}` must be left unmodified; it will be
+                // expanded to the number of tracks that took the place of
+                // those of the queue
+                "Replaced the queue with one track",
+                "Replaced the queue with {} tracks",
+                n_tracks as u32,
+                &[&n_tracks.to_string()],
+            )
+        };
+        self.add_toast_with_button(msg, i18n("Undo"), move |win| {
+            win.undo_replace(&replaced);
+        });
     }
 
     // Reads the tags of the tracks in the queue and in the album shown in
@@ -379,14 +443,20 @@ impl Window {
             self,
             #[upgrade_or]
             false,
-            move |_, value, _, _| {
+            move |_, value, x, y| {
                 if let Ok(file_list) = value.get::<gdk::FileList>() {
                     if file_list.files().is_empty() {
                         win.add_toast(i18n("Unable to access dropped files"));
                         return false;
                     }
 
-                    win.add_files_to_queue(file_list.files());
+                    // Dropped on the zone that plays them, or on the one
+                    // that adds them
+                    if win.imp().drag_overlay.in_play_zone(x, y) {
+                        win.play_dropped_files(file_list.files());
+                    } else {
+                        win.add_files_to_queue(file_list.files());
+                    }
                     return true;
                 }
 

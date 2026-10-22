@@ -25,6 +25,7 @@ use adw::subclass::prelude::*;
 use glib::clone;
 use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
+use selected_playlist::ReplacedQueue;
 use sidebar::SizeLimits;
 
 use crate::{

@@ -168,8 +168,64 @@ impl Window {
     // those of a saved playlist
     pub(super) fn select_queue_to_play(&self) {
         if !self.selected_playlist().is_empty() {
+            // Where the saved one was, to go back to it: the save at idle
+            // would come after the switch
+            self.save_resume_point();
             self.set_selected_playlist("");
         }
+    }
+
+    // What playing dropped tracks is about to replace: the queue, and the
+    // playlist that was selected, to put them back. The queue is taken
+    // from its file, which also has the tracks that couldn't be read, or
+    // from the player if it's unreadable
+    pub(super) fn replaced_queue(&self) -> ReplacedQueue {
+        self.save_resume_point();
+        let selected = self.selected_playlist();
+        let queue = playlists::load("")
+            .or_else(|| {
+                let player = self.player().filter(|_| selected.is_empty())?;
+                Some(player.queue().files_in_order())
+            })
+            .unwrap_or_default();
+        ReplacedQueue {
+            selected,
+            queue,
+            queue_point: ResumePoint::load(&self.imp().settings, ""),
+        }
+    }
+
+    // Puts back the queue and the playlist that dropped tracks replaced,
+    // paused where it was
+    pub(super) fn undo_replace(&self, replaced: &ReplacedQueue) {
+        let imp = self.imp();
+        // Like the actions on playlists, while tracks are read
+        if imp.loads.get() > 0 {
+            return;
+        }
+
+        // It could have been deleted while the toast was up
+        let selected = if playlists::exists(&replaced.selected) {
+            replaced.selected.as_str()
+        } else {
+            ""
+        };
+
+        // The dropped tracks stop first: points are saved from the current
+        // track, at idle and when switching, and theirs would take the
+        // place of the one put back. The pane stays meanwhile
+        self.save_resume_point();
+        imp.pending_playlist.replace(Some(selected.to_string()));
+        if let Some(player) = self.player() {
+            player.clear_queue();
+        }
+
+        playlists::save("", &replaced.queue);
+        ResumePoints::update(&imp.settings, |points| match &replaced.queue_point {
+            Some(point) => points.set("", point.clone()),
+            None => points.remove(""),
+        });
+        self.load_playlist(selected);
     }
 
     // Puts the tracks of the playlist in the queue; the tracks of the
@@ -180,8 +236,13 @@ impl Window {
         if name == self.selected_playlist() {
             return;
         }
+        self.load_playlist(name);
+    }
 
+    // Even the selected one, to read its tracks again
+    fn load_playlist(&self, name: &str) {
         let Some(files) = playlists::load(name) else {
+            self.end_pending_playlist();
             self.add_toast(i18n("Unable to open the playlist"));
             return;
         };
@@ -191,9 +252,18 @@ impl Window {
 
         if files.is_empty() {
             self.replace_selected_playlist(name);
+            self.end_pending_playlist();
         } else {
             self.imp().pending_playlist.replace(Some(name.to_string()));
             self.queue_playlist_tracks(files, name);
+        }
+    }
+
+    // After undoing a drop, the pane stayed while the queue was emptied,
+    // waiting for the tracks
+    fn end_pending_playlist(&self) {
+        if self.imp().pending_playlist.take().is_some() {
+            self.update_library_for_queue();
         }
     }
 
@@ -581,4 +651,12 @@ fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
         dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
     }
     dialog
+}
+
+// The queue and the playlist that playing dropped tracks replaced
+pub(super) struct ReplacedQueue {
+    // The name of the playlist that was selected, empty for the queue
+    selected: String,
+    queue: Vec<gio::File>,
+    queue_point: Option<ResumePoint>,
 }
