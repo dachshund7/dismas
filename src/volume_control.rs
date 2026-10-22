@@ -168,14 +168,18 @@ impl VolumeControl {
             glib::Propagation::Proceed,
             move |_, _, dy| {
                 debug!("Scroll delta: {dy}");
-                let adj = this.imp().volume_scale.adjustment();
-                let delta = dy * adj.step_increment();
-                let d = (adj.value() - delta).clamp(adj.lower(), adj.upper());
-                adj.set_value(d);
+                this.step(-dy);
                 glib::Propagation::Stop
             }
         ));
         self.imp().volume_scale.add_controller(controller);
+    }
+
+    /// Changes the volume by a number of steps, negative to lower it.
+    pub fn step(&self, steps: f64) {
+        let adj = self.imp().volume_scale.adjustment();
+        let value = adj.value() + steps * adj.step_increment();
+        adj.set_value(value.clamp(adj.lower(), adj.upper()));
     }
 
     pub fn connect_volume_changed<F: Fn(&Self, f64) + 'static>(

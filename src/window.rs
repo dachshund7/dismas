@@ -213,6 +213,14 @@ mod imp {
                     p.seek_forward();
                 }
             });
+            klass.install_action("win.volume-up", None, move |win, _, _| {
+                debug!("Window::win.volume-up()");
+                win.imp().playback_control.volume_control().step(1.0);
+            });
+            klass.install_action("win.volume-down", None, move |win, _, _| {
+                debug!("Window::win.volume-down()");
+                win.imp().playback_control.volume_control().step(-1.0);
+            });
             klass.install_action("win.previous", None, move |win, _, _| {
                 debug!("Window::win.previous()");
                 if let Some(p) = win.player() {
