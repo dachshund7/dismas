@@ -381,6 +381,14 @@ impl Window {
                 .set_int("window-height", height)
                 .expect("Unable to stop window-height");
 
+            // While playing in the background, the window only hides, so
+            // that it comes back as it was, without reading the albums
+            // again
+            if window.plays_in_background() {
+                window.set_visible(false);
+                return glib::Propagation::Stop;
+            }
+
             window.unbind_queue();
             window.unbind_state();
             window.unbind_waveform();

@@ -731,6 +731,12 @@ impl Window {
         }
     }
 
+    fn plays_in_background(&self) -> bool {
+        self.application()
+            .and_downcast::<crate::application::Application>()
+            .is_some_and(|app| app.plays_in_background())
+    }
+
     fn player(&self) -> Option<Rc<AudioPlayer>> {
         if let Some(app) = self.application() {
             let player = app

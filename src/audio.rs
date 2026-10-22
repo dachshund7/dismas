@@ -22,7 +22,8 @@
 // ├── Queue: the GListModel of the tracks to play
 // ├── GstBackend: a GstPlayer wrapper
 // ╰── controllers: external bits of code that interact with the state
-//     ╰── MprisController: an MPRIS wrapper
+//     ├── MprisController: an MPRIS wrapper
+//     ╰── TrayController: a StatusNotifierItem (tray icon)
 //
 // The AudioPlayer object creates a glib::Sender/Receiver channel pair, and
 // passes the sender to the controllers; whenever the controllers update their
@@ -47,6 +48,10 @@ mod inhibit_controller;
 mod mpris_controller;
 pub use inhibit_controller::InhibitController;
 pub use mpris_controller::MprisController;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+mod tray_controller;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+pub use tray_controller::TrayController;
 
 mod gst_backend;
 pub use gst_backend::GstBackend;

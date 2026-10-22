@@ -13,7 +13,7 @@ use adw::subclass::prelude::*;
 use ashpd::{WindowIdentifier, desktop::background::Background};
 use async_channel::Receiver;
 use glib::clone;
-use gtk::{gio, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use log::{debug, warn};
 
 use crate::{
@@ -26,8 +26,13 @@ use crate::{
     window::Window,
 };
 
+// The tokens are XDG activation tokens, which bring the window to the
+// front on Wayland
 pub enum ApplicationAction {
-    Present,
+    Present(Option<String>),
+    // Closes the window if it has the focus, and presents it otherwise
+    ToggleWindow(Option<String>),
+    Quit,
 }
 
 // How often the position is saved while playing, in case Dismas doesn't
@@ -130,14 +135,16 @@ mod imp {
         fn activate(&self) {
             debug!("Application::activate");
 
-            self.obj().present_main_window(true);
+            self.obj().present_main_window(true, None);
         }
 
         fn open(&self, files: &[gio::File], _hint: &str) {
             debug!("Application::open");
 
             // The files take the place of the queue of the last session
-            self.obj().present_main_window(false).open_files(files);
+            self.obj()
+                .present_main_window(false, None)
+                .open_files(files);
         }
     }
 
@@ -161,6 +168,48 @@ impl Default for Application {
     }
 }
 
+// Whether the window can be seen. GTK doesn't know about desktops: on
+// X11, window managers unmap the windows of the other desktops without
+// telling it
+fn shows_on_screen(window: &Window) -> bool {
+    if !window.is_visible() {
+        return false;
+    }
+    let Some(surface) = window.surface() else {
+        return false;
+    };
+    // Wayland compositors suspend the windows of hidden workspaces
+    if surface
+        .downcast_ref::<gdk::Toplevel>()
+        .is_some_and(|toplevel| {
+            toplevel
+                .state()
+                .intersects(gdk::ToplevelState::MINIMIZED | gdk::ToplevelState::SUSPENDED)
+        })
+    {
+        return false;
+    }
+    !on_other_desktop(&surface)
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn on_other_desktop(surface: &gdk::Surface) -> bool {
+    let Some(surface) = surface.downcast_ref::<gdk_x11::X11Surface>() else {
+        return false;
+    };
+    let Some(display) = surface.display().downcast::<gdk_x11::X11Display>().ok() else {
+        return false;
+    };
+    // Sticky windows are on all desktops
+    let desktop = surface.desktop();
+    desktop != u32::MAX && desktop != display.screen().current_desktop()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+fn on_other_desktop(_surface: &gdk::Surface) -> bool {
+    false
+}
+
 impl Application {
     pub fn new() -> Self {
         Self::default()
@@ -168,6 +217,11 @@ impl Application {
 
     pub fn player(&self) -> Rc<AudioPlayer> {
         self.imp().player.clone()
+    }
+
+    // Whether closing the window keeps the music playing
+    pub(crate) fn plays_in_background(&self) -> bool {
+        self.imp().background_hold.borrow().is_some()
     }
 
     fn setup_settings(&self) {
@@ -184,6 +238,12 @@ impl Application {
                     } else {
                         debug!("Dropping background hold");
                         this.imp().background_hold.replace(None);
+                        // A hidden window would keep Dismas running
+                        if let Some(window) = this.active_window()
+                            && !window.is_visible()
+                        {
+                            window.close();
+                        }
                     }
                 }
             ),
@@ -288,16 +348,40 @@ impl Application {
 
     fn process_action(&self, action: ApplicationAction) {
         match action {
-            ApplicationAction::Present => {
-                self.present_main_window(true);
+            ApplicationAction::Present(token) => {
+                self.present_main_window(true, token.as_deref());
             }
+            ApplicationAction::ToggleWindow(token) => {
+                // Playback goes on, as the tray is only shown while Dismas
+                // plays in the background. Whether the window has the focus
+                // doesn't matter: moving to the tray can give it to another
+                // window when the focus follows the pointer
+                if let Some(window) = self.active_window().and_downcast::<Window>()
+                    && shows_on_screen(&window)
+                {
+                    window.close();
+                } else {
+                    self.present_main_window(true, token.as_deref());
+                }
+            }
+            ApplicationAction::Quit => self.quit(),
         }
     }
 
     // With `restore`, a new window restores the playlist of the last
     // session, if the user wants it; otherwise, the caller adds tracks
-    fn present_main_window(&self, restore: bool) -> Window {
+    fn present_main_window(&self, restore: bool, activation_token: Option<&str>) -> Window {
         let window = if let Some(window) = self.active_window().and_downcast::<Window>() {
+            // A window on another desktop comes to this one, rather than
+            // taking the user there
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            if window.is_visible()
+                && let Some(surface) = window.surface()
+                && on_other_desktop(&surface)
+                && let Some(surface) = surface.downcast_ref::<gdk_x11::X11Surface>()
+            {
+                surface.move_to_current_desktop();
+            }
             window
         } else {
             let window = Window::new(self);
@@ -310,6 +394,9 @@ impl Application {
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         self.request_background();
 
+        if let Some(token) = activation_token {
+            window.set_startup_id(token);
+        }
         window.present();
         window
     }
@@ -364,28 +451,36 @@ impl Application {
                 "Dismas needs to run in the background to play music",
             ));
 
+            // Many sessions have no Background portal, which only asks the
+            // user; only a refusal turns the setting off
             match request.send().await.and_then(
                 |r: ashpd::desktop::Request<ashpd::desktop::background::Background>| r.response(),
             ) {
-                Ok(response) => {
+                Ok(response) if response.run_in_background() => {
                     debug!("Background request successful: {response:?}");
-                    self.imp().background_hold.replace(Some(self.hold()));
                 }
-                Err(err) => {
-                    warn!("Background request denied: {err}");
+                Ok(_) | Err(ashpd::Error::Response(_)) => {
+                    warn!("Background request denied");
+                    // Drops the hold
                     self.imp()
                         .settings
                         .set_boolean("background-play", false)
                         .expect("Unable to set background-play settings key");
                 }
+                Err(err) => debug!("No Background portal: {err}"),
             }
         }
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     fn request_background(&self) {
-        let background_play = self.imp().settings.boolean("background-play");
-        if background_play {
+        let imp = self.imp();
+        if imp.settings.boolean("background-play") {
+            // Held before the portal answers, which can take a while, so
+            // that closing the window doesn't quit in the meantime
+            if imp.background_hold.borrow().is_none() {
+                imp.background_hold.replace(Some(self.hold()));
+            }
             let ctx = glib::MainContext::default();
             ctx.spawn_local(clone!(
                 #[weak(rename_to = app)]

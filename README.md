@@ -45,6 +45,15 @@ What Dismas adds
 - **Sleep timer:** stops the music after a set number of minutes. It can stop
   right away, or let the track that's playing when time runs out finish
   first.
+- **Tray icon:** while Background Playback is on, Dismas shows an icon in the
+  tray. Click it to show or close the window, middle-click it to play or
+  pause, or use its menu. It needs a tray that supports StatusNotifierItem:
+  KDE Plasma; the Xfce, Cinnamon, LXQt and Budgie panels; waybar and swaybar;
+  and Ubuntu's GNOME. Bars with only an XEmbed tray (i3bar, polybar, tint2,
+  stalonetray) need [snixembed](https://git.sr.ht/~steef/snixembed), which
+  doesn't pass on middle clicks, and stock GNOME needs the AppIndicator
+  extension. Without a tray, the music still plays in the background, and the
+  media controls or opening Dismas again bring it back.
 - **Layout:** the player fits itself to the window, and the cover and waveform
   grow into any spare room.
 - **Robustness:** tags and covers load in parallel worker threads, and cover

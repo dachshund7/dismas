@@ -13,6 +13,7 @@
         "--device=dri",
         "--socket=wayland",
         "--socket=pulseaudio",
+        "--talk-name=org.kde.StatusNotifierWatcher",
         "--filesystem=xdg-music:ro"
     ],
     "build-options" : {

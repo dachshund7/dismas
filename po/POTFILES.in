@@ -16,6 +16,7 @@ src/gtk/window.blp
 src/application.rs
 src/audio/inhibit_controller.rs
 src/audio/track.rs
+src/audio/tray_controller.rs
 src/album_tracks.rs
 src/cover_picture.rs
 src/library.rs

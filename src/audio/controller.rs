@@ -9,6 +9,8 @@ pub trait Controller {
     fn set_track(&self, track: &Track);
     // The tags of the current track were read again
     fn update_track(&self, _track: &Track) {}
+    // No track is current anymore
+    fn clear_track(&self) {}
     fn set_position(&self, position: u64, notify: bool);
     fn set_repeat_mode(&self, repeat: RepeatMode);
     // Whether a track comes after the current one

@@ -12,6 +12,8 @@ use glib::clone;
 use gtk::{glib, prelude::*};
 use log::{debug, error};
 
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use crate::audio::TrayController;
 use crate::{
     application::ApplicationAction,
     audio::{
@@ -136,6 +138,12 @@ impl AudioPlayer {
 
         let mpris_controller = MprisController::new(sender.clone());
         controllers.push(Box::new(mpris_controller));
+
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        controllers.push(Box::new(TrayController::new(
+            sender.clone(),
+            app_sender.clone(),
+        )));
 
         let inhibit_controller = InhibitController::new();
         controllers.push(Box::new(inhibit_controller));
@@ -281,7 +289,7 @@ impl AudioPlayer {
             } else {
                 debug!("No tracks left");
                 self.backend.set_track_uri(None);
-                self.state.set_current_track(None);
+                self.clear_current_track();
                 self.state.set_playback_state(PlaybackState::Stopped);
 
                 for c in &self.controllers {
@@ -518,7 +526,7 @@ impl AudioPlayer {
             }
         } else {
             self.backend.set_track_uri(None);
-            self.state.set_current_track(None);
+            self.clear_current_track();
             self.set_playback_state(PlaybackState::Stopped);
         }
     }
@@ -614,6 +622,13 @@ impl AudioPlayer {
         &self.waveform_generator
     }
 
+    fn clear_current_track(&self) {
+        self.state.set_current_track(None);
+        for c in &self.controllers {
+            c.clear_track();
+        }
+    }
+
     pub fn set_current_track(&self, track: Option<Track>) {
         self.state.set_current_track(track);
     }
@@ -671,7 +686,7 @@ impl AudioPlayer {
     }
 
     fn present(&self) {
-        if let Err(e) = self.app_sender.try_send(ApplicationAction::Present) {
+        if let Err(e) = self.app_sender.try_send(ApplicationAction::Present(None)) {
             error!("Unable to send Present: {e}");
         }
     }
@@ -679,7 +694,7 @@ impl AudioPlayer {
     pub fn clear_queue(&self) {
         self.finished.set(false);
         self.stop();
-        self.state.set_current_track(None);
+        self.clear_current_track();
         self.queue.clear();
     }
 
@@ -698,7 +713,7 @@ impl AudioPlayer {
         self.queue.remove_track(track);
 
         if self.queue.is_empty() {
-            self.state.set_current_track(None);
+            self.clear_current_track();
         }
     }
 
