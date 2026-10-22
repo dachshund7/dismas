@@ -822,6 +822,10 @@ impl Window {
     // End when they have text, to move the cursor; the album search has the
     // focus while the grid shows.
     //
+    // Ctrl+Left and Ctrl+Right seek, here rather than as accels, which would
+    // run before a text entry with text could move its cursor by word; the
+    // lists and the grid would move their focus with them.
+    //
     // The releases are kept from the window too, which would show the focus
     // ring for the key, as if it had moved the focus; and holding Space
     // down toggles playback once, not with every repeat
@@ -846,12 +850,11 @@ impl Window {
                 };
             }
 
-            if key
-                .modifier_state()
-                .intersects(gtk::accelerator_get_default_mod_mask())
-            {
-                return glib::Propagation::Proceed;
-            }
+            let ctrl = match key.modifier_state() & gtk::accelerator_get_default_mod_mask() {
+                gdk::ModifierType::CONTROL_MASK => true,
+                modifiers if modifiers.is_empty() => false,
+                _ => return glib::Propagation::Proceed,
+            };
 
             let win = controller.widget().and_downcast::<Window>().unwrap();
             let focus = gtk::prelude::GtkWindowExt::focus(&win);
@@ -865,6 +868,13 @@ impl Window {
             let in_entry = entry.is_some();
             let in_text = entry.is_some_and(|entry| !entry.text().is_empty());
             let handled = match keyval {
+                gdk::Key::Left | gdk::Key::KP_Left if ctrl && !in_text => {
+                    WidgetExt::activate_action(&win, "win.seek-backwards", None).is_ok()
+                }
+                gdk::Key::Right | gdk::Key::KP_Right if ctrl && !in_text => {
+                    WidgetExt::activate_action(&win, "win.seek-forward", None).is_ok()
+                }
+                _ if ctrl => false,
                 gdk::Key::space if pressed.get() == Some(keyval) => true,
                 gdk::Key::space => {
                     !in_entry && WidgetExt::activate_action(&win, "win.play", None).is_ok()

@@ -92,12 +92,11 @@ mod imp {
             obj.set_accels_for_action("queue.find", &["<primary>F"]);
             obj.set_accels_for_action("queue.shuffle", &["<primary>r"]);
 
-            obj.set_accels_for_action("win.seek-backwards", &["<primary>Left"]);
-            obj.set_accels_for_action("win.seek-forward", &["<primary>Right"]);
+            // Ctrl+Left and Ctrl+Right seek, see `Window::setup_key_shortcuts()`
             obj.set_accels_for_action("win.volume-up", &["<primary>Up"]);
             obj.set_accels_for_action("win.volume-down", &["<primary>Down"]);
-            obj.set_accels_for_action("win.previous", &["<primary>p"]);
-            obj.set_accels_for_action("win.next", &["<primary>n"]);
+            obj.set_accels_for_action("win.previous", &["<Alt>Left"]);
+            obj.set_accels_for_action("win.next", &["<Alt>Right"]);
             obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
             // In the order of the buttons of the pages
