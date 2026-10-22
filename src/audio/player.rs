@@ -428,6 +428,9 @@ impl AudioPlayer {
         }
         track.set_playing(true);
         self.state.set_current_track(Some(track));
+        // The controllers too, as a track that doesn't play yet reports
+        // no position
+        self.update_position(0, false);
     }
 
     // Pausing keeps the position, to go on from there later
