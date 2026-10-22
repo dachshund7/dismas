@@ -115,6 +115,13 @@ impl PlayerState {
     }
 
     pub fn set_current_track(&self, track: Option<Track>) {
+        // The same track again, as when it repeats, only starts over: the
+        // cover, the labels and the queue stay as they are
+        if track.is_some() && self.track() == track {
+            self.set_position(0);
+            return;
+        }
+
         self.imp().current_track.replace(track);
         self.imp().position.replace(0);
         self.notify_track();
@@ -161,5 +168,47 @@ impl PlayerState {
 impl Default for PlayerState {
     fn default() -> Self {
         glib::Object::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::audio::track::TrackData;
+
+    fn record_notifies(state: &PlayerState) -> Rc<RefCell<Vec<String>>> {
+        let notified = Rc::new(RefCell::new(Vec::new()));
+        let recorded = notified.clone();
+        state.connect_notify_local(None, move |_, pspec| {
+            recorded.borrow_mut().push(pspec.name().to_string());
+        });
+        notified
+    }
+
+    #[test]
+    fn same_track_only_starts_over() {
+        let state = PlayerState::default();
+        let track = Track::new(TrackData::default());
+        state.set_current_track(Some(track.clone()));
+        state.set_position(42);
+
+        let notified = record_notifies(&state);
+        state.set_current_track(Some(track));
+        assert_eq!(state.position(), 0);
+        assert_eq!(*notified.borrow(), ["position"]);
+    }
+
+    #[test]
+    fn another_track_is_a_change() {
+        let state = PlayerState::default();
+        state.set_current_track(Some(Track::new(TrackData::default())));
+
+        let notified = record_notifies(&state);
+        state.set_current_track(Some(Track::new(TrackData::default())));
+        let notified = notified.borrow();
+        assert!(notified.iter().any(|name| name == "track"));
+        assert!(notified.iter().any(|name| name == "cover"));
     }
 }
