@@ -105,6 +105,8 @@ All notable changes to this project will be documented in this file.
 - On X11 without a compositor, drags over the part of the window gained by
   widening it went to the window below
 - GLib warnings when nothing was left to play
+- GTK themes installed for libadwaita apps, like Colloid, drew the outlines
+  and corners of their cards on the covers of the track rows
 
 ### Removed
 
