@@ -90,6 +90,8 @@ mod imp {
         #[template_child]
         pub waveform_view: TemplateChild<WaveformView>,
         #[template_child]
+        pub seek_scale: TemplateChild<gtk::Scale>,
+        #[template_child]
         pub elapsed_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub remaining_label: TemplateChild<gtk::Label>,
@@ -396,6 +398,7 @@ mod imp {
                 playback_control: TemplateChild::default(),
                 menu_button: TemplateChild::default(),
                 waveform_view: TemplateChild::default(),
+                seek_scale: TemplateChild::default(),
                 elapsed_label: TemplateChild::default(),
                 remaining_label: TemplateChild::default(),
                 playlist_view: TemplateChild::default(),
@@ -767,6 +770,21 @@ impl Window {
 
     fn setup_actions(&self) {
         self.add_action(&self.imp().settings.create_action("restore-playlist"));
+
+        // The seek bar takes the place of the waveform; the setting is only
+        // read, never written, by the widgets
+        self.add_action(&self.imp().settings.create_action("show-waveform"));
+        self.imp()
+            .settings
+            .bind("show-waveform", &*self.imp().waveform_view, "visible")
+            .get()
+            .build();
+        self.imp()
+            .settings
+            .bind("show-waveform", &*self.imp().seek_scale, "visible")
+            .get()
+            .invert_boolean()
+            .build();
 
         // Like `win.select-playlist`, with the selected playlist as its
         // state, for the menu of the playlist pane's title to mark it

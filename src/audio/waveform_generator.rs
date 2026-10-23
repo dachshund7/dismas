@@ -8,28 +8,56 @@ use gst::prelude::*;
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
 use log::{debug, warn};
 
-use crate::audio::{Controller, PlaybackState, RepeatMode, Track};
+use crate::{
+    audio::{Controller, PlaybackState, RepeatMode, Track},
+    utils,
+};
 
 mod imp {
     use super::*;
 
-    #[derive(Debug, Default, glib::Properties)]
+    #[derive(Debug, glib::Properties)]
     #[properties(wrapper_type = super::WaveformGenerator)]
     pub struct WaveformGenerator {
         pub track: RefCell<Option<Track>>,
         #[property(name = "has-peaks", get = |imp: &Self| imp.peaks.borrow().is_some(), type = bool)]
         pub peaks: RefCell<Option<Vec<(f64, f64)>>>,
         pub pipeline: RefCell<Option<(gst::Element, gst::bus::BusWatchGuard)>>,
+        pub settings: gio::Settings,
     }
 
     #[glib::object_subclass]
     impl ObjectSubclass for WaveformGenerator {
         const NAME: &'static str = "WaveformGenerator";
         type Type = super::WaveformGenerator;
+
+        fn new() -> Self {
+            Self {
+                track: RefCell::default(),
+                peaks: RefCell::default(),
+                pipeline: RefCell::default(),
+                settings: utils::settings_manager(),
+            }
+        }
     }
 
     #[glib::derived_properties]
     impl ObjectImpl for WaveformGenerator {
+        fn constructed(&self) {
+            self.parent_constructed();
+
+            // Turning the waveform off stops making it, and turning it on
+            // makes the one of the current track
+            self.settings.connect_changed(
+                Some("show-waveform"),
+                clone!(
+                    #[weak(rename_to = this)]
+                    self.obj(),
+                    move |_, _| this.load_peaks()
+                ),
+            );
+        }
+
         fn dispose(&self) {
             self.obj().stop_pipeline();
         }
@@ -156,6 +184,14 @@ impl WaveformGenerator {
         // The pipeline of the previous track would otherwise keep adding
         // its peaks to the ones of this track, and save them as its own
         self.stop_pipeline();
+
+        // The player shows a seek bar instead, so the track isn't read
+        // a second time, and nothing is cached
+        if !self.imp().settings.boolean("show-waveform") {
+            self.imp().peaks.replace(None);
+            self.notify_has_peaks();
+            return;
+        }
 
         let track = match self.imp().track.borrow().as_ref() {
             Some(s) => s.clone(),

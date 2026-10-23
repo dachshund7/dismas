@@ -35,6 +35,11 @@
 	  <key name="enable-recoloring" type="b">
 	    <default>true</default>
 	  </key>
+	  <key name="show-waveform" type="b">
+	    <default>true</default>
+	    <summary>Show the waveform of the track</summary>
+	    <description>Whether the player shows the waveform of the track to seek in it, or a plain seek bar. Without the waveform, the tracks aren't read a second time to draw it</description>
+	  </key>
     <key name="replay-gain" enum="io.github.dachshund7.Dismas.ReplayGainMode">
       <default>'off'</default>
     </key>

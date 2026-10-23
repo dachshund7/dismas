@@ -69,6 +69,18 @@ template $DismasWindow: Adw.ApplicationWindow {
                       can-focus: "true";
                     }
 
+                    // In place of the waveform, without the "show-waveform"
+                    // setting; the position is a fraction of the track, as
+                    // the waveform's is
+                    Scale seek_scale {
+                      adjustment: Adjustment {
+                        lower: 0;
+                        upper: 1;
+                        step-increment: 0.05;
+                        page-increment: 0.05;
+                      };
+                    }
+
                     CenterBox {
                       orientation: horizontal;
                       width-request: 256;

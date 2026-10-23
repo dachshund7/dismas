@@ -192,6 +192,7 @@ impl Window {
 
     pub fn set_track_position(&self, position: f64) {
         self.imp().waveform_view.set_position(position);
+        self.imp().seek_scale.set_value(position);
     }
 }
 

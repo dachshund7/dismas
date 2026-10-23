@@ -300,13 +300,22 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, position| {
-                debug!("New position: {position}");
-                if let Some(player) = win.player() {
-                    let state = player.state();
-                    if state.track().is_some() {
-                        player.seek_position_rel(position);
-                        player.play();
-                    }
+                win.seek_to(position);
+            }
+        ));
+
+        // Only for the user's changes, not the position the player sets;
+        // without a track, the knob stays where it is
+        self.imp().seek_scale.connect_change_value(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Stop,
+            move |_, _, value| {
+                if win.seek_to(value.clamp(0.0, 1.0)) {
+                    glib::Propagation::Proceed
+                } else {
+                    glib::Propagation::Stop
                 }
             }
         ));
@@ -418,6 +427,20 @@ impl Window {
             .playlist_view
             .queue_searchbar()
             .set_key_capture_widget(Some(self.upcast_ref::<gtk::Widget>()));
+    }
+
+    // Seeks to a fraction of the track and plays it, if there is a track
+    fn seek_to(&self, position: f64) -> bool {
+        debug!("New position: {position}");
+        let Some(player) = self.player() else {
+            return false;
+        };
+        if player.state().track().is_none() {
+            return false;
+        }
+        player.seek_position_rel(position);
+        player.play();
+        true
     }
 
     // The pane's Remove All and Select buttons do nothing without
