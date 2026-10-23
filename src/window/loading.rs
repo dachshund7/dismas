@@ -162,9 +162,7 @@ impl Window {
                 while let Ok(data) = receiver.recv().await {
                     cur_file += 1;
                     win.imp().playlist_view.update_loading(cur_file, n_files);
-                    if let Some(data) = data {
-                        tracks.push(Track::new(data));
-                    }
+                    tracks.extend(data.into_iter().map(Track::new));
                 }
 
                 debug!(
@@ -404,8 +402,9 @@ impl Window {
                     let Ok(data) = receiver.recv().await else {
                         break;
                     };
-                    // A file that can't be read anymore keeps its old tags
-                    let Some(data) = data else {
+                    // A file that can't be read anymore keeps its old tags,
+                    // as does one that a CUE sheet splits now
+                    let Ok([data]) = <[_; 1]>::try_from(data) else {
                         continue;
                     };
                     track.update(data);

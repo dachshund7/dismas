@@ -499,7 +499,7 @@ impl AlbumTracks {
                     // Along with the ones that are already read
                     let mut batch: Vec<Track> = data.into_iter().map(Track::new).collect();
                     while let Ok(data) = receiver.try_recv() {
-                        batch.extend(data.map(Track::new));
+                        batch.extend(data.into_iter().map(Track::new));
                     }
                     if batch.is_empty() {
                         continue;

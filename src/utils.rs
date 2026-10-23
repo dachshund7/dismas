@@ -220,8 +220,8 @@ fn load_files_from_folder_internal(
 }
 
 pub fn cmp_two_files(base: Option<&gio::File>, a: &gio::File, b: &gio::File) -> Ordering {
-    cmp_like_nautilus(&folder_sort_name(base, a), &folder_sort_name(base, b))
-        .then_with(|| cmp_like_nautilus(&file_sort_name(a), &file_sort_name(b)))
+    cmp_file_names(&folder_sort_name(base, a), &folder_sort_name(base, b))
+        .then_with(|| cmp_file_names(&file_sort_name(a), &file_sort_name(b)))
 }
 
 // The folder of the file, relative to the base folder if it's inside it,
@@ -244,7 +244,7 @@ fn file_sort_name(file: &gio::File) -> String {
     )
 }
 
-fn cmp_like_nautilus(filename_a: &str, filename_b: &str) -> Ordering {
+pub fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
     let sort_last_a = filename_a.starts_with(['.', '#']);
     let sort_last_b = filename_b.starts_with(['.', '#']);
 

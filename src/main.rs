@@ -8,6 +8,7 @@ mod audio;
 mod config;
 mod cover_image;
 mod cover_picture;
+mod cue_sheet;
 mod drag_overlay;
 mod fit_bin;
 mod i18n;

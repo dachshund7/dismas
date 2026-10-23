@@ -3,12 +3,13 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fs::File,
+    hash::Hash,
     io::BufReader,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -17,13 +18,15 @@ use std::{
 use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
 use itertools::Itertools;
 use lofty::{
+    ape::{ApeFile, ApeTag},
     config::ParseOptions,
     file::{AudioFile, FileType, TaggedFile},
     flac::FlacFile,
     ogg::{OpusFile, SpeexFile, VorbisComments, VorbisFile},
     prelude::{Accessor, TaggedFileExt},
     probe::Probe,
-    tag::{ItemKey, Tag},
+    tag::{ItemKey, ItemValue, Tag},
+    wavpack::WavPackFile,
 };
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
@@ -33,6 +36,7 @@ use crate::{
         cover_cache::{AlbumCover, CoverArt, CoverCache},
         youtube_description,
     },
+    cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
     library::is_mbid,
     utils::ATTRIBUTE_HOST_PATH,
@@ -570,16 +574,18 @@ fn album_artist_search_text(tag: &Tag, album_artist: &str) -> String {
     text
 }
 
-// The Vorbis comments that lofty leaves out of the tags of the
-// `TaggedFile`, as it has no `ItemKey` for them
+// The Vorbis comments and APE items that lofty leaves out of the tags of
+// the `TaggedFile`, as it has no `ItemKey` for them
 #[derive(Debug, Default)]
 pub struct ExtraComments {
     synopsis: Option<String>,
     // The JSON written by the "Work Hierarchy" plugin of MusicBrainz Picard
     work_hierarchy: Option<String>,
+    // A CUE sheet that splits the file into tracks
+    pub cue_sheet: Option<String>,
 }
 
-// Reads a file, and the Vorbis comments in `ExtraComments` if it has them
+// Reads a file, and the items in `ExtraComments` if it has them
 pub fn read_tagged_file(
     probe: Probe<BufReader<File>>,
     options: ParseOptions,
@@ -598,6 +604,27 @@ pub fn read_tagged_file(
         let extra = ExtraComments {
             synopsis: get("SYNOPSIS"),
             work_hierarchy: get("WORK_HIERARCHY"),
+            cue_sheet: get("CUESHEET"),
+        };
+        Ok((file.into(), extra))
+    }
+
+    // Monkey's Audio and WavPack files have their CUE sheet in an APE tag
+    fn read_ape<F: AudioFile + Into<TaggedFile>>(
+        probe: Probe<BufReader<File>>,
+        options: ParseOptions,
+        ape: fn(&F) -> Option<&ApeTag>,
+    ) -> lofty::error::Result<(TaggedFile, ExtraComments)> {
+        let file = F::read_from(&mut probe.into_inner(), options)?;
+        let cue_sheet = ape(&file)
+            .and_then(|tag| tag.get("Cuesheet"))
+            .and_then(|item| match item.value() {
+                ItemValue::Text(text) => Some(text.clone()),
+                _ => None,
+            });
+        let extra = ExtraComments {
+            cue_sheet,
+            ..Default::default()
         };
         Ok((file.into(), extra))
     }
@@ -607,6 +634,8 @@ pub fn read_tagged_file(
         Some(FileType::Vorbis) => read(probe, options, |f: &VorbisFile| Some(f.vorbis_comments())),
         Some(FileType::Speex) => read(probe, options, |f: &SpeexFile| Some(f.vorbis_comments())),
         Some(FileType::Flac) => read(probe, options, FlacFile::vorbis_comments),
+        Some(FileType::Ape) => read_ape(probe, options, ApeFile::ape),
+        Some(FileType::WavPack) => read_ape(probe, options, WavPackFile::ape),
         _ => probe
             .options(options)
             .read()
@@ -1048,9 +1077,11 @@ impl TrackData {
         self.cover_art()?.cache()
     }
 
-    // Reads the tags and the cover of a track; this blocks, so it must not
-    // be called on the main thread
-    pub fn from_uri(uri: &str) -> Option<Self> {
+    // Reads the tracks of a file: an audio file, which a CUE sheet next to
+    // it or in its tags can split into tracks, the tracks of a sheet, or a
+    // track of a sheet. This blocks, so it must not be called on the main
+    // thread
+    fn read(uri: &str, files: &FileCache) -> Vec<Self> {
         let now = Instant::now();
 
         let file = gio::File::for_uri(uri);
@@ -1058,35 +1089,92 @@ impl TrackData {
         // web, can't be read by lofty
         let Some(path) = file.path() else {
             warn!("Unable to find a local path for {uri}");
-            return None;
+            return Vec::new();
         };
 
-        let (mime_type, _) = gio::content_type_guess(Some(&path), None);
+        let tracks = if let Some((sheet, number)) = cue_sheet::parse_location(&path) {
+            let Some(sheet) = files.sheet(sheet) else {
+                warn!("Unable to read the CUE sheet of {uri}");
+                return Vec::new();
+            };
+            let Some(track) = sheet.track(number) else {
+                warn!("Unable to find track {number} in {:?}", sheet.path);
+                return Vec::new();
+            };
+            Self::read_cue_tracks(&sheet, vec![track], files)
+        } else if cue_sheet::is_cue_path(&path) {
+            // The files that a sheet before it in the list splits have that
+            // sheet's tracks
+            match files.claims.sheets.get(&path) {
+                Some(sheet) => Self::read_cue_tracks(sheet, files.claims.tracks_of(&path), files),
+                None => Vec::new(),
+            }
+        } else {
+            Self::read_audio_file(file, &path, files)
+        };
+
+        debug!(
+            "Tracks of {uri}: {}, loading time: {} ms",
+            tracks.len(),
+            now.elapsed().as_millis()
+        );
+        tracks
+    }
+
+    fn read_audio_file(file: gio::File, path: &Path, files: &FileCache) -> Vec<Self> {
+        let (mime_type, _) = gio::content_type_guess(Some(path), None);
         if !mime_type.starts_with("audio") || mime_type.ends_with("x-mpegurl") {
-            return None;
+            return Vec::new();
         }
 
-        let file_probe = match Probe::open(&path) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("Unable to open file {path:?}: {e}");
-                return None;
-            }
-        };
+        // A sheet among the files has its tracks
+        if files.claims.sheet_of(path).is_some() {
+            return Vec::new();
+        }
+        if let Some(sheet) = files.folder_sheet(path) {
+            let tracks = sheet.tracks().filter(|(_, audio)| *audio == path).collect();
+            return Self::read_cue_tracks(&sheet, tracks, files);
+        }
 
-        let (tagged_file, extra) = match file_probe.guess_file_type() {
-            Ok(t) => match read_tagged_file(t, ParseOptions::new()) {
-                Ok(f) => f,
-                Err(e) => {
-                    warn!("Unable to read parsed file {path:?}: {e}");
-                    return None;
-                }
-            },
-            Err(e) => {
-                warn!("Unable to parse file type {path:?}: {e}");
-                return None;
-            }
+        let Some(read) = FileRead::read(path) else {
+            return Vec::new();
         };
+        let embedded = read
+            .extra
+            .cue_sheet
+            .as_deref()
+            .and_then(|text| SplitSheet::embedded(path, text));
+        match embedded {
+            Some(sheet) => {
+                let cue_file = CueFile::new(&sheet.sheet, &read);
+                sheet
+                    .tracks()
+                    .map(|(track, _)| Self::cue_track(&sheet, track, &cue_file))
+                    .collect()
+            }
+            None => vec![Self::whole_file(file, &read)],
+        }
+    }
+
+    fn read_cue_tracks(
+        sheet: &SplitSheet,
+        tracks: Vec<(&CueTrack, &Path)>,
+        files: &FileCache,
+    ) -> Vec<Self> {
+        tracks
+            .into_iter()
+            .filter_map(|(track, audio)| {
+                let cue_file = files.cue_file(sheet, audio)?;
+                Some(Self::cue_track(sheet, track, &cue_file))
+            })
+            .collect()
+    }
+
+    // A track that is a whole file
+    fn whole_file(file: gio::File, read: &FileRead) -> Self {
+        let path = &read.path;
+        let tagged_file = &read.tagged_file;
+        let extra = &read.extra;
 
         let mut artist = None;
         let mut title = None;
@@ -1100,12 +1188,12 @@ impl TrackData {
             artist = track_artist(tag);
             title = tag.title().map(|s| s.to_string());
             album = tag.album().map(|s| s.to_string());
-            credits = TrackCredits::from_tag(tag, &extra);
+            credits = TrackCredits::from_tag(tag, extra);
             replay_gain = ReplayGain::from_tag(tag);
-            tag_text = tag_search_text(tag, &extra);
-            cover = Some(CoverCache::cover_art(&path, tag));
+            tag_text = tag_search_text(tag, extra);
+            cover = Some(CoverCache::cover_art(path, tag));
         } else {
-            warn!("Unable to load primary tag for: {uri}");
+            warn!("Unable to load primary tag for: {path:?}");
             for tag in tagged_file.tags() {
                 debug!("Found tag: {:?}", tag.tag_type());
                 // The tags that come later fill in for the ones missing
@@ -1113,12 +1201,12 @@ impl TrackData {
                 artist = artist.or_else(|| track_artist(tag));
                 title = title.or_else(|| tag.title().map(|s| s.to_string()));
                 album = album.or_else(|| tag.album().map(|s| s.to_string()));
-                credits = TrackCredits::from_tag(tag, &extra);
+                credits = TrackCredits::from_tag(tag, extra);
                 replay_gain = ReplayGain::from_tag(tag);
-                tag_text = tag_search_text(tag, &extra);
+                tag_text = tag_search_text(tag, extra);
                 // The first tag with a cover has the one we keep
                 if cover.as_ref().is_none_or(|c| c.art().is_none()) {
-                    cover = Some(CoverCache::cover_art(&path, tag));
+                    cover = Some(CoverCache::cover_art(path, tag));
                 }
 
                 if artist.is_some() && title.is_some() {
@@ -1127,71 +1215,64 @@ impl TrackData {
             }
         }
 
-        let info = file
-            .query_info(
-                &format!("standard::display-name,standard::size,{ATTRIBUTE_HOST_PATH}"),
-                gio::FileQueryInfoFlags::NONE,
-                gio::Cancellable::NONE,
-            )
-            .ok();
+        let uuid = read
+            .display_name
+            .as_deref()
+            .map(|name| track_uuid(name, None, [&artist, &title, &album]));
 
-        let uuid = info.as_ref().map(|info| {
-            let mut hasher = Sha256::new();
-
-            hasher.update(info.display_name().as_str());
-
-            if let Some(ref artist) = artist {
-                hasher.update(artist);
-            }
-            if let Some(ref title) = title {
-                hasher.update(title);
-            }
-            if let Some(ref album) = album {
-                hasher.update(album);
-            }
-
-            format!("{:x}", hasher.finalize())
-        });
-
-        let properties = tagged_file.properties();
-        let duration = properties.duration().as_secs();
-        let details = FileDetails {
-            format: format_name(tagged_file.file_type()),
-            path: info
-                .as_ref()
-                .and_then(|info| info.attribute_as_string(ATTRIBUTE_HOST_PATH))
-                .map(|p| PathBuf::from(p.as_str()))
-                .or(Some(path)),
-            size: info
-                .as_ref()
-                .and_then(|info| u64::try_from(info.size()).ok()),
-            bitrate: properties.audio_bitrate().filter(|b| *b > 0),
-            sample_rate: properties.sample_rate().filter(|r| *r > 0),
-            bit_depth: properties.bit_depth().filter(|d| *d > 0),
-            channels: properties.channels().filter(|c| *c > 0),
-            replay_gain,
-        };
-
-        debug!(
-            "Track {:?} ('{:?}') loading time: {} ms",
-            uuid,
-            title,
-            now.elapsed().as_millis()
-        );
-
-        Some(TrackData {
-            artist,
-            title,
-            album,
+        TrackData {
             credits,
             tag_text,
             cover,
             uuid,
-            duration,
-            details,
+            duration: tagged_file.properties().duration().as_secs(),
+            details: read.details(replay_gain),
             file,
             audio: None,
-        })
+            artist,
+            title,
+            album,
+        }
+    }
+
+    // A track of a CUE sheet, with the tags from the sheet over those of
+    // its audio file
+    fn cue_track(sheet: &SplitSheet, track: &CueTrack, cue_file: &CueFile) -> Self {
+        let tag = cue_sheet::track_tag(&cue_file.tag, &sheet.sheet, track);
+        // The other items are about the whole file
+        let extra = ExtraComments::default();
+        let artist = track_artist(&tag);
+        let title = tag.title().map(|s| s.to_string());
+        let album = tag.album().map(|s| s.to_string());
+
+        let end = match track.end {
+            Some(end) if cue_file.duration.is_zero() || end < cue_file.duration => end,
+            _ => cue_file.duration,
+        };
+        let uuid = cue_file
+            .display_name
+            .as_deref()
+            .map(|name| track_uuid(name, Some(track.number), [&artist, &title, &album]));
+        let mut details = cue_file.details.clone();
+        details.replay_gain = ReplayGain::from_tag(&tag);
+
+        TrackData {
+            credits: TrackCredits::from_tag(&tag, &extra),
+            tag_text: tag_search_text(&tag, &extra),
+            cover: Some(cue_file.cover.clone()),
+            uuid,
+            duration: end.saturating_sub(track.start).as_secs(),
+            details,
+            file: gio::File::for_path(sheet.location(track)),
+            audio: Some(CueAudio {
+                file: gio::File::for_path(&cue_file.path),
+                start: track.start,
+                end: track.end,
+            }),
+            artist,
+            title,
+            album,
+        }
     }
 
     pub fn uri(&self) -> String {
@@ -1218,50 +1299,252 @@ impl TrackData {
     }
 }
 
-// Reads the tracks in a separate thread, and sends them one at a time, in
-// order, with `None` for the files that are not tracks; reading stops if
-// the receiver is dropped
+// The id of a track, which names the cache of its waveform
+fn track_uuid(display_name: &str, number: Option<u32>, tags: [&Option<String>; 3]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(display_name);
+    // The tracks of a CUE sheet share their file, and can share a title
+    if let Some(number) = number {
+        hasher.update(format!("/track{number:02}"));
+    }
+    for tag in tags.into_iter().flatten() {
+        hasher.update(tag);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+// An audio file, with its tags and properties
+struct FileRead {
+    path: PathBuf,
+    tagged_file: TaggedFile,
+    extra: ExtraComments,
+    display_name: Option<String>,
+    size: Option<u64>,
+    // The path outside the sandbox, if the file came through the document
+    // portal
+    host_path: Option<PathBuf>,
+}
+
+impl FileRead {
+    fn read(path: &Path) -> Option<Self> {
+        let file_probe = match Probe::open(path) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("Unable to open file {path:?}: {e}");
+                return None;
+            }
+        };
+
+        let (tagged_file, extra) = match file_probe.guess_file_type() {
+            Ok(t) => match read_tagged_file(t, ParseOptions::new()) {
+                Ok(f) => f,
+                Err(e) => {
+                    warn!("Unable to read parsed file {path:?}: {e}");
+                    return None;
+                }
+            },
+            Err(e) => {
+                warn!("Unable to parse file type {path:?}: {e}");
+                return None;
+            }
+        };
+
+        let info = gio::File::for_path(path)
+            .query_info(
+                &format!("standard::display-name,standard::size,{ATTRIBUTE_HOST_PATH}"),
+                gio::FileQueryInfoFlags::NONE,
+                gio::Cancellable::NONE,
+            )
+            .ok();
+
+        Some(Self {
+            path: path.to_path_buf(),
+            tagged_file,
+            extra,
+            display_name: info.as_ref().map(|info| info.display_name().to_string()),
+            size: info
+                .as_ref()
+                .and_then(|info| u64::try_from(info.size()).ok()),
+            host_path: info
+                .as_ref()
+                .and_then(|info| info.attribute_as_string(ATTRIBUTE_HOST_PATH))
+                .map(|p| PathBuf::from(p.as_str())),
+        })
+    }
+
+    fn details(&self, replay_gain: ReplayGain) -> FileDetails {
+        let properties = self.tagged_file.properties();
+        FileDetails {
+            format: format_name(self.tagged_file.file_type()),
+            path: self.host_path.clone().or_else(|| Some(self.path.clone())),
+            size: self.size,
+            bitrate: properties.audio_bitrate().filter(|b| *b > 0),
+            sample_rate: properties.sample_rate().filter(|r| *r > 0),
+            bit_depth: properties.bit_depth().filter(|d| *d > 0),
+            channels: properties.channels().filter(|c| *c > 0),
+            replay_gain,
+        }
+    }
+}
+
+// An audio file that a CUE sheet splits, with what its tracks take from it
+struct CueFile {
+    path: PathBuf,
+    // The tags of the album, without the pictures, which the cover is
+    // read from
+    tag: Tag,
+    cover: AlbumCover,
+    duration: Duration,
+    display_name: Option<String>,
+    details: FileDetails,
+}
+
+impl CueFile {
+    fn new(sheet: &cue_sheet::CueSheet, read: &FileRead) -> Self {
+        let file_tag = read
+            .tagged_file
+            .primary_tag()
+            .or_else(|| read.tagged_file.first_tag());
+        let mut tag = cue_sheet::album_tag(file_tag, sheet);
+        // All the tracks have the same album, so they share the cover
+        let cover = CoverCache::cover_art(&read.path, &tag);
+        while !tag.pictures().is_empty() {
+            tag.remove_picture(0);
+        }
+        Self {
+            path: read.path.clone(),
+            tag,
+            cover,
+            duration: read.tagged_file.properties().duration(),
+            display_name: read.display_name.clone(),
+            details: read.details(ReplayGain::default()),
+        }
+    }
+}
+
+// Values computed once, by the first thread that needs each
+struct Memo<K, V>(Mutex<HashMap<K, Arc<OnceLock<V>>>>);
+
+impl<K, V> Default for Memo<K, V> {
+    fn default() -> Self {
+        Self(Mutex::default())
+    }
+}
+
+impl<K: Eq + Hash, V: Clone> Memo<K, V> {
+    fn get(&self, key: K, init: impl FnOnce() -> V) -> V {
+        let slot = self.0.lock().unwrap().entry(key).or_default().clone();
+        slot.get_or_init(init).clone()
+    }
+}
+
+// What the threads reading a list of files share: which audio files the
+// CUE sheets among the files split, and the sheets and the audio files
+// that several tracks come from, which are read once
+#[derive(Default)]
+struct FileCache {
+    claims: Claims,
+    sheets: Memo<PathBuf, Option<Arc<SplitSheet>>>,
+    // By sheet and audio file
+    cue_files: Memo<(PathBuf, PathBuf), Option<Arc<CueFile>>>,
+    // The ".cue" files in a folder that split audio files
+    folders: Memo<PathBuf, Arc<Vec<Arc<SplitSheet>>>>,
+}
+
+impl FileCache {
+    // A ".cue" file, or the sheet in the tags of an audio file
+    fn sheet(&self, path: &Path) -> Option<Arc<SplitSheet>> {
+        if let Some(sheet) = self.claims.sheets.get(path) {
+            return Some(sheet.clone());
+        }
+        self.sheets.get(path.to_path_buf(), || {
+            if cue_sheet::is_cue_path(path) {
+                return SplitSheet::read(path).map(Arc::new);
+            }
+            let read = FileRead::read(path)?;
+            let sheet = Arc::new(SplitSheet::embedded(
+                path,
+                read.extra.cue_sheet.as_deref()?,
+            )?);
+            // Its tracks take the rest from the file that was just read
+            let key = (path.to_path_buf(), path.to_path_buf());
+            self.cue_files
+                .get(key, || Some(Arc::new(CueFile::new(&sheet.sheet, &read))));
+            Some(sheet)
+        })
+    }
+
+    fn cue_file(&self, sheet: &SplitSheet, audio: &Path) -> Option<Arc<CueFile>> {
+        let key = (sheet.path.clone(), audio.to_path_buf());
+        self.cue_files.get(key, || {
+            let read = FileRead::read(audio)?;
+            Some(Arc::new(CueFile::new(&sheet.sheet, &read)))
+        })
+    }
+
+    // The first ".cue" file next to an audio file that splits it
+    fn folder_sheet(&self, audio: &Path) -> Option<Arc<SplitSheet>> {
+        let dir = audio.parent()?;
+        self.folders
+            .get(dir.to_path_buf(), || {
+                Arc::new(cue_sheet::folder_sheets(dir))
+            })
+            .iter()
+            .find(|sheet| sheet.splits(audio))
+            .cloned()
+    }
+}
+
 // Decoding a cover mostly waits for its sandboxed loader, so a few at a
 // time go faster, even on fewer cores
 const MAX_LOADING_THREADS: usize = 4;
 
 // Reading the tags and decoding the covers takes a while, so the tracks
-// are read in a few threads; they are sent in the order of the files, one
-// for each, and the threads stop once the receiver is dropped
-pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Option<TrackData>> {
+// are read in a few threads. They are sent in the order of the files, all
+// the tracks of a file at once, which can be none; the threads stop once
+// the receiver is dropped
+pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Vec<TrackData>> {
     let (sender, receiver) = async_channel::unbounded();
 
     let uris: Arc<Vec<String>> = Arc::new(files.iter().map(|f| f.uri().to_string()).collect());
-    let next = Arc::new(AtomicUsize::new(0));
-    let (read_sender, read_receiver) = std::sync::mpsc::channel();
-    let n_threads = MAX_LOADING_THREADS.min(uris.len()).max(1);
-    for _ in 0..n_threads {
-        let uris = Arc::clone(&uris);
-        let next = Arc::clone(&next);
-        let read_sender = read_sender.clone();
-        std::thread::spawn(move || {
-            loop {
-                let index = next.fetch_add(1, Ordering::Relaxed);
-                let Some(uri) = uris.get(index) else {
-                    break;
-                };
-                // A file whose tags make the reader panic is skipped, rather
-                // than leaving the tracks after it unread
-                let data =
-                    std::panic::catch_unwind(|| TrackData::from_uri(uri)).unwrap_or_else(|_| {
-                        warn!("Unable to read the tags of {uri}");
-                        None
-                    });
-                if read_sender.send((index, data)).is_err() {
-                    break;
-                }
-            }
-        });
-    }
-    drop(read_sender);
-
-    // The tracks read out of order wait for the ones before them
+    let paths: Vec<PathBuf> = files.iter().filter_map(FileExt::path).collect();
     std::thread::spawn(move || {
+        // Which sheets split the audio files, before any is read
+        let cache = Arc::new(FileCache {
+            claims: Claims::new(paths.iter().map(PathBuf::as_path)),
+            ..Default::default()
+        });
+
+        let next = Arc::new(AtomicUsize::new(0));
+        let (read_sender, read_receiver) = std::sync::mpsc::channel();
+        let n_threads = MAX_LOADING_THREADS.min(uris.len()).max(1);
+        for _ in 0..n_threads {
+            let uris = Arc::clone(&uris);
+            let next = Arc::clone(&next);
+            let cache = Arc::clone(&cache);
+            let read_sender = read_sender.clone();
+            std::thread::spawn(move || {
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(uri) = uris.get(index) else {
+                        break;
+                    };
+                    // A file whose tags make the reader panic is skipped,
+                    // rather than leaving the tracks after it unread
+                    let data = std::panic::catch_unwind(|| TrackData::read(uri, &cache))
+                        .unwrap_or_else(|_| {
+                            warn!("Unable to read the tags of {uri}");
+                            Vec::new()
+                        });
+                    if read_sender.send((index, data)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(read_sender);
+
+        // The tracks read out of order wait for the ones before them
         let mut waiting = BTreeMap::new();
         let mut next_index = 0;
         for (index, data) in read_receiver {
@@ -1637,6 +1920,7 @@ impl Default for Track {
 
 #[cfg(test)]
 mod tests {
+    use gtk::gio::prelude::*;
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
@@ -2219,5 +2503,106 @@ mod tests {
             "oeuvres completes"
         );
         assert_eq!(normalize_search_text("Søren Łukasz"), "soren lukasz");
+    }
+
+    // A WAV file of silence, 8000 bytes a second
+    fn write_wav(path: &std::path::Path, seconds: u32) {
+        let data_size = 8000 * seconds;
+        let mut bytes = Vec::new();
+        bytes.extend(b"RIFF");
+        bytes.extend((36 + data_size).to_le_bytes());
+        bytes.extend(b"WAVEfmt ");
+        bytes.extend(16u32.to_le_bytes());
+        // PCM, mono, 8000 Hz, 8000 bytes a second, 1 byte a frame, 8 bits
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(8000u32.to_le_bytes());
+        bytes.extend(8000u32.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(8u16.to_le_bytes());
+        bytes.extend(b"data");
+        bytes.extend(data_size.to_le_bytes());
+        bytes.resize(bytes.len() + data_size as usize, 128);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    // The tracks read from some files, as the queue gets them
+    fn read_tracks(files: &[&std::path::Path]) -> Vec<Vec<super::TrackData>> {
+        use super::{Claims, FileCache, TrackData};
+
+        let cache = FileCache {
+            claims: Claims::new(files.iter().copied()),
+            ..Default::default()
+        };
+        files
+            .iter()
+            .map(|path| {
+                let uri = gtk::gio::File::for_path(path).uri();
+                TrackData::read(&uri, &cache)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_cue_sheet_splits_its_file_into_tracks() {
+        use std::time::Duration;
+
+        let dir = std::env::temp_dir().join(format!("dismas-cue-tracks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("Album.wav");
+        write_wav(&wav, 10);
+        let cue = dir.join("Album.cue");
+        std::fs::write(
+            &cue,
+            "PERFORMER \"Kino\"\nTITLE \"Album\"\nFILE \"Album.wav\" WAVE\n\
+             TRACK 01 AUDIO\nTITLE \"One\"\nINDEX 01 00:00:00\n\
+             TRACK 02 AUDIO\nTITLE \"Two\"\nINDEX 01 00:03:00\n\
+             TRACK 03 AUDIO\nTITLE \"Three\"\nPERFORMER \"Guest\"\nINDEX 01 00:07:00\n",
+        )
+        .unwrap();
+
+        // Listed together, the sheet has the tracks, and the file none
+        let read = read_tracks(&[&cue, &wav]);
+        assert!(read[1].is_empty());
+        let tracks = &read[0];
+        let titles: Vec<_> = tracks.iter().map(|t| t.title().unwrap()).collect();
+        assert_eq!(titles, vec!["One", "Two", "Three"]);
+        let durations: Vec<_> = tracks.iter().map(super::TrackData::duration).collect();
+        assert_eq!(durations, vec![3, 4, 3]);
+        assert_eq!(tracks[1].artist(), Some("Kino"));
+        assert_eq!(tracks[2].artist(), Some("Guest"));
+        assert_eq!(tracks[2].album(), Some("Album"));
+        assert_eq!(tracks[2].credits().track_number, Some(3));
+        assert_eq!(tracks[1].file().path().unwrap(), cue.join("track02"));
+        assert_eq!(tracks[1].audio_file().path().unwrap(), wav);
+        assert_eq!(
+            tracks[1].segment(),
+            (Duration::from_secs(3), Some(Duration::from_secs(7)))
+        );
+        assert_eq!(tracks[2].segment(), (Duration::from_secs(7), None));
+        assert_eq!(tracks[1].details().path.as_deref(), Some(wav.as_path()));
+        assert_ne!(tracks[0].uuid(), tracks[1].uuid());
+
+        // Alone, the file is split by the sheet next to it, with the same
+        // tracks
+        let alone = read_tracks(&[&wav]).remove(0);
+        let locations: Vec<_> = alone.iter().map(super::TrackData::uri).collect();
+        let expected: Vec<_> = tracks.iter().map(super::TrackData::uri).collect();
+        assert_eq!(locations, expected);
+
+        // A track of the sheet, as a playlist has it
+        let track = read_tracks(&[&cue.join("track02")]).remove(0);
+        assert_eq!(track.len(), 1);
+        assert_eq!(track[0].title(), Some("Two"));
+
+        // Without the sheet, the file is a track
+        std::fs::remove_file(&cue).unwrap();
+        let whole = read_tracks(&[&wav]).remove(0);
+        assert_eq!(whole.len(), 1);
+        assert_eq!(whole[0].duration(), 10);
+        assert_eq!(whole[0].segment(), (Duration::ZERO, None));
+        assert!(read_tracks(&[&cue.join("track02")])[0].is_empty());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
