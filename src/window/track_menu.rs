@@ -205,7 +205,7 @@ impl Window {
             let state = player.state();
 
             if let Some(track) = state.track() {
-                let file = track.file();
+                let file = track.audio_file();
 
                 match file
                     .query_info_future(

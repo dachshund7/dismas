@@ -11,7 +11,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
@@ -912,7 +912,19 @@ pub struct TrackData {
     uuid: Option<String>,
     duration: u64,
     details: FileDetails,
+    // Where the track is; for a track of a CUE sheet, a path under the
+    // sheet, which is not a file
     file: gio::File,
+    // The part of an audio file that a track of a CUE sheet plays
+    audio: Option<CueAudio>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CueAudio {
+    pub file: gio::File,
+    pub start: Duration,
+    // Until the end of the file if `None`
+    pub end: Option<Duration>,
 }
 
 // The format and the properties of the file of a track
@@ -1178,6 +1190,7 @@ impl TrackData {
             duration,
             details,
             file,
+            audio: None,
         })
     }
 
@@ -1187,6 +1200,21 @@ impl TrackData {
 
     pub fn file(&self) -> gio::File {
         self.file.clone()
+    }
+
+    // The file that plays, which is not the track's own for the tracks of
+    // CUE sheets
+    pub fn audio_file(&self) -> gio::File {
+        self.audio
+            .as_ref()
+            .map_or_else(|| self.file.clone(), |audio| audio.file.clone())
+    }
+
+    // Where the track starts and ends in its audio file
+    pub fn segment(&self) -> (Duration, Option<Duration>) {
+        self.audio
+            .as_ref()
+            .map_or((Duration::ZERO, None), |audio| (audio.start, audio.end))
     }
 }
 
@@ -1263,6 +1291,7 @@ impl Default for TrackData {
             duration: 0,
             details: FileDetails::default(),
             file: gio::File::for_path("/does-not-exist"),
+            audio: None,
         }
     }
 }
@@ -1585,6 +1614,18 @@ impl Track {
 
     pub fn file(&self) -> gio::File {
         self.imp().data.borrow().file()
+    }
+
+    pub fn audio_file(&self) -> gio::File {
+        self.imp().data.borrow().audio_file()
+    }
+
+    pub fn audio_uri(&self) -> String {
+        self.audio_file().uri().to_string()
+    }
+
+    pub fn segment(&self) -> (Duration, Option<Duration>) {
+        self.imp().data.borrow().segment()
     }
 }
 

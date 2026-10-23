@@ -18,7 +18,7 @@ use crate::{
     application::ApplicationAction,
     audio::{
         Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, SleepTimer,
-        Track, WaveformGenerator,
+        Track, TrackSource, WaveformGenerator,
     },
     utils,
 };
@@ -263,7 +263,7 @@ impl AudioPlayer {
 
         let next_track = next_track.filter(|_| !self.sleep_timer.finishing_track());
         self.backend
-            .set_next_uri(next_track.map(|t| t.uri()).as_deref());
+            .set_next(next_track.map(|t| TrackSource::of(&t)).as_ref());
     }
 
     fn setup_channel(self: Rc<Self>) {
@@ -327,7 +327,7 @@ impl AudioPlayer {
             if let Some(next_track) = self.queue.next_track() {
                 debug!("Next track: {}", next_track.uri());
 
-                self.backend.set_track_uri(Some(&next_track.uri()));
+                self.backend.set_track(Some(&TrackSource::of(&next_track)));
                 self.show_track(next_track);
                 self.state.set_playback_state(state);
 
@@ -342,7 +342,7 @@ impl AudioPlayer {
                 }
             } else {
                 debug!("No tracks left");
-                self.backend.set_track_uri(None);
+                self.backend.set_track(None);
                 self.clear_current_track();
                 self.state.set_playback_state(PlaybackState::Stopped);
 
@@ -415,9 +415,9 @@ impl AudioPlayer {
         }
         if let Some(next_track) = self.queue.next_track() {
             debug!("Playing next (gapless): {}", next_track.uri());
+            self.backend.confirm_switch(&TrackSource::of(&next_track));
             self.show_track(next_track);
         }
-        self.backend.confirm_switch(uri);
     }
 
     // Shows the track as the one playing
@@ -501,7 +501,7 @@ impl AudioPlayer {
                 self.set_playback_state(PlaybackState::Paused);
             }
 
-            self.backend.set_track_uri(Some(&prev_track.uri()));
+            self.backend.set_track(Some(&TrackSource::of(&prev_track)));
 
             debug!("Marking '{}' as playing", prev_track.uri());
             self.show_track(prev_track);
@@ -540,7 +540,7 @@ impl AudioPlayer {
                 self.set_playback_state(PlaybackState::Paused);
             }
 
-            self.backend.set_track_uri(Some(&next_track.uri()));
+            self.backend.set_track(Some(&TrackSource::of(&next_track)));
             self.show_track(next_track);
 
             if was_playing {
@@ -572,14 +572,14 @@ impl AudioPlayer {
                 self.set_playback_state(PlaybackState::Paused);
             }
 
-            self.backend.set_track_uri(Some(&track.uri()));
+            self.backend.set_track(Some(&TrackSource::of(&track)));
             self.show_track(track);
 
             if was_playing {
                 self.set_playback_state(PlaybackState::Playing);
             }
         } else {
-            self.backend.set_track_uri(None);
+            self.backend.set_track(None);
             self.clear_current_track();
             self.set_playback_state(PlaybackState::Stopped);
         }

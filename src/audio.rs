@@ -54,7 +54,7 @@ mod tray_controller;
 pub use tray_controller::TrayController;
 
 mod gst_backend;
-pub use gst_backend::GstBackend;
+pub use gst_backend::{GstBackend, TrackSource};
 
 mod player;
 mod queue;

@@ -72,7 +72,7 @@ impl Window {
     // main view, so we replace it with the full resolution cover of the
     // current track, once it has been loaded in a separate thread
     fn load_full_cover(&self, track: &Track) {
-        let Some(path) = track.file().path() else {
+        let Some(path) = track.audio_file().path() else {
             return;
         };
         let uri = track.uri();

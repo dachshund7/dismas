@@ -217,7 +217,7 @@ impl WaveformGenerator {
             .unwrap()
             .by_name("uridecodebin")
             .unwrap();
-        uridecodebin.set_property("uri", track.uri());
+        uridecodebin.set_property("uri", track.audio_uri());
 
         let fakesink = pipeline
             .downcast_ref::<gst::Bin>()

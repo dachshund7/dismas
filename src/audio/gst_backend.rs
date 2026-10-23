@@ -27,18 +27,44 @@ use gst::prelude::*;
 use gtk::{gio, gio::prelude::*, glib};
 use log::{debug, error, warn};
 
-use crate::audio::{PlaybackAction, ReplayGainMode, SeekDirection};
+use crate::audio::{PlaybackAction, ReplayGainMode, SeekDirection, Track};
 
 // How long after loading a track the next one can be handed over
 const HAND_OVER_AFTER_LOAD: Duration = Duration::from_millis(500);
 
+// What plays for a track: its file, or the part of a file that a CUE sheet
+// gives it
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackSource {
+    // The URI of the track, which tells apart the tracks of one file
+    pub id: String,
+    // The URI of the file that plays
+    pub uri: String,
+    pub start: gst::ClockTime,
+    // Until the end of the file if `None`
+    pub end: Option<gst::ClockTime>,
+}
+
+impl TrackSource {
+    pub fn of(track: &Track) -> Self {
+        let (start, end) = track.segment();
+        let clock_time = |d: Duration| gst::ClockTime::from_nseconds(d.as_nanos() as u64);
+        Self {
+            id: track.uri(),
+            uri: track.audio_uri(),
+            start: clock_time(start),
+            end: end.map(clock_time),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Gapless {
     // The track after the one the player shows
-    next_uri: Option<String>,
+    next: Option<TrackSource>,
     // The track handed to playbin, until the player follows it or another
     // track is loaded; only one at a time
-    handed: Option<String>,
+    handed: Option<TrackSource>,
     // Whether the handed track started playing
     started: bool,
     // The tracks GstPlay is yet to load; each says when it's loaded
@@ -46,7 +72,7 @@ struct Gapless {
     // When the player last loaded a track
     loaded_at: Option<Instant>,
     // The track the pipeline plays
-    current_uri: Option<String>,
+    current: Option<TrackSource>,
     // Changes whenever the player loads a track itself, so it can tell
     // the tracks that started before
     generation: u64,
@@ -207,7 +233,7 @@ impl GstBackend {
                 debug!("Not handing over the next track while the pipeline changes state");
                 return None;
             };
-            let next_uri = {
+            let next = {
                 let mut gapless = gapless.lock().unwrap();
                 if gapless.pending_loads > 0 || gapless.handed.is_some() {
                     return None;
@@ -221,18 +247,18 @@ impl GstBackend {
                 {
                     return None;
                 }
-                let next_uri = gapless.next_uri.clone()?;
+                let next = gapless.next.clone()?;
 
                 // A missing track would stop the pipeline before this one ends
-                if !gio::File::for_uri(&next_uri).query_exists(gio::Cancellable::NONE) {
+                if !gio::File::for_uri(&next.uri).query_exists(gio::Cancellable::NONE) {
                     return None;
                 }
-                gapless.handed = Some(next_uri.clone());
-                next_uri
+                gapless.handed = Some(next.clone());
+                next
             };
 
-            debug!("Handing over the next track: {next_uri}");
-            playbin.set_property("uri", &next_uri);
+            debug!("Handing over the next track: {}", next.id);
+            playbin.set_property("uri", &next.uri);
             None
         });
 
@@ -245,14 +271,15 @@ impl GstBackend {
             if gapless.started {
                 return;
             }
-            let Some(uri) = gapless.handed.clone() else {
+            let Some(handed) = gapless.handed.as_ref() else {
                 return;
             };
+            let id = handed.id.clone();
             gapless.started = true;
             let generation = gapless.generation;
             drop(gapless);
 
-            if let Err(e) = sender.try_send(PlaybackAction::TrackAdvanced(generation, uri)) {
+            if let Err(e) = sender.try_send(PlaybackAction::TrackAdvanced(generation, id)) {
                 error!("Failed to send TrackAdvanced: {e}");
             }
         });
@@ -318,15 +345,15 @@ impl GstBackend {
         ));
     }
 
-    pub fn set_track_uri(&self, uri: Option<&str>) {
-        self.start_position.set(uri.map(|_| 0));
+    pub fn set_track(&self, source: Option<&TrackSource>) {
+        self.start_position.set(source.map(|_| 0));
         {
             let mut gapless = self.gapless();
             gapless.generation += 1;
             gapless.handed = None;
             gapless.started = false;
-            gapless.current_uri = uri.map(str::to_owned);
-            if uri.is_some() {
+            gapless.current = source.cloned();
+            if source.is_some() {
                 gapless.pending_loads += 1;
                 gapless.loaded_at = Some(Instant::now());
             }
@@ -334,15 +361,15 @@ impl GstBackend {
         // Without a track, playbin is only stopped: given no URI, it
         // checks it anyway, and GLib warns about it. As GstPlay isn't
         // loading anything, no load is counted
-        match uri {
-            Some(uri) => self.gst_player.set_uri(Some(uri)),
+        match source {
+            Some(source) => self.gst_player.set_uri(Some(&source.uri)),
             None => self.gst_player.stop(),
         }
     }
 
     // The track that playbin gets once this one is about to finish
-    pub fn set_next_uri(&self, uri: Option<&str>) {
-        self.gapless().next_uri = uri.map(str::to_owned);
+    pub fn set_next(&self, source: Option<&TrackSource>) {
+        self.gapless().next = source.cloned();
     }
 
     pub fn generation(&self) -> u64 {
@@ -350,11 +377,11 @@ impl GstBackend {
     }
 
     // The player follows the track that was handed over
-    pub fn confirm_switch(&self, uri: &str) {
+    pub fn confirm_switch(&self, source: &TrackSource) {
         let mut gapless = self.gapless();
         gapless.handed = None;
         gapless.started = false;
-        gapless.current_uri = Some(uri.to_owned());
+        gapless.current = Some(source.clone());
     }
 
     // The seeks return the position the track will start at, if it hasn't
@@ -430,9 +457,9 @@ impl GstBackend {
     // Loading the track again stops it too, and replaces a track that was
     // handed over, which playbin would keep instead
     pub fn stop(&self) {
-        let current_uri = self.gapless().current_uri.clone();
-        if current_uri.is_some() {
-            self.set_track_uri(current_uri.as_deref());
+        let current = self.gapless().current.clone();
+        if current.is_some() {
+            self.set_track(current.as_ref());
         } else {
             self.start_position.take();
             self.gst_player.stop();
