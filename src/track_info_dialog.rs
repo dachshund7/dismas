@@ -113,19 +113,13 @@ impl TrackInfoDialog {
         }
         fill_group(&imp.performance_group, &performance);
 
-        let mut production = vec![
+        let production = [
             (i18n("Producer"), credits.producers.clone()),
             (i18n("Engineer"), credits.engineers.clone()),
             (i18n("Mixer"), credits.mixers.clone()),
             (i18n("Remixer"), credits.remixers.clone()),
             (i18n("DJ-Mixer"), credits.dj_mixers.clone()),
         ];
-        // The roles without a field of their own, e.g. "mastering engineer"
-        for credit in &credits.other_production {
-            if let Some(role) = &credit.role {
-                production.push((capitalize(role), vec![credit.name.clone()]));
-            }
-        }
         fill_group(&imp.production_group, &production);
 
         fill_group(&imp.release_group, &release_fields(track, &credits));

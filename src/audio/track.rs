@@ -33,10 +33,7 @@ use log::{debug, warn};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    audio::{
-        cover_cache::{AlbumCover, CoverArt, CoverCache},
-        youtube_description,
-    },
+    audio::cover_cache::{AlbumCover, CoverArt, CoverCache},
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::{i18n, i18n_f},
     library::{folder_album_title, is_mbid},
@@ -90,9 +87,6 @@ pub struct TrackCredits {
     pub mixers: Vec<String>,
     pub remixers: Vec<String>,
     pub dj_mixers: Vec<String>,
-    // The production roles without a field of their own, e.g. "mastering
-    // engineer"
-    pub other_production: Vec<Credit>,
     pub album_artist: Option<String>,
     pub disc_number: Option<u32>,
     pub disc_total: Option<u32>,
@@ -113,9 +107,6 @@ pub struct TrackCredits {
     pub barcodes: Vec<String>,
     pub isrcs: Vec<String>,
     pub genres: Vec<String>,
-    // Whether the composers come from the description that YouTube
-    // generated, rather than from the tags
-    pub composers_from_description: bool,
     pub copyright: Vec<String>,
     pub musicbrainz: MusicBrainzIds,
     // The MusicBrainz ids of the composers of the works the track
@@ -155,9 +146,8 @@ impl MusicBrainzIds {
 }
 
 impl TrackCredits {
-    // The credits in the tags, filled in from the description that YouTube
-    // generated, if the track has one; lofty leaves the tags it doesn't
-    // know out of `tag`, so `extra` has the Vorbis comments we need
+    // The credits in the tags; lofty leaves the tags it doesn't know out of
+    // `tag`, so `extra` has the Vorbis comments we need
     fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
         let mut credits = Self::from_tag_items(tag);
         credits.composer_ids = extra
@@ -176,11 +166,6 @@ impl TrackCredits {
             credits.movement = Some(movement.full());
             credits.movement_number = None;
             credits.movement_levels = movement.levels.map(|levels| (levels, movement.movement));
-        }
-
-        let description = description_texts(tag, extra).find_map(youtube_description::parse);
-        if let Some(description) = description {
-            credits.fill_in(description);
         }
 
         credits
@@ -207,7 +192,6 @@ impl TrackCredits {
             mixers: tag_strings(tag, ItemKey::MixEngineer),
             remixers: tag_strings(tag, ItemKey::Remixer),
             dj_mixers: tag_strings(tag, ItemKey::MixDj),
-            other_production: Vec::new(),
             album_artist: tag.get_string(ItemKey::AlbumArtist).map(plain_commas),
             disc_number: tag.disk(),
             disc_total: tag.disk_total(),
@@ -236,7 +220,6 @@ impl TrackCredits {
             barcodes: tag_strings(tag, ItemKey::Barcode),
             isrcs: tag_strings(tag, ItemKey::Isrc),
             genres: tag_strings(tag, ItemKey::Genre),
-            composers_from_description: false,
             copyright: tag
                 .get_strings(ItemKey::CopyrightMessage)
                 .map(ToString::to_string)
@@ -244,34 +227,6 @@ impl TrackCredits {
             musicbrainz: MusicBrainzIds::from_tag(tag),
             composer_ids: None,
         }
-    }
-
-    // Takes what a YouTube description has and the tags don't
-    fn fill_in(&mut self, description: TrackCredits) {
-        fn fill<T>(field: &mut Vec<T>, other: Vec<T>) {
-            if field.is_empty() {
-                *field = other;
-            }
-        }
-
-        self.composers_from_description =
-            self.composers.is_empty() && !description.composers.is_empty();
-        fill(&mut self.composers, description.composers);
-        fill(&mut self.lyricists, description.lyricists);
-        fill(&mut self.arrangers, description.arrangers);
-        fill(&mut self.conductors, description.conductors);
-        fill(&mut self.performers, description.performers);
-        fill(&mut self.producers, description.producers);
-        fill(&mut self.engineers, description.engineers);
-        fill(&mut self.mixers, description.mixers);
-        fill(&mut self.remixers, description.remixers);
-        fill(&mut self.other_production, description.other_production);
-        fill(&mut self.copyright, description.copyright);
-
-        if self.date.as_deref().is_none_or(is_upload_date) {
-            self.date = description.date;
-        }
-        self.original_date = self.original_date.take().or(description.original_date);
     }
 
     // The original release date, if it's not the same as the date, e.g.
@@ -286,16 +241,12 @@ impl TrackCredits {
 
     // The composers to show in the queue for a track that is not part of
     // a larger work, unless the artist already names them; only for
-    // classical music, as for popular music they are the songwriters.
-    // Most classical tracks from YouTube have no genre, but their
-    // descriptions credit composers, while the tags of popular music
-    // often do
+    // classical music, as for popular music they are the songwriters
     pub fn listed_composers(&self, artist: Option<&str>) -> Option<String> {
-        let classical = self.composers_from_description
-            || self
-                .genres
-                .iter()
-                .any(|g| g.eq_ignore_ascii_case("classical"));
+        let classical = self
+            .genres
+            .iter()
+            .any(|g| g.eq_ignore_ascii_case("classical"));
         let named = artist.is_some_and(|a| self.artist_is_composer(a));
         if !classical || self.composers.is_empty() || named {
             return None;
@@ -423,7 +374,7 @@ pub fn normalize_search_text(s: &str) -> String {
 // The text of all the tags of a track, for searching the queue; this
 // leaves out the tags that only contain identifiers, numbers or technical
 // data, as they would make short searches, like "op 29", match by accident
-pub fn tag_search_text(tag: &Tag, extra: &ExtraComments) -> String {
+pub fn tag_search_text(tag: &Tag) -> String {
     let mut text = tag
         .items()
         .filter(|item| {
@@ -491,16 +442,6 @@ pub fn tag_search_text(tag: &Tag, extra: &ExtraComments) -> String {
         text.push_str(&album_title_search_text(album, album_artist));
     }
 
-    // The names in a description from YouTube, e.g. the composer, which
-    // the other tags of these tracks often lack
-    if let Some(names) = description_texts(tag, extra)
-        .map(youtube_description::search_names)
-        .find(|names| !names.is_empty())
-    {
-        text.push(' ');
-        text.push_str(&names.join(" "));
-    }
-
     text
 }
 
@@ -509,16 +450,6 @@ fn is_link(word: &str) -> bool {
     ["http://", "https://", "www."]
         .iter()
         .any(|prefix| word.starts_with(prefix))
-}
-
-// The tags that can hold a description generated by YouTube
-fn description_texts<'a>(tag: &'a Tag, extra: &'a ExtraComments) -> impl Iterator<Item = &'a str> {
-    extra
-        .synopsis
-        .as_deref()
-        .into_iter()
-        .chain(tag.get_strings(ItemKey::Description))
-        .chain(tag.get_strings(ItemKey::Comment))
 }
 
 // Album titles often list the names in the album artist, e.g. the album
@@ -579,7 +510,6 @@ fn album_artist_search_text(tag: &Tag, album_artist: &str) -> String {
 // the `TaggedFile`, as it has no `ItemKey` for them
 #[derive(Debug, Default)]
 pub struct ExtraComments {
-    synopsis: Option<String>,
     // The JSON written by the "Work Hierarchy" plugin of MusicBrainz Picard
     work_hierarchy: Option<String>,
     // A CUE sheet that splits the file into tracks
@@ -603,7 +533,6 @@ pub fn read_tagged_file(
                 .map(ToString::to_string)
         };
         let extra = ExtraComments {
-            synopsis: get("SYNOPSIS"),
             work_hierarchy: get("WORK_HIERARCHY"),
             cue_sheet: get("CUESHEET"),
         };
@@ -897,12 +826,6 @@ fn position_ranges(positions: &[u32]) -> String {
             }
         })
         .join(", ")
-}
-
-// yt-dlp stores the date of the upload as "YYYYMMDD", which is not when
-// the track was released
-fn is_upload_date(date: &str) -> bool {
-    date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit())
 }
 
 // The artists of a track, if the tags name any
@@ -1342,7 +1265,7 @@ impl TrackData {
             album = track_album(tag);
             credits = TrackCredits::from_tag(tag, extra);
             replay_gain = ReplayGain::from_tag(tag);
-            tag_text = tag_search_text(tag, extra);
+            tag_text = tag_search_text(tag);
             cover = Some(CoverCache::cover_art(path, tag));
         } else {
             warn!("Unable to load primary tag for: {path:?}");
@@ -1355,7 +1278,7 @@ impl TrackData {
                 album = album.or_else(|| track_album(tag));
                 credits = TrackCredits::from_tag(tag, extra);
                 replay_gain = ReplayGain::from_tag(tag);
-                tag_text = tag_search_text(tag, extra);
+                tag_text = tag_search_text(tag);
                 // The first tag with a cover has the one we keep
                 if cover.as_ref().is_none_or(|c| c.art().is_none()) {
                     cover = Some(CoverCache::cover_art(path, tag));
@@ -1429,7 +1352,7 @@ impl TrackData {
 
         TrackData {
             credits: TrackCredits::from_tag(&tag, &extra),
-            tag_text: tag_search_text(&tag, &extra),
+            tag_text: tag_search_text(&tag),
             cover: Some(cue_file.cover.clone()),
             uuid,
             duration: end.saturating_sub(track.start).as_secs(),
@@ -2126,9 +2049,9 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        Credit, ExtraComments, MovementName, MusicBrainzIds, TrackCredits, album_title_search_text,
-        is_numbered, normalize_search_text, position_ranges, tag_search_text, title_from_name,
-        track_album, track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
+        Credit, MovementName, MusicBrainzIds, TrackCredits, album_title_search_text, is_numbered,
+        normalize_search_text, position_ranges, tag_search_text, title_from_name, track_album,
+        track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
     };
 
     #[test]
@@ -2190,23 +2113,14 @@ mod tests {
     }
 
     #[test]
-    fn search_text_has_description_names_but_no_links() {
+    fn search_text_has_no_links() {
         let mut tag = Tag::new(TagType::VorbisComments);
         tag.insert_text(ItemKey::TrackTitle, "Aqua".to_string());
         tag.insert_text(
             ItemKey::Comment,
             "https://www.youtube.com/watch?v=LLIsy64Sv5c".to_string(),
         );
-        let extra = ExtraComments {
-            synopsis: Some(
-                "Provided to YouTube by IIP-DDS\n\nAqua · Núria Rial\n\nAqua\n\n\
-                 Composer: Núria Rial\n\nAuto-generated by YouTube."
-                    .to_string(),
-            ),
-            ..Default::default()
-        };
-        let text = normalize_search_text(&tag_search_text(&tag, &extra));
-        assert!(text.contains("nuria rial"));
+        let text = normalize_search_text(&tag_search_text(&tag));
         assert!(!text.contains("youtube"));
         assert!(text.contains("aqua"));
     }
@@ -2483,7 +2397,7 @@ mod tests {
     fn composers_are_listed_for_classical_music() {
         let brentner = TrackCredits {
             composers: vec!["Jan Josef Ignác Brentner".to_string()],
-            composers_from_description: true,
+            genres: vec!["Classical".to_string()],
             ..Default::default()
         };
         assert_eq!(
@@ -2697,21 +2611,6 @@ mod tests {
             Some("1961")
         );
         assert_eq!(dates(Some("2007"), None).distinct_original_date(), None);
-    }
-
-    #[test]
-    fn description_replaces_only_the_upload_date() {
-        let description = || dates(Some("2019-03-01"), Some("1963"));
-
-        let mut downloaded = dates(Some("20240411"), None);
-        downloaded.fill_in(description());
-        assert_eq!(downloaded.date.as_deref(), Some("2019-03-01"));
-        assert_eq!(downloaded.original_date.as_deref(), Some("1963"));
-
-        let mut tagged = dates(Some("2019"), Some("1962"));
-        tagged.fill_in(description());
-        assert_eq!(tagged.date.as_deref(), Some("2019"));
-        assert_eq!(tagged.original_date.as_deref(), Some("1962"));
     }
 
     #[test]

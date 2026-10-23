@@ -1019,7 +1019,7 @@ fn read_file_tags(path: &Path) -> Option<(lofty::file::TaggedFile, ExtraComments
             return None;
         }
     };
-    // The extra comments have the descriptions from YouTube, for searching
+    // The extra comments have the CUE sheet in the tags, if there's one
     match read_tagged_file(probe, options) {
         Ok(f) => Some(f),
         Err(e) => {
@@ -1053,7 +1053,7 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
 
     // A file without tags is in the album of its folder too
     let empty = Tag::new(tagged_file.primary_tag_type());
-    let tags = TrackTags::from_tag(tag.unwrap_or(&empty), &extra, path, Some(path));
+    let tags = TrackTags::from_tag(tag.unwrap_or(&empty), path, Some(path));
     vec![(path.to_path_buf(), tags)]
 }
 
@@ -1081,7 +1081,7 @@ fn read_sheet_tags(
 fn cue_track_tags(sheet: &SplitSheet, album_tag: &Tag, track: &CueTrack) -> (PathBuf, TrackTags) {
     let tag = cue_sheet::track_tag(album_tag, &sheet.sheet, track);
     // The album is in the folder of the sheet
-    let tags = TrackTags::from_tag(&tag, &ExtraComments::default(), &sheet.path, None);
+    let tags = TrackTags::from_tag(&tag, &sheet.path, None);
     (sheet.location(track), tags)
 }
 
@@ -1121,7 +1121,7 @@ impl TrackTags {
     // The title of a track without one is the name of its `file`, which
     // is searched like the queue searches it; the tracks of CUE sheets
     // have none
-    fn from_tag(tag: &Tag, extra: &ExtraComments, path: &Path, file: Option<&Path>) -> Self {
+    fn from_tag(tag: &Tag, path: &Path, file: Option<&Path>) -> Self {
         let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
 
         let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
@@ -1175,7 +1175,7 @@ impl TrackTags {
                     .clone()
                     .or_else(|| file.map(title_from_file_name))
                     .unwrap_or_default(),
-                tag_search_text(tag, extra),
+                tag_search_text(tag),
                 folder_album.clone().unwrap_or_default(),
             ]
             .join(" "),
@@ -1241,25 +1241,23 @@ mod tests {
     fn tracks_without_titles_are_searched_by_file_name() {
         use lofty::tag::{ItemKey, Tag, TagType};
 
-        use crate::audio::ExtraComments;
-
         let path = Path::new("/music/Some Folder/01 - Intro.flac");
         let mut tag = Tag::new(TagType::VorbisComments);
-        let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path));
         assert_eq!(tags.album.as_deref(), Some("Some Folder"));
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(search.contains("some folder"));
 
         tag.insert_text(ItemKey::AlbumTitle, "Album".to_string());
-        let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path));
         assert_eq!(tags.title, None);
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(!search.contains("some folder"));
 
         tag.insert_text(ItemKey::TrackTitle, "Overture".to_string());
-        let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path));
         let search = tags.search.unwrap();
         assert!(search.contains("overture"));
         assert!(!search.contains("intro"));

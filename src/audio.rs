@@ -62,7 +62,6 @@ mod sleep_timer;
 mod state;
 mod track;
 mod waveform_generator;
-mod youtube_description;
 
 pub use player::{
     AudioPlayer, PlaybackAction, PlaybackState, RepeatMode, ReplayGainMode, SeekDirection,
