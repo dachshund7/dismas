@@ -66,20 +66,25 @@ playbackcontrol {
   padding-bottom: 12px;
 }
 
-/* The sleep timer button is filled while the timer is on; coloring the
- * icon alone wouldn't show with "Match Cover Art", which makes the accent
- * color the color of the text */
-playbackcontrol menubutton.sleep-timer-on > button {
+/* The sleep timer button is filled while the timer is on, and the shuffle
+ * button while the playlist is shuffled, as the grey of a checked button
+ * hardly differs from the one of the others; coloring the icon alone
+ * wouldn't show with "Match Cover Art", which makes the accent color the
+ * color of the text */
+playbackcontrol menubutton.sleep-timer-on > button,
+playbackcontrol button.shuffle:checked {
   background-color: var(--accent-bg-color);
   color: var(--accent-fg-color);
 }
 
-playbackcontrol menubutton.sleep-timer-on > button:hover {
+playbackcontrol menubutton.sleep-timer-on > button:hover,
+playbackcontrol button.shuffle:checked:hover {
   background-image: image(color-mix(in srgb, currentColor 10%, transparent));
 }
 
 playbackcontrol menubutton.sleep-timer-on > button:active,
-playbackcontrol menubutton.sleep-timer-on > button:checked {
+playbackcontrol menubutton.sleep-timer-on > button:checked,
+playbackcontrol button.shuffle:checked:active {
   background-image: image(color-mix(in srgb, currentColor 20%, transparent));
 }
 
