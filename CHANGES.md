@@ -68,6 +68,9 @@ All notable changes to this project will be documented in this file.
 - Tracks without a title tag show their file name, without a leading track
   number, instead of "Unknown title", and can be searched by it; Track Info
   only shows the title and album from the tags
+- Tracks without an album tag are in the album grid, grouped by the folder
+  they're in and named after it, which is also shown as their album and
+  can be searched; a file without tags shows its folder's cover file
 - Update dependencies
 
 ### Fixed
@@ -98,6 +101,7 @@ All notable changes to this project will be documented in this file.
   it opened
 - On X11, Esc didn't cancel dragging a track in the queue, and the queue
   kept scrolling after a track was dropped near its edge
+- An album whose tracks had no artist tags was by "Various Artists"
 - On X11 without a compositor, drags over the part of the window gained by
   widening it went to the window below
 - GLib warnings when nothing was left to play

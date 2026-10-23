@@ -39,7 +39,7 @@ use crate::{
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::{i18n, i18n_f},
-    library::is_mbid,
+    library::{folder_album_title, is_mbid},
     utils::{self, ATTRIBUTE_HOST_PATH},
 };
 
@@ -918,6 +918,19 @@ pub fn track_title(tag: &Tag) -> Option<String> {
         .map(|title| title.to_string())
 }
 
+// The album in a tag, unless it's blank
+fn track_album(tag: &Tag) -> Option<String> {
+    tag.album()
+        .filter(|album| !album.trim().is_empty())
+        .map(|album| album.to_string())
+}
+
+// The album of a track without one in its tags: the folder it's in, as in
+// the album grid
+fn fallback_album(path: &Path) -> String {
+    folder_album_title(path).unwrap_or_else(|| i18n("Unknown album"))
+}
+
 // The title of a track without one in its tags, from the name of its file,
 // e.g. "Intro" for "01 - Intro.flac". Only a leading track number is left
 // out: "Song - Live" could just as well be "Artist - Song", so the rest is
@@ -1029,6 +1042,8 @@ pub struct TrackData {
     // The title shown when the tags have none
     fallback_title: String,
     album: Option<String>,
+    // The album shown when the tags have none
+    fallback_album: String,
     credits: TrackCredits,
     tag_text: String,
     cover: Option<AlbumCover>,
@@ -1150,6 +1165,16 @@ impl TrackData {
 
     pub fn album(&self) -> Option<&str> {
         self.album.as_deref()
+    }
+
+    // The album from the tags, or else the name of the track's folder
+    pub fn shown_album(&self) -> &str {
+        self.album.as_deref().unwrap_or(&self.fallback_album)
+    }
+
+    // The album shown in place of the one the tags lack
+    pub fn fallback_album(&self) -> Option<&str> {
+        self.album.is_none().then_some(self.fallback_album.as_str())
     }
 
     pub fn tag_text(&self) -> &str {
@@ -1314,7 +1339,7 @@ impl TrackData {
             debug!("Found primary tag");
             artist = track_artist(tag);
             title = track_title(tag);
-            album = tag.album().map(|s| s.to_string());
+            album = track_album(tag);
             credits = TrackCredits::from_tag(tag, extra);
             replay_gain = ReplayGain::from_tag(tag);
             tag_text = tag_search_text(tag, extra);
@@ -1327,7 +1352,7 @@ impl TrackData {
                 // from the first
                 artist = artist.or_else(|| track_artist(tag));
                 title = title.or_else(|| track_title(tag));
-                album = album.or_else(|| tag.album().map(|s| s.to_string()));
+                album = album.or_else(|| track_album(tag));
                 credits = TrackCredits::from_tag(tag, extra);
                 replay_gain = ReplayGain::from_tag(tag);
                 tag_text = tag_search_text(tag, extra);
@@ -1341,6 +1366,11 @@ impl TrackData {
                 }
             }
         }
+        // A file without tags can still have a cover file next to it
+        if cover.is_none() {
+            let tag = Tag::new(tagged_file.primary_tag_type());
+            cover = Some(CoverCache::cover_art(path, &tag));
+        }
 
         let uuid = read
             .display_name
@@ -1348,6 +1378,13 @@ impl TrackData {
             .map(|name| track_uuid(name, None, [&artist, &title, &album]));
         let fallback_title = if title.is_none() {
             title_from_file_name(path)
+        } else {
+            String::new()
+        };
+        // The folder outside the sandbox, as a file that came through the
+        // document portal is in a folder named after its document
+        let fallback_album = if album.is_none() {
+            fallback_album(read.host_path.as_deref().unwrap_or(path))
         } else {
             String::new()
         };
@@ -1365,6 +1402,7 @@ impl TrackData {
             title,
             fallback_title,
             album,
+            fallback_album,
         }
     }
 
@@ -1376,7 +1414,7 @@ impl TrackData {
         let extra = ExtraComments::default();
         let artist = track_artist(&tag);
         let title = track_title(&tag);
-        let album = tag.album().map(|s| s.to_string());
+        let album = track_album(&tag);
 
         let end = match track.end {
             Some(end) if cue_file.duration.is_zero() || end < cue_file.duration => end,
@@ -1408,6 +1446,12 @@ impl TrackData {
             // Translators: the title of a track of a CUE sheet that has
             // none; `{}` is its number
             fallback_title: i18n_f("Track {}", &[&track.number.to_string()]),
+            // The album is in the folder of the sheet
+            fallback_album: if album.is_none() {
+                fallback_album(&sheet.path)
+            } else {
+                String::new()
+            },
             album,
         }
     }
@@ -1711,6 +1755,7 @@ impl Default for TrackData {
             title: Some("Invalid Title".to_string()),
             fallback_title: String::new(),
             album: Some("Invalid Album".to_string()),
+            fallback_album: String::new(),
             credits: TrackCredits::default(),
             tag_text: String::new(),
             cover: None,
@@ -1792,10 +1837,7 @@ mod imp {
         }
 
         fn album(&self) -> String {
-            match self.data.borrow().album() {
-                Some(album) => album.to_string(),
-                None => i18n("Unknown album"),
-            }
+            self.data.borrow().shown_album().to_string()
         }
 
         fn credits(&self) -> String {
@@ -2039,7 +2081,13 @@ impl Track {
                 let data = self.imp().data.borrow();
                 // The album title is in the tags, without the names that
                 // would make it match tracks by other people
-                let key = [self.artist(), self.title(), data.tag_text().to_string()].join(" ");
+                let key = [
+                    self.artist(),
+                    self.title(),
+                    data.tag_text().to_string(),
+                    data.fallback_album().unwrap_or_default().to_string(),
+                ]
+                .join(" ");
                 normalize_search_text(&key)
             })
             .clone()
@@ -2080,7 +2128,7 @@ mod tests {
     use super::{
         Credit, ExtraComments, MovementName, MusicBrainzIds, TrackCredits, album_title_search_text,
         is_numbered, normalize_search_text, position_ranges, tag_search_text, title_from_name,
-        track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
+        track_album, track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
     };
 
     #[test]
@@ -2133,6 +2181,12 @@ mod tests {
         assert_eq!(track_title(&tag), None);
         tag.insert_text(ItemKey::TrackTitle, "Aqua".to_string());
         assert_eq!(track_title(&tag).as_deref(), Some("Aqua"));
+
+        assert_eq!(track_album(&tag), None);
+        tag.insert_text(ItemKey::AlbumTitle, " ".to_string());
+        assert_eq!(track_album(&tag), None);
+        tag.insert_text(ItemKey::AlbumTitle, "Aquarium".to_string());
+        assert_eq!(track_album(&tag).as_deref(), Some("Aquarium"));
     }
 
     #[test]
@@ -2793,14 +2847,19 @@ mod tests {
 
     #[test]
     fn tracks_without_titles_show_their_file_name_or_number() {
-        let dir = std::env::temp_dir().join(format!("dismas-untitled-{}", std::process::id()));
+        let name = format!("dismas-untitled-{}", std::process::id());
+        let dir = std::env::temp_dir().join(&name);
         std::fs::create_dir_all(&dir).unwrap();
         let wav = dir.join("01 - Intro.wav");
         crate::utils::write_test_wav(&wav, 4);
 
+        // Nor an album, which is the folder's
         let whole = read_tracks(&[&wav]).remove(0);
         assert_eq!(whole[0].title(), None);
         assert_eq!(whole[0].shown_title(), "Intro");
+        assert_eq!(whole[0].album(), None);
+        assert_eq!(whole[0].shown_album(), name);
+        assert_eq!(whole[0].fallback_album(), Some(name.as_str()));
 
         // The other names in the folder start with "01" to "09"
         let tenth = dir.join("10 under the mat.wav");
@@ -2819,6 +2878,19 @@ mod tests {
         let tracks = read_tracks(&[&cue]).remove(0);
         let titles: Vec<_> = tracks.iter().map(super::TrackData::shown_title).collect();
         assert_eq!(titles, vec!["One", "Track 2"]);
+        assert_eq!(tracks[0].shown_album(), name);
+
+        // With an album, there's nothing in its place
+        std::fs::write(
+            &cue,
+            "TITLE \"Album\"\nFILE \"01 - Intro.wav\" WAVE\n\
+             TRACK 01 AUDIO\nINDEX 01 00:00:00\n\
+             TRACK 02 AUDIO\nINDEX 01 00:02:00\n",
+        )
+        .unwrap();
+        let tracks = read_tracks(&[&cue]).remove(0);
+        assert_eq!(tracks[0].shown_album(), "Album");
+        assert_eq!(tracks[0].fallback_album(), None);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

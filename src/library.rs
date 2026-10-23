@@ -44,7 +44,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 10;
+const SCHEMA_VERSION: i32 = 11;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -418,18 +418,23 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
                 COALESCE(MAX(t.album_artist),
                          CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
                               ELSE MAX(t.artist) END),
-                MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added)
+                MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added),
+                COUNT(DISTINCT t.artist)
          FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
          WHERE t.album_id IS NOT NULL{hidden_sql}
          GROUP BY t.album_id"
     ))?;
     // Without an album artist, the albums whose tracks are by different
-    // artists are compilations
+    // artists are compilations, and those whose tracks have none are by an
+    // unknown artist
     let various = i18n("Various Artists");
+    let unknown = i18n("Unknown artist");
     let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
-        let artist = row
-            .get::<_, Option<String>>(2)?
-            .unwrap_or_else(|| various.clone());
+        let artist = match row.get::<_, Option<String>>(2)? {
+            Some(artist) => artist,
+            None if row.get::<_, i64>(7)? == 0 => unknown.clone(),
+            None => various.clone(),
+        };
         let sort_key = row
             .get::<_, Option<String>>(5)?
             .unwrap_or_else(|| artist.clone());
@@ -977,13 +982,14 @@ fn create_thumbnail(track: &Path, dest: &Path) -> bool {
     let Some(tagged_file) = tagged_file else {
         return false;
     };
+    // A file without tags can still have a cover file next to it
+    let empty = Tag::new(tagged_file.primary_tag_type());
     let tag = tagged_file
         .primary_tag()
-        .or_else(|| tagged_file.first_tag());
+        .or_else(|| tagged_file.first_tag())
+        .unwrap_or(&empty);
 
-    let Some(image) =
-        tag.and_then(|tag| CoverCache::load_cover(tag, track.parent(), THUMBNAIL_SIZE))
-    else {
+    let Some(image) = CoverCache::load_cover(tag, track.parent(), THUMBNAIL_SIZE) else {
         return false;
     };
 
@@ -1045,9 +1051,9 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
             .collect();
     }
 
-    let tags = tag.map_or_else(TrackTags::default, |tag| {
-        TrackTags::from_tag(tag, &extra, path, Some(path))
-    });
+    // A file without tags is in the album of its folder too
+    let empty = Tag::new(tagged_file.primary_tag_type());
+    let tags = TrackTags::from_tag(tag.unwrap_or(&empty), &extra, path, Some(path));
     vec![(path.to_path_buf(), tags)]
 }
 
@@ -1104,6 +1110,13 @@ fn album_folder(path: &Path) -> Option<&Path> {
     }
 }
 
+// The album of a track without an album tag: the folder it's in, by name
+pub fn folder_album_title(path: &Path) -> Option<String> {
+    album_folder(path)?
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
 impl TrackTags {
     // The title of a track without one is the name of its `file`, which
     // is searched like the queue searches it; the tracks of CUE sheets
@@ -1124,29 +1137,33 @@ impl TrackTags {
             .map(|s| s.chars().take(4).collect::<String>())
             .filter(|s| !s.is_empty());
 
-        // Tracks without an album are not part of the grid. The release
-        // id from MusicBrainz tells apart albums with the same name;
-        // without it, we use the album artist, so the discs of an album in
-        // separate folders stay together. Compilations often have no album
-        // artist, and a different artist for each track, so we fall back to
-        // the folder the album is in
-        let album_id = album.as_ref().map(|album| {
-            if let Some(mbid) = get(ItemKey::MusicBrainzReleaseId).filter(|s| is_mbid(s)) {
-                mbid
-            } else {
-                let mut hasher = Sha256::new();
-                hasher.update(album);
-                hasher.update([0]);
-                match (&album_artist, album_folder(path)) {
-                    (Some(artist), _) => hasher.update(artist),
-                    (None, Some(folder)) => {
-                        hasher.update(folder.as_os_str().as_encoded_bytes());
-                    }
-                    (None, None) => (),
+        // The release id from MusicBrainz tells apart albums with the same
+        // name; without it, we use the album artist, so the discs of an
+        // album in separate folders stay together. Compilations often have
+        // no album artist, and a different artist for each track, so we fall
+        // back to the folder the album is in. Tracks without an album are
+        // grouped by that folder, as an album without a name, which the
+        // tags can't have
+        let mbid = get(ItemKey::MusicBrainzReleaseId).filter(|s| album.is_some() && is_mbid(s));
+        let album_id = mbid.unwrap_or_else(|| {
+            let mut hasher = Sha256::new();
+            hasher.update(album.as_deref().unwrap_or_default());
+            hasher.update([0]);
+            match (
+                album.as_ref().and(album_artist.as_ref()),
+                album_folder(path),
+            ) {
+                (Some(artist), _) => hasher.update(artist),
+                (None, Some(folder)) => {
+                    hasher.update(folder.as_os_str().as_encoded_bytes());
                 }
-                utils::hex(&hasher.finalize())
+                (None, None) => (),
             }
+            utils::hex(&hasher.finalize())
         });
+        // The album of a track without one is shown as its folder's name,
+        // in the grid as in the queue
+        let folder_album = album.is_none().then(|| folder_album_title(path)).flatten();
 
         // The same text as `Track::search_key()`, so that searching the
         // albums matches the same tracks as searching the queue
@@ -1159,13 +1176,14 @@ impl TrackTags {
                     .or_else(|| file.map(title_from_file_name))
                     .unwrap_or_default(),
                 tag_search_text(tag, extra),
+                folder_album.clone().unwrap_or_default(),
             ]
             .join(" "),
         );
 
         TrackTags {
-            album_id,
-            album,
+            album_id: Some(album_id),
+            album: album.or(folder_album),
             // After the id, which must not change
             album_artist: album_artist.as_deref().map(plain_commas),
             artist: artist.as_deref().map(plain_commas),
@@ -1217,25 +1235,102 @@ mod tests {
         assert_eq!(path_from_bytes(path_bytes(path).to_vec()), path);
     }
 
-    // Like the queue, for which the title is the file name
+    // Like the queue, for which the title is the file name, and the album
+    // the folder's
     #[test]
     fn tracks_without_titles_are_searched_by_file_name() {
         use lofty::tag::{ItemKey, Tag, TagType};
 
         use crate::audio::ExtraComments;
 
-        let path = Path::new("/music/Album/01 - Intro.flac");
+        let path = Path::new("/music/Some Folder/01 - Intro.flac");
         let mut tag = Tag::new(TagType::VorbisComments);
+        let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
+        assert_eq!(tags.album.as_deref(), Some("Some Folder"));
+        let search = tags.search.unwrap();
+        assert!(search.contains("intro"));
+        assert!(search.contains("some folder"));
+
         tag.insert_text(ItemKey::AlbumTitle, "Album".to_string());
         let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
         assert_eq!(tags.title, None);
-        assert!(tags.search.unwrap().contains("intro"));
+        let search = tags.search.unwrap();
+        assert!(search.contains("intro"));
+        assert!(!search.contains("some folder"));
 
         tag.insert_text(ItemKey::TrackTitle, "Overture".to_string());
         let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
         let search = tags.search.unwrap();
         assert!(search.contains("overture"));
         assert!(!search.contains("intro"));
+    }
+
+    #[test]
+    fn tracks_without_an_album_are_grouped_by_folder() {
+        use super::{query_albums, scan_with};
+        use crate::utils::write_test_wav;
+
+        let music = test_dir("folder-albums");
+        std::fs::create_dir_all(music.join("Album/CD 2")).unwrap();
+        std::fs::create_dir_all(music.join("Sheet")).unwrap();
+        write_test_wav(&music.join("Loose.wav"), 1);
+        write_test_wav(&music.join("Album/One.wav"), 1);
+        write_test_wav(&music.join("Album/CD 2/Two.wav"), 1);
+        write_test_wav(&music.join("Sheet/Sheet.wav"), 4);
+        std::fs::write(
+            music.join("Sheet/Sheet.cue"),
+            "FILE \"Sheet.wav\" WAVE\n\
+             TRACK 01 AUDIO\nINDEX 01 00:00:00\n\
+             TRACK 02 AUDIO\nINDEX 01 00:02:00\n",
+        )
+        .unwrap();
+
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+
+        // The discs of an album in folders of their own are one album, and
+        // the tracks in the music folder itself are named after it
+        let root = music.file_name().unwrap().to_string_lossy().into_owned();
+        let mut albums: Vec<(String, String)> = query_albums(&conn, &[])
+            .unwrap()
+            .into_iter()
+            .map(|album| (album.title, album.artist))
+            .collect();
+        albums.sort();
+        let mut expected: Vec<(String, String)> = ["Album", "Sheet", &root]
+            .iter()
+            .map(|title| (title.to_string(), "Unknown artist".to_string()))
+            .collect();
+        expected.sort();
+        assert_eq!(albums, expected);
+
+        let mut stmt = conn
+            .prepare("SELECT path, album_id, search FROM tracks ORDER BY path")
+            .unwrap();
+        let rows: Vec<(Vec<u8>, String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let album_of = |name: &str| {
+            let path = path_bytes(&music.join(name)).to_vec();
+            rows.iter().find(|row| row.0 == path).unwrap().1.clone()
+        };
+        assert_eq!(album_of("Album/One.wav"), album_of("Album/CD 2/Two.wav"));
+        assert_eq!(
+            album_of("Sheet/Sheet.cue/track01"),
+            album_of("Sheet/Sheet.cue/track02")
+        );
+        assert_ne!(album_of("Album/One.wav"), album_of("Loose.wav"));
+
+        // The folder is searched like a tag of the album
+        let two = path_bytes(&music.join("Album/CD 2/Two.wav")).to_vec();
+        let search = &rows.iter().find(|row| row.0 == two).unwrap().2;
+        assert!(search.contains("album"));
+        assert!(search.contains("two"));
+
+        std::fs::remove_dir_all(&music).unwrap();
     }
 
     #[test]

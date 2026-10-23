@@ -249,10 +249,17 @@ impl CoverCache {
 
         // We use the album and artist to ensure we share the
         // same cover data for every track in the album; if we
-        // don't have an album, we use the file name; paths are hashed as
+        // don't have an album, we use the file name. Without pictures in
+        // the tags, the cover can only be a file in the folder, which the
+        // tracks in it share, e.g. files without tags. Paths are hashed as
         // bytes, as they are not always valid UTF-8
         let mut hasher = Sha256::new();
-        if let Some(album) = album {
+        if tag.pictures().is_empty()
+            && let Some(parent) = path.parent()
+        {
+            hasher.update([0]);
+            hasher.update(parent.as_os_str().as_encoded_bytes());
+        } else if let Some(album) = album {
             hasher.update(&album);
 
             if let Some(artist) = album_artist {
@@ -307,9 +314,12 @@ impl CoverCache {
             .ok()?
             .read()
             .ok()?;
+        // A file without tags can still have a cover file next to it
+        let empty = lofty::tag::Tag::new(tagged_file.primary_tag_type());
         let tag = tagged_file
             .primary_tag()
-            .or_else(|| tagged_file.first_tag())?;
+            .or_else(|| tagged_file.first_tag())
+            .unwrap_or(&empty);
         let image = Self::load_cover(tag, path.parent(), FULL_COVER_SIZE)?;
 
         Some(image.into_texture())
