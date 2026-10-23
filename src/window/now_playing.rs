@@ -116,7 +116,11 @@ impl Window {
     pub(super) fn update_style(&self, track: Option<&Track>) {
         let imp = self.imp();
 
-        let palette = if !imp.settings.boolean("enable-recoloring") {
+        // In high contrast, the colors of the cover would only take some of
+        // the contrast away
+        let palette = if !imp.settings.boolean("enable-recoloring")
+            || adw::StyleManager::default().is_high_contrast()
+        {
             None
         } else if let Some(palette) = track.and_then(Track::cover_palette) {
             self.action_set_enabled("win.enable-recoloring", true);
@@ -150,6 +154,14 @@ impl Window {
 
         set_css_class(&*imp.toast_overlay, "main-window", palette.is_some());
         set_css_class(&*imp.toast_overlay, "cover-accent", accent.is_some());
+
+        // An open track information dialog uses the same colors, which are
+        // gone without a cover
+        if let Some(dialog) = adw::prelude::AdwApplicationWindowExt::visible_dialog(self)
+            .and_downcast::<TrackInfoDialog>()
+        {
+            set_css_class(&dialog, "recolored", palette.is_some());
+        }
     }
 
     pub(super) fn update_title(&self, track: Option<&Track>) {

@@ -367,6 +367,22 @@ impl Window {
         );
         let _dummy = self.imp().settings.boolean("enable-recoloring");
 
+        // High contrast turns recoloring off
+        let notify_high_contrast_id =
+            adw::StyleManager::default().connect_high_contrast_notify(clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |_| {
+                    if let Some(player) = this.player() {
+                        let state = player.state();
+                        this.update_style(state.track().as_ref());
+                    }
+                }
+            ));
+        self.imp()
+            .notify_high_contrast_id
+            .replace(Some(notify_high_contrast_id));
+
         self.connect_close_request(move |window| {
             debug!("Saving window state");
             let width = window.default_size().0;
@@ -391,6 +407,9 @@ impl Window {
             window.unbind_queue();
             window.unbind_state();
             window.unbind_waveform();
+            if let Some(id) = window.imp().notify_high_contrast_id.take() {
+                adw::StyleManager::default().disconnect(id);
+            }
 
             glib::Propagation::Proceed
         });

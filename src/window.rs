@@ -194,6 +194,7 @@ mod imp {
         pub notify_ntracks_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_current_id: RefCell<Option<glib::SignalHandlerId>>,
         pub notify_peaks_id: RefCell<Option<glib::SignalHandlerId>>,
+        pub notify_high_contrast_id: RefCell<Option<glib::SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -442,6 +443,7 @@ mod imp {
                 notify_ntracks_id: RefCell::new(None),
                 notify_current_id: RefCell::new(None),
                 notify_peaks_id: RefCell::new(None),
+                notify_high_contrast_id: RefCell::new(None),
             }
         }
     }
