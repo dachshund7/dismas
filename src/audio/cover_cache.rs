@@ -12,7 +12,10 @@ use lofty::prelude::TaggedFileExt;
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
 
-use crate::cover_image::{CoverImage, accent_color};
+use crate::{
+    cover_image::{CoverImage, accent_color},
+    utils,
+};
 
 // The base cover size is 192px, but we need to account for HiDPI;
 // better to scale down when rendering on displays with a scaling
@@ -265,7 +268,7 @@ impl CoverCache {
             hasher.update(path.as_os_str().as_encoded_bytes());
         }
 
-        let uuid = format!("{:x}", hasher.finalize());
+        let uuid = utils::hex(&hasher.finalize());
 
         let slot = Self::global().lock().unwrap().slot(&uuid);
         slot.get_or_init(|| {
@@ -363,7 +366,7 @@ fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
 // one, whose picture the desktop could have kept for the same file name;
 // the files of the album's previous covers are removed
 fn write_cover_file(dir: &Path, uuid: &str, png: &[u8]) -> Result<PathBuf, glib::Error> {
-    let hash = format!("{:x}", Sha256::digest(png));
+    let hash = utils::hex(&Sha256::digest(png));
     let name = format!("{uuid}-{}.png", &hash[..16]);
     let path = dir.join(&name);
     if path.exists() {

@@ -177,6 +177,12 @@ pub fn format_time(t: i64) -> String {
     format!("{}:{:02}", (t - (t % 60)) / 60, t % 60)
 }
 
+// A hash in lowercase hex, as it names caches and albums, and has to stay
+// the same across versions of the hashing crates
+pub fn hex(hash: &[u8]) -> String {
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 // Whether a file is an audio track, guessing from its name only, which is
 // much faster than looking at its contents when scanning a whole library
 pub fn is_audio_path(path: &std::path::Path) -> bool {
@@ -335,5 +341,15 @@ mod tests {
         // No space before the ellipsis
         let name = format!("{} {}", "a".repeat(28), "b".repeat(10));
         assert_eq!(short_playlist_name(&name), format!("{}…", "a".repeat(28)));
+    }
+
+    #[test]
+    fn writes_hashes_as_before() {
+        use sha2::{Digest, Sha256};
+
+        assert_eq!(
+            hex(&Sha256::digest("abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

@@ -40,7 +40,7 @@ use crate::{
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
     library::is_mbid,
-    utils::ATTRIBUTE_HOST_PATH,
+    utils::{self, ATTRIBUTE_HOST_PATH},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1346,7 +1346,7 @@ fn track_uuid(display_name: &str, number: Option<u32>, tags: [&Option<String>; 3
     for tag in tags.into_iter().flatten() {
         hasher.update(tag);
     }
-    format!("{:x}", hasher.finalize())
+    utils::hex(&hasher.finalize())
 }
 
 // An audio file, with its tags and properties

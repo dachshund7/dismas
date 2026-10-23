@@ -916,7 +916,7 @@ impl TrackTags {
                     }
                     (None, None) => (),
                 }
-                format!("{:x}", hasher.finalize())
+                utils::hex(&hasher.finalize())
             }
         });
 
