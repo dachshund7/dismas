@@ -59,7 +59,10 @@ fn main() -> glib::ExitCode {
 
     // Set up gettext translations
     debug!("Setting up locale data");
-    setlocale(LocaleCategory::LcAll, "");
+    // SAFETY: no other thread is running yet to read the locale
+    unsafe {
+        setlocale(LocaleCategory::LcAll, "");
+    }
 
     bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR).expect("Unable to bind the text domain");
     bind_textdomain_codeset(GETTEXT_PACKAGE, "UTF-8")
