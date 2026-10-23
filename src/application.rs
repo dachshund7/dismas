@@ -327,7 +327,7 @@ impl Application {
         let Some((track, position)) = imp.player.resume_point() else {
             return;
         };
-        let Some(index) = imp.player.queue().position_in_order(&track) else {
+        let Some(index) = imp.player.queue().position(&track) else {
             return;
         };
         // A deleted playlist could still be playing, while the queue

@@ -66,12 +66,7 @@ impl Window {
                     .sync_create()
                     .build();
 
-                // The shuffled order is only the one tracks are played in,
-                // so tracks are only moved in the order they were added
-                win.bind_property("queue-shuffled", &row, "reorderable")
-                    .invert_boolean()
-                    .sync_create()
-                    .build();
+                row.set_reorderable(true);
                 row.connect_move_requested(clone!(
                     #[weak]
                     win,
@@ -255,17 +250,20 @@ impl Window {
         if self.imp().pending_playlist.borrow().is_none() {
             self.set_playlist_visible(false);
         }
-        self.set_queue_shuffled(false);
         self.set_queue_selection(false);
         self.update_style(None);
     }
 
+    // Empties the selected playlist, e.g. for tracks to play in place of
+    // those of the queue; the order it had before it was shuffled goes too
     pub(super) fn clear_queue(&self) {
         if let Some(p) = self.player() {
             p.clear_queue();
 
             // So that the queue isn't restored at the next startup
             self.store_queue();
+            playlists::drop_unshuffled(&self.selected_playlist());
+            self.sync_queue_shuffled();
         }
     }
 
@@ -392,14 +390,14 @@ impl Window {
         };
         let queue = player.queue();
         let tracks = if self.queue_selection() && track.selected() {
-            queue.selected_tracks_in_order()
+            queue.selected_tracks()
         } else {
             vec![track.clone()]
         };
         let before = if above {
             Some(target.clone())
         } else {
-            queue.next_in_order(target)
+            queue.track_after(target)
         };
 
         let shown = self.shown_queue_rows();

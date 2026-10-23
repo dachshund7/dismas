@@ -389,7 +389,7 @@ impl AudioPlayer {
     // The track and position to go on from in a later session
     pub fn resume_point(&self) -> Option<(Track, u64)> {
         if self.finished.get() {
-            return Some((self.queue.first_in_order()?, 0));
+            return Some((self.queue.track_at(0)?, 0));
         }
         Some((self.state.track()?, self.state.position()))
     }

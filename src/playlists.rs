@@ -4,7 +4,8 @@
 // The playlists, saved as M3U8 files in the user data dir: the queue in
 // queue.m3u8, and the others in the playlists directory, one file for
 // each, named after the playlist. Functions taking a name take an empty
-// one for the queue
+// one for the queue. A shuffled playlist keeps its order from before, to
+// restore it, in a file of the same name in the unshuffled directory
 
 use std::path::{Path, PathBuf};
 
@@ -32,29 +33,42 @@ fn playlists_dir() -> PathBuf {
     data_dir().join("playlists")
 }
 
+fn playlist_path(name: &str) -> PathBuf {
+    path_in(&data_dir(), name)
+}
+
+fn unshuffled_path(name: &str) -> PathBuf {
+    path_in(&data_dir().join("unshuffled"), name)
+}
+
 // The queue is outside the directory of the saved playlists, so that it
 // isn't listed with them, and can't have the name of one
-fn playlist_path(name: &str) -> PathBuf {
+fn path_in(dir: &Path, name: &str) -> PathBuf {
     if name.is_empty() {
-        data_dir().join(format!("queue.{EXTENSION}"))
+        dir.join(format!("queue.{EXTENSION}"))
     } else {
-        playlists_dir().join(format!("{name}.{EXTENSION}"))
+        dir.join("playlists").join(format!("{name}.{EXTENSION}"))
     }
 }
 
 // The names of the saved playlists, in alphabetical order
 pub fn names() -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(playlists_dir()) else {
+    let mut names = names_in(&playlists_dir());
+    names.sort_by_cached_key(|name| name.to_lowercase());
+    names
+}
+
+// The names of the playlists with a file in a directory
+fn names_in(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut names: Vec<String> = entries
+    entries
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == EXTENSION))
         .filter_map(|path| Some(path.file_stem()?.to_str()?.to_string()))
-        .collect();
-    names.sort_by_cached_key(|name| name.to_lowercase());
-    names
+        .collect()
 }
 
 pub fn exists(name: &str) -> bool {
@@ -92,19 +106,108 @@ pub fn create(name: &str) -> Result<(), glib::Error> {
     create_with_tracks(name, &[])
 }
 
+// An order left from a playlist of the same name, e.g. deleted outside
+// the app, doesn't make the new one shuffled
 pub fn create_with_tracks(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
-    write(name.trim(), files)
+    let name = name.trim();
+    drop_unshuffled(name);
+    write(name, files)
 }
 
-// Renames a saved playlist; the new name has been checked with
-// `check_name()`
+// Renames a saved playlist, and the order it had before it was shuffled;
+// the new name has been checked with `check_name()`
 pub fn rename(name: &str, new_name: &str) -> std::io::Result<()> {
-    std::fs::rename(playlist_path(name), playlist_path(new_name.trim()))
+    rename_in(&data_dir(), name, new_name.trim())
 }
 
-// Moves a saved playlist to the trash, from where it can be restored
+fn rename_in(dir: &Path, name: &str, new_name: &str) -> std::io::Result<()> {
+    std::fs::rename(path_in(dir, name), path_in(dir, new_name))?;
+
+    let unshuffled_dir = dir.join("unshuffled");
+    let unshuffled = path_in(&unshuffled_dir, name);
+    let new_unshuffled = path_in(&unshuffled_dir, new_name);
+    let result = if unshuffled.is_file() {
+        std::fs::rename(unshuffled, new_unshuffled)
+    } else {
+        remove_if_exists(&new_unshuffled)
+    };
+    if let Err(e) = result {
+        warn!("Unable to rename the order of the playlist '{name}' before shuffling: {e}");
+    }
+    Ok(())
+}
+
+// Moves a saved playlist to the trash, from where it can be restored; the
+// order it had before it was shuffled is gone
 pub fn trash(name: &str) -> Result<(), glib::Error> {
-    gio::File::for_path(playlist_path(name)).trash(gio::Cancellable::NONE)
+    gio::File::for_path(playlist_path(name)).trash(gio::Cancellable::NONE)?;
+    drop_unshuffled(name);
+    Ok(())
+}
+
+// Whether the playlist was shuffled, and keeps the order it had before
+pub fn is_shuffled(name: &str) -> bool {
+    unshuffled_path(name).is_file()
+}
+
+// Keeps the order of a playlist before it's shuffled; it's written before
+// the shuffled one, so that a crash in between can't lose it
+pub fn save_unshuffled(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
+    write_path(&unshuffled_path(name), files)
+}
+
+// The order the playlist had before it was shuffled, if it was
+pub fn load_unshuffled(name: &str) -> Option<Vec<gio::File>> {
+    let path = unshuffled_path(name);
+    if path.is_file() {
+        read_m3u(&path)
+    } else {
+        None
+    }
+}
+
+// Forgets the order from before shuffling, once it's restored, or when the
+// tracks are replaced
+pub fn drop_unshuffled(name: &str) {
+    if let Err(e) = remove_if_exists(&unshuffled_path(name)) {
+        warn!("Unable to remove the order of the playlist '{name}' before shuffling: {e}");
+    }
+}
+
+// A playlist made with the tracks of another one is shuffled like it
+pub fn copy_unshuffled(name: &str, new_name: &str) {
+    match load_unshuffled(name) {
+        Some(files) => {
+            if let Err(e) = save_unshuffled(new_name, &files) {
+                warn!("Unable to copy the order of the playlist '{name}' before shuffling: {e}");
+            }
+        }
+        None => drop_unshuffled(new_name),
+    }
+}
+
+// Drops the orders of playlists that are gone, e.g. removed outside the
+// app; the queue is always there
+pub fn retain_unshuffled(names: &[String]) {
+    retain_unshuffled_in(&data_dir(), names);
+}
+
+fn retain_unshuffled_in(dir: &Path, names: &[String]) {
+    let unshuffled_dir = dir.join("unshuffled");
+    for name in names_in(&unshuffled_dir.join("playlists")) {
+        if !names.contains(&name)
+            && let Err(e) = remove_if_exists(&path_in(&unshuffled_dir, &name))
+        {
+            warn!("Unable to remove the order of the playlist '{name}' before shuffling: {e}");
+        }
+    }
+}
+
+fn remove_if_exists(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
 }
 
 // The tracks of a playlist; the queue has none until it's first saved
@@ -184,7 +287,10 @@ pub fn save(name: &str, files: &[gio::File]) {
 }
 
 fn write(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
-    let path = playlist_path(name);
+    write_path(&playlist_path(name), files)
+}
+
+fn write_path(path: &Path, files: &[gio::File]) -> Result<(), glib::Error> {
     if let Some(dir) = path.parent() {
         glib::mkdir_with_parents(dir, 0o755);
     }
@@ -344,6 +450,60 @@ mod tests {
 
         let taken = |name: &str| name == "Mix" || name == "Mix 2";
         assert_eq!(free_name_among("Mix", taken), "Mix 3");
+    }
+
+    // A data dir of its own for a test, with a playlist named "Mix" that
+    // was shuffled
+    fn shuffled_mix() -> PathBuf {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let files = [gio::File::for_path("/music/a.opus")];
+        write_path(&path_in(&dir, "Mix"), &files).unwrap();
+        write_path(&path_in(&dir.join("unshuffled"), "Mix"), &files).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_queue_and_a_playlist_named_queue_have_their_own_files() {
+        assert_ne!(playlist_path(""), playlist_path("queue"));
+        assert_ne!(unshuffled_path(""), unshuffled_path("queue"));
+        assert_ne!(unshuffled_path("Mix"), playlist_path("Mix"));
+    }
+
+    #[test]
+    fn renaming_moves_the_order_before_shuffling() {
+        let dir = shuffled_mix();
+        let unshuffled_dir = dir.join("unshuffled");
+        // Left from a playlist of that name deleted outside the app
+        write_path(&path_in(&unshuffled_dir, "Old"), &[]).unwrap();
+
+        rename_in(&dir, "Mix", "Road Trip").unwrap();
+        assert!(path_in(&dir, "Road Trip").is_file());
+        assert!(path_in(&unshuffled_dir, "Road Trip").is_file());
+        assert!(!path_in(&unshuffled_dir, "Mix").is_file());
+
+        // Without an order of its own, a stale one under the new name goes
+        std::fs::remove_file(path_in(&unshuffled_dir, "Road Trip")).unwrap();
+        rename_in(&dir, "Road Trip", "Old").unwrap();
+        assert!(path_in(&dir, "Old").is_file());
+        assert!(!path_in(&unshuffled_dir, "Old").is_file());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn drops_the_orders_of_playlists_that_are_gone() {
+        let dir = shuffled_mix();
+        let unshuffled_dir = dir.join("unshuffled");
+        write_path(&path_in(&unshuffled_dir, "Gone"), &[]).unwrap();
+        write_path(&path_in(&unshuffled_dir, ""), &[]).unwrap();
+
+        retain_unshuffled_in(&dir, &["Mix".to_string()]);
+        assert!(path_in(&unshuffled_dir, "Mix").is_file());
+        assert!(!path_in(&unshuffled_dir, "Gone").is_file());
+        // The queue is always there
+        assert!(path_in(&unshuffled_dir, "").is_file());
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

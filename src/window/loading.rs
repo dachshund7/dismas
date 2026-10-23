@@ -34,6 +34,8 @@ impl Window {
             // The queue of the last session is gone, rather than coming
             // back when switching to the queue
             playlists::save("", &[]);
+            playlists::drop_unshuffled("");
+            self.sync_queue_shuffled();
             if self.selected_playlist().is_empty() {
                 self.end_startup();
                 return;
@@ -232,9 +234,6 @@ impl Window {
                         });
                         match resume_at {
                             Some((pos, position)) => {
-                                // Shuffling isn't restored, so the order
-                                // is the one the tracks were added in
-                                debug_assert!(!queue.is_shuffled());
                                 player.skip_to(pos);
                                 player.resume_at(position.into());
                             }
@@ -434,9 +433,11 @@ impl Window {
         }
 
         // At startup, the selected playlist isn't loaded, and the files
-        // take the place of the queue instead
+        // take the place of the queue instead, which isn't shuffled anymore
         if self.imp().starting.get() {
             self.select_queue_to_play();
+            playlists::drop_unshuffled("");
+            self.sync_queue_shuffled();
         }
 
         self.add_files_to_queue(files.to_vec(), QueueMode::Show, None);
@@ -573,15 +574,12 @@ impl Window {
     // What files, or albums, dropped at a point of the window would do, if
     // they can be dropped there; the point is relative to the drag overlay,
     // which has the whole window. Files dropped elsewhere than on the pane
-    // go to the zones, and so do all of them while the queue is shuffled,
-    // as there is no place to put them in; albums only go to the pane,
-    // since the grid has buttons to add and play them
+    // go to the zones; albums only go to the pane, since the grid has
+    // buttons to add and play them
     fn file_drop_at(&self, x: f64, y: f64, albums: bool) -> Option<FileDrop> {
         let pane_drop = self.pane_drop_at(x, y);
         if albums {
             pane_drop
-        } else if self.queue_shuffled() {
-            Some(FileDrop::Zones)
         } else {
             Some(pane_drop.unwrap_or(FileDrop::Zones))
         }
@@ -596,9 +594,6 @@ impl Window {
         if picked != *pane && !picked.is_ancestor(pane) {
             return None;
         }
-        if self.queue_shuffled() {
-            return Some(FileDrop::End);
-        }
         Some(self.queue_drop_place(&picked, y).unwrap_or(FileDrop::End))
     }
 
@@ -608,7 +603,7 @@ impl Window {
             FileDrop::Place(row, true) | FileDrop::AboveWork(row) => row.track(),
             FileDrop::Place(row, false) => {
                 let target = row.track()?;
-                self.player()?.queue().next_in_order(&target)
+                self.player()?.queue().track_after(&target)
             }
             FileDrop::End | FileDrop::Zones => None,
         }
@@ -712,8 +707,7 @@ impl Window {
 
     // Where the zones go across the window, and what is blurred under them:
     // the main area next to the playlist pane, where it shows, as tracks
-    // dropped on the pane go in between its tracks, or all of the window
-    // while shuffled. Next to the sidebar of the collapsed split view, the
+    // dropped on the pane go in between its tracks. Next to the sidebar of the collapsed split view, the
     // main area is only drawn moved aside, so the zones are laid out where
     // it shows rather than over it
     fn zones_area(&self) -> (f32, f32, gtk::Widget) {
@@ -721,7 +715,7 @@ impl Window {
         let overlay = &*imp.drag_overlay;
         let width = overlay.width() as f32;
         let whole = (0.0, width, imp.toast_overlay.get().upcast());
-        if self.queue_shuffled() || !imp.playlist_pane.is_mapped() {
+        if !imp.playlist_pane.is_mapped() {
             return whole;
         }
         let Some(pane) = imp.playlist_pane.compute_bounds(overlay) else {

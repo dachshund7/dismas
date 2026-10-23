@@ -189,7 +189,6 @@ impl Window {
                             win.reset_queue();
                         } else {
                             win.update_library_for_queue();
-                            win.action_set_enabled("queue.shuffle", queue.n_tracks() > 1);
 
                             win.action_set_enabled("win.play", true);
                             win.action_set_enabled("win.previous", true);
@@ -403,12 +402,17 @@ impl Window {
     }
 
     // The pane's Remove All and Select buttons do nothing without
-    // tracks, and Remove All waits for the tracks being loaded
+    // tracks, and Remove All waits for the tracks being loaded. So does
+    // shuffling, which saves the tracks of the queue: while they're read,
+    // it doesn't have them all. A shuffled playlist can always be put back
+    // in order, even with a single track left
     pub(super) fn update_queue_actions(&self) {
-        let empty = self.queue_is_empty();
+        let n_tracks = self.player().map_or(0, |p| p.queue().n_tracks());
         let loading = self.imp().loads.get() > 0;
-        self.action_set_enabled("queue.clear", !empty && !loading);
-        self.action_set_enabled("queue.select", !empty);
+        self.action_set_enabled("queue.clear", n_tracks > 0 && !loading);
+        self.action_set_enabled("queue.select", n_tracks > 0);
+        let can_shuffle = n_tracks > 1 || (n_tracks > 0 && self.queue_shuffled());
+        self.action_set_enabled("queue.shuffle", can_shuffle && !loading);
     }
 
     // The initial state of the playback actions
@@ -419,7 +423,6 @@ impl Window {
             self.action_set_enabled("win.previous", !queue.is_empty());
             self.action_set_enabled("win.next", !queue.is_last_track());
 
-            self.action_set_enabled("queue.shuffle", queue.n_tracks() > 1);
             self.update_queue_actions();
             self.action_set_enabled("win.replaygain", player.replaygain_available());
 
@@ -433,7 +436,7 @@ impl Window {
             self.imp()
                 .playback_control
                 .set_repeat_mode(queue.repeat_mode());
-            self.set_queue_shuffled(queue.is_shuffled());
+            self.sync_queue_shuffled();
 
             self.update_library_for_queue();
         }

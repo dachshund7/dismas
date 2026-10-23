@@ -17,7 +17,7 @@ const KEY: &str = "resume-points";
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResumePoint {
     pub uri: String,
-    // In the order the tracks were added, even when shuffled
+    // In the order of the playlist
     pub index: u32,
     // In seconds
     pub position: u32,

@@ -1,11 +1,15 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::cell::Cell;
+use std::{
+    cell::Cell,
+    collections::{HashMap, VecDeque},
+};
 
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
+use rand::{Rng, seq::SliceRandom};
 
-use crate::audio::{RepeatMode, ShuffleListModel, Track};
+use crate::audio::{RepeatMode, Track};
 
 mod imp {
     use super::*;
@@ -13,13 +17,11 @@ mod imp {
     #[derive(Debug, glib::Properties)]
     #[properties(wrapper_type = super::Queue)]
     pub struct Queue {
-        pub model: ShuffleListModel,
         pub store: gio::ListStore,
         #[property(get, builder(RepeatMode::default()))]
         pub repeat_mode: Cell<RepeatMode>,
         #[property(name = "current", get = Self::current, nullable, type = Option<Track>)]
         pub current_pos: Cell<Option<u32>>,
-        pub shuffled: Cell<bool>,
         #[property(name = "n-tracks", get = Self::n_tracks, type = u32)]
         n_tracks: std::marker::PhantomData<u32>,
     }
@@ -30,15 +32,10 @@ mod imp {
         type Type = super::Queue;
 
         fn new() -> Self {
-            let store = gio::ListStore::new::<Track>();
-            let model = ShuffleListModel::new(Some(&store));
-
             Self {
-                store,
-                model,
+                store: gio::ListStore::new::<Track>(),
                 repeat_mode: Cell::new(RepeatMode::default()),
                 current_pos: Cell::new(None),
-                shuffled: Cell::new(false),
                 n_tracks: Default::default(),
             }
         }
@@ -53,7 +50,7 @@ mod imp {
         }
 
         fn n_tracks(&self) -> u32 {
-            self.model.n_items()
+            self.store.n_items()
         }
     }
 }
@@ -70,44 +67,30 @@ impl Default for Queue {
 
 impl Queue {
     pub fn is_empty(&self) -> bool {
-        self.imp().model.n_items() == 0
+        self.imp().store.n_items() == 0
     }
 
     pub fn model(&self) -> &gio::ListModel {
-        self.imp().model.as_ref()
+        self.imp().store.upcast_ref()
     }
 
-    // The tracks in the order they were added, even when shuffled
-    pub fn files_in_order(&self) -> Vec<gio::File> {
-        self.imp()
-            .store
-            .iter::<Track>()
-            .flatten()
-            .map(|track| track.file())
-            .collect()
+    fn tracks(&self) -> Vec<Track> {
+        self.imp().store.iter::<Track>().flatten().collect()
     }
 
-    // The first track in the order they were added, even when shuffled
-    pub fn first_in_order(&self) -> Option<Track> {
-        self.imp().store.item(0).and_downcast()
+    // The files of the tracks, in the order of the queue, which is the one
+    // that is saved
+    pub fn files(&self) -> Vec<gio::File> {
+        self.tracks().iter().map(Track::file).collect()
     }
 
     pub fn track_at(&self, pos: u32) -> Option<Track> {
-        self.imp().model.item(pos).and_downcast()
+        self.imp().store.item(pos).and_downcast()
     }
 
-    // The position of a track in the queue, if it's in it
+    // The position of a track in the queue, if it's in it; the same file
+    // added twice is two tracks
     pub fn position(&self, track: &Track) -> Option<u32> {
-        self.imp()
-            .model
-            .iter::<Track>()
-            .position(|s| s.is_ok_and(|s| s == *track))
-            .map(|pos| pos as u32)
-    }
-
-    // The position of a track in the order the tracks were added, even
-    // when shuffled; the same file added twice is two tracks
-    pub fn position_in_order(&self, track: &Track) -> Option<u32> {
         self.imp()
             .store
             .iter::<Track>()
@@ -119,19 +102,14 @@ impl Queue {
     // section of its work are made again
     pub fn track_changed(&self, track: &Track) {
         if let Some(pos) = self.position(track) {
-            self.imp().model.items_changed(pos, 1, 1);
+            self.imp().store.splice(pos, 1, std::slice::from_ref(track));
         }
     }
 
     pub fn set_current_track(&self, track: Option<Track>) {
         if let Some(track) = track {
-            let pos = self
-                .imp()
-                .model
-                .iter::<Track>()
-                .position(|s| s.is_ok_and(|s| s == track));
-            if let Some(pos) = pos {
-                self.imp().current_pos.replace(Some(pos as u32));
+            if let Some(pos) = self.position(&track) {
+                self.imp().current_pos.replace(Some(pos));
                 self.notify_current();
             }
         } else {
@@ -158,14 +136,14 @@ impl Queue {
     pub fn add_tracks(&self, tracks: &[impl IsA<glib::Object>]) {
         self.imp()
             .store
-            .splice(self.imp().model.n_items(), 0, tracks);
+            .splice(self.imp().store.n_items(), 0, tracks);
         self.notify_n_tracks();
     }
 
-    // Inserts tracks before another one, in the order they were added, or
-    // at the end if it's not there anymore; the current track stays
+    // Inserts tracks before another one, or at the end if it's not there
+    // anymore; the current track stays
     pub fn insert_tracks(&self, tracks: &[Track], before: Option<&Track>) {
-        let Some(pos) = before.and_then(|before| self.position_in_order(before)) else {
+        let Some(pos) = before.and_then(|before| self.position(before)) else {
             self.add_tracks(tracks);
             return;
         };
@@ -178,13 +156,8 @@ impl Queue {
     pub fn remove_track(&self, track: &Track) {
         let n_tracks = self.n_tracks();
         let current = self.current();
-        let pos = self
-            .imp()
-            .store
-            .iter::<Track>()
-            .position(|s| s.is_ok_and(|s| s == *track));
-        if let Some(pos) = pos {
-            self.imp().store.remove(pos as u32);
+        if let Some(pos) = self.position(track) {
+            self.imp().store.remove(pos);
         }
 
         // Removing a track moves the ones after it; the current track is
@@ -196,8 +169,7 @@ impl Queue {
         }
     }
 
-    // Moves a track before another one, or to the end; the tracks are
-    // moved in the order they were added, which is the one that is saved
+    // Moves a track before another one, or to the end
     pub fn move_track(&self, track: &Track, before: Option<&Track>) {
         self.move_tracks(std::slice::from_ref(track), before);
     }
@@ -207,7 +179,7 @@ impl Queue {
     // before the next track that isn't
     pub fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
         let store = &self.imp().store;
-        let old: Vec<Track> = store.iter::<Track>().flatten().collect();
+        let old = self.tracks();
         let moved: Vec<Track> = old.iter().filter(|t| tracks.contains(t)).cloned().collect();
         if moved.is_empty() {
             return;
@@ -239,24 +211,48 @@ impl Queue {
         self.update_current_pos(current);
     }
 
-    // The selected tracks, in the order they were added
-    pub fn selected_tracks_in_order(&self) -> Vec<Track> {
-        self.imp()
-            .store
-            .iter::<Track>()
-            .flatten()
-            .filter(Track::selected)
-            .collect()
+    // Shuffles the tracks, in a single change. The track to keep comes
+    // first, and all the others after it, those that came before it too
+    pub fn shuffle(&self, keep: Option<&Track>, rng: &mut (impl Rng + ?Sized)) {
+        let mut tracks = self.tracks();
+        let kept = keep
+            .and_then(|keep| tracks.iter().position(|t| t == keep))
+            .map(|pos| tracks.remove(pos));
+        tracks.shuffle(rng);
+        tracks.splice(0..0, kept);
+        self.replace_order(&tracks);
     }
 
-    // The track after this one in the order they were added, which is
-    // not the shown one when shuffled
-    pub fn next_in_order(&self, track: &Track) -> Option<Track> {
+    // Puts the tracks back in the order of the URIs saved before they were
+    // shuffled, in a single change; see `restored_order()`
+    pub fn restore_order(&self, saved: &[String]) {
+        let tracks = self.tracks();
+        let uris: Vec<String> = tracks.iter().map(Track::uri).collect();
+        let restored: Vec<Track> = restored_order(&uris, saved)
+            .into_iter()
+            .map(|i| tracks[i].clone())
+            .collect();
+        if restored != tracks {
+            self.replace_order(&restored);
+        }
+    }
+
+    // The same tracks in another order; the current track stays
+    fn replace_order(&self, tracks: &[Track]) {
+        let current = self.current();
         let store = &self.imp().store;
-        let pos = store
-            .iter::<Track>()
-            .position(|s| s.is_ok_and(|s| s == *track))?;
-        store.item(pos as u32 + 1).and_downcast()
+        store.splice(0, store.n_items(), tracks);
+        self.update_current_pos(current);
+    }
+
+    // The selected tracks, in the order of the queue
+    pub fn selected_tracks(&self) -> Vec<Track> {
+        self.tracks().into_iter().filter(Track::selected).collect()
+    }
+
+    // The track after this one in the queue
+    pub fn track_after(&self, track: &Track) -> Option<Track> {
+        self.track_at(self.position(track)? + 1)
     }
 
     // Looks up the current track again, after tracks moved
@@ -326,7 +322,7 @@ impl Queue {
     // The position after the current track, or the first one if there
     // is no current track
     fn next_pos(&self, repeat_mode: RepeatMode) -> Option<u32> {
-        let n_tracks = self.imp().model.n_items();
+        let n_tracks = self.imp().store.n_items();
         if n_tracks == 0 {
             return None;
         }
@@ -361,7 +357,7 @@ impl Queue {
     }
 
     pub fn is_last_track(&self) -> bool {
-        let n_items = self.imp().model.n_items();
+        let n_items = self.imp().store.n_items();
 
         if let Some(current_pos) = self.imp().current_pos.get()
             && n_items > 0
@@ -370,24 +366,6 @@ impl Queue {
         }
 
         false
-    }
-
-    pub fn is_shuffled(&self) -> bool {
-        self.imp().shuffled.get()
-    }
-
-    pub fn set_shuffled(&self, shuffled: bool) {
-        if shuffled != self.imp().shuffled.replace(shuffled) {
-            if shuffled {
-                let current_pos = self.imp().current_pos.get().unwrap_or(0);
-                self.imp().model.reshuffle(current_pos);
-            } else {
-                let current_pos = self.current_track_index().unwrap_or(0);
-                let current_track = self.track_at(current_pos);
-                self.imp().model.unshuffle();
-                self.set_current_track(current_track);
-            }
-        }
     }
 
     pub fn unselect_all_tracks(&self) {
@@ -404,6 +382,29 @@ impl Queue {
             .filter(Track::selected)
             .count() as u32
     }
+}
+
+// The order of the tracks of the queue, by their URIs, put back in the
+// order saved before they were shuffled: the nth copy of a file takes the
+// place of the nth one in it, the tracks that aren't in it, added since,
+// go after those in the order they have, and the ones that are only in
+// it, removed since, stay out. Returns the positions of the tracks
+fn restored_order(current: &[String], saved: &[String]) -> Vec<usize> {
+    let mut copies: HashMap<&str, VecDeque<usize>> = HashMap::new();
+    for (pos, uri) in current.iter().enumerate() {
+        copies.entry(uri).or_default().push_back(pos);
+    }
+    let mut order: Vec<usize> = saved
+        .iter()
+        .filter_map(|uri| copies.get_mut(uri.as_str())?.pop_front())
+        .collect();
+
+    let mut placed = vec![false; current.len()];
+    for &pos in &order {
+        placed[pos] = true;
+    }
+    order.extend((0..current.len()).filter(|&pos| !placed[pos]));
+    order
 }
 
 #[cfg(test)]
@@ -549,6 +550,125 @@ mod tests {
         queue.remove_track(&t[0]);
         assert_eq!(seen.take(), Some(Some(t[2].clone())));
         assert_eq!(queue.current_track_index(), Some(1));
+    }
+
+    fn seeded(seed: u64) -> rand::rngs::StdRng {
+        rand::SeedableRng::seed_from_u64(seed)
+    }
+
+    // The same tracks, each once
+    fn is_permutation(order: &[usize], n: usize) -> bool {
+        let mut sorted = order.to_vec();
+        sorted.sort_unstable();
+        sorted == (0..n).collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn shuffle_keeps_a_track_first() {
+        for seed in 0..20 {
+            let (queue, t) = queue_of(10);
+            queue.set_current_track(Some(t[6].clone()));
+
+            queue.shuffle(Some(&t[6]), &mut seeded(seed));
+            let order = order(&queue, &t);
+            assert_eq!(order[0], 6);
+            assert!(is_permutation(&order, 10));
+            assert_eq!(queue.current(), Some(t[6].clone()));
+            assert_eq!(queue.current_track_index(), Some(0));
+        }
+    }
+
+    #[test]
+    fn shuffle_moves_the_tracks_before_the_current_one_too() {
+        // Over a few shuffles, every track lands elsewhere at least once,
+        // with or without one to keep
+        for keep in [None, Some(5)] {
+            let mut moved = [false; 10];
+            for seed in 0..20 {
+                let (queue, t) = queue_of(10);
+                queue.set_current_track(Some(t[5].clone()));
+                queue.shuffle(keep.map(|k| &t[k]), &mut seeded(seed));
+
+                let order = order(&queue, &t);
+                assert!(is_permutation(&order, 10));
+                for (pos, &track) in order.iter().enumerate() {
+                    moved[track] |= pos != track;
+                }
+                // The current track is found where it went
+                let current = queue.current_track_index().unwrap();
+                assert_eq!(order[current as usize], 5);
+            }
+            assert!(moved.iter().all(|&m| m), "{keep:?}: {moved:?}");
+        }
+    }
+
+    #[test]
+    fn shuffle_is_one_change() {
+        let (queue, _) = queue_of(5);
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        queue.model().connect_items_changed({
+            let changes = changes.clone();
+            move |_, position, removed, added| changes.borrow_mut().push((position, removed, added))
+        });
+
+        queue.shuffle(None, &mut seeded(1));
+        assert_eq!(*changes.borrow(), [(0, 5, 5)]);
+    }
+
+    fn uris(uris: &[&str]) -> Vec<String> {
+        uris.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn restore_puts_back_the_saved_order() {
+        let saved = uris(&["a", "b", "c", "d"]);
+        let current = uris(&["c", "a", "d", "b"]);
+        assert_eq!(restored_order(&current, &saved), [1, 3, 0, 2]);
+    }
+
+    #[test]
+    fn restore_puts_added_tracks_at_the_end() {
+        let saved = uris(&["a", "b", "c"]);
+        // Added since, in between: they go after, in the order they have
+        let current = uris(&["c", "y", "a", "x", "b"]);
+        assert_eq!(restored_order(&current, &saved), [2, 4, 0, 1, 3]);
+    }
+
+    #[test]
+    fn restore_leaves_out_removed_tracks() {
+        let saved = uris(&["a", "b", "c", "d"]);
+        let current = uris(&["d", "a"]);
+        assert_eq!(restored_order(&current, &saved), [1, 0]);
+        assert_eq!(restored_order(&[], &saved), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn restore_matches_the_copies_of_a_file_in_turn() {
+        let saved = uris(&["a", "b", "a", "c"]);
+        let current = uris(&["a", "c", "a", "b"]);
+        assert_eq!(restored_order(&current, &saved), [0, 3, 2, 1]);
+
+        // A copy removed: the one left takes the place of the first
+        let current = uris(&["c", "b", "a"]);
+        assert_eq!(restored_order(&current, &saved), [2, 1, 0]);
+
+        // A copy added: the extra one goes at the end
+        let current = uris(&["a", "a", "b", "a", "c"]);
+        assert_eq!(restored_order(&current, &saved), [0, 2, 1, 4, 3]);
+    }
+
+    #[test]
+    fn restore_order_keeps_the_current_track() {
+        let (queue, t) = queue_of(4);
+        queue.set_current_track(Some(t[1].clone()));
+        queue.shuffle(Some(&t[1]), &mut seeded(3));
+
+        // All the tracks have the same URI, so the order is the one they
+        // have; what matters is that nothing is lost
+        let saved = vec![t[0].uri(); 4];
+        queue.restore_order(&saved);
+        assert!(is_permutation(&order(&queue, &t), 4));
+        assert_eq!(queue.current(), Some(t[1].clone()));
     }
 
     #[test]

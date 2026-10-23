@@ -507,24 +507,21 @@ mod imp {
             }
         }
 
+        // Asked for with the shuffle button or its shortcut: shuffling keeps
+        // the order from before, and turning it off puts it back. The
+        // button shows whether the selected playlist has one, so it's only
+        // set from its file otherwise, with `sync_queue_shuffled()`
         fn set_queue_shuffled(&self, shuffled: bool) {
             let obj = self.obj();
-
-            if shuffled != self.queue_shuffled.replace(shuffled) {
-                if let Some(player) = obj.player() {
-                    let queue = player.queue();
-                    let state = player.state();
-                    let reset_track = queue.is_first_track() && !state.playing();
-
-                    queue.set_shuffled(shuffled);
-
-                    if reset_track {
-                        player.skip_to(0);
-                    }
-                }
-
-                obj.notify_queue_shuffled();
+            if shuffled == self.queue_shuffled.get() {
+                return;
             }
+            if shuffled {
+                obj.shuffle_queue();
+            } else {
+                obj.unshuffle_queue();
+            }
+            obj.sync_queue_shuffled();
         }
 
         fn set_queue_selection(&self, selection: bool) {

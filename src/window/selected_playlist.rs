@@ -16,10 +16,13 @@ impl Window {
         if !selected.is_empty() && !playlists::exists(&selected) {
             self.set_selected_playlist("");
         }
-        // Or any other, e.g. outside the app, leaving its point behind
+        // Or any other, e.g. outside the app, leaving its point and its
+        // order from before shuffling behind
+        let names = playlists::names();
         ResumePoints::update(&self.imp().settings, |points| {
-            points.retain_playlists(&playlists::names());
+            points.retain_playlists(&names);
         });
+        playlists::retain_unshuffled(&names);
         self.update_playlist_labels();
         self.update_playlists_menu();
     }
@@ -40,6 +43,7 @@ impl Window {
         if self.playlists_visible() {
             self.update_playlists_page();
         }
+        self.sync_queue_shuffled();
     }
 
     pub(super) fn update_playlists_page(&self) {
@@ -160,8 +164,76 @@ impl Window {
         if !name.is_empty() && !playlists::exists(&name) {
             return;
         }
-        // Shuffling only changes the order they're played in
-        playlists::save(&name, &player.queue().files_in_order());
+        playlists::save(&name, &player.queue().files());
+    }
+
+    // The shuffle button shows whether the selected playlist was shuffled,
+    // and keeps the order it had before; it's on, to put it back, even
+    // when there's a single track left
+    pub(super) fn sync_queue_shuffled(&self) {
+        let shuffled = playlists::is_shuffled(&self.selected_playlist());
+        if shuffled != self.imp().queue_shuffled.replace(shuffled) {
+            self.notify_queue_shuffled();
+        }
+        self.update_queue_actions();
+    }
+
+    // Shuffles the tracks of the selected playlist, keeping the order they
+    // had to put it back. The track playing, or paused partway, e.g. where
+    // the last session stopped, comes first, to go on from there; otherwise
+    // the first of the shuffled tracks is ready to play
+    pub(super) fn shuffle_queue(&self) {
+        let Some(player) = self.player() else {
+            return;
+        };
+        let queue = player.queue();
+        // While tracks are read, the queue doesn't have them all yet
+        let name = self.selected_playlist();
+        if queue.is_empty()
+            || self.imp().loads.get() > 0
+            || (!name.is_empty() && !playlists::exists(&name))
+        {
+            return;
+        }
+
+        // Kept before the shuffled order is saved, so that a crash in
+        // between can't lose it
+        if let Err(e) = playlists::save_unshuffled(&name, &queue.files()) {
+            log::warn!("Unable to keep the order of the playlist '{name}': {e}");
+            return;
+        }
+
+        let state = player.state();
+        let keep = queue
+            .current()
+            .filter(|_| state.playing() || state.position() > 0);
+        queue.shuffle(keep.as_ref(), &mut rand::rng());
+        if keep.is_none() {
+            player.skip_to(0);
+        }
+        self.store_queue();
+    }
+
+    // Puts the tracks of the selected playlist back in the order they had
+    // before they were shuffled; the tracks added since go at the end. The
+    // current track stays, and playback goes on from it
+    pub(super) fn unshuffle_queue(&self) {
+        let Some(player) = self.player() else {
+            return;
+        };
+        let name = self.selected_playlist();
+        if self.imp().loads.get() > 0 {
+            return;
+        }
+
+        if let Some(files) = playlists::load_unshuffled(&name) {
+            let uris: Vec<String> = files.iter().map(|f| f.uri().to_string()).collect();
+            player.queue().restore_order(&uris);
+            self.store_queue();
+        }
+        // Only once the order is saved, so that a crash in between can't
+        // lose it
+        playlists::drop_unshuffled(&name);
     }
 
     // Playing tracks right away replaces those of the queue, rather than
@@ -185,12 +257,13 @@ impl Window {
         let queue = playlists::load("")
             .or_else(|| {
                 let player = self.player().filter(|_| selected.is_empty())?;
-                Some(player.queue().files_in_order())
+                Some(player.queue().files())
             })
             .unwrap_or_default();
         ReplacedQueue {
             selected,
             queue,
+            queue_unshuffled: playlists::load_unshuffled(""),
             queue_point: ResumePoint::load(&self.imp().settings, ""),
         }
     }
@@ -220,6 +293,16 @@ impl Window {
             player.clear_queue();
         }
 
+        // The order from before shuffling is kept first, so that a crash in
+        // between can't lose it
+        match &replaced.queue_unshuffled {
+            Some(files) => {
+                if let Err(e) = playlists::save_unshuffled("", files) {
+                    log::warn!("Unable to keep the order of the queue: {e}");
+                }
+            }
+            None => playlists::drop_unshuffled(""),
+        }
         playlists::save("", &replaced.queue);
         ResumePoints::update(&imp.settings, |points| match &replaced.queue_point {
             Some(point) => points.set("", point.clone()),
@@ -400,15 +483,13 @@ impl Window {
         }
     }
 
-    // Makes a playlist with the tracks of the queue, in the order they were
-    // added; it isn't selected, so that what's playing goes on, and the
+    // Makes a playlist with the tracks of the queue, in their order; it
+    // isn't selected, so that what's playing goes on, and the
     // queue can be cleared without emptying it. The toast can open it
     fn save_queue_as_playlist(&self, name: &str) {
         // The queue in the player, while it's selected, or as last saved
         let files = match self.player() {
-            Some(player) if self.selected_playlist().is_empty() => {
-                Some(player.queue().files_in_order())
-            }
+            Some(player) if self.selected_playlist().is_empty() => Some(player.queue().files()),
             _ => playlists::load(""),
         };
         let result = files
@@ -416,6 +497,8 @@ impl Window {
             .and_then(|files| playlists::create_with_tracks(name, &files));
         match result {
             Ok(()) => {
+                // Shuffled like the queue, to put back the same order
+                playlists::copy_unshuffled("", name);
                 self.update_playlists_page();
                 self.update_playlists_menu();
                 // Translators: `{playlist}` must be left unmodified; it is
@@ -445,7 +528,7 @@ impl Window {
 
         let unchanged = self.selected_playlist().is_empty()
             && self.player().is_some_and(|player| {
-                let queue = player.queue().files_in_order();
+                let queue = player.queue().files();
                 playlists::load(name).is_some_and(|files| {
                     files.len() == queue.len() && files.iter().zip(&queue).all(|(a, b)| a.equal(b))
                 })
@@ -658,5 +741,7 @@ pub(super) struct ReplacedQueue {
     // The name of the playlist that was selected, empty for the queue
     selected: String,
     queue: Vec<gio::File>,
+    // The order the queue had before it was shuffled, if it was
+    queue_unshuffled: Option<Vec<gio::File>>,
     queue_point: Option<ResumePoint>,
 }

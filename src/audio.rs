@@ -58,7 +58,6 @@ pub use gst_backend::GstBackend;
 
 mod player;
 mod queue;
-mod shuffle;
 mod sleep_timer;
 mod state;
 mod track;
@@ -70,7 +69,6 @@ pub use player::{
     VOLUME_STEP,
 };
 pub use queue::Queue;
-pub use shuffle::ShuffleListModel;
 pub use sleep_timer::SleepTimer;
 pub use state::PlayerState;
 pub use track::{
