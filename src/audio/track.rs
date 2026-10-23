@@ -38,7 +38,7 @@ use crate::{
         youtube_description,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
-    i18n::i18n,
+    i18n::{i18n, i18n_f},
     library::is_mbid,
     utils::{self, ATTRIBUTE_HOST_PATH},
 };
@@ -911,6 +911,97 @@ fn track_artist(tag: &Tag) -> Option<String> {
     (!artists.is_empty()).then(|| plain_commas(&artists))
 }
 
+// The title in a tag, unless it's blank
+pub fn track_title(tag: &Tag) -> Option<String> {
+    tag.title()
+        .filter(|title| !title.trim().is_empty())
+        .map(|title| title.to_string())
+}
+
+// The title of a track without one in its tags, from the name of its file,
+// e.g. "Intro" for "01 - Intro.flac". Only a leading track number is left
+// out: "Song - Live" could just as well be "Artist - Song", so the rest is
+// kept as it is. This can read the folder of the file, so it must not be
+// called on the main thread
+pub fn title_from_file_name(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy())
+        .unwrap_or_default();
+    title_from_name(&stem, |width| has_padded_numbers(path, width))
+}
+
+// `padded(width)` tells whether the other names in the folder start with
+// numbers padded with zeros to `width` digits
+fn title_from_name(stem: &str, padded: impl FnOnce(usize) -> bool) -> String {
+    let name = stem.replace('_', " ");
+    let name = name.trim();
+    without_track_number(name, padded)
+        .unwrap_or(name)
+        .to_string()
+}
+
+// The rest of a name that starts with a track number, e.g. "01 - ", "1. ",
+// "3) ", "01 ", or "1-03 " for a disc and a track; the numbers that can be
+// part of a title, like in "99 Luftballons" or "3.14 Pi", are kept
+fn without_track_number(name: &str, padded: impl FnOnce(usize) -> bool) -> Option<&str> {
+    let digits = |s: &str| s.bytes().take_while(u8::is_ascii_digit).count();
+
+    let n = digits(name);
+    if !(1..=3).contains(&n) {
+        return None;
+    }
+    let (number, rest) = name.split_at(n);
+    // A disc and a track, e.g. "1-03"
+    if let Some(track) = rest
+        .strip_prefix('-')
+        .filter(|track| n <= 2 && digits(track) == 2)
+    {
+        return after_track_number(&track[2..], || true);
+    }
+    // A number followed by a space alone is a track number if it starts
+    // with a zero, e.g. "01 Intro", or if the other names in the folder
+    // do, e.g. "10 Song" next to "09 Song"
+    after_track_number(rest, || (n >= 2 && number.starts_with('0')) || padded(n))
+}
+
+// The rest of a name after the separator that follows its track number:
+// a dot, a dash or a parenthesis, or if `bare_space()`, a space
+fn after_track_number(rest: &str, bare_space: impl FnOnce() -> bool) -> Option<&str> {
+    let trimmed = rest.trim_start();
+    let after = match trimmed.strip_prefix(['.', '-', ')']) {
+        Some(after) => {
+            let spaced = after.trim_start();
+            // A digit right after the separator continues the number, e.g.
+            // "3.14 Pi" or "2-4-6-8 Motorway"; after a space, it starts the
+            // title, e.g. "02 - 12 to 12"
+            if spaced.len() == after.len() && after.starts_with(|c: char| c.is_ascii_digit()) {
+                return None;
+            }
+            spaced
+        }
+        None if trimmed.len() < rest.len() && bare_space() => trimmed,
+        None => return None,
+    };
+    (!after.is_empty()).then_some(after)
+}
+
+// Whether another name in the folder of `path` starts with a number padded
+// with zeros to `width` digits, e.g. "09 Song"
+fn has_padded_numbers(path: &Path, width: usize) -> bool {
+    let Some(entries) = path.parent().and_then(|dir| std::fs::read_dir(dir).ok()) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let name = name.as_encoded_bytes();
+        name.len() > width
+            && name[0] == b'0'
+            && name[..width].iter().all(u8::is_ascii_digit)
+            && !name[width].is_ascii_digit()
+    })
+}
+
 // Replaces the full-width commas in a name with plain ones: tracks
 // downloaded from YouTube separate their artists with commas, and use
 // full-width ones for the commas within a name, e.g. "Orquesta del Teatro
@@ -935,6 +1026,8 @@ fn tag_strings(tag: &Tag, key: ItemKey) -> Vec<String> {
 pub struct TrackData {
     artist: Option<String>,
     title: Option<String>,
+    // The title shown when the tags have none
+    fallback_title: String,
     album: Option<String>,
     credits: TrackCredits,
     tag_text: String,
@@ -1048,6 +1141,11 @@ impl TrackData {
 
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    // The title from the tags, or else the one from the file name
+    pub fn shown_title(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.fallback_title)
     }
 
     pub fn album(&self) -> Option<&str> {
@@ -1215,7 +1313,7 @@ impl TrackData {
         if let Some(tag) = tagged_file.primary_tag() {
             debug!("Found primary tag");
             artist = track_artist(tag);
-            title = tag.title().map(|s| s.to_string());
+            title = track_title(tag);
             album = tag.album().map(|s| s.to_string());
             credits = TrackCredits::from_tag(tag, extra);
             replay_gain = ReplayGain::from_tag(tag);
@@ -1228,7 +1326,7 @@ impl TrackData {
                 // The tags that come later fill in for the ones missing
                 // from the first
                 artist = artist.or_else(|| track_artist(tag));
-                title = title.or_else(|| tag.title().map(|s| s.to_string()));
+                title = title.or_else(|| track_title(tag));
                 album = album.or_else(|| tag.album().map(|s| s.to_string()));
                 credits = TrackCredits::from_tag(tag, extra);
                 replay_gain = ReplayGain::from_tag(tag);
@@ -1248,6 +1346,11 @@ impl TrackData {
             .display_name
             .as_deref()
             .map(|name| track_uuid(name, None, [&artist, &title, &album]));
+        let fallback_title = if title.is_none() {
+            title_from_file_name(path)
+        } else {
+            String::new()
+        };
 
         TrackData {
             credits,
@@ -1260,6 +1363,7 @@ impl TrackData {
             audio: None,
             artist,
             title,
+            fallback_title,
             album,
         }
     }
@@ -1271,7 +1375,7 @@ impl TrackData {
         // The other items are about the whole file
         let extra = ExtraComments::default();
         let artist = track_artist(&tag);
-        let title = tag.title().map(|s| s.to_string());
+        let title = track_title(&tag);
         let album = tag.album().map(|s| s.to_string());
 
         let end = match track.end {
@@ -1301,6 +1405,9 @@ impl TrackData {
             }),
             artist,
             title,
+            // Translators: the title of a track of a CUE sheet that has
+            // none; `{}` is its number
+            fallback_title: i18n_f("Track {}", &[&track.number.to_string()]),
             album,
         }
     }
@@ -1602,6 +1709,7 @@ impl Default for TrackData {
         TrackData {
             artist: Some("Invalid Artist".to_string()),
             title: Some("Invalid Title".to_string()),
+            fallback_title: String::new(),
             album: Some("Invalid Album".to_string()),
             credits: TrackCredits::default(),
             tag_text: String::new(),
@@ -1680,10 +1788,7 @@ mod imp {
         }
 
         fn title(&self) -> String {
-            match self.data.borrow().title() {
-                Some(title) => title.to_string(),
-                None => i18n("Unknown title"),
-            }
+            self.data.borrow().shown_title().to_string()
         }
 
         fn album(&self) -> String {
@@ -1863,6 +1968,15 @@ impl Track {
         }
     }
 
+    // The title and album in the tags, without the ones shown in their place
+    pub fn tag_title(&self) -> Option<String> {
+        self.imp().data.borrow().title().map(ToString::to_string)
+    }
+
+    pub fn tag_album(&self) -> Option<String> {
+        self.imp().data.borrow().album().map(ToString::to_string)
+    }
+
     pub fn credit_details(&self) -> TrackCredits {
         self.imp().data.borrow().credits().clone()
     }
@@ -1965,9 +2079,61 @@ mod tests {
 
     use super::{
         Credit, ExtraComments, MovementName, MusicBrainzIds, TrackCredits, album_title_search_text,
-        is_numbered, normalize_search_text, position_ranges, tag_search_text,
-        work_hierarchy_composer_ids, work_hierarchy_labels,
+        is_numbered, normalize_search_text, position_ranges, tag_search_text, title_from_name,
+        track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
     };
+
+    #[test]
+    fn file_names_lose_only_their_track_numbers() {
+        let cases = [
+            ("01 - Intro", "Intro"),
+            ("01. Intro", "Intro"),
+            ("01 Intro", "Intro"),
+            ("01-Intro", "Intro"),
+            ("03_Song_Name", "Song Name"),
+            ("1-03 Intro", "Intro"),
+            ("3) Intro", "Intro"),
+            ("10 - Intro", "Intro"),
+            ("Song - Live", "Song - Live"),
+            ("01 - Song - Live", "Song - Live"),
+            ("Artist - Song", "Artist - Song"),
+            ("Song.Name", "Song.Name"),
+            // Titles starting with a number
+            ("02 12 to 12", "12 to 12"),
+            ("02 - 12 to 12", "12 to 12"),
+            // Numbers that can be part of the title
+            ("99 Luftballons", "99 Luftballons"),
+            ("2001 A Space Odyssey", "2001 A Space Odyssey"),
+            ("2-4-6-8 Motorway", "2-4-6-8 Motorway"),
+            ("3.14 Pi", "3.14 Pi"),
+            // Nothing would be left
+            ("01", "01"),
+            ("01 - ", "01 -"),
+        ];
+        for (name, title) in cases {
+            assert_eq!(title_from_name(name, |_| false), title, "{name}");
+        }
+
+        // Next to names that start with "01" to "09"
+        assert_eq!(
+            title_from_name("10 under the mat", |width| width == 2),
+            "under the mat"
+        );
+        assert_eq!(
+            title_from_name("99 Luftballons", |width| width == 3),
+            "99 Luftballons"
+        );
+    }
+
+    #[test]
+    fn blank_titles_are_missing() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        assert_eq!(track_title(&tag), None);
+        tag.insert_text(ItemKey::TrackTitle, "  ".to_string());
+        assert_eq!(track_title(&tag), None);
+        tag.insert_text(ItemKey::TrackTitle, "Aqua".to_string());
+        assert_eq!(track_title(&tag).as_deref(), Some("Aqua"));
+    }
 
     #[test]
     fn search_text_has_description_names_but_no_links() {
@@ -2621,6 +2787,38 @@ mod tests {
         assert_eq!(whole[0].duration(), 10);
         assert_eq!(whole[0].segment(), (Duration::ZERO, None));
         assert!(read_tracks(&[&cue.join("track02")])[0].is_empty());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn tracks_without_titles_show_their_file_name_or_number() {
+        let dir = std::env::temp_dir().join(format!("dismas-untitled-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("01 - Intro.wav");
+        crate::utils::write_test_wav(&wav, 4);
+
+        let whole = read_tracks(&[&wav]).remove(0);
+        assert_eq!(whole[0].title(), None);
+        assert_eq!(whole[0].shown_title(), "Intro");
+
+        // The other names in the folder start with "01" to "09"
+        let tenth = dir.join("10 under the mat.wav");
+        crate::utils::write_test_wav(&tenth, 1);
+        let tenth = read_tracks(&[&tenth]).remove(0);
+        assert_eq!(tenth[0].shown_title(), "under the mat");
+
+        let cue = dir.join("Album.cue");
+        std::fs::write(
+            &cue,
+            "FILE \"01 - Intro.wav\" WAVE\n\
+             TRACK 01 AUDIO\nTITLE \"One\"\nINDEX 01 00:00:00\n\
+             TRACK 02 AUDIO\nINDEX 01 00:02:00\n",
+        )
+        .unwrap();
+        let tracks = read_tracks(&[&cue]).remove(0);
+        let titles: Vec<_> = tracks.iter().map(super::TrackData::shown_title).collect();
+        assert_eq!(titles, vec!["One", "Track 2"]);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

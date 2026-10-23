@@ -35,7 +35,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     audio::{
         CoverCache, ExtraComments, normalize_search_text, plain_commas, read_tagged_file,
-        tag_search_text,
+        tag_search_text, title_from_file_name, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
@@ -1046,7 +1046,7 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
     }
 
     let tags = tag.map_or_else(TrackTags::default, |tag| {
-        TrackTags::from_tag(tag, &extra, path)
+        TrackTags::from_tag(tag, &extra, path, Some(path))
     });
     vec![(path.to_path_buf(), tags)]
 }
@@ -1075,7 +1075,7 @@ fn read_sheet_tags(
 fn cue_track_tags(sheet: &SplitSheet, album_tag: &Tag, track: &CueTrack) -> (PathBuf, TrackTags) {
     let tag = cue_sheet::track_tag(album_tag, &sheet.sheet, track);
     // The album is in the folder of the sheet
-    let tags = TrackTags::from_tag(&tag, &ExtraComments::default(), &sheet.path);
+    let tags = TrackTags::from_tag(&tag, &ExtraComments::default(), &sheet.path, None);
     (sheet.location(track), tags)
 }
 
@@ -1105,7 +1105,10 @@ fn album_folder(path: &Path) -> Option<&Path> {
 }
 
 impl TrackTags {
-    fn from_tag(tag: &Tag, extra: &ExtraComments, path: &Path) -> Self {
+    // The title of a track without one is the name of its `file`, which
+    // is searched like the queue searches it; the tracks of CUE sheets
+    // have none
+    fn from_tag(tag: &Tag, extra: &ExtraComments, path: &Path, file: Option<&Path>) -> Self {
         let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
 
         let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
@@ -1147,11 +1150,14 @@ impl TrackTags {
 
         // The same text as `Track::search_key()`, so that searching the
         // albums matches the same tracks as searching the queue
-        let title = tag.title().map(|s| s.to_string());
+        let title = track_title(tag);
         let search = normalize_search_text(
             &[
                 tag.get_strings(ItemKey::TrackArtist).join(", "),
-                title.clone().unwrap_or_default(),
+                title
+                    .clone()
+                    .or_else(|| file.map(title_from_file_name))
+                    .unwrap_or_default(),
                 tag_search_text(tag, extra),
             ]
             .join(" "),
@@ -1209,6 +1215,27 @@ mod tests {
 
         let path = Path::new(OsStr::from_bytes(b"/music/caf\xe9.flac"));
         assert_eq!(path_from_bytes(path_bytes(path).to_vec()), path);
+    }
+
+    // Like the queue, for which the title is the file name
+    #[test]
+    fn tracks_without_titles_are_searched_by_file_name() {
+        use lofty::tag::{ItemKey, Tag, TagType};
+
+        use crate::audio::ExtraComments;
+
+        let path = Path::new("/music/Album/01 - Intro.flac");
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::AlbumTitle, "Album".to_string());
+        let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
+        assert_eq!(tags.title, None);
+        assert!(tags.search.unwrap().contains("intro"));
+
+        tag.insert_text(ItemKey::TrackTitle, "Overture".to_string());
+        let tags = super::TrackTags::from_tag(&tag, &ExtraComments::default(), path, Some(path));
+        let search = tags.search.unwrap();
+        assert!(search.contains("overture"));
+        assert!(!search.contains("intro"));
     }
 
     #[test]

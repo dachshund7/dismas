@@ -65,6 +65,9 @@ All notable changes to this project will be documented in this file.
 - The playlist pane's labels and tooltips name the selected playlist
 - Clicking the clear icon of a search entry puts the cursor in it
 - Read dates written with dots, such as 2024.06.03
+- Tracks without a title tag show their file name, without a leading track
+  number, instead of "Unknown title", and can be searched by it; Track Info
+  only shows the title and album from the tags
 - Update dependencies
 
 ### Fixed

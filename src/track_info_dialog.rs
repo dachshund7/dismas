@@ -87,8 +87,10 @@ impl TrackInfoDialog {
         // For movements of a larger work, the title just repeats the work
         // and the movement, so only show it for other tracks
         let movement = track.movement();
-        let title =
-            Some(track.title()).filter(|t| movement.is_none() && credits.work.as_ref() != Some(t));
+        // Only the tags are shown, not the title made from the file name
+        let title = track
+            .tag_title()
+            .filter(|t| movement.is_none() && credits.work.as_ref() != Some(t));
 
         let work = [
             (i18n("Title"), title.into_iter().collect()),
@@ -144,7 +146,7 @@ fn release_fields(track: &Track, credits: &TrackCredits) -> Vec<(String, Vec<Str
         .filter(|_| credits.disc_number > Some(1) || credits.disc_total > Some(1));
 
     vec![
-        (i18n("Album"), vec![track.album()]),
+        (i18n("Album"), track.tag_album().into_iter().collect()),
         (i18n("Album Artist"), album_artist.into_iter().collect()),
         (i18n("Disc"), disc.into_iter().collect()),
         (
