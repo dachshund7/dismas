@@ -13,7 +13,7 @@ glycin = { version = "4", features = ["gdk4"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 gettext-rs = { version = "0.7", features = ["gettext-system"] }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_16"] }
-itertools = "0.14"
+itertools = "0.15"
 glib-unix = "0.22"
 libc = "0.2"
 lofty = "0.24"
