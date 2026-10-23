@@ -434,6 +434,23 @@ mod tests {
         assert_eq!(paths(&parsed), paths(&files));
     }
 
+    // The tracks of CUE sheets are under their sheet, which is a file
+    #[test]
+    fn format_round_trips_tracks_of_cue_sheets() {
+        let files = [
+            gio::File::for_path("/home/me/Music/Album/Album.cue/track03"),
+            gio::File::for_path("/home/me/Music/Live.flac/track12"),
+        ];
+        let (text, n_outside) = format_m3u(&files, Some(Path::new("/home/me/Music")));
+        assert_eq!(
+            text,
+            "#EXTM3U\nAlbum/Album.cue/track03\nLive.flac/track12\n"
+        );
+        assert_eq!(n_outside, 0);
+        let parsed = parse_m3u(&text, &gio::File::for_path("/home/me/Music"));
+        assert_eq!(paths(&parsed), paths(&files));
+    }
+
     #[test]
     fn parse_backslashes() {
         let text = "Album\\01 a.opus\n";

@@ -8,6 +8,7 @@
 use adw::prelude::*;
 
 use super::*;
+use crate::cue_sheet;
 
 impl Window {
     pub(super) fn setup_playlists(&self) {
@@ -628,7 +629,7 @@ impl Window {
             let n_entries = files.len();
             let found: Vec<gio::File> = files
                 .into_iter()
-                .filter(|f| f.path().is_some_and(|p| p.is_file()))
+                .filter(|f| f.path().is_some_and(|p| cue_sheet::location_exists(&p)))
                 .collect();
             let stem = path.file_stem()?.to_string_lossy().into_owned();
             Some((stem, n_entries, found))

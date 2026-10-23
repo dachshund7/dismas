@@ -804,8 +804,10 @@ fn audio_files(files: Vec<gio::File>) -> Vec<gio::File> {
         ) {
             match info.file_type() {
                 gio::FileType::Regular => {
+                    // CUE sheets split audio files into tracks
                     if let Some(content_type) = info.content_type()
-                        && gio::content_type_is_mime_type(&content_type, "audio/*")
+                        && (gio::content_type_is_mime_type(&content_type, "audio/*")
+                            || gio::content_type_is_mime_type(&content_type, "application/x-cue"))
                     {
                         debug!("Adding file '{}' to the queue", file.uri());
                         queue.push(file);

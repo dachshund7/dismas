@@ -285,6 +285,11 @@ pub fn real_path(path: &Path) -> &Path {
     parse_location(path).map_or(path, |(sheet, _)| sheet)
 }
 
+// Whether a track is still there, as a file or as a track of a sheet
+pub fn location_exists(path: &Path) -> bool {
+    path.is_file() || parse_location(path).is_some()
+}
+
 // The audio file of a track
 pub fn audio_path(path: &Path) -> Option<PathBuf> {
     let Some((sheet, number)) = parse_location(path) else {
@@ -757,6 +762,8 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         assert_eq!(location, dir.join("Album.cue/track03"));
         assert_eq!(parse_location(&location), Some((sheet.as_path(), 3)));
         assert_eq!(real_path(&location), sheet);
+        assert!(location_exists(&location));
+        assert!(!location_exists(&track_location(&dir.join("Gone.cue"), 1)));
         assert_eq!(parse_location(&dir.join("Album.cue/track")), None);
         assert_eq!(parse_location(&dir.join("Album.cue/track+3")), None);
         // A folder can have any name
