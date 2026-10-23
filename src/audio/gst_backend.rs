@@ -37,7 +37,7 @@ use gst::prelude::*;
 use gtk::{gio, gio::prelude::*, glib};
 use log::{debug, error, warn};
 
-use crate::audio::{PlaybackAction, ReplayGainMode, SeekDirection, Track};
+use crate::audio::{Gains, PlaybackAction, ReplayGainMode, SeekDirection, Track};
 
 // How long after loading a track the next one can be handed over
 const HAND_OVER_AFTER_LOAD: Duration = Duration::from_millis(500);
@@ -53,6 +53,8 @@ pub struct TrackSource {
     pub start: gst::ClockTime,
     // Until the end of the file if `None`
     pub end: Option<gst::ClockTime>,
+    // For a part of a file, as the stream has the gains of all of it
+    pub gains: Option<Gains>,
 }
 
 impl TrackSource {
@@ -64,6 +66,7 @@ impl TrackSource {
             uri: track.audio_uri(),
             start: clock_time(start),
             end: end.map(clock_time),
+            gains: track.gains(),
         }
     }
 }
@@ -200,6 +203,92 @@ fn update_position(
     if let Err(e) = sender.try_send(PlaybackAction::UpdatePosition(pos, notify)) {
         error!("Failed to send UpdatePosition({pos}): {e}");
     }
+}
+
+// Where a buffer is in its file
+fn stream_time(pad: &gst::Pad, buffer: &gst::BufferRef) -> Option<gst::ClockTime> {
+    let event = pad.sticky_event::<gst::event::Segment>(0)?;
+    let segment = event.segment().downcast_ref::<gst::ClockTime>()?;
+    segment.to_stream_time(buffer.pts()?)
+}
+
+fn gain_tags(gains: Gains) -> Option<gst::TagList> {
+    let mut tags = gst::TagList::new();
+    {
+        let tags = tags.get_mut().unwrap();
+        let mode = gst::TagMergeMode::Replace;
+        if let Some(gain) = gains.track_gain {
+            tags.add::<gst::tags::TrackGain>(&gain, mode);
+        }
+        if let Some(peak) = gains.track_peak {
+            tags.add::<gst::tags::TrackPeak>(&peak, mode);
+        }
+        if let Some(gain) = gains.album_gain {
+            tags.add::<gst::tags::AlbumGain>(&gain, mode);
+        }
+        if let Some(peak) = gains.album_peak {
+            tags.add::<gst::tags::AlbumPeak>(&peak, mode);
+        }
+    }
+    (tags.n_tags() > 0).then_some(tags)
+}
+
+// Gives rgvolume the gains of the tracks of CUE sheets, from the sheet,
+// as the tags of the stream are about the whole file. They're sent before
+// the first buffer of each track that reaches the filter: the stream's
+// tags come before it, and at the start of the next part of a file, the
+// gain changes up to a buffer late, a fraction of a second
+fn add_gain_probe(pad: &gst::Pad, rg_volume_sink: gst::Pad, gapless: Arc<Mutex<Gapless>>) {
+    // The track whose audio reaches the filter, ahead of the sink, and
+    // whether rgvolume has its gains
+    let filtered: Mutex<(Option<TrackSource>, bool)> = Mutex::default();
+    pad.add_probe(
+        gst::PadProbeType::BUFFER
+            | gst::PadProbeType::EVENT_DOWNSTREAM
+            | gst::PadProbeType::EVENT_FLUSH,
+        move |pad, info| {
+            let buffer = match info.data {
+                Some(gst::PadProbeData::Buffer(ref buffer)) => buffer,
+                Some(gst::PadProbeData::Event(ref event)) => {
+                    let gapless = gapless.lock().unwrap();
+                    let track = match event.type_() {
+                        // The file loaded, or the one handed over
+                        gst::EventType::StreamStart => {
+                            gapless.handed.as_ref().or(gapless.current.as_ref())
+                        }
+                        // A seek stays in the track the player shows
+                        gst::EventType::FlushStop => gapless.playing(),
+                        _ => return gst::PadProbeReturn::Ok,
+                    };
+                    *filtered.lock().unwrap() = (track.cloned(), false);
+                    return gst::PadProbeReturn::Ok;
+                }
+                _ => return gst::PadProbeReturn::Ok,
+            };
+
+            let tags = {
+                let gapless = gapless.lock().unwrap();
+                let mut filtered = filtered.lock().unwrap();
+                // Past the end of the track, the next part of the file
+                if let Some(track) = &filtered.0
+                    && track
+                        .end
+                        .is_some_and(|end| stream_time(pad, buffer).is_some_and(|time| time >= end))
+                    && gapless.next_follows(track)
+                {
+                    *filtered = (gapless.next.clone(), false);
+                }
+                if std::mem::replace(&mut filtered.1, true) {
+                    return gst::PadProbeReturn::Ok;
+                }
+                filtered.0.as_ref().and_then(|track| track.gains)
+            };
+            if let Some(tags) = tags.and_then(gain_tags) {
+                rg_volume_sink.send_event(gst::event::Tag::new(tags));
+            }
+            gst::PadProbeReturn::Ok
+        },
+    );
 }
 
 // What to do with a buffer at the end of a track
@@ -390,6 +479,9 @@ impl GstBackend {
         if let Some(ref replaygain) = res.replaygain {
             let pad = replaygain.rg_filter_bin.static_pad("src").unwrap();
             add_end_probe(&pad, res.gapless.clone());
+            let pad = replaygain.rg_filter_bin.static_pad("sink").unwrap();
+            let rg_volume_sink = replaygain.rg_volume.static_pad("sink").unwrap();
+            add_gain_probe(&pad, rg_volume_sink, res.gapless.clone());
         }
         res.gst_player
             .pipeline()
@@ -809,6 +901,7 @@ mod tests {
             uri: "file:///music/album.flac".to_string(),
             start: gst::ClockTime::from_mseconds(start_ms),
             end: end_ms.map(gst::ClockTime::from_mseconds),
+            gains: None,
         }
     }
 
@@ -981,5 +1074,89 @@ mod tests {
             Ok(PlaybackAction::UpdatePosition(61, false))
         ));
         assert!(receiver.try_recv().is_err());
+    }
+
+    // The gain rgvolume applies after each buffer of 300 ms of a file,
+    // whose stream has a track gain of -10 dB, in track mode
+    fn gains_through_filter(gapless: Gapless) -> Option<Vec<f64>> {
+        gst::init().unwrap();
+        // rgvolume comes with the good plugins
+        let replaygain = GstReplayGain::new().ok()?;
+        replaygain.rg_volume.set_property("album-mode", false);
+        let rg_volume_sink = replaygain.rg_volume.static_pad("sink").unwrap();
+        let pad = replaygain.rg_filter_bin.static_pad("sink").unwrap();
+        add_gain_probe(&pad, rg_volume_sink, Arc::new(Mutex::new(gapless)));
+
+        let pipeline = gst::Pipeline::new();
+        let sink = gst::ElementFactory::make("fakesink")
+            .property("sync", false)
+            .build()
+            .unwrap();
+        pipeline
+            .add_many([&replaygain.rg_filter_bin, &sink])
+            .unwrap();
+        replaygain.rg_filter_bin.link(&sink).unwrap();
+        let src = gst::Pad::builder(gst::PadDirection::Src).build();
+        src.set_active(true).unwrap();
+        src.link(&pad).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+
+        src.push_event(gst::event::StreamStart::new("album"));
+        let caps = gst_audio::AudioInfo::builder(gst_audio::AudioFormat::F32le, 1000, 1)
+            .build()
+            .unwrap()
+            .to_caps()
+            .unwrap();
+        src.push_event(gst::event::Caps::new(&caps));
+        src.push_event(gst::event::Segment::new(&gst::FormattedSegment::<
+            gst::ClockTime,
+        >::new()));
+        let mut tags = gst::TagList::new();
+        tags.get_mut()
+            .unwrap()
+            .add::<gst::tags::TrackGain>(&-10.0, gst::TagMergeMode::Append);
+        src.push_event(gst::event::Tag::new(tags));
+
+        let mut gains = Vec::new();
+        for i in 0..5 {
+            let mut buffer = gst::Buffer::with_size(300 * 4).unwrap();
+            {
+                let buffer = buffer.get_mut().unwrap();
+                buffer.set_pts(gst::ClockTime::from_mseconds(i * 300));
+                buffer.set_duration(gst::ClockTime::from_mseconds(300));
+            }
+            src.push(buffer).unwrap();
+            gains.push(replaygain.rg_volume.property::<f64>("result-gain"));
+        }
+        pipeline.set_state(gst::State::Null).unwrap();
+        Some(gains)
+    }
+
+    #[test]
+    fn the_tracks_of_a_cue_sheet_have_their_own_gain() {
+        let with_gain = |mut source: TrackSource, track_gain| {
+            source.gains = Some(Gains {
+                track_gain: Some(track_gain),
+                album_gain: Some(-8.0),
+                ..Default::default()
+            });
+            source
+        };
+        let Some(gains) = gains_through_filter(Gapless {
+            current: Some(with_gain(source("track01", 0, Some(900)), -3.0)),
+            next: Some(with_gain(source("track02", 900, None), -6.0)),
+            ..Default::default()
+        }) else {
+            return;
+        };
+        // The next part of the file has its own from its first buffer
+        assert_eq!(gains, vec![-3.0, -3.0, -3.0, -6.0, -6.0]);
+
+        // A whole file has the gain of its stream
+        let gains = gains_through_filter(Gapless {
+            current: Some(source("track", 0, None)),
+            ..Default::default()
+        });
+        assert_eq!(gains, Some(vec![-10.0; 5]));
     }
 }

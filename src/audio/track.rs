@@ -954,6 +954,34 @@ pub struct CueAudio {
     pub start: Duration,
     // Until the end of the file if `None`
     pub end: Option<Duration>,
+    // The gains of the stream of the file are about all of it
+    pub gains: Gains,
+}
+
+// The ReplayGain of a track, in dB, and its peaks
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Gains {
+    pub track_gain: Option<f64>,
+    pub track_peak: Option<f64>,
+    pub album_gain: Option<f64>,
+    pub album_peak: Option<f64>,
+}
+
+impl Gains {
+    fn from_tag(tag: &Tag) -> Self {
+        // E.g. "-6.20 dB", or "0.988" for a peak
+        let value = |key| {
+            let text = tag.get_string(key)?.trim().to_ascii_lowercase();
+            let number = text.strip_suffix("db").unwrap_or(&text);
+            number.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+        };
+        Self {
+            track_gain: value(ItemKey::ReplayGainTrackGain),
+            track_peak: value(ItemKey::ReplayGainTrackPeak),
+            album_gain: value(ItemKey::ReplayGainAlbumGain),
+            album_peak: value(ItemKey::ReplayGainAlbumPeak),
+        }
+    }
 }
 
 // The format and the properties of the file of a track
@@ -1268,6 +1296,7 @@ impl TrackData {
                 file: gio::File::for_path(&cue_file.path),
                 start: track.start,
                 end: track.end,
+                gains: Gains::from_tag(&tag),
             }),
             artist,
             title,
@@ -1296,6 +1325,12 @@ impl TrackData {
         self.audio
             .as_ref()
             .map_or((Duration::ZERO, None), |audio| (audio.start, audio.end))
+    }
+
+    // The ReplayGain of a track of a CUE sheet; the stream of a whole file
+    // has its own
+    pub fn gains(&self) -> Option<Gains> {
+        self.audio.as_ref().map(|audio| audio.gains)
     }
 }
 
@@ -1909,6 +1944,10 @@ impl Track {
 
     pub fn segment(&self) -> (Duration, Option<Duration>) {
         self.imp().data.borrow().segment()
+    }
+
+    pub fn gains(&self) -> Option<Gains> {
+        self.imp().data.borrow().gains()
     }
 }
 

@@ -524,16 +524,15 @@ impl Claims {
 }
 
 // The items of an audio file that are about all of it, rather than about
-// one of the tracks of the sheet that splits it
-const FILE_ITEMS: [ItemKey; 8] = [
+// one of the tracks of the sheet that splits it. Its track gain stays for
+// the tracks the sheet has none for: it's the one the file plays with
+const FILE_ITEMS: [ItemKey; 6] = [
     ItemKey::TrackTitle,
     ItemKey::TrackNumber,
     ItemKey::TrackTotal,
     ItemKey::Isrc,
     ItemKey::MusicBrainzRecordingId,
     ItemKey::MusicBrainzTrackId,
-    ItemKey::ReplayGainTrackGain,
-    ItemKey::ReplayGainTrackPeak,
 ];
 
 fn set(tag: &mut Tag, key: ItemKey, value: Option<&String>) {
@@ -872,7 +871,10 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         );
         let first = track_tag(&album, &sheet, &sheet.tracks[0]);
         assert_eq!(first.artist().as_deref(), Some("Sir John Barbirolli"));
-        // Not the file's gain, which is the whole disc's
-        assert_eq!(first.get_string(ItemKey::ReplayGainTrackGain), None);
+        // Without a gain in the sheet, the file's, the whole disc's
+        assert_eq!(
+            first.get_string(ItemKey::ReplayGainTrackGain),
+            Some("-6.00 dB")
+        );
     }
 }
