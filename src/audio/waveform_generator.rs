@@ -219,6 +219,16 @@ impl WaveformGenerator {
             .unwrap();
         uridecodebin.set_property("uri", track.audio_uri());
 
+        // A track of a CUE sheet is a part of its file, which the pipeline
+        // seeks to once it's ready
+        let (start, end) = track.segment();
+        let segment = (!start.is_zero() || end.is_some()).then(|| {
+            let clock_time =
+                |d: std::time::Duration| gst::ClockTime::from_nseconds(d.as_nanos() as u64);
+            (clock_time(start), end.map(clock_time))
+        });
+        let mut seeked = segment.is_none();
+
         let fakesink = pipeline
             .downcast_ref::<gst::Bin>()
             .unwrap()
@@ -244,6 +254,34 @@ impl WaveformGenerator {
                     use gst::MessageView;
 
                     match msg.view() {
+                        MessageView::AsyncDone(..) if !seeked => {
+                            seeked = true;
+                            let (start, end) = segment.unwrap();
+                            let stop_type = if end.is_some() {
+                                gst::SeekType::Set
+                            } else {
+                                gst::SeekType::None
+                            };
+                            let seek = pipeline.seek(
+                                1.0,
+                                gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+                                gst::SeekType::Set,
+                                Some(start),
+                                stop_type,
+                                end,
+                            );
+                            let playing =
+                                seek.is_ok() && pipeline.set_state(gst::State::Playing).is_ok();
+                            if !playing {
+                                warn!("Unable to generate the waveform of the track");
+                                pipeline
+                                    .set_state(gst::State::Null)
+                                    .expect("Unable to set 'null' state");
+                                this.imp().pipeline.replace(None);
+                                this.finish_peaks(false);
+                                return glib::ControlFlow::Break;
+                            }
+                        }
                         MessageView::Eos(..) => {
                             debug!("End of waveform stream");
                             pipeline
@@ -264,8 +302,10 @@ impl WaveformGenerator {
                             return glib::ControlFlow::Break;
                         }
                         MessageView::Element(element) => {
+                            // Until the seek, from the start of the file
                             if let Some(s) = element.structure()
                                 && s.has_name("level")
+                                && seeked
                             {
                                 let peaks_array = s.get::<&glib::ValueArray>("peak").unwrap();
                                 let v1 = peaks_array[0].get::<f64>().unwrap();
@@ -286,7 +326,12 @@ impl WaveformGenerator {
             ))
             .expect("failed to add bus watch");
 
-        match pipeline.set_state(gst::State::Playing) {
+        let state = if segment.is_some() {
+            gst::State::Paused
+        } else {
+            gst::State::Playing
+        };
+        match pipeline.set_state(state) {
             Ok(_) => {
                 self.imp().pipeline.replace(Some((pipeline, bus_watch)));
             }
