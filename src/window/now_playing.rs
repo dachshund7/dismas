@@ -116,44 +116,40 @@ impl Window {
     pub(super) fn update_style(&self, track: Option<&Track>) {
         let imp = self.imp();
 
-        if !imp.settings.boolean("enable-recoloring") {
-            imp.provider.load_from_string("");
-            imp.toast_overlay.remove_css_class("main-window");
-            return;
-        }
+        let palette = if !imp.settings.boolean("enable-recoloring") {
+            None
+        } else if let Some(palette) = track.and_then(Track::cover_palette) {
+            self.action_set_enabled("win.enable-recoloring", true);
+            Some(palette)
+        } else {
+            self.action_set_enabled("win.enable-recoloring", false);
+            None
+        };
 
-        if let Some(track) = track
-            && let Some(bg_colors) = track.cover_palette()
-        {
-            let mut css = String::new();
+        // The accent color is only replaced when the cover has a color to
+        // make it from; the stylesheet's rule for it would make the accent
+        // color invalid without one, rather than keep the system's
+        let accent = palette.as_ref().and(track).and_then(Track::cover_accent);
 
-            css.push_str(":root {");
-
-            let n_colors = bg_colors.len();
-            for (i, color) in bg_colors.iter().enumerate().take(n_colors) {
-                let s = format!("--background-color-{i}: {color};");
-                css.push_str(&s);
+        if let Some(palette) = &palette {
+            let mut css = String::from(":root {");
+            for (i, color) in palette.iter().enumerate() {
+                css.push_str(&format!("--background-color-{i}: {color};"));
             }
-
-            for i in n_colors + 1 - 1..5 {
+            for i in palette.len()..5 {
                 css.push_str(&format!("--background-color-{i}: var(--window-bg-color);"));
             }
-
-            css.push('}');
-
-            imp.provider.load_from_string(&css);
-            if !imp.toast_overlay.has_css_class("main-window") {
-                imp.toast_overlay.add_css_class("main-window");
+            if let Some(accent) = accent {
+                css.push_str(&format!("--cover-accent: {accent};"));
             }
-
-            self.action_set_enabled("win.enable-recoloring", true);
-
-            return;
+            css.push('}');
+            imp.provider.load_from_string(&css);
+        } else {
+            imp.provider.load_from_string("");
         }
 
-        imp.provider.load_from_string("");
-        imp.toast_overlay.remove_css_class("main-window");
-        self.action_set_enabled("win.enable-recoloring", false);
+        set_css_class(&*imp.toast_overlay, "main-window", palette.is_some());
+        set_css_class(&*imp.toast_overlay, "cover-accent", accent.is_some());
     }
 
     pub(super) fn update_title(&self, track: Option<&Track>) {
@@ -184,5 +180,13 @@ impl Window {
 
     pub fn set_track_position(&self, position: f64) {
         self.imp().waveform_view.set_position(position);
+    }
+}
+
+fn set_css_class(widget: &impl IsA<gtk::Widget>, class: &str, set: bool) {
+    if set {
+        widget.add_css_class(class);
+    } else {
+        widget.remove_css_class(class);
     }
 }

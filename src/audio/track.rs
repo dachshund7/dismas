@@ -1028,6 +1028,10 @@ impl TrackData {
         self.cover_art().map(CoverArt::palette)
     }
 
+    pub fn cover_accent(&self) -> Option<gdk::RGBA> {
+        self.cover_art().and_then(CoverArt::accent)
+    }
+
     pub fn cover_cache(&self) -> Option<&PathBuf> {
         self.cover_art()?.cache()
     }
@@ -1525,6 +1529,10 @@ impl Track {
 
     pub fn cover_palette(&self) -> Option<Vec<gdk::RGBA>> {
         self.imp().data.borrow().cover_palette().cloned()
+    }
+
+    pub fn cover_accent(&self) -> Option<gdk::RGBA> {
+        self.imp().data.borrow().cover_accent()
     }
 
     pub fn cover_uuid(&self) -> Option<String> {

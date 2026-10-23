@@ -68,9 +68,8 @@ playbackcontrol {
 
 /* The sleep timer button is filled while the timer is on, and the shuffle
  * button while the playlist is shuffled, as the grey of a checked button
- * hardly differs from the one of the others; coloring the icon alone
- * wouldn't show with "Match Cover Art", which makes the accent color the
- * color of the text */
+ * hardly differs from the one of the others, and a colored icon alone
+ * would hardly show */
 playbackcontrol menubutton.sleep-timer-on > button,
 playbackcontrol button.shuffle:checked {
   background-color: var(--accent-bg-color);
@@ -267,10 +266,6 @@ dragoverlay {
   --sidebar-shade-color: rgb(0 0 0 / 10%);
   --sidebar-border-color: rgb(0 0 0 / 10%);
 
-  --accent-bg-color: rgb(0 0 0 / 75%);
-  --accent-fg-color: white;
-  --accent-color: oklab(from var(--accent-bg-color) var(--standalone-color-oklab));
-
   --scrollbar-outline-color: rgb(255 255 255 / 25%);
 
   background: var(--cover-gradient);
@@ -301,6 +296,17 @@ dialog.track-info.recolored {
     --cover-tint-1: oklch(from var(--background-color-1) 0.27 min(c, 0.06) h);
     --cover-tint-2: oklch(from var(--background-color-2) 0.27 min(c, 0.06) h);
   }
+}
+
+/* The accent color is made from the most chromatic color of the cover, at
+ * a lightness that white text can be read on, in both color schemes, like
+ * the system's accent colors; it's only replaced when the cover has one
+ * that isn't grey. The accent color of text is made from it again, as the
+ * one defined on :root follows the accent color there */
+.main-window.cover-accent {
+  --accent-bg-color: oklch(from var(--cover-accent) 0.5 clamp(0.08, c, 0.14) h);
+  --accent-fg-color: white;
+  --accent-color: oklab(from var(--accent-bg-color) var(--standalone-color-oklab));
 }
 
 /* Over the content, the sidebar of the collapsed split view has the colors
@@ -337,10 +343,6 @@ dialog.track-info.recolored headerbar {
   box-shadow: none;
 }
 
-.main-window volume > scale trough highlight {
-  background: color-mix(in srgb, var(--accent-bg-color) var(--dim-opacity), transparent);
-}
-
 volume:hover > scale { color: inherit; }
 
 volume > scale trough highlight { min-height: 12px; min-width: 12px; }
@@ -353,9 +355,6 @@ volume > scale trough slider { opacity: 0; }
     --sidebar-backdrop-color: rgb(255 255 255 / 2.75%);
     --sidebar-shade-color: rgb(0 0 0 / 20%);
     --sidebar-border-color: rgb(0 0 0 / 28%);
-
-    --accent-bg-color: rgb(255 255 255 / 75%);
-    --accent-fg-color: rgb(0 0 0 / 75%);
 
     --scrollbar-outline-color: rgb(0 0 0 / 25%);
   }

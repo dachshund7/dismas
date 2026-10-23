@@ -12,7 +12,7 @@ use lofty::prelude::TaggedFileExt;
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
 
-use crate::cover_image::CoverImage;
+use crate::cover_image::{CoverImage, accent_color};
 
 // The base cover size is 192px, but we need to account for HiDPI;
 // better to scale down when rendering on displays with a scaling
@@ -42,6 +42,7 @@ pub struct CoverArt {
     texture: gdk::Texture,
     row_texture: gdk::Texture,
     palette: Vec<gdk::RGBA>,
+    accent: Option<gdk::RGBA>,
     cache: Option<PathBuf>,
 }
 
@@ -56,6 +57,11 @@ impl CoverArt {
 
     pub fn palette(&self) -> &Vec<gdk::RGBA> {
         self.palette.as_ref()
+    }
+
+    // The color the accent color is made from, if the cover isn't grey
+    pub fn accent(&self) -> Option<gdk::RGBA> {
+        self.accent
     }
 
     pub fn cache(&self) -> Option<&PathBuf> {
@@ -268,6 +274,7 @@ impl CoverCache {
                 // The color palette we use for styling the UI; we want
                 // both the texture and the palette
                 let palette = image.palette()?;
+                let accent = accent_color(&palette, &image.shares(&palette));
                 // Cache the cover, so that the MPRIS controller can
                 // reference it later
                 let cache = cache_cover_art(&uuid, &image);
@@ -276,6 +283,7 @@ impl CoverCache {
                     texture: image.into_texture(),
                     row_texture,
                     palette,
+                    accent,
                     cache,
                 })
             })
@@ -389,11 +397,13 @@ fn write_cover_file(dir: &Path, uuid: &str, png: &[u8]) -> Result<PathBuf, glib:
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{path::PathBuf, sync::Arc};
 
-    use gtk::{glib, prelude::*};
+    use gtk::{gdk, gio, glib, prelude::*};
+    use lofty::prelude::TaggedFileExt;
 
-    use super::{CoverCache, write_cover_file};
+    use super::{COVER_SIZE, CoverCache, write_cover_file};
+    use crate::cover_image::{accent_color, oklch_chroma};
 
     #[test]
     fn changed_covers_get_a_new_file() {
@@ -476,5 +486,80 @@ mod tests {
         let _second = cache.slot("second");
         assert!(!cache.entries.contains_key("first"));
         assert!(cache.entries.contains_key("second"));
+    }
+
+    // Prints the palette of the cover of each folder under DISMAS_COVERS_DIR,
+    // loaded like the app does, with the chroma and share of each color, and
+    // a star on the one the accent color is made from, to tune accent_color
+    // on real covers rather than on palettes picked by eye:
+    //   DISMAS_COVERS_DIR=~/Music cargo test print_palettes -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn print_palettes() {
+        fn hex(color: &gdk::RGBA) -> String {
+            let byte = |c: f32| (c * 255.0).round() as u8;
+            format!(
+                "#{:02x}{:02x}{:02x}",
+                byte(color.red()),
+                byte(color.green()),
+                byte(color.blue())
+            )
+        }
+
+        let root = std::env::var_os("DISMAS_COVERS_DIR").expect("DISMAS_COVERS_DIR is not set");
+        let mut dirs = vec![PathBuf::from(root)];
+        while let Some(dir) = dirs.pop() {
+            let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+                .collect();
+            entries.sort();
+            dirs.extend(entries.iter().rev().filter(|path| path.is_dir()).cloned());
+
+            let tagged_file = entries
+                .iter()
+                .filter(|path| {
+                    gio::content_type_guess(Some(path), None)
+                        .0
+                        .starts_with("audio/")
+                })
+                .find_map(|path| {
+                    lofty::probe::Probe::open(path)
+                        .ok()?
+                        .guess_file_type()
+                        .ok()?
+                        .read()
+                        .ok()
+                });
+            let Some(tagged_file) = tagged_file else {
+                continue;
+            };
+            let Some(tag) = tagged_file
+                .primary_tag()
+                .or_else(|| tagged_file.first_tag())
+            else {
+                continue;
+            };
+            let Some(image) = CoverCache::load_cover(tag, Some(&dir), COVER_SIZE) else {
+                continue;
+            };
+            let Some(palette) = image.palette() else {
+                continue;
+            };
+
+            let shares = image.shares(&palette);
+            let accent = accent_color(&palette, &shares);
+            let colors: Vec<String> = palette
+                .iter()
+                .zip(&shares)
+                .map(|(color, share)| {
+                    let star = if accent == Some(*color) { " *" } else { "" };
+                    format!("{} {:.3} {share:.3}{star}", hex(color), oklch_chroma(color))
+                })
+                .collect();
+            println!("{}\t{}", dir.display(), colors.join("\t"));
+        }
     }
 }
