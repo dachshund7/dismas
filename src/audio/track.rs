@@ -20,9 +20,10 @@ use itertools::Itertools;
 use lofty::{
     ape::{ApeFile, ApeTag},
     config::ParseOptions,
+    error::FileParseError,
     file::{AudioFile, FileType, TaggedFile},
     flac::FlacFile,
-    ogg::{OpusFile, SpeexFile, VorbisComments, VorbisFile},
+    ogg::{OpusFile, SpeexFile, VorbisFile, tag::VorbisComments},
     prelude::{Accessor, TaggedFileExt},
     probe::Probe,
     tag::{ItemKey, ItemValue, Tag},
@@ -589,12 +590,12 @@ pub struct ExtraComments {
 pub fn read_tagged_file(
     probe: Probe<BufReader<File>>,
     options: ParseOptions,
-) -> lofty::error::Result<(TaggedFile, ExtraComments)> {
+) -> Result<(TaggedFile, ExtraComments), FileParseError> {
     fn read<F: AudioFile + Into<TaggedFile>>(
         probe: Probe<BufReader<File>>,
         options: ParseOptions,
         comments: fn(&F) -> Option<&VorbisComments>,
-    ) -> lofty::error::Result<(TaggedFile, ExtraComments)> {
+    ) -> Result<(TaggedFile, ExtraComments), FileParseError> {
         let file = F::read_from(&mut probe.into_inner(), options)?;
         let get = |key| {
             comments(&file)
@@ -614,7 +615,7 @@ pub fn read_tagged_file(
         probe: Probe<BufReader<File>>,
         options: ParseOptions,
         ape: fn(&F) -> Option<&ApeTag>,
-    ) -> lofty::error::Result<(TaggedFile, ExtraComments)> {
+    ) -> Result<(TaggedFile, ExtraComments), FileParseError> {
         let file = F::read_from(&mut probe.into_inner(), options)?;
         let cue_sheet = ape(&file)
             .and_then(|tag| tag.get("Cuesheet"))

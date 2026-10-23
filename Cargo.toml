@@ -16,7 +16,7 @@ gtk = { version = "0.11", package = "gtk4", features = ["v4_16"] }
 itertools = "0.15"
 glib-unix = "0.22"
 libc = "0.2"
-lofty = "0.24"
+lofty = "0.25"
 log = "0.4"
 mpris-server = "0.10"
 pretty_env_logger = "0.5"
