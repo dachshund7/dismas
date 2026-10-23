@@ -125,7 +125,7 @@ impl Window {
             (
                 i18n("Close the Queue"),
                 i18n("Back to the Queue"),
-                i18n("Drop a track to add it to the queue"),
+                i18n("Drop tracks to add them to the queue"),
             )
         } else {
             let args = [("playlist", name.as_str())];
@@ -142,7 +142,7 @@ impl Window {
                 // Translators: `{playlist}` must be left unmodified; it is
                 // expanded to the name of a playlist
                 i18n_k(
-                    "Drop a track to add it to {playlist}",
+                    "Drop tracks to add them to {playlist}",
                     &[("playlist", short_name.as_str())],
                 ),
             )
