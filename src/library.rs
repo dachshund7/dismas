@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The albums in the Music folder
+//! The albums in the music folders
 //!
 //! Reading the tags of every track takes a while, so they are kept in an
 //! SQLite database in the user data directory, and only the files that
@@ -20,7 +20,7 @@ use std::{
 
 pub use album::{Album, AlbumSort};
 use async_channel::Sender;
-use gtk::{gio, glib};
+use gtk::{gio, gio::prelude::*, glib};
 use itertools::Itertools;
 use lofty::{
     config::ParseOptions,
@@ -124,13 +124,176 @@ struct TrackTags {
     search: Option<String>,
 }
 
+// A folder whose albums are in the grid: the path that's read, and the
+// path outside the sandbox of a folder that came through the document
+// portal, which names it and tells it apart even when it's gone, e.g.
+// when its access was taken back
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MusicFolder {
+    pub path: PathBuf,
+    pub host: Option<PathBuf>,
+}
+
+impl MusicFolder {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path, host: None }
+    }
+
+    // The path to show
+    pub fn shown_path(&self) -> &Path {
+        self.host.as_deref().unwrap_or(&self.path)
+    }
+}
+
 // The XDG Music folder; without a user-dirs.dirs file, GLib doesn't know
 // about one, so we look for the usual "Music" folder in the home directory
-pub fn music_dir() -> Option<PathBuf> {
+pub fn default_music_dir() -> PathBuf {
     glib::user_special_dir(glib::UserDirectory::Music)
         .filter(|dir| *dir != glib::home_dir())
-        .or_else(|| Some(glib::home_dir().join("Music")))
-        .filter(|dir| dir.is_dir())
+        .unwrap_or_else(|| glib::home_dir().join("Music"))
+}
+
+// The music folders in the settings, where an empty list means the XDG
+// Music folder. They're kept as URIs, as the strings of the settings must
+// be UTF-8; the ones without a local path are left out
+pub fn music_folders(settings: &gio::Settings) -> Vec<MusicFolder> {
+    folders_from_entries(settings.get::<Vec<(String, String)>>("music-folders"))
+}
+
+fn folders_from_entries(entries: Vec<(String, String)>) -> Vec<MusicFolder> {
+    if entries.is_empty() {
+        return vec![MusicFolder::new(default_music_dir())];
+    }
+    entries
+        .into_iter()
+        .filter_map(|(uri, host)| {
+            let path = gio::File::for_uri(&uri).path()?;
+            let host = Some(host)
+                .filter(|host| !host.is_empty())
+                .and_then(|host| gio::File::for_uri(&host).path());
+            Some(MusicFolder { path, host })
+        })
+        .collect()
+}
+
+pub fn store_music_folders(settings: &gio::Settings, folders: &[MusicFolder]) {
+    let uri = |path: &Path| gio::File::for_path(path).uri().to_string();
+    let entries: Vec<(String, String)> = folders
+        .iter()
+        .map(|folder| {
+            let host = folder.host.as_deref().map(uri).unwrap_or_default();
+            (uri(&folder.path), host)
+        })
+        .collect();
+    if let Err(e) = settings.set("music-folders", entries.to_variant()) {
+        warn!("Unable to store the music folders: {e}");
+    }
+}
+
+// A folder picked in the file chooser, as it's read. The portal gives a
+// folder of the Music folder a path of its own, as it grants write access,
+// which the sandbox doesn't have; the Music folder's own path is read
+// instead, spelled like the Music folder, so that its tracks have the
+// same paths either way. This blocks, as the portal's files can be slow
+pub fn resolve_folder(path: &Path) -> MusicFolder {
+    let Some(host) = host_path(path) else {
+        return MusicFolder::new(path.to_path_buf());
+    };
+    // The host path has its symbolic links resolved, as the Music folder
+    // might have, e.g. to another drive
+    let music = default_music_dir();
+    if let Ok(real_music) = std::fs::canonicalize(&music)
+        && let Ok(relative) = host.strip_prefix(&real_music)
+        && music.join(relative).is_dir()
+    {
+        return MusicFolder::new(music.join(relative));
+    }
+    MusicFolder {
+        path: path.to_path_buf(),
+        host: Some(host),
+    }
+}
+
+// The path outside the sandbox of a folder of the document portal
+fn host_path(path: &Path) -> Option<PathBuf> {
+    if !path.starts_with(glib::user_runtime_dir().join("doc")) {
+        return None;
+    }
+    let info = gio::File::for_path(path)
+        .query_info(
+            utils::ATTRIBUTE_HOST_PATH,
+            gio::FileQueryInfoFlags::NONE,
+            None::<&gio::Cancellable>,
+        )
+        .ok()?;
+    info.attribute_as_string(utils::ATTRIBUTE_HOST_PATH)
+        .map(|host| PathBuf::from(host.as_str()))
+}
+
+// What tells folders apart, and whether one is in another: the path
+// outside the sandbox, or the path without symbolic links, as two paths
+// can lead to the same folder. This blocks
+pub fn folder_key(folder: &MusicFolder) -> PathBuf {
+    folder.host.clone().unwrap_or_else(|| {
+        std::fs::canonicalize(&folder.path).unwrap_or_else(|_| folder.path.clone())
+    })
+}
+
+// The folders to read, and those that aren't there, whose tracks are
+// kept, as reading them again when they're back takes a while, but hidden,
+// as they can't play
+#[derive(Debug, Default)]
+pub struct Roots {
+    pub available: Vec<PathBuf>,
+    pub unavailable: Vec<PathBuf>,
+}
+
+// The music folders, without those in another one; this blocks
+pub fn roots(folders: &[MusicFolder]) -> Roots {
+    let keyed = folders
+        .iter()
+        .map(|folder| (folder_key(folder), folder.path.clone()))
+        .collect();
+    let mut roots = Roots::default();
+    for path in outermost(keyed) {
+        if is_available(&path) {
+            roots.available.push(path);
+        } else {
+            roots.unavailable.push(path);
+        }
+    }
+    roots
+}
+
+// The values whose keys are neither in another's, nor the same as an
+// earlier one's
+fn outermost<T>(keyed: Vec<(PathBuf, T)>) -> Vec<T> {
+    let keys: Vec<PathBuf> = keyed.iter().map(|(key, _)| key.clone()).collect();
+    keyed
+        .into_iter()
+        .enumerate()
+        .filter(|(i, (key, _))| {
+            !keys
+                .iter()
+                .enumerate()
+                .any(|(j, other)| key.starts_with(other) && (key != other || j < *i))
+        })
+        .map(|(_, (_, value))| value)
+        .collect()
+}
+
+// Whether a folder can be read: an empty one counts as gone, as it's often
+// where a drive is mounted, while it isn't
+pub fn is_available(path: &Path) -> bool {
+    std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_some())
+}
+
+// Hidden files and folders aren't part of the library, like the trash of
+// a drive, which keeps deleted files under their own names, and neither is
+// Windows' recycle bin
+fn is_library_entry(name: &Path) -> bool {
+    let name = name.as_os_str().as_encoded_bytes();
+    !name.starts_with(b".") && name != b"$RECYCLE.BIN"
 }
 
 fn data_dir() -> PathBuf {
@@ -213,57 +376,33 @@ fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
     }
 }
 
+// A condition that leaves out the tracks whose file is in one of the
+// folders, and its parameters: the paths in a folder sort between its path
+// with a slash, and with the character after the slash, '0'
+fn hidden_condition(column: &str, hidden: &[PathBuf]) -> (String, Vec<Vec<u8>>) {
+    let mut sql = String::new();
+    let mut params = Vec::new();
+    for folder in hidden {
+        let mut start = path_bytes(folder).to_vec();
+        if start.last() != Some(&b'/') {
+            start.push(b'/');
+        }
+        let mut end = start.clone();
+        if let Some(last) = end.last_mut() {
+            *last += 1;
+        }
+        sql.push_str(&format!(" AND NOT ({column} >= ? AND {column} < ?)"));
+        params.push(start);
+        params.push(end);
+    }
+    (sql, params)
+}
+
 // The albums, sorted by artist, then year and title; the grid sorts them
-// again in the order the user picked
-pub fn albums() -> Vec<AlbumInfo> {
-    let query = |conn: &Connection| -> rusqlite::Result<Vec<AlbumInfo>> {
-        let mut stmt = conn.prepare(
-            "SELECT t.album_id, MAX(t.album),
-                    COALESCE(MAX(t.album_artist),
-                             CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
-                                  ELSE MAX(t.artist) END),
-                    MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added)
-             FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
-             WHERE t.album_id IS NOT NULL
-             GROUP BY t.album_id",
-        )?;
-        // Without an album artist, the albums whose tracks are by different
-        // artists are compilations
-        let various = i18n("Various Artists");
-        let rows = stmt.query_map([], |row| {
-            let artist = row
-                .get::<_, Option<String>>(2)?
-                .unwrap_or_else(|| various.clone());
-            let sort_key = row
-                .get::<_, Option<String>>(5)?
-                .unwrap_or_else(|| artist.clone());
-            let key = glib::CollationKey::from(sort_key.as_str());
-            let info = AlbumInfo {
-                id: row.get(0)?,
-                title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                artist,
-                artist_sort: sort_key,
-                year: row.get(3)?,
-                added: row.get(6)?,
-                cover: row.get(4)?,
-            };
-            let key = (
-                key,
-                info.year.clone(),
-                glib::CollationKey::from(info.title.as_str()),
-            );
-            Ok((key, info))
-        })?;
-
-        // Sorted by artist, then year and title, in the order of the
-        // current locale
-        let mut albums = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        albums.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        Ok(albums.into_iter().map(|(_, info)| info).collect())
-    };
-
-    match with_connection(|conn| query(conn)) {
+// again in the order the user picked. The tracks in the `hidden` folders,
+// which aren't there, are left out
+pub fn albums(hidden: &[PathBuf]) -> Vec<AlbumInfo> {
+    match with_connection(|conn| query_albums(conn, hidden)) {
         Ok(albums) => albums,
         Err(e) => {
             warn!("Unable to load the albums: {e}");
@@ -272,16 +411,72 @@ pub fn albums() -> Vec<AlbumInfo> {
     }
 }
 
+fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<AlbumInfo>> {
+    let (hidden_sql, hidden_params) = hidden_condition("t.file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT t.album_id, MAX(t.album),
+                COALESCE(MAX(t.album_artist),
+                         CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
+                              ELSE MAX(t.artist) END),
+                MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added)
+         FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
+         WHERE t.album_id IS NOT NULL{hidden_sql}
+         GROUP BY t.album_id"
+    ))?;
+    // Without an album artist, the albums whose tracks are by different
+    // artists are compilations
+    let various = i18n("Various Artists");
+    let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
+        let artist = row
+            .get::<_, Option<String>>(2)?
+            .unwrap_or_else(|| various.clone());
+        let sort_key = row
+            .get::<_, Option<String>>(5)?
+            .unwrap_or_else(|| artist.clone());
+        let key = glib::CollationKey::from(sort_key.as_str());
+        let info = AlbumInfo {
+            id: row.get(0)?,
+            title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            artist,
+            artist_sort: sort_key,
+            year: row.get(3)?,
+            added: row.get(6)?,
+            cover: row.get(4)?,
+        };
+        let key = (
+            key,
+            info.year.clone(),
+            glib::CollationKey::from(info.title.as_str()),
+        );
+        Ok((key, info))
+    })?;
+
+    // Sorted by artist, then year and title, in the order of the
+    // current locale
+    let mut albums = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    albums.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    Ok(albums.into_iter().map(|(_, info)| info).collect())
+}
+
 // The albums with a track that contains every word, which must be
-// normalized with `normalize_search_text()`, like in the queue
-pub fn search_albums(words: &[String]) -> HashSet<String> {
+// normalized with `normalize_search_text()`, like in the queue; the
+// tracks in the `hidden` folders are left out, as in `albums()`
+pub fn search_albums(words: &[String], hidden: &[PathBuf]) -> HashSet<String> {
     let query = |conn: &Connection| -> rusqlite::Result<HashSet<String>> {
+        use rusqlite::types::Value;
+
         let conditions = vec!["instr(search, ?) > 0"; words.len()].join(" AND ");
+        let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
         let mut stmt = conn.prepare(&format!(
             "SELECT DISTINCT album_id FROM tracks
-             WHERE album_id IS NOT NULL AND {conditions}"
+             WHERE album_id IS NOT NULL AND {conditions}{hidden_sql}"
         ))?;
-        stmt.query_map(rusqlite::params_from_iter(words), |row| row.get(0))?
+        let params = words
+            .iter()
+            .map(|word| Value::Text(word.clone()))
+            .chain(hidden_params.into_iter().map(Value::Blob));
+        stmt.query_map(rusqlite::params_from_iter(params), |row| row.get(0))?
             .collect()
     };
 
@@ -340,11 +535,11 @@ pub fn track_album(path: &Path) -> Option<String> {
     }
 }
 
-// Updates the database with the tracks in `music_dir`; this blocks, so it
-// should be called from a separate thread
-pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {
+// Updates the database with the tracks in the music folders; this blocks,
+// so it should be called from a separate thread
+pub fn scan(folders: &[MusicFolder], sender: &Sender<ScanEvent>) {
     let now = Instant::now();
-    let result = scan_internal(music_dir, sender).unwrap_or_else(|e| {
+    let result = scan_internal(folders, sender).unwrap_or_else(|e| {
         warn!("Unable to scan the library: {e}");
         ScanResult::default()
     });
@@ -353,10 +548,15 @@ pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {
     let _ = sender.try_send(ScanEvent::Finished(result));
 }
 
-fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Result<ScanResult> {
+fn scan_internal(
+    folders: &[MusicFolder],
+    sender: &Sender<ScanEvent>,
+) -> rusqlite::Result<ScanResult> {
+    let roots = roots(folders);
+    debug!("Library: reading {roots:?}");
     with_connection(|conn| {
-        let (result, stale_albums) = scan_with(conn, music_dir, sender)?;
-        update_covers(conn, &stale_albums)?;
+        let (result, stale_albums) = scan_with(conn, &roots, sender)?;
+        update_covers(conn, &stale_albums, &roots.unavailable)?;
         Ok(result)
     })
 }
@@ -377,8 +577,8 @@ struct Source {
     path: PathBuf,
     stamp: Stamp,
     // When it was created; a new track counts as added then, so that the
-    // tracks that were in the Music folder before the library existed are
-    // sorted by when they were added too
+    // tracks that were in the music folders before the library existed, or
+    // before their folder was added, are sorted by when they were added too
     created: i64,
     // The audio files a sheet splits
     audio: Vec<PathBuf>,
@@ -418,12 +618,20 @@ impl Source {
 // for again
 fn scan_with(
     conn: &mut Connection,
-    music_dir: &Path,
+    roots: &Roots,
     sender: &Sender<ScanEvent>,
 ) -> rusqlite::Result<(ScanResult, HashSet<String>)> {
-    let paths: Vec<PathBuf> = utils::load_files_from_folder(&gio::File::for_path(music_dir), true)
+    let paths: Vec<PathBuf> = roots
+        .available
         .iter()
-        .filter_map(gio::prelude::FileExt::path)
+        .flat_map(|root| {
+            utils::load_files_from_folder_filtered(
+                &gio::File::for_path(root),
+                true,
+                &is_library_entry,
+            )
+        })
+        .filter_map(|file| file.path())
         .collect();
 
     // The CUE sheets that split audio files have their tracks, in place
@@ -575,10 +783,16 @@ fn scan_with(
         let _ = sender.try_send(ScanEvent::Progress(done, total));
     }
 
-    // Forget the files that are gone
+    // Forget the files that are gone, but not those of the folders that
+    // aren't there, e.g. on a drive that isn't plugged in, which aren't read
+    // again once they're back
     let gone: Vec<Vec<u8>> = known
         .keys()
         .filter(|file| !present.contains(*file))
+        .filter(|file| {
+            let path = path_from_bytes(file.to_vec());
+            !roots.unavailable.iter().any(|root| path.starts_with(root))
+        })
         .cloned()
         .collect();
     if !gone.is_empty() {
@@ -623,19 +837,26 @@ fn change_time(metadata: &std::fs::Metadata) -> i64 {
 
 // Creates the thumbnails of the albums that don't have one yet, or whose
 // tracks changed; the thumbnails are in the cache directory, so they might
-// have been removed since the last scan
-fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusqlite::Result<()> {
+// have been removed since the last scan. They're made from the tracks that
+// are there, so the albums of the `hidden` folders, which aren't, keep
+// theirs until they're back
+fn update_covers(
+    conn: &mut Connection,
+    stale_albums: &HashSet<String>,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<()> {
     let dir = covers_dir();
     let mut missing = Vec::new();
     let mut cover_times = HashMap::new();
     {
-        let mut stmt = conn.prepare(
+        let (hidden_sql, hidden_params) = hidden_condition("t.file", hidden);
+        let mut stmt = conn.prepare(&format!(
             "SELECT t.album_id, MIN(t.path), c.album_id, c.path
              FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
-             WHERE t.album_id IS NOT NULL
-             GROUP BY t.album_id",
-        )?;
-        let rows = stmt.query_map([], |row| {
+             WHERE t.album_id IS NOT NULL{hidden_sql}
+             GROUP BY t.album_id"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 path_from_bytes(row.get::<_, Vec<u8>>(1)?),
@@ -668,7 +889,11 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
                 Some(None) => false,
                 None => cover_time().is_some(),
             };
-            if !has_row || outdated || removed || cover_file_changed || stale_albums.contains(&id) {
+            // A track that's gone since the scan would leave its album
+            // without a cover for good
+            if (!has_row || outdated || removed || cover_file_changed || stale_albums.contains(&id))
+                && cue_sheet::real_path(&first_track).is_file()
+            {
                 missing.push((id, first_track));
             }
         }
@@ -950,7 +1175,31 @@ impl TrackTags {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_mbid, path_bytes, path_from_bytes};
+    use std::path::{Path, PathBuf};
+
+    use super::{MusicFolder, Roots, is_mbid, path_bytes, path_from_bytes};
+
+    fn roots_of(paths: &[&Path]) -> Roots {
+        let folders: Vec<MusicFolder> = paths
+            .iter()
+            .map(|path| MusicFolder::new(path.to_path_buf()))
+            .collect();
+        super::roots(&folders)
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("dismas-library-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn test_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(super::SCHEMA).unwrap();
+        conn
+    }
 
     // E.g. names from old Latin-1 rips
     #[cfg(unix)]
@@ -970,7 +1219,7 @@ mod tests {
         assert!(!is_mbid("/home/user/Pictures/photo"));
     }
 
-    // A track in the database, with paths from the music folder
+    // A track in the database, with paths relative to a folder
     #[derive(Debug, PartialEq)]
     struct Row {
         path: String,
@@ -1007,10 +1256,10 @@ mod tests {
 
     #[test]
     fn the_tracks_of_a_cue_sheet_take_the_place_of_its_file() {
-        use super::{SCHEMA, scan_with};
+        use super::scan_with;
         use crate::utils::write_test_wav;
 
-        let music = std::env::temp_dir().join(format!("dismas-library-cue-{}", std::process::id()));
+        let music = test_dir("cue");
         std::fs::create_dir_all(music.join("Album")).unwrap();
         std::fs::create_dir_all(music.join("Other")).unwrap();
         write_test_wav(&music.join("Album/Album.wav"), 10);
@@ -1024,11 +1273,10 @@ mod tests {
         )
         .unwrap();
 
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA).unwrap();
+        let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();
 
-        let (result, _) = scan_with(&mut conn, &music, &sender).unwrap();
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
         assert_eq!(result.n_changed, 3);
         let found = tracks(&conn, &music);
         let files: Vec<_> = found
@@ -1054,13 +1302,13 @@ mod tests {
         let added = found[0].added;
 
         // Nothing changed
-        let (result, _) = scan_with(&mut conn, &music, &sender).unwrap();
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
         assert_eq!(result.n_changed, 0);
 
         // Without the sheet, the file is a track again, added when its
         // tracks were
         std::fs::remove_file(&cue).unwrap();
-        let (result, _) = scan_with(&mut conn, &music, &sender).unwrap();
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
         assert_eq!(result.n_changed, 3);
         let found = tracks(&conn, &music);
         assert_eq!(found.len(), 2);
@@ -1069,5 +1317,206 @@ mod tests {
         assert_eq!(found[0].added, added);
 
         std::fs::remove_dir_all(&music).unwrap();
+    }
+
+    #[test]
+    fn folders_inside_others_are_left_out() {
+        use super::outermost;
+
+        let keyed = |keys: &[&str]| -> Vec<(PathBuf, usize)> {
+            keys.iter()
+                .enumerate()
+                .map(|(i, key)| (PathBuf::from(key), i))
+                .collect()
+        };
+        assert_eq!(outermost(keyed(&["/m/a/sub", "/m/a"])), vec![1]);
+        assert_eq!(outermost(keyed(&["/m/a", "/m/a/sub"])), vec![0]);
+        assert_eq!(outermost(keyed(&["/m/a", "/m/b", "/m/a"])), vec![0, 1]);
+        // Not a folder of /m/a
+        assert_eq!(outermost(keyed(&["/m/a", "/m/ab"])), vec![0, 1]);
+    }
+
+    #[test]
+    fn missing_and_empty_folders_are_unavailable() {
+        let dir = test_dir("roots");
+        let (full, empty, missing) = (dir.join("full"), dir.join("empty"), dir.join("missing"));
+        std::fs::create_dir_all(&full).unwrap();
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::write(full.join("file"), "").unwrap();
+
+        let roots = roots_of(&[&full, &empty, &missing]);
+        assert_eq!(roots.available, vec![full]);
+        assert_eq!(roots.unavailable, vec![empty, missing]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_settings_list_the_folders() {
+        use super::{default_music_dir, folders_from_entries};
+
+        assert_eq!(
+            folders_from_entries(Vec::new()),
+            vec![MusicFolder::new(default_music_dir())]
+        );
+        assert_eq!(
+            folders_from_entries(vec![
+                ("file:///music/A".to_string(), String::new()),
+                (
+                    "file:///run/user/1000/doc/1a2b/B".to_string(),
+                    "file:///media/drive/B".to_string()
+                ),
+            ]),
+            vec![
+                MusicFolder::new(PathBuf::from("/music/A")),
+                MusicFolder {
+                    path: PathBuf::from("/run/user/1000/doc/1a2b/B"),
+                    host: Some(PathBuf::from("/media/drive/B")),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tracks_of_several_folders() {
+        use super::scan_with;
+        use crate::utils::write_test_wav;
+
+        let dir = test_dir("folders");
+        let (a, b) = (dir.join("A"), dir.join("B"));
+        let sub = a.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        write_test_wav(&a.join("One.wav"), 1);
+        write_test_wav(&sub.join("Two.wav"), 1);
+        write_test_wav(&b.join("Three.wav"), 1);
+
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        let paths = |conn: &rusqlite::Connection| -> Vec<String> {
+            tracks(conn, &dir).into_iter().map(|row| row.path).collect()
+        };
+
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        assert_eq!(result.n_changed, 3);
+        assert_eq!(
+            paths(&conn),
+            vec!["A/One.wav", "A/sub/Two.wav", "B/Three.wav"]
+        );
+
+        // A folder inside another one is read once, either way round
+        for roots in [roots_of(&[&a, &sub, &b]), roots_of(&[&sub, &a, &b])] {
+            let (result, _) = scan_with(&mut conn, &roots, &sender).unwrap();
+            assert_eq!(result.n_changed, 0);
+            assert_eq!(paths(&conn).len(), 3);
+        }
+
+        // The tracks of a folder that isn't there are kept, as are those of
+        // an empty one, which is often a drive that isn't mounted
+        let away = dir.join("B-away");
+        std::fs::rename(&b, &away).unwrap();
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        assert_eq!(result.n_changed, 0);
+        assert_eq!(paths(&conn).len(), 3);
+        std::fs::rename(&away, &b).unwrap();
+        std::fs::rename(b.join("Three.wav"), dir.join("Three.wav")).unwrap();
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        assert_eq!(result.n_changed, 0);
+        assert_eq!(paths(&conn).len(), 3);
+
+        // Those of a folder that was removed from the list go
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&a]), &sender).unwrap();
+        assert_eq!(result.n_changed, 1);
+        assert_eq!(paths(&conn), vec!["A/One.wav", "A/sub/Two.wav"]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_linked_to_another_is_read_once() {
+        use super::scan_with;
+        use crate::utils::write_test_wav;
+
+        let dir = test_dir("link");
+        let a = dir.join("A");
+        std::fs::create_dir_all(&a).unwrap();
+        write_test_wav(&a.join("One.wav"), 1);
+        let b = dir.join("B");
+        std::os::unix::fs::symlink(&a, &b).unwrap();
+
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        assert_eq!(result.n_changed, 1);
+        let found: Vec<String> = tracks(&conn, &dir)
+            .into_iter()
+            .map(|row| row.path)
+            .collect();
+        assert_eq!(found, vec!["A/One.wav"]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn trash_and_hidden_folders_are_not_read() {
+        use super::scan_with;
+        use crate::utils::write_test_wav;
+
+        let dir = test_dir("hidden");
+        for folder in ["Album", ".Trash-1000/files", "$RECYCLE.BIN"] {
+            std::fs::create_dir_all(dir.join(folder)).unwrap();
+        }
+        write_test_wav(&dir.join("Album/One.wav"), 1);
+        write_test_wav(&dir.join("Album/.Two.wav"), 1);
+        write_test_wav(&dir.join(".Trash-1000/files/Three.wav"), 1);
+        write_test_wav(&dir.join("$RECYCLE.BIN/$R4ND0M.wav"), 1);
+
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        scan_with(&mut conn, &roots_of(&[&dir]), &sender).unwrap();
+        let found: Vec<String> = tracks(&conn, &dir)
+            .into_iter()
+            .map(|row| row.path)
+            .collect();
+        assert_eq!(found, vec!["Album/One.wav"]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_albums_of_hidden_folders_are_left_out() {
+        use super::query_albums;
+
+        let conn = test_db();
+        for (path, album) in [
+            ("/m/A/One.flac", "a"),
+            ("/m/B/Two.flac", "b"),
+            ("/m/B/sub/Three.flac", "b"),
+            ("/m/Bb/Four.flac", "c"),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2)",
+                rusqlite::params![path.as_bytes(), album],
+            )
+            .unwrap();
+        }
+        let ids = |hidden: &[PathBuf]| -> Vec<String> {
+            let mut ids: Vec<String> = query_albums(&conn, hidden)
+                .unwrap()
+                .into_iter()
+                .map(|album| album.id)
+                .collect();
+            ids.sort();
+            ids
+        };
+
+        assert_eq!(ids(&[]), vec!["a", "b", "c"]);
+        assert_eq!(ids(&[PathBuf::from("/m/B")]), vec!["a", "c"]);
+        assert_eq!(
+            ids(&[PathBuf::from("/m/A"), PathBuf::from("/m/Bb/")]),
+            vec!["b"]
+        );
     }
 }

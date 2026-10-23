@@ -12,6 +12,8 @@ QA Plan
   - Search
   - Open an album; play it; add it to the queue
   - Select albums and tracks, with Shift+click and Ctrl+A
+  - Music folders in Preferences: add one, remove one and undo, and
+    unplug or rename one, whose albums are hidden until it's back
 3. Player
   - Play/pause, with Space too
   - Previous/next

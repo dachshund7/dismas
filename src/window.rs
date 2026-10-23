@@ -152,7 +152,7 @@ mod imp {
         // Whether there is anything to play, to go to the player
         #[property(get)]
         pub player_available: Cell<bool>,
-        // Whether the Music folder is being read, for the page switchers;
+        // Whether the music folders are being read, for the page switchers;
         // the one in the album grid's header is in the window before the
         // library view is bound, so it can't follow the view itself
         #[property(get, set)]
@@ -260,7 +260,7 @@ mod imp {
             });
             klass.install_action("win.preferences", None, move |win, _, _| {
                 debug!("Window::win.preferences()");
-                adw::prelude::AdwDialogExt::present(&PreferencesDialog::default(), Some(win));
+                win.show_preferences();
             });
             klass.install_action_async("win.open-directory", None, async move |win, _, _| {
                 debug!("Window::win.open-directory()");
@@ -957,6 +957,33 @@ impl Window {
         let width = settings.int("window-width");
         let height = settings.int("window-height");
         self.set_default_size(width, height);
+    }
+
+    // The music folders are read again once the dialog is closed, if they
+    // changed: a scan can't be stopped, so a folder added by mistake and
+    // removed again isn't read in the meantime
+    fn show_preferences(&self) {
+        let folders = |win: &Self| -> HashSet<PathBuf> {
+            library::music_folders(&win.imp().settings)
+                .into_iter()
+                .map(|folder| folder.path)
+                .collect()
+        };
+        let before = folders(self);
+        let dialog = PreferencesDialog::default();
+        adw::prelude::AdwDialogExt::connect_closed(
+            &dialog,
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |dialog| {
+                    if dialog.rescan_requested() || folders(&win) != before {
+                        win.imp().library_view.start_scan(false);
+                    }
+                }
+            ),
+        );
+        adw::prelude::AdwDialogExt::present(&dialog, Some(self));
     }
 
     pub fn add_toast(&self, msg: String) {

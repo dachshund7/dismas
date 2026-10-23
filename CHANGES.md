@@ -28,11 +28,16 @@ All notable changes to this project will be documented in this file.
 - Show Waveform, in Preferences, to show a plain seek bar instead of the
   waveform
 - Change the volume with Ctrl+Up and Ctrl+Down
+- Music folders, in Preferences, to show albums from other folders than
+  the Music folder, like a second drive; while a folder isn't there, its
+  albums are hidden, and they come back without being read again
 - Remember the volume and the repeat mode
 
 ### Changed
 
 - The settings moved from the main menu to Preferences
+- Hidden files and folders in the music folders, like the trash of a
+  drive, aren't part of the album grid
 - "Restore Playlist at Startup" is now "Restore Queue at Startup": a
   selected saved playlist always reopens, even with the setting off
 - Shuffling reorders the playlist for real, so the order shown, played and

@@ -146,11 +146,17 @@ mod imp {
         pub search_words: RefCell<Vec<String>>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
-        // The Music folder is being read
+        // The music folders are being read
         #[property(get)]
         pub scanning: Cell<bool>,
+        // The folders changed while they were being read, so they're read
+        // again once it's done; two scans would write at once
+        pub rescan_pending: Cell<bool>,
         // Bumped for each reload of the albums
         pub reload_generation: Cell<u32>,
+        // The music folders that aren't there, as of the last reload, whose
+        // albums are hidden
+        pub hidden_folders: RefCell<Vec<std::path::PathBuf>>,
     }
 
     #[glib::object_subclass]
@@ -780,12 +786,13 @@ impl LibraryView {
             return;
         }
 
+        let hidden = self.imp().hidden_folders.borrow().clone();
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
                 let Ok((words, matches)) = gio::spawn_blocking(move || {
-                    let matches = library::search_albums(&words);
+                    let matches = library::search_albums(&words, &hidden);
                     (words, matches)
                 })
                 .await
@@ -990,20 +997,27 @@ impl LibraryView {
 
     // Reads the albums from the database, in a separate thread; the albums
     // of the last reload are shown, e.g. the one after a scan rather than
-    // the one before it, if it takes longer
+    // the one before it, if it takes longer. Those of the music folders
+    // that aren't there are hidden, as they can't play
     pub fn reload(&self) {
         let imp = self.imp();
         let generation = imp.reload_generation.get().wrapping_add(1);
         imp.reload_generation.set(generation);
+        let folders = library::music_folders(self.app_settings());
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
-                let albums = gio::spawn_blocking(library::albums)
-                    .await
-                    .unwrap_or_default();
+                let (hidden, albums) = gio::spawn_blocking(move || {
+                    let hidden = library::roots(&folders).unavailable;
+                    let albums = library::albums(&hidden);
+                    (hidden, albums)
+                })
+                .await
+                .unwrap_or_default();
                 if this.imp().reload_generation.get() == generation {
+                    this.imp().hidden_folders.replace(hidden);
                     this.show_albums(albums);
                 }
             }
@@ -1057,21 +1071,24 @@ impl LibraryView {
             .set_visible(page == "albums" && imp.scanning.get());
     }
 
-    // Shows the albums we know about, then looks for changes in the Music
-    // folder in a separate thread; `requested` is whether the user asked
-    // for it, to tell them what it found
+    // Shows the albums we know about, then looks for changes in the music
+    // folders in a separate thread; `requested` is whether the user asked
+    // for it, to tell them what it found. During a scan, another one follows
+    // it, as the folders might have changed since it started; the user can't
+    // ask for one then, as the action is off
     pub fn start_scan(&self, requested: bool) {
         let imp = self.imp();
         if imp.scanning.get() {
+            imp.rescan_pending.set(true);
             return;
         }
         self.set_scanning(true);
+        self.run_scan(requested);
+    }
 
-        let Some(music_dir) = library::music_dir() else {
-            self.set_scanning(false);
-            self.reload();
-            return;
-        };
+    fn run_scan(&self, requested: bool) {
+        let imp = self.imp();
+        let folders = library::music_folders(self.app_settings());
 
         self.reload();
         imp.scan_progress.set_fraction(0.0);
@@ -1102,7 +1119,7 @@ impl LibraryView {
         );
 
         let (sender, receiver) = async_channel::unbounded();
-        std::thread::spawn(move || library::scan(&music_dir, &sender));
+        std::thread::spawn(move || library::scan(&folders, &sender));
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
@@ -1133,16 +1150,25 @@ impl LibraryView {
                     }
                 }
 
-                // The channel also closes if the scan panicked
-                this.set_scanning(false);
-                this.reload();
-
+                // The progress bars stop pulsing for this scan, even when
+                // another one follows. The channel also closes if the scan
+                // panicked
+                counting.set(true);
                 let uris: Vec<String> = result
                     .updated
                     .iter()
                     .map(|path| gio::File::for_path(path).uri().to_string())
                     .collect();
                 let n_changed = u32::try_from(result.n_changed).unwrap_or(u32::MAX);
+
+                // The next scan goes on without stopping the spinner
+                if this.imp().rescan_pending.take() {
+                    this.emit_by_name::<()>("scan-finished", &[&uris, &n_changed, &requested]);
+                    this.run_scan(false);
+                    return;
+                }
+                this.set_scanning(false);
+                this.reload();
                 this.emit_by_name::<()>("scan-finished", &[&uris, &n_changed, &requested]);
             }
         ));

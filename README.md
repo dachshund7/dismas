@@ -23,9 +23,10 @@ contributions made with AI tools, and much of Dismas was written with Claude.
 What Dismas adds
 ----------------
 
-- **Album grid:** browse the albums in your Music folder, sorted by artist,
+- **Album grid:** browse the albums in your music folders, sorted by artist,
   title, year or date added, and select albums or tracks to play or add to
-  the queue.
+  the queue. The Music folder is the default; others, like a second drive,
+  can be added in Preferences.
 - **Search by any tag:** searching the albums or the queue looks in every
   tag of the tracks, not just the title, artist and album. Find a recording
   by its conductor, soloist, orchestra, ensemble, composer, work or label,

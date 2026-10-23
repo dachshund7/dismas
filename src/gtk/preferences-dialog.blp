@@ -8,6 +8,21 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
   title: _("Preferences");
 
   Adw.PreferencesPage {
+    // Its rows are bound to the list of folders, so the button that adds
+    // one is in a group of its own
+    Adw.PreferencesGroup music_folders_group {
+      title: _("Music Folders");
+      description: _("The albums in these folders are shown in the album grid");
+    }
+
+    Adw.PreferencesGroup {
+      Adw.ButtonRow add_folder_row {
+        title: _("_Add Folder…");
+        start-icon-name: "list-add-symbolic";
+        use-underline: true;
+      }
+    }
+
     Adw.PreferencesGroup {
       title: _("Playback");
 

@@ -24,6 +24,7 @@ src/library.rs
 src/library_view.rs
 src/playback_control.rs
 src/playlists_page.rs
+src/preferences_dialog.rs
 src/queue_row.rs
 src/track_info_dialog.rs
 src/window/albums.rs

@@ -714,7 +714,8 @@ impl Window {
     }
 }
 
-// A dialog for M3U playlists, starting in the music folder
+// A dialog for M3U playlists, starting in the first music folder that's
+// there
 fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
     let filter = gtk::FileFilter::new();
     filter.set_name(Some(&i18n("Playlists")));
@@ -731,8 +732,9 @@ fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
         .filters(&filters)
         .default_filter(&filter)
         .build();
-    if let Some(dir) = library::music_dir() {
-        dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
+    let folders = library::music_folders(&utils::settings_manager());
+    if let Some(folder) = folders.into_iter().find(|folder| folder.path.is_dir()) {
+        dialog.set_initial_folder(Some(&gio::File::for_path(folder.path)));
     }
     dialog
 }

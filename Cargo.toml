@@ -42,7 +42,7 @@ x11rb = "0.14"
 [dependencies.adw]
 package = "libadwaita"
 version = "0.9"
-features = ["v1_5"]
+features = ["v1_8"]
 
 [dependencies.gst]
 package = "gstreamer"

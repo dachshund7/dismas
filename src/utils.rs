@@ -194,6 +194,7 @@ fn load_files_from_folder_internal(
     base: &gio::File,
     folder: &gio::File,
     recursive: bool,
+    keep: &dyn Fn(&std::path::Path) -> bool,
 ) -> Vec<gio::File> {
     let Ok(mut enumerator) = folder.enumerate_children(
         "standard::name,standard::type",
@@ -206,9 +207,12 @@ fn load_files_from_folder_internal(
 
     let mut files = Vec::new();
     while let Some(info) = enumerator.next().and_then(Result::ok) {
+        if !keep(&info.name()) {
+            continue;
+        }
         let child = enumerator.child(&info);
         if recursive && info.file_type() == gio::FileType::Directory {
-            let mut res = load_files_from_folder_internal(base, &child, recursive);
+            let mut res = load_files_from_folder_internal(base, &child, recursive, keep);
             files.append(&mut res);
         } else if info.file_type() == gio::FileType::Regular {
             files.push(child.clone());
@@ -266,10 +270,20 @@ pub fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
 }
 
 pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::File> {
+    load_files_from_folder_filtered(folder, recursive, &|_| true)
+}
+
+// The files of a folder, without the files and folders whose names `keep`
+// turns down
+pub fn load_files_from_folder_filtered(
+    folder: &gio::File,
+    recursive: bool,
+    keep: &dyn Fn(&std::path::Path) -> bool,
+) -> Vec<gio::File> {
     use std::time::Instant;
 
     let now = Instant::now();
-    let res = load_files_from_folder_internal(folder, folder, recursive);
+    let res = load_files_from_folder_internal(folder, folder, recursive, keep);
     debug!(
         "Folder enumeration: {} us (recursive: {}), total files: {}",
         now.elapsed().as_micros(),

@@ -204,12 +204,12 @@ impl Window {
                 win.reload_changed_tracks(&uris);
                 if requested {
                     let msg = if n_changed == 0 {
-                        i18n("No changes found in the Music folder")
+                        i18n("No changes found in the music folders")
                     } else {
                         ni18n_k(
                             // Translators: the `{n}` must be left unmodified
-                            "{n} track changed in the Music folder",
-                            "{n} tracks changed in the Music folder",
+                            "{n} track changed in the music folders",
+                            "{n} tracks changed in the music folders",
                             n_changed,
                             &[("n", &n_changed.to_string())],
                         )

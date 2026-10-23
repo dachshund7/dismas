@@ -88,10 +88,15 @@
 	    <summary>Width of the playlist sidebar</summary>
 	    <description>The width of the playlist sidebar, in pixels; 0 means the width is computed automatically</description>
 	  </key>
+	  <key name="music-folders" type="a(ss)">
+	    <default>[]</default>
+	    <summary>The music folders</summary>
+	    <description>The folders whose albums are shown in the album grid, as URIs: the folder that is read, and its URI outside the sandbox if it came through the document portal (empty otherwise). An empty list means the XDG Music folder</description>
+	  </key>
 	  <key name="album-sort" enum="io.github.dachshund7.Dismas.AlbumSort">
 	    <default>'artist'</default>
 	    <summary>What the albums are sorted by</summary>
-	    <description>The albums in the grid are sorted by artist, title, year, or the date they were added to the Music folder</description>
+	    <description>The albums in the grid are sorted by artist, title, year, or the date they were added to the music folders</description>
 	  </key>
 	  <key name="album-sort-order" enum="io.github.dachshund7.Dismas.SortOrder">
 	    <default>'ascending'</default>
