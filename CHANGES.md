@@ -10,9 +10,12 @@ All notable changes to this project will be documented in this file.
   position
 - The toast after saving the queue as a playlist has an Open button, to
   switch to the new playlist without interrupting playback
+- A Preferences dialog (Ctrl+,), with a switch for moving the window from
+  its header bars, for window managers that move windows themselves
 
 ### Changed
 
+- The settings moved from the main menu to Preferences
 - "Restore Playlist at Startup" is now "Restore Queue at Startup": a
   selected saved playlist always reopens, even with the setting off
 

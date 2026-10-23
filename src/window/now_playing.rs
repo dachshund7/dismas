@@ -122,12 +122,8 @@ impl Window {
             || adw::StyleManager::default().is_high_contrast()
         {
             None
-        } else if let Some(palette) = track.and_then(Track::cover_palette) {
-            self.action_set_enabled("win.enable-recoloring", true);
-            Some(palette)
         } else {
-            self.action_set_enabled("win.enable-recoloring", false);
-            None
+            track.and_then(Track::cover_palette)
         };
 
         // The accent color is only replaced when the cover has a color to

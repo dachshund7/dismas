@@ -56,8 +56,8 @@ What Dismas adds
   AppIndicator extension. Without a tray, the music still plays in the
   background, and the media controls or opening Dismas again bring it back.
 - **Layout:** the player fits itself to the window, and the cover and waveform
-  grow into any spare room. Turn off Show Waveform in the main menu for a
-  plain seek bar instead.
+  grow into any spare room. Turn off Show Waveform in Preferences for a plain
+  seek bar instead.
 - **Robustness:** tags and covers load in parallel worker threads, and cover
   art is decoded in sandboxed [glycin](https://gitlab.gnome.org/GNOME/glycin)
   loaders. Unreadable files, odd tags and file names that aren't valid UTF-8

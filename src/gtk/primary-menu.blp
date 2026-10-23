@@ -15,51 +15,10 @@ menu primary_menu {
 
   section {
     item {
-      label: _("_Match Cover Art");
-      action: "win.enable-recoloring";
+      label: _("_Preferences");
+      action: "win.preferences";
     }
 
-    item {
-      label: _("Show _Waveform");
-      action: "win.show-waveform";
-    }
-
-    item {
-      label: _("_Background Playback");
-      action: "app.background-play";
-    }
-
-    item {
-      label: _("_Restore Queue at Startup");
-      action: "win.restore-playlist";
-    }
-  }
-
-  section {
-    submenu {
-      label: _("_ReplayGain");
-
-      item {
-        label: C_("replaygain-menu", "_Album");
-        action: "win.replaygain";
-        target: "album";
-      }
-
-      item {
-        label: C_("replaygain-menu", "_Track");
-        action: "win.replaygain";
-        target: "track";
-      }
-
-      item {
-        label: C_("replaygain-menu", "_Disabled");
-        action: "win.replaygain";
-        target: "off";
-      }
-    }
-  }
-
-  section {
     item {
       label: _("_Keyboard Shortcuts");
       action: "app.shortcuts";

@@ -281,21 +281,26 @@ pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::F
 }
 
 // Header bars have a window handle inside, which moves the window when
-// dragged; removing its drag gesture keeps its clicks, like the window menu
-pub fn disable_window_drag(widget: &gtk::Widget) {
+// dragged; turning off its drag gesture keeps its clicks, like the window
+// menu. Turning it on puts it back in the bubble phase, where GTK leaves it
+pub fn set_window_drag(widget: &gtk::Widget, enabled: bool) {
     if widget.is::<gtk::WindowHandle>() {
+        let phase = if enabled {
+            gtk::PropagationPhase::Bubble
+        } else {
+            gtk::PropagationPhase::None
+        };
         let controllers = widget.observe_controllers();
-        let drags = (0..controllers.n_items())
+        for drag in (0..controllers.n_items())
             .filter_map(|i| controllers.item(i))
             .filter_map(|c| c.downcast::<gtk::GestureDrag>().ok())
-            .collect::<Vec<_>>();
-        for drag in drags {
-            widget.remove_controller(&drag);
+        {
+            drag.set_propagation_phase(phase);
         }
     }
     let mut child = widget.first_child();
     while let Some(widget) = child {
-        disable_window_drag(&widget);
+        set_window_drag(&widget, enabled);
         child = widget.next_sibling();
     }
 }

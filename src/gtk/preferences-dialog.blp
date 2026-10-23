@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 John Hamilton
+
+using Gtk 4.0;
+using Adw 1;
+
+template $DismasPreferencesDialog: Adw.PreferencesDialog {
+  title: _("Preferences");
+
+  Adw.PreferencesPage {
+    Adw.PreferencesGroup {
+      title: _("Playback");
+
+      Adw.SwitchRow background_play_row {
+        title: _("_Background Playback");
+        subtitle: _("Keep playing after the window is closed");
+        use-underline: true;
+      }
+
+      Adw.SwitchRow restore_playlist_row {
+        title: _("_Restore Queue at Startup");
+        subtitle: _("Keep the tracks of the queue from the last session");
+        use-underline: true;
+      }
+    }
+
+    // The rows go through the window's action, which passes the mode on
+    // to the player
+    Adw.PreferencesGroup {
+      title: "ReplayGain";
+      description: _("Play tracks at an even loudness, from their ReplayGain tags");
+
+      Adw.ActionRow {
+        title: C_("replaygain-menu", "_Album");
+        subtitle: _("Keep the differences in loudness within an album");
+        use-underline: true;
+        activatable-widget: replaygain_album;
+
+        [prefix]
+        CheckButton replaygain_album {
+          action-name: "win.replaygain";
+          action-target: "'album'";
+          valign: center;
+        }
+      }
+
+      Adw.ActionRow {
+        title: C_("replaygain-menu", "_Track");
+        subtitle: _("Play every track at the same loudness");
+        use-underline: true;
+        activatable-widget: replaygain_track;
+
+        [prefix]
+        CheckButton replaygain_track {
+          action-name: "win.replaygain";
+          action-target: "'track'";
+          valign: center;
+        }
+      }
+
+      Adw.ActionRow {
+        title: C_("replaygain-menu", "_Disabled");
+        use-underline: true;
+        activatable-widget: replaygain_off;
+
+        [prefix]
+        CheckButton replaygain_off {
+          action-name: "win.replaygain";
+          action-target: "'off'";
+          valign: center;
+        }
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Appearance");
+
+      Adw.SwitchRow recoloring_row {
+        title: _("_Match Cover Art");
+        subtitle: _("Tint the window with the colors of the cover");
+        use-underline: true;
+      }
+
+      Adw.SwitchRow waveform_row {
+        title: _("Show _Waveform");
+        subtitle: _("Seek in the waveform of the track, instead of a plain bar");
+        use-underline: true;
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Window");
+
+      Adw.SwitchRow header_bars_row {
+        title: _("Move the Window from _Header Bars");
+        subtitle: _("Turn off when the window manager moves windows itself");
+        use-underline: true;
+      }
+    }
+  }
+}

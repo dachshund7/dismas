@@ -99,6 +99,7 @@ mod imp {
             obj.set_accels_for_action("win.next", &["<Alt>Right"]);
             obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
+            obj.set_accels_for_action("win.preferences", &["<primary>comma"]);
             // In the order of the buttons of the pages
             obj.set_accels_for_action("win.page::player", &["<primary>1"]);
             obj.set_accels_for_action("win.page::library", &["<primary>2", "<primary>g"]);
@@ -427,10 +428,6 @@ impl Application {
                 })
                 .build(),
         ]);
-
-        // The action follows the setting, which is turned off again if
-        // the portal doesn't let Dismas run in the background
-        self.add_action(&self.imp().settings.create_action("background-play"));
     }
 
     // Without a window, e.g. when activated over D-Bus while playing in the

@@ -22,6 +22,7 @@ mod player_box;
 mod playlist_view;
 mod playlists;
 mod playlists_page;
+mod preferences_dialog;
 mod push_bin;
 mod queue_row;
 mod resume_point;

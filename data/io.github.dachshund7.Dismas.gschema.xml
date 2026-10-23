@@ -30,7 +30,7 @@
 	  <key name="move-from-header-bars" type="b">
 	    <default>true</default>
 	    <summary>Move the window by dragging its header bars</summary>
-	    <description>Whether dragging the header bars of the window and of its dialogs moves the window, as it does in other applications; it can be turned off when the window manager moves windows by itself, as tiling window managers do. It applies to the windows and dialogs opened afterwards</description>
+	    <description>Whether dragging the header bars of the window and of its dialogs moves the window, as it does in other applications; it can be turned off when the window manager moves windows by itself, as tiling window managers do.</description>
 	  </key>
 	  <key name="enable-recoloring" type="b">
 	    <default>true</default>
