@@ -39,6 +39,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Background Playback is off by default, so closing the window quits
+  unless it's turned on in Preferences; this also applies to anyone who
+  never changed the setting
 - The settings moved from the main menu to Preferences
 - Hidden files and folders in the music folders, like the trash of a
   drive, aren't part of the album grid

@@ -55,7 +55,9 @@
 	    <description>Whether playback stops at the end of the queue, repeats all of it, or repeats the current track</description>
 	  </key>
 	  <key name="background-play" type="b">
-	    <default>true</default>
+	    <default>false</default>
+	    <summary>Keep playing after the window is closed</summary>
+	    <description>Whether closing the window hides it and keeps the music playing, with an icon in the tray, rather than quitting. Turning it on asks the Background portal, and a refusal turns it off again</description>
 	  </key>
 	  <key name="restore-playlist" type="b">
 	    <default>true</default>
