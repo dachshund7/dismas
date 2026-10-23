@@ -273,21 +273,40 @@ dragoverlay {
 
   --scrollbar-outline-color: rgb(255 255 255 / 25%);
 
-  background: linear-gradient(127deg, color-mix(in srgb, var(--background-color-0) 55%, transparent), color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%),
-              linear-gradient(217deg, color-mix(in srgb, var(--background-color-1) 55%, transparent), color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%),
-              linear-gradient(336deg, color-mix(in srgb, var(--background-color-2) 55%, transparent), color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%);
+  background: var(--cover-gradient);
   transition-property: background;
   transition-duration: 250ms;
   transition-timing-function: ease;
 }
 
+/* With "Match Cover Art", the colors of the cover only give the hue, and a
+ * little of their chroma: the lightness follows the color scheme, so the
+ * text keeps its contrast whatever the cover. The tints are defined where
+ * the colors of the cover are, which is only while recoloring */
+.main-window,
+dialog.track-info.recolored {
+  --cover-tint-0: oklch(from var(--background-color-0) 0.94 min(c, 0.05) h);
+  --cover-tint-1: oklch(from var(--background-color-1) 0.94 min(c, 0.05) h);
+  --cover-tint-2: oklch(from var(--background-color-2) 0.94 min(c, 0.05) h);
+  --cover-gradient:
+    linear-gradient(127deg, oklch(from var(--cover-tint-0) l c h / 75%), oklch(from var(--cover-tint-0) l c h / 0%) 70.71%),
+    linear-gradient(217deg, oklch(from var(--cover-tint-1) l c h / 75%), oklch(from var(--cover-tint-1) l c h / 0%) 70.71%),
+    linear-gradient(336deg, oklch(from var(--cover-tint-2) l c h / 75%), oklch(from var(--cover-tint-2) l c h / 0%) 70.71%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .main-window,
+  dialog.track-info.recolored {
+    --cover-tint-0: oklch(from var(--background-color-0) 0.27 min(c, 0.06) h);
+    --cover-tint-1: oklch(from var(--background-color-1) 0.27 min(c, 0.06) h);
+    --cover-tint-2: oklch(from var(--background-color-2) 0.27 min(c, 0.06) h);
+  }
+}
+
 /* Over the content, the sidebar of the collapsed split view has the colors
  * of the window, which would show through it otherwise */
 .main-window overlay-split-view.collapsed .playlist-pane {
-  background: linear-gradient(127deg, color-mix(in srgb, var(--background-color-0) 55%, transparent), color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%),
-              linear-gradient(217deg, color-mix(in srgb, var(--background-color-1) 55%, transparent), color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%),
-              linear-gradient(336deg, color-mix(in srgb, var(--background-color-2) 55%, transparent), color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%),
-              var(--window-bg-color);
+  background: var(--cover-gradient), var(--window-bg-color);
   transition-property: background;
   transition-duration: 250ms;
   transition-timing-function: ease;
@@ -300,17 +319,14 @@ dragoverlay {
 }
 
 /* The track information dialog follows the colors of the cover; the
- * colors are defined on :root, so they are available outside of the
- * main window as well */
+ * colors of the cover are defined on :root, so they are available outside
+ * of the main window as well, and the dialog has tints of its own */
 dialog.track-info.recolored {
   --card-bg-color: color-mix(in srgb, var(--dialog-bg-color) 60%, transparent);
 }
 
 dialog.track-info.recolored sheet {
-  background: linear-gradient(127deg, color-mix(in srgb, var(--background-color-0) 55%, transparent), color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%),
-              linear-gradient(217deg, color-mix(in srgb, var(--background-color-1) 55%, transparent), color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%),
-              linear-gradient(336deg, color-mix(in srgb, var(--background-color-2) 55%, transparent), color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%),
-              var(--dialog-bg-color);
+  background: var(--cover-gradient), var(--dialog-bg-color);
   transition-property: background;
   transition-duration: 250ms;
   transition-timing-function: ease;
