@@ -14,6 +14,16 @@
 // these calls return, so none is handed over until it says each track is
 // loaded. Stopping loads the track again, as playbin would otherwise keep
 // the one that was handed over
+//
+// The tracks of a CUE sheet are parts of one file. A track starts with a
+// seek once its file is loaded: GstPlay drops the seeks made before it
+// loads a file, so a track that doesn't start at the beginning of its file
+// only plays once it's loaded. When the next track goes on from where the
+// track ends in the same file, the pipeline plays on, and the player
+// follows once the position is past the end. Otherwise, the audio after
+// the end is cut before it reaches the sink, which ends the stream there.
+// Only the next track of a file that plays to its end can be handed over,
+// as playbin plays it from its start
 
 use std::{
     cell::Cell,
@@ -58,7 +68,7 @@ impl TrackSource {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Gapless {
     // The track after the one the player shows
     next: Option<TrackSource>,
@@ -71,11 +81,36 @@ struct Gapless {
     pending_loads: u32,
     // When the player last loaded a track
     loaded_at: Option<Instant>,
-    // The track the pipeline plays
+    // The track the player shows, which the pipeline plays
     current: Option<TrackSource>,
+    // The track after `current` in the same file, which the pipeline went
+    // on to, until the player follows it
+    advanced: Option<TrackSource>,
+    // Whether the audio after the end of the track was cut, as the next
+    // track doesn't go on from there; until a seek or another track
+    cut: bool,
+    // Whether the last seek took the track to its start, which isn't
+    // reported as a seek
+    start_seek: bool,
     // Changes whenever the player loads a track itself, so it can tell
     // the tracks that started before
     generation: u64,
+}
+
+impl Gapless {
+    // The track the pipeline plays
+    fn playing(&self) -> Option<&TrackSource> {
+        self.advanced.as_ref().or(self.current.as_ref())
+    }
+
+    // Whether the next track goes on from where `source` ends in its file
+    fn next_follows(&self, source: &TrackSource) -> bool {
+        source.end.is_some_and(|end| {
+            self.next
+                .as_ref()
+                .is_some_and(|next| next.uri == source.uri && next.start == end)
+        })
+    }
 }
 
 // The state lock of an element, held unless someone else holds it
@@ -109,8 +144,11 @@ pub struct GstBackend {
     gst_player: gst_play::Play,
     replaygain: Option<GstReplayGain>,
     // Where the track starts once it plays, if it hasn't since it was
-    // loaded: GstPlay would only seek once it's ready to play
+    // loaded, from the start of the track: GstPlay would only seek once
+    // it's ready to play
     start_position: Cell<Option<u64>>,
+    // Whether the track plays once it's loaded
+    play_requested: Cell<bool>,
     gapless: Arc<Mutex<Gapless>>,
 }
 
@@ -120,11 +158,156 @@ pub struct GstReplayGain {
     rg_volume: gst::Element,
 }
 
-fn send_update_position(sender: &Sender<PlaybackAction>, clock: gst::ClockTime, notify: bool) {
-    let pos = clock.seconds();
+// Reports the position from the start of the track playing, given the
+// one in its file; past the end of the track, the next one goes on from
+// there if it's the next part of the file
+fn update_position(
+    sender: &Sender<PlaybackAction>,
+    gapless: &Mutex<Gapless>,
+    position: gst::ClockTime,
+    seek_done: bool,
+) {
+    let mut gapless = gapless.lock().unwrap();
+    // From the file before the one being loaded
+    if gapless.pending_loads > 0 {
+        return;
+    }
+    let notify = seek_done && !std::mem::take(&mut gapless.start_seek);
+
+    let ended = gapless
+        .current
+        .as_ref()
+        .and_then(|current| current.end)
+        .is_some_and(|end| position >= end);
+    if ended && gapless.advanced.is_none() {
+        let current = gapless.current.as_ref().unwrap();
+        if gapless.next_follows(current) {
+            let next = gapless.next.clone().unwrap();
+            let action = PlaybackAction::TrackAdvanced(gapless.generation, next.id.clone());
+            gapless.advanced = Some(next);
+            if let Err(e) = sender.try_send(action) {
+                error!("Failed to send TrackAdvanced: {e}");
+            }
+        }
+    }
+
+    let start = gapless
+        .playing()
+        .map_or(gst::ClockTime::ZERO, |playing| playing.start);
+    drop(gapless);
+
+    let pos = position.saturating_sub(start).seconds();
     if let Err(e) = sender.try_send(PlaybackAction::UpdatePosition(pos, notify)) {
         error!("Failed to send UpdatePosition({pos}): {e}");
     }
+}
+
+// What to do with a buffer at the end of a track
+enum EndCut {
+    Pass,
+    // Cut the part of the buffer after the end, from where it is in this
+    // segment
+    Clip(gst::FormattedSegment<gst::ClockTime>),
+    // End the stream before this buffer
+    End,
+}
+
+fn end_cut(pad: &gst::Pad, buffer: &gst::BufferRef, gapless: &Mutex<Gapless>) -> EndCut {
+    let Some(pts) = buffer.pts() else {
+        return EndCut::Pass;
+    };
+    let Some(event) = pad.sticky_event::<gst::event::Segment>(0) else {
+        return EndCut::Pass;
+    };
+    let Some(segment) = event.segment().downcast_ref::<gst::ClockTime>() else {
+        return EndCut::Pass;
+    };
+    // Where the buffer is in the file
+    let Some(start) = segment.to_stream_time(pts) else {
+        return EndCut::Pass;
+    };
+    let stop = buffer
+        .duration()
+        .and_then(|duration| pts.checked_add(duration))
+        .and_then(|stop| segment.to_stream_time(stop))
+        .unwrap_or(start);
+
+    let mut gapless = gapless.lock().unwrap();
+    if gapless.cut || gapless.pending_loads > 0 {
+        return EndCut::Pass;
+    }
+    let Some(playing) = gapless.playing() else {
+        return EndCut::Pass;
+    };
+    let Some(end) = playing.end else {
+        return EndCut::Pass;
+    };
+    if stop <= end || gapless.next_follows(playing) {
+        return EndCut::Pass;
+    }
+    if start < end {
+        let mut clip = segment.clone();
+        clip.set_stop(segment.position_from_stream_time(end));
+        return EndCut::Clip(clip);
+    }
+    gapless.cut = true;
+    EndCut::End
+}
+
+// Cuts the audio after the end of a track at the src pad of the audio
+// filter, unless the next track goes on from there in the same file. The
+// end of the stream comes after the audio of the track, so the sink plays
+// it before GstPlay reports it, and the player goes on to the next track
+fn add_end_probe(pad: &gst::Pad, gapless: Arc<Mutex<Gapless>>) {
+    pad.add_probe(
+        gst::PadProbeType::BUFFER | gst::PadProbeType::EVENT_FLUSH,
+        move |pad, info| {
+            let cut = match info.data {
+                Some(gst::PadProbeData::Buffer(ref buffer)) => end_cut(pad, buffer, &gapless),
+                Some(gst::PadProbeData::Event(ref event)) => {
+                    // A seek, which can go back before the end
+                    if event.type_() == gst::EventType::FlushStop {
+                        gapless.lock().unwrap().cut = false;
+                    }
+                    return gst::PadProbeReturn::Ok;
+                }
+                _ => return gst::PadProbeReturn::Ok,
+            };
+
+            match cut {
+                EndCut::Pass => gst::PadProbeReturn::Ok,
+                EndCut::Clip(segment) => {
+                    let Some(audio_info) = pad
+                        .current_caps()
+                        .and_then(|caps| gst_audio::AudioInfo::from_caps(&caps).ok())
+                    else {
+                        return gst::PadProbeReturn::Ok;
+                    };
+                    let Some(gst::PadProbeData::Buffer(buffer)) = info.data.take() else {
+                        return gst::PadProbeReturn::Ok;
+                    };
+                    match gst_audio::audio_buffer_clip(
+                        buffer,
+                        segment.upcast_ref(),
+                        audio_info.rate(),
+                        audio_info.bpf(),
+                    ) {
+                        Some(buffer) => {
+                            info.data = Some(gst::PadProbeData::Buffer(buffer));
+                            gst::PadProbeReturn::Ok
+                        }
+                        None => gst::PadProbeReturn::Drop,
+                    }
+                }
+                // The pad refuses the buffers that come after it
+                EndCut::End => {
+                    debug!("Cutting the track at its end");
+                    pad.push_event(gst::event::Eos::new());
+                    gst::PadProbeReturn::Drop
+                }
+            }
+        },
+    );
 }
 
 impl GstReplayGain {
@@ -178,19 +361,6 @@ impl GstReplayGain {
             rg_volume,
         })
     }
-
-    pub fn set_mode(&self, playbin: gst::Element, replaygain: ReplayGainMode) {
-        let identity = gst::ElementFactory::make_with_name("identity", None).unwrap();
-
-        let (filter, album_mode) = match replaygain {
-            ReplayGainMode::Album => (self.rg_filter_bin.as_ref(), true),
-            ReplayGainMode::Track => (self.rg_filter_bin.as_ref(), false),
-            ReplayGainMode::Off => (&identity, true),
-        };
-
-        self.rg_volume.set_property("album-mode", album_mode);
-        playbin.set_property("audio-filter", filter);
-    }
 }
 
 impl GstBackend {
@@ -201,6 +371,9 @@ impl GstBackend {
 
         let mut config = gst_player.config();
         config.set_position_update_interval(250);
+        // The tracks of CUE sheets start where the seek takes them, while
+        // other seeks would stop at the nearest seek point before
+        config.set_seek_accurate(true);
         gst_player.set_config(config).unwrap();
 
         let res = Self {
@@ -208,13 +381,31 @@ impl GstBackend {
             gst_player,
             replaygain: GstReplayGain::new().ok(),
             start_position: Cell::default(),
+            play_requested: Cell::default(),
             gapless: Arc::default(),
         };
+
+        // There is always an audio filter, which cuts the tracks at their
+        // end; the window sets the one for ReplayGain later
+        if let Some(ref replaygain) = res.replaygain {
+            let pad = replaygain.rg_filter_bin.static_pad("src").unwrap();
+            add_end_probe(&pad, res.gapless.clone());
+        }
+        res.gst_player
+            .pipeline()
+            .set_property("audio-filter", res.identity());
 
         res.setup_signals();
         res.setup_gapless();
 
         res
+    }
+
+    // An audio filter that changes nothing but the end of the tracks
+    fn identity(&self) -> gst::Element {
+        let identity = gst::ElementFactory::make_with_name("identity", None).unwrap();
+        add_end_probe(&identity.static_pad("src").unwrap(), self.gapless.clone());
+        identity
     }
 
     fn gapless(&self) -> MutexGuard<'_, Gapless> {
@@ -238,6 +429,11 @@ impl GstBackend {
                 if gapless.pending_loads > 0 || gapless.handed.is_some() {
                     return None;
                 }
+                // playbin plays the next file from its start, after the end
+                // of this one
+                if gapless.cut || gapless.playing().is_some_and(|p| p.end.is_some()) {
+                    return None;
+                }
                 // Loading a track right after one is handed over can leave
                 // GstPlay waiting forever, and tracks are loaded one after
                 // the other while skipping
@@ -248,6 +444,9 @@ impl GstBackend {
                     return None;
                 }
                 let next = gapless.next.clone()?;
+                if !next.start.is_zero() {
+                    return None;
+                }
 
                 // A missing track would stop the pipeline before this one ends
                 if !gio::File::for_uri(&next.uri).query_exists(gio::Cancellable::NONE) {
@@ -305,6 +504,13 @@ impl GstBackend {
                         gapless.handed = None;
                         gapless.started = false;
                         gapless.pending_loads = gapless.pending_loads.saturating_sub(1);
+                        let loaded = gapless.pending_loads == 0;
+                        drop(gapless);
+                        // GstPlay holds its lock, so the track is played
+                        // from the main thread
+                        if loaded && let Err(e) = sender.try_send(PlaybackAction::TrackLoaded) {
+                            error!("Failed to send TrackLoaded: {e}");
+                        }
                     }
                     gst_play::PlayMessage::Error(message) => {
                         error!("GStreamer error: {}", message.error());
@@ -319,12 +525,12 @@ impl GstBackend {
                     }
                     gst_play::PlayMessage::PositionUpdated(message) => {
                         if let Some(position) = message.position() {
-                            send_update_position(&sender, position, false);
+                            update_position(&sender, &gapless, position, false);
                         }
                     }
                     gst_play::PlayMessage::SeekDone(message) => {
                         if let Some(position) = message.position() {
-                            send_update_position(&sender, position, true);
+                            update_position(&sender, &gapless, position, true);
                         }
                     }
                     gst_play::PlayMessage::VolumeChanged(message) => {
@@ -347,12 +553,16 @@ impl GstBackend {
 
     pub fn set_track(&self, source: Option<&TrackSource>) {
         self.start_position.set(source.map(|_| 0));
+        self.play_requested.set(false);
         {
             let mut gapless = self.gapless();
             gapless.generation += 1;
             gapless.handed = None;
             gapless.started = false;
             gapless.current = source.cloned();
+            gapless.advanced = None;
+            gapless.cut = false;
+            gapless.start_seek = false;
             if source.is_some() {
                 gapless.pending_loads += 1;
                 gapless.loaded_at = Some(Instant::now());
@@ -376,12 +586,14 @@ impl GstBackend {
         self.gapless().generation
     }
 
-    // The player follows the track that was handed over
+    // The player follows the track that was handed over, or that the
+    // pipeline went on to in the same file
     pub fn confirm_switch(&self, source: &TrackSource) {
         let mut gapless = self.gapless();
         gapless.handed = None;
         gapless.started = false;
         gapless.current = Some(source.clone());
+        gapless.advanced = None;
     }
 
     // The seeks return the position the track will start at, if it hasn't
@@ -421,13 +633,21 @@ impl GstBackend {
         self.seek_to(gst::ClockTime::ZERO)
     }
 
+    // The destination is from the start of the track
     fn seek_to(&self, destination: gst::ClockTime) -> Option<u64> {
         if self.start_position.get().is_some() {
             let position = destination.seconds();
             self.start_position.set(Some(position));
             Some(position)
         } else {
-            self.gst_player.seek(destination);
+            let start = {
+                let mut gapless = self.gapless();
+                gapless.start_seek = false;
+                gapless
+                    .playing()
+                    .map_or(gst::ClockTime::ZERO, |playing| playing.start)
+            };
+            self.gst_player.seek(start + destination);
             None
         }
     }
@@ -441,16 +661,44 @@ impl GstBackend {
     }
 
     pub fn play(&self) {
+        let (start, loading) = {
+            let gapless = self.gapless();
+            let start = gapless
+                .current
+                .as_ref()
+                .map_or(gst::ClockTime::ZERO, |current| current.start);
+            (start, gapless.pending_loads > 0)
+        };
+        // Where the track starts in its file, if not at the beginning
+        let position = self
+            .start_position
+            .get()
+            .map(|position| start + gst::ClockTime::from_seconds(position))
+            .filter(|position| !position.is_zero());
+        // GstPlay would drop the seek when it loads the file
+        if loading && position.is_some() {
+            self.play_requested.set(true);
+            return;
+        }
+
+        self.start_position.take();
         self.gst_player.play();
         // GstPlay seeks once the track is ready to play
-        if let Some(position) = self.start_position.take()
-            && position > 0
-        {
-            self.gst_player.seek(gst::ClockTime::from_seconds(position));
+        if let Some(position) = position {
+            self.gapless().start_seek = true;
+            self.gst_player.seek(position);
+        }
+    }
+
+    // Plays the track that was loaded, if it was asked to play meanwhile
+    pub fn loaded(&self) {
+        if self.gapless().pending_loads == 0 && self.play_requested.take() {
+            self.play();
         }
     }
 
     pub fn pause(&self) {
+        self.play_requested.set(false);
         self.gst_player.pause();
     }
 
@@ -477,9 +725,17 @@ impl GstBackend {
     }
 
     pub fn set_replaygain(&self, replaygain: ReplayGainMode) {
-        if let Some(ref r) = self.replaygain {
-            r.set_mode(self.gst_player.pipeline(), replaygain);
-        }
+        let filter = match (&self.replaygain, replaygain) {
+            (Some(r), ReplayGainMode::Album | ReplayGainMode::Track) => {
+                r.rg_volume
+                    .set_property("album-mode", replaygain == ReplayGainMode::Album);
+                r.rg_filter_bin.clone()
+            }
+            _ => self.identity(),
+        };
+        self.gst_player
+            .pipeline()
+            .set_property("audio-filter", &filter);
     }
 
     pub fn replaygain_available(&self) -> bool {
@@ -545,5 +801,185 @@ mod tests {
         assert_eq!(gain(), -4.0);
 
         pipeline.set_state(gst::State::Null).unwrap();
+    }
+
+    fn source(id: &str, start_ms: u64, end_ms: Option<u64>) -> TrackSource {
+        TrackSource {
+            id: id.to_string(),
+            uri: "file:///music/album.flac".to_string(),
+            start: gst::ClockTime::from_mseconds(start_ms),
+            end: end_ms.map(gst::ClockTime::from_mseconds),
+        }
+    }
+
+    // What reaches the sink when buffers of 300 ms go through a filter
+    // that cuts the tracks: the length of each buffer, and whether the
+    // stream ended
+    fn play_through_end_probe(gapless: Gapless) -> (Vec<u64>, bool) {
+        gst::init().unwrap();
+        let identity = gst::ElementFactory::make("identity").build().unwrap();
+        let received = play_through_filter(&identity, gapless.clone());
+        // The ReplayGain filter cuts them the same, from its bin's pad
+        if let Ok(replaygain) = GstReplayGain::new() {
+            let with_replaygain = play_through_filter(&replaygain.rg_filter_bin, gapless);
+            assert_eq!(with_replaygain, received);
+        }
+        received
+    }
+
+    fn play_through_filter(filter: &gst::Element, gapless: Gapless) -> (Vec<u64>, bool) {
+        let gapless = Arc::new(Mutex::new(gapless));
+
+        let pipeline = gst::Pipeline::new();
+        let identity = filter;
+        add_end_probe(&identity.static_pad("src").unwrap(), gapless);
+        let sink = gst::ElementFactory::make("fakesink")
+            .property("sync", false)
+            .build()
+            .unwrap();
+        pipeline.add_many([identity, &sink]).unwrap();
+        identity.link(&sink).unwrap();
+
+        let received = Arc::new(Mutex::new((Vec::new(), false)));
+        let sink_received = received.clone();
+        sink.static_pad("sink").unwrap().add_probe(
+            gst::PadProbeType::BUFFER | gst::PadProbeType::EVENT_DOWNSTREAM,
+            move |_, info| {
+                let mut received = sink_received.lock().unwrap();
+                match info.data {
+                    Some(gst::PadProbeData::Buffer(ref buffer)) => {
+                        received.0.push(buffer.duration().unwrap().mseconds());
+                    }
+                    Some(gst::PadProbeData::Event(ref event))
+                        if event.type_() == gst::EventType::Eos =>
+                    {
+                        received.1 = true;
+                    }
+                    _ => (),
+                }
+                gst::PadProbeReturn::Ok
+            },
+        );
+
+        let src = gst::Pad::builder(gst::PadDirection::Src).build();
+        src.set_active(true).unwrap();
+        src.link(&identity.static_pad("sink").unwrap()).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+
+        // 1000 samples a second, of 4 bytes each
+        src.push_event(gst::event::StreamStart::new("album"));
+        let caps = gst_audio::AudioInfo::builder(gst_audio::AudioFormat::F32le, 1000, 1)
+            .build()
+            .unwrap()
+            .to_caps()
+            .unwrap();
+        src.push_event(gst::event::Caps::new(&caps));
+        src.push_event(gst::event::Segment::new(&gst::FormattedSegment::<
+            gst::ClockTime,
+        >::new()));
+        for i in 0..5 {
+            let mut buffer = gst::Buffer::with_size(300 * 4).unwrap();
+            {
+                let buffer = buffer.get_mut().unwrap();
+                buffer.set_pts(gst::ClockTime::from_mseconds(i * 300));
+                buffer.set_duration(gst::ClockTime::from_mseconds(300));
+            }
+            // Refused once the stream ended
+            let _ = src.push(buffer);
+        }
+
+        pipeline.set_state(gst::State::Null).unwrap();
+        let received = received.lock().unwrap();
+        (received.0.clone(), received.1)
+    }
+
+    #[test]
+    fn the_audio_after_the_end_of_a_track_is_cut() {
+        let (buffers, ended) = play_through_end_probe(Gapless {
+            current: Some(source("track01", 0, Some(1000))),
+            ..Default::default()
+        });
+        assert_eq!(buffers, vec![300, 300, 300, 100]);
+        assert!(ended);
+    }
+
+    #[test]
+    fn the_next_part_of_the_file_plays_on() {
+        let (buffers, ended) = play_through_end_probe(Gapless {
+            current: Some(source("track01", 0, Some(1000))),
+            next: Some(source("track02", 1000, None)),
+            ..Default::default()
+        });
+        assert_eq!(buffers, vec![300; 5]);
+        assert!(!ended);
+    }
+
+    #[test]
+    fn a_track_that_plays_to_the_end_of_its_file_is_not_cut() {
+        let (buffers, ended) = play_through_end_probe(Gapless {
+            current: Some(source("track02", 1000, None)),
+            ..Default::default()
+        });
+        assert_eq!(buffers, vec![300; 5]);
+        assert!(!ended);
+    }
+
+    #[test]
+    fn positions_are_from_the_start_of_the_track() {
+        let (sender, receiver) = async_channel::unbounded();
+        let gapless = Mutex::new(Gapless {
+            current: Some(source("track02", 60_000, Some(120_000))),
+            next: Some(source("track03", 120_000, None)),
+            generation: 3,
+            ..Default::default()
+        });
+
+        update_position(&sender, &gapless, gst::ClockTime::from_seconds(90), false);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::UpdatePosition(30, false))
+        ));
+
+        // Past the end, the next part of the file takes over, until the
+        // player follows it
+        update_position(&sender, &gapless, gst::ClockTime::from_seconds(125), false);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::TrackAdvanced(3, ref id)) if id == "track03"
+        ));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::UpdatePosition(5, false))
+        ));
+        update_position(&sender, &gapless, gst::ClockTime::from_seconds(126), false);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::UpdatePosition(6, false))
+        ));
+        assert!(receiver.try_recv().is_err());
+
+        // Positions from before a load are dropped
+        gapless.lock().unwrap().pending_loads = 1;
+        update_position(&sender, &gapless, gst::ClockTime::from_seconds(10), false);
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_track_after_a_part_of_another_file_is_not_followed() {
+        let (sender, receiver) = async_channel::unbounded();
+        let mut other = source("other", 0, None);
+        other.uri = "file:///music/other.flac".to_string();
+        let gapless = Mutex::new(Gapless {
+            current: Some(source("track02", 60_000, Some(120_000))),
+            next: Some(other),
+            ..Default::default()
+        });
+
+        update_position(&sender, &gapless, gst::ClockTime::from_seconds(121), false);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::UpdatePosition(61, false))
+        ));
+        assert!(receiver.try_recv().is_err());
     }
 }

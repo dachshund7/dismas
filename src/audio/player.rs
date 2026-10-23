@@ -42,8 +42,11 @@ pub enum PlaybackAction {
     Seek(i64),
     SeekTo(u64),
     PlayNext,
-    // The track handed over to the backend started playing
+    // The track handed over to the backend started playing, or the
+    // pipeline went on to the next track of the same file
     TrackAdvanced(u64, String),
+    // The backend loaded the tracks it was given
+    TrackLoaded,
     SleepTimerExpired,
 
     Raise,
@@ -295,6 +298,7 @@ impl AudioPlayer {
             PlaybackAction::StepVolume(steps) => self.step_volume(steps),
             PlaybackAction::PlayNext => self.play_next(),
             PlaybackAction::TrackAdvanced(generation, uri) => self.track_advanced(generation, &uri),
+            PlaybackAction::TrackLoaded => self.backend.loaded(),
             PlaybackAction::SleepTimerExpired => self.sleep_timer_expired(),
             PlaybackAction::Raise => self.present(),
             PlaybackAction::Repeat(mode) => self.update_repeat_mode(mode),
