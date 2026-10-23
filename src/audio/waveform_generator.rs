@@ -188,8 +188,7 @@ impl WaveformGenerator {
         // The player shows a seek bar instead, so the track isn't read
         // a second time, and nothing is cached
         if !self.imp().settings.boolean("show-waveform") {
-            self.imp().peaks.replace(None);
-            self.notify_has_peaks();
+            self.clear_peaks();
             return;
         }
 
@@ -210,7 +209,17 @@ impl WaveformGenerator {
                 self,
                 async move { this.load_peaks_cache(&track, &cache).await }
             ));
+        } else {
+            // Without a name for its cache, there's no waveform to show;
+            // the previous track's would stay otherwise
+            self.clear_peaks();
         }
+    }
+
+    // Drops the peaks, and the view draws the waveform flat
+    fn clear_peaks(&self) {
+        self.imp().peaks.replace(None);
+        self.notify_has_peaks();
     }
 
     // Stops generating the peaks, if a pipeline is running
@@ -228,22 +237,24 @@ impl WaveformGenerator {
         self.stop_pipeline();
 
         let Some(track) = self.imp().track.borrow().clone() else {
-            self.imp().peaks.replace(None);
-            self.notify_has_peaks();
+            self.clear_peaks();
             return;
         };
 
-        // Reset the peaks vector
+        // Reset the peaks vector. The view draws the waveform flat until
+        // the peaks are ready, rather than keep the previous track's; a
+        // waveform from the cache comes soon enough to replace the
+        // previous one directly
         let peaks: Vec<(f64, f64)> = Vec::new();
         self.imp().peaks.replace(Some(peaks));
+        self.notify_has_peaks();
 
         let pipeline_str = "uridecodebin name=uridecodebin ! audioconvert ! audio/x-raw,channels=2 ! level name=level interval=250000000 ! fakesink name=faked";
         let pipeline = match gst::parse::launch(pipeline_str) {
             Ok(pipeline) => pipeline,
             Err(err) => {
                 warn!("Unable to generate the waveform: {err}");
-                self.imp().peaks.replace(None);
-                self.notify_has_peaks();
+                self.clear_peaks();
                 return;
             }
         };
@@ -376,8 +387,7 @@ impl WaveformGenerator {
                 pipeline
                     .set_state(gst::State::Null)
                     .expect("Pipeline reset failed");
-                self.imp().peaks.replace(None);
-                self.notify_has_peaks();
+                self.clear_peaks();
             }
         }
     }

@@ -49,7 +49,9 @@ mod imp {
         pub hover_position: Cell<Option<f64>>,
         // left and right channel peaks, normalised between 0 and 1
         pub peaks: RefCell<Option<Vec<PeakPair>>>,
-        pub next_peaks: RefCell<Option<Vec<PeakPair>>>,
+        // The peaks to show once the current ones have gone down, while
+        // they change; the change can be to no peaks
+        pub next_peaks: RefCell<Option<Option<Vec<PeakPair>>>>,
         pub tick_id: RefCell<Option<gtk::TickCallbackId>>,
         pub first_frame_time: Cell<Option<i64>>,
         pub factor: Cell<Option<f64>>,
@@ -195,51 +197,33 @@ mod imp {
                 color.alpha() * empty_opacity,
             );
 
+            let hover_color = gdk::RGBA::new(
+                color.red(),
+                color.green(),
+                color.blue(),
+                color.alpha() * hover_opacity,
+            );
+            let bar_color = |state| match state {
+                BarState::Played => &color,
+                BarState::Hovered => &hover_color,
+                BarState::Unplayed => &empty_color,
+            };
+
             let is_rtl = widget.direction() == gtk::TextDirection::Rtl;
             let bar_size = 2;
             let space_size = 2;
             let block_size = bar_size + space_size;
             let available_width = w;
+            let waveform_width = f64::from(w);
+            let cursor_pos = cursors(
+                self.position.get(),
+                self.hover_position.get(),
+                waveform_width,
+                is_rtl,
+            );
 
             if let Some(ref peaks) = *self.peaks.borrow() {
                 let n_peaks = peaks.len() as i32;
-                let waveform_width = f64::from(w);
-
-                // We have two cursors:
-                //
-                // 1. the state position, updated by the player
-                // 2. the hover position, updated by the motion controller
-                //
-                // The hover position may be behind the state position, if we are
-                // scrubbing backwards; or after the state position, if we are
-                // scrubbing forward.
-                //
-                // The area between the state position and the hover position is
-                // meant to be shown as a dimmed cursor color; the area between
-                // the start of the waveform and the state position is meant to be
-                // shown as a full cursor color; and the area between the hover
-                // position and the end of the waveform is meant to be shown as a
-                // current foreground color.
-                let position = if is_rtl {
-                    1.0 - self.position.get()
-                } else {
-                    self.position.get()
-                };
-                let mut cursor_pos: [f64; 2] =
-                    [position * waveform_width, position * waveform_width];
-                if let Some(hover) = self.hover_position.get() {
-                    if is_rtl {
-                        if hover <= position {
-                            cursor_pos[1] = hover * waveform_width;
-                        } else {
-                            cursor_pos[0] = hover * waveform_width;
-                        }
-                    } else if hover <= position {
-                        cursor_pos[0] = hover * waveform_width;
-                    } else {
-                        cursor_pos[1] = hover * waveform_width;
-                    }
-                }
 
                 // If the number of samples is too big to fit into the available
                 // width, we average the samples that fit within a bar
@@ -293,33 +277,8 @@ mod imp {
                             graphene::Rect::new(x, y, width, height)
                         };
 
-                        if is_rtl {
-                            if offset > cursor_pos[0] {
-                                snapshot.append_color(&color, &block);
-                            } else if offset > cursor_pos[1] {
-                                let hover_color = gdk::RGBA::new(
-                                    color.red(),
-                                    color.green(),
-                                    color.blue(),
-                                    color.alpha() * hover_opacity,
-                                );
-                                snapshot.append_color(&hover_color, &block);
-                            } else {
-                                snapshot.append_color(&empty_color, &block);
-                            }
-                        } else if offset < cursor_pos[0] {
-                            snapshot.append_color(&color, &block);
-                        } else if offset < cursor_pos[1] {
-                            let hover_color = gdk::RGBA::new(
-                                color.red(),
-                                color.green(),
-                                color.blue(),
-                                color.alpha() * hover_opacity,
-                            );
-                            snapshot.append_color(&hover_color, &block);
-                        } else {
-                            snapshot.append_color(&empty_color, &block);
-                        }
+                        let state = bar_state(offset, cursor_pos, is_rtl);
+                        snapshot.append_color(bar_color(state), &block);
 
                         accum.left = 0.0;
                         accum.right = 0.0;
@@ -334,18 +293,87 @@ mod imp {
                     }
                 }
             } else {
+                // A flat line, until the peaks are ready, which still shows
+                // the position
                 let mut offset = space_size;
                 while offset < w - space_size {
                     let x = offset as f32;
                     let y = center_y - 1.0;
                     let width = bar_size as f32;
                     let height: f32 = 2.0;
-                    snapshot.append_color(&color, &graphene::Rect::new(x, y, width, height));
+                    let edge = if is_rtl { offset + bar_size } else { offset };
+                    let state = bar_state(f64::from(edge), cursor_pos, is_rtl);
+                    snapshot
+                        .append_color(bar_color(state), &graphene::Rect::new(x, y, width, height));
 
                     offset += block_size;
                 }
             }
         }
+    }
+}
+
+// Where a bar is: played, between the position and the hover position,
+// or past both
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BarState {
+    Played,
+    Hovered,
+    Unplayed,
+}
+
+// We have two cursors:
+//
+// 1. the state position, updated by the player
+// 2. the hover position, updated by the motion controller
+//
+// The hover position may be behind the state position, if we are
+// scrubbing backwards; or after the state position, if we are
+// scrubbing forward.
+//
+// The area between the state position and the hover position is
+// meant to be shown as a dimmed cursor color; the area between
+// the start of the waveform and the state position is meant to be
+// shown as a full cursor color; and the area between the hover
+// position and the end of the waveform is meant to be shown as a
+// current foreground color.
+//
+// The cursors are in pixels from the left, also right to left, where
+// the start of the track is on the right; the hover position is a
+// fraction of the width, from the left
+fn cursors(position: f64, hover: Option<f64>, width: f64, is_rtl: bool) -> [f64; 2] {
+    let position = if is_rtl { 1.0 - position } else { position };
+    let mut cursor_pos = [position * width, position * width];
+    if let Some(hover) = hover {
+        if is_rtl {
+            if hover <= position {
+                cursor_pos[1] = hover * width;
+            } else {
+                cursor_pos[0] = hover * width;
+            }
+        } else if hover <= position {
+            cursor_pos[0] = hover * width;
+        } else {
+            cursor_pos[1] = hover * width;
+        }
+    }
+    cursor_pos
+}
+
+// The state of a bar from its leading edge: its left one, or its right
+// one right to left
+fn bar_state(edge: f64, cursor_pos: [f64; 2], is_rtl: bool) -> BarState {
+    let (first, second) = if is_rtl {
+        (edge > cursor_pos[0], edge > cursor_pos[1])
+    } else {
+        (edge < cursor_pos[0], edge < cursor_pos[1])
+    };
+    if first {
+        BarState::Played
+    } else if second {
+        BarState::Hovered
+    } else {
+        BarState::Unplayed
     }
 }
 
@@ -504,12 +532,14 @@ impl WaveformView {
         let peak_pairs = peaks.filter(|p| !p.is_empty()).map(|p| normalize_peaks(&p));
         let enable_animations = self.settings().is_gtk_enable_animations();
         if !enable_animations {
+            self.imp().next_peaks.replace(None);
+            self.imp().factor.set(None);
             self.imp().peaks.replace(peak_pairs);
             self.queue_resize();
             return;
         }
 
-        self.imp().next_peaks.replace(peak_pairs);
+        self.imp().next_peaks.replace(Some(peak_pairs));
         self.imp().factor.set(None);
         self.imp().first_frame_time.set(None);
 
@@ -522,9 +552,9 @@ impl WaveformView {
                 }
 
                 let has_peaks = this.imp().peaks.borrow().is_some();
-                let has_next_peaks = this.imp().next_peaks.borrow().is_some();
+                let pending = this.imp().next_peaks.borrow().is_some();
 
-                if has_peaks && has_next_peaks {
+                if has_peaks && pending {
                     // Animate the existing peaks to zero
                     let progress = 1.0 - ((frame_time - first_frame_time) as f64 / ANIMATION_USECS);
                     let delta = ease_out_cubic(progress);
@@ -535,7 +565,21 @@ impl WaveformView {
                         this.imp().factor.replace(Some(delta));
                         this.queue_draw();
                     }
-                } else if has_peaks && !has_next_peaks {
+                } else if pending {
+                    // Swap in the next peaks, which go up from zero; without
+                    // any, the waveform stays flat
+                    let next_peaks = this.imp().next_peaks.take().flatten();
+                    let has_next_peaks = next_peaks.is_some();
+                    this.imp().peaks.replace(next_peaks);
+                    this.imp().first_frame_time.replace(None);
+                    this.queue_resize();
+                    if !has_next_peaks {
+                        this.imp().factor.replace(None);
+                        this.imp().tick_id.replace(None);
+                        return glib::ControlFlow::Break;
+                    }
+                    this.imp().factor.replace(Some(0.0));
+                } else if has_peaks {
                     // Animate the peaks from zero
                     let progress = (frame_time - first_frame_time) as f64 / ANIMATION_USECS;
                     let delta = ease_out_cubic(progress);
@@ -549,13 +593,6 @@ impl WaveformView {
                     }
                     this.imp().factor.replace(Some(delta));
                     this.queue_draw();
-                } else if !has_peaks && has_next_peaks {
-                    // Swap peaks
-                    let next_peaks = this.imp().next_peaks.take();
-                    this.imp().peaks.replace(next_peaks);
-                    this.imp().factor.replace(None);
-                    this.imp().first_frame_time.replace(None);
-                    this.queue_resize();
                 } else {
                     // No peaks
                     this.imp().factor.replace(None);
@@ -587,13 +624,70 @@ impl WaveformView {
 
 #[cfg(test)]
 mod tests {
-    use super::{PeakPair, normalize_peaks};
+    use super::{BarState, PeakPair, bar_state, cursors, normalize_peaks};
 
     #[test]
     fn channels_are_scaled_by_their_own_loudest_peak() {
         assert_eq!(
             normalize_peaks(&[(0.5, 0.1), (0.25, 0.05)]),
             [PeakPair::new(1.0, 1.0), PeakPair::new(0.5, 0.5)]
+        );
+    }
+
+    // The states of the bars whose leading edges are at these pixels
+    fn states(edges: &[f64], cursor_pos: [f64; 2], is_rtl: bool) -> Vec<BarState> {
+        edges
+            .iter()
+            .map(|&edge| bar_state(edge, cursor_pos, is_rtl))
+            .collect()
+    }
+
+    #[test]
+    fn bars_before_the_position_are_played() {
+        use BarState::*;
+        let cursor_pos = cursors(0.5, None, 100.0, false);
+        assert_eq!(cursor_pos, [50.0, 50.0]);
+        assert_eq!(states(&[10.0, 60.0], cursor_pos, false), [Played, Unplayed]);
+    }
+
+    #[test]
+    fn bars_up_to_the_hover_position_are_dimmed() {
+        use BarState::*;
+        // Ahead of the position
+        let cursor_pos = cursors(0.5, Some(0.8), 100.0, false);
+        assert_eq!(
+            states(&[10.0, 60.0, 90.0], cursor_pos, false),
+            [Played, Hovered, Unplayed]
+        );
+
+        // Behind it
+        let cursor_pos = cursors(0.5, Some(0.2), 100.0, false);
+        assert_eq!(
+            states(&[10.0, 30.0, 60.0], cursor_pos, false),
+            [Played, Hovered, Unplayed]
+        );
+    }
+
+    #[test]
+    fn right_to_left_the_played_bars_are_on_the_right() {
+        use BarState::*;
+        // A quarter of the track, from the right edge
+        let cursor_pos = cursors(0.25, None, 100.0, true);
+        assert_eq!(cursor_pos, [75.0, 75.0]);
+        assert_eq!(states(&[90.0, 50.0], cursor_pos, true), [Played, Unplayed]);
+
+        // Hovering ahead of the position, on its left
+        let cursor_pos = cursors(0.25, Some(0.5), 100.0, true);
+        assert_eq!(
+            states(&[90.0, 60.0, 40.0], cursor_pos, true),
+            [Played, Hovered, Unplayed]
+        );
+
+        // Hovering behind it, on its right
+        let cursor_pos = cursors(0.25, Some(0.9), 100.0, true);
+        assert_eq!(
+            states(&[95.0, 80.0, 50.0], cursor_pos, true),
+            [Played, Hovered, Unplayed]
         );
     }
 
