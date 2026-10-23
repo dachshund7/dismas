@@ -264,7 +264,7 @@ mod imp {
             });
             klass.install_action_async("win.open-directory", None, async move |win, _, _| {
                 debug!("Window::win.open-directory()");
-                win.open_track_directory().await;
+                win.open_playing_track_directory().await;
             });
             klass.install_action("win.show-playing-track", None, move |win, _, _| {
                 debug!("Window::win.show-playing-track()");

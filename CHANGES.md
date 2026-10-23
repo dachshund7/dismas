@@ -32,6 +32,10 @@ All notable changes to this project will be documented in this file.
   the Music folder, like a second drive; while a folder isn't there, its
   albums are hidden, and they come back without being read again
 - Remember the volume and the repeat mode
+- The track menu has Open Directory, and in the playlist pane Remove,
+  which removes all the selected tracks when the track is one of them;
+  Go to Album is only in the playlist pane, as an album's tracks are
+  already there
 
 ### Changed
 

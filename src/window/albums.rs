@@ -160,7 +160,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, row, x, y| {
-                win.show_track_menu(row, x, y);
+                win.show_track_menu(row, x, y, false);
             }
         ));
         album_tracks.connect_back(clone!(

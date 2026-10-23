@@ -41,7 +41,7 @@ impl Window {
                 row.connect_menu_requested(clone!(
                     #[weak]
                     win,
-                    move |row, x, y| win.show_track_menu(row, x, y)
+                    move |row, x, y| win.show_track_menu(row, x, y, true)
                 ));
                 row.connect_select_requested(clone!(
                     #[weak]

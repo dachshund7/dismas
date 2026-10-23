@@ -5,45 +5,52 @@ use super::*;
 use crate::utils::ATTRIBUTE_HOST_PATH;
 
 impl Window {
-    // The menu of a track, at the given point of its row
-    pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64) {
+    // The menu of a track, at the given point of its row; a row of the
+    // queue, rather than of an album's tracks, can go to its album and be
+    // removed
+    pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, in_queue: bool) {
         let Some(track) = row.track() else {
             return;
         };
 
+        let actions = gio::SimpleActionGroup::new();
+        let section = gio::Menu::new();
+
         // The album is looked up while the menu opens, and the item stays
         // off for the tracks that are not in the album grid
-        let album_id: Rc<RefCell<Option<String>>> = Rc::default();
-        let actions = gio::SimpleActionGroup::new();
-        let go_to_album = gio::SimpleAction::new("go-to-album", None);
-        go_to_album.set_enabled(false);
-        go_to_album.connect_activate(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[strong]
-            track,
-            #[strong]
-            album_id,
-            move |_, _| {
-                let album_id = album_id.borrow().clone();
-                if let Some(album_id) = album_id {
-                    win.go_to_album(&album_id, &track.file());
+        if in_queue {
+            let album_id: Rc<RefCell<Option<String>>> = Rc::default();
+            let go_to_album = gio::SimpleAction::new("go-to-album", None);
+            go_to_album.set_enabled(false);
+            go_to_album.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[strong]
+                track,
+                #[strong]
+                album_id,
+                move |_, _| {
+                    let album_id = album_id.borrow().clone();
+                    if let Some(album_id) = album_id {
+                        win.go_to_album(&album_id, &track.file());
+                    }
                 }
-            }
-        ));
-        actions.add_action(&go_to_album);
-        glib::spawn_future_local(clone!(
-            #[weak]
-            go_to_album,
-            #[strong]
-            track,
-            async move {
-                if let Some(id) = track_album(&track.file()).await {
-                    album_id.replace(Some(id));
-                    go_to_album.set_enabled(true);
+            ));
+            actions.add_action(&go_to_album);
+            glib::spawn_future_local(clone!(
+                #[weak]
+                go_to_album,
+                #[strong]
+                track,
+                async move {
+                    if let Some(id) = track_album(&track.file()).await {
+                        album_id.replace(Some(id));
+                        go_to_album.set_enabled(true);
+                    }
                 }
-            }
-        ));
+            ));
+            section.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
+        }
 
         let info = gio::SimpleAction::new("info", None);
         info.connect_activate(clone!(
@@ -55,9 +62,64 @@ impl Window {
         ));
         actions.add_action(&info);
 
+        let open_directory = gio::SimpleAction::new("open-directory", None);
+        open_directory.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_, _| {
+                glib::spawn_future_local(clone!(
+                    #[weak]
+                    win,
+                    #[strong]
+                    track,
+                    async move { win.open_track_directory(&track).await }
+                ));
+            }
+        ));
+        actions.add_action(&open_directory);
+
+        section.append(Some(&i18n("Open Directory")), Some("track.open-directory"));
+        section.append(Some(&i18n("Track Information")), Some("track.info"));
         let menu = gio::Menu::new();
-        menu.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
-        menu.append(Some(&i18n("Track Information")), Some("track.info"));
+        menu.append_section(None, &section);
+
+        // On a selected track, it removes all the selected ones, like the
+        // button of selection mode; on another, only that one. It comes
+        // last, away from the pointer, as the menu opens under it
+        if in_queue {
+            let selection = self.queue_selection() && track.selected();
+            let remove = gio::SimpleAction::new("remove", None);
+            remove.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[strong]
+                track,
+                move |_, _| {
+                    if selection {
+                        win.remove_selected_tracks();
+                    } else {
+                        win.remove_track(&track);
+                        win.store_queue();
+                    }
+                }
+            ));
+            actions.add_action(&remove);
+
+            let several = selection
+                && self
+                    .player()
+                    .is_some_and(|p| p.queue().n_selected_tracks() > 1);
+            let label = if several {
+                i18n("Remove Selected Tracks")
+            } else {
+                i18n("Remove")
+            };
+            let section = gio::Menu::new();
+            section.append(Some(&label), Some("track.remove"));
+            menu.append_section(None, &section);
+        }
 
         let popover = gtk::PopoverMenu::from_model(Some(&menu));
         popover.insert_action_group("track", Some(&actions));
@@ -200,38 +262,38 @@ impl Window {
         adw::prelude::AdwDialogExt::present(&dialog, Some(self));
     }
 
-    pub(super) async fn open_track_directory(&self) {
-        if let Some(player) = self.player() {
-            let state = player.state();
+    pub(super) async fn open_playing_track_directory(&self) {
+        if let Some(player) = self.player()
+            && let Some(track) = player.state().track()
+        {
+            self.open_track_directory(&track).await;
+        }
+    }
 
-            if let Some(track) = state.track() {
-                let file = track.audio_file();
+    async fn open_track_directory(&self, track: &Track) {
+        let file = track.audio_file();
 
-                match file
-                    .query_info_future(
-                        ATTRIBUTE_HOST_PATH,
-                        gio::FileQueryInfoFlags::NONE,
-                        glib::Priority::DEFAULT,
-                    )
-                    .await
-                {
-                    Err(err) => debug!("Unable to get host-path attribute: {err}"),
-                    Ok(info) => {
-                        let host_path = info
-                            .attribute_as_string(ATTRIBUTE_HOST_PATH)
-                            .and_then(|x| PathBuf::from_str(x.as_str()).ok());
+        match file
+            .query_info_future(
+                ATTRIBUTE_HOST_PATH,
+                gio::FileQueryInfoFlags::NONE,
+                glib::Priority::DEFAULT,
+            )
+            .await
+        {
+            Err(err) => debug!("Unable to get host-path attribute: {err}"),
+            Ok(info) => {
+                let host_path = info
+                    .attribute_as_string(ATTRIBUTE_HOST_PATH)
+                    .and_then(|x| PathBuf::from_str(x.as_str()).ok());
 
-                        if let Some(path) = host_path.or_else(|| file.path()) {
-                            let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(path)));
-                            if let Err(_e) = launcher
-                                .open_containing_folder_future(Some(
-                                    self.upcast_ref::<gtk::Window>(),
-                                ))
-                                .await
-                            {
-                                self.add_toast(i18n("Unable to open folder"));
-                            }
-                        }
+                if let Some(path) = host_path.or_else(|| file.path()) {
+                    let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(path)));
+                    if let Err(_e) = launcher
+                        .open_containing_folder_future(Some(self.upcast_ref::<gtk::Window>()))
+                        .await
+                    {
+                        self.add_toast(i18n("Unable to open folder"));
                     }
                 }
             }
