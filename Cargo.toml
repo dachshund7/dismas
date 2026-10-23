@@ -18,7 +18,7 @@ glib-unix = "0.22"
 libc = "0.2"
 lofty = "0.24"
 log = "0.4"
-mpris-server = "0.8"
+mpris-server = "0.10"
 pretty_env_logger = "0.5"
 rand = { version = "0.10", features = ["thread_rng"] }
 rusqlite = "0.40"
