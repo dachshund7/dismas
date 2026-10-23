@@ -6,23 +6,86 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Playback resumes where it was at startup, paused at the same track and
-  position
+- Gapless playback: tracks play back to back, such as movements that run
+  into each other
+- CUE sheets split audio files into their tracks, from a `.cue` file next
+  to them or a `CUESHEET` tag, in the queue, the album grid and playlists,
+  each track with its own ReplayGain; `.cue` files can be opened and
+  dropped too
+- Each playlist resumes where it was, paused at the same track and
+  position, at startup and when switching back to it
+- A tray icon while playing in the background, to show or hide the window,
+  control playback, change the volume by scrolling, and quit
+- Switch playlists from a menu on the playlist pane's title
+- Drop files between the tracks of the playlist pane, and drag albums from
+  the grid into place there
+- A drop zone that plays the dropped tracks in place of the queue, with an
+  Undo
 - The toast after saving the queue as a playlist has an Open button, to
   switch to the new playlist without interrupting playback
 - A Preferences dialog (Ctrl+,), with a switch for moving the window from
   its header bars, for window managers that move windows themselves
+- Show Waveform, in Preferences, to show a plain seek bar instead of the
+  waveform
+- Change the volume with Ctrl+Up and Ctrl+Down
+- Remember the volume and the repeat mode
 
 ### Changed
 
 - The settings moved from the main menu to Preferences
 - "Restore Playlist at Startup" is now "Restore Queue at Startup": a
   selected saved playlist always reopens, even with the setting off
+- Shuffling reorders the playlist for real, so the order shown, played and
+  saved is the same, until the shuffle button puts back the order from
+  before; the button is filled while the playlist is shuffled
+- Previous and next track are Alt+Left and Alt+Right, instead of Ctrl+B
+  and Ctrl+N
+- "Match Cover Art" keeps the contrast of the text, with tints of the
+  cover's colors that follow the color scheme, takes the accent color from
+  the cover, and is off in high contrast
+- Once the queue has played to its end, the last track stays shown, and
+  playing again starts over from the first one
+- Closing the window while playing in the background hides it, so it comes
+  back as it was
+- Find cover files named cover or folder in any case and image type, such
+  as `Cover.JPG` or `folder.webp`, and use them when the cover in the tags
+  can't be decoded
+- The playlist pane's labels and tooltips name the selected playlist
+- Clicking the clear icon of a search entry puts the cursor in it
+- Read dates written with dots, such as 2024.06.03
+- Update dependencies
 
 ### Fixed
 
 - With "Restore Queue at Startup" off, opening the window again while
   playing in the background replaced the queue with the playing tracks
+- Without a Background portal, as in many window manager sessions,
+  closing the window quit Dismas even with Background Playback on
+- Ctrl+Left and Ctrl+Right seeked instead of moving the cursor in a search
+  entry
+- Next from the media keys on the last track went back to the first, and
+  the desktop's media controls offered Next there
+- The desktop's media controls kept the position of the previous track
+  after skipping while paused
+- When a track repeated, the cover and the waveform were loaded again, the
+  queue scrolled back to the track, and a track that decodes slower than it
+  plays never got a waveform
+- The previous track's waveform stayed until the new one's was ready
+- Seeking in a track that hadn't played yet didn't show
+- Scrolling to the playing track could leave it out of view, hide the
+  tracks before it, or leave out the header of its work
+- Remove All and Select stayed on in an empty playlist pane
+- Selected albums were queued in the order of the library rather than the
+  order of the grid
+- A playlist name too long for a file name got the wrong message, and long
+  names made tooltips as wide as the screen
+- An open track information dialog kept the colors of the cover from when
+  it opened
+- On X11, Esc didn't cancel dragging a track in the queue, and the queue
+  kept scrolling after a track was dropped near its edge
+- On X11 without a compositor, drags over the part of the window gained by
+  widening it went to the window below
+- GLib warnings when nothing was left to play
 
 ### Removed
 
@@ -39,13 +102,37 @@ The first release of Dismas, a fork of Amberol's development version after
   playlists, and switch between them on the Playlists page
 - Import and export playlists as M3U files, with paths relative to the
   playlist's folder
+- Reopen the selected playlist at startup, unless "Restore Playlist at
+  Startup" is off
 - Search every tag of the tracks in the queue
-- Reorder the queue by dragging tracks, and select ranges with Shift+click
+- Select tracks and albums with Ctrl+click, Shift+click for a range, or
+  Ctrl+A, to add, play or remove them together
+- Reorder the queue by dragging tracks by their handle, several at once in
+  selection mode
+- Add the same track to the queue more than once
 - Work, movement, composer, performer and production credits for classical
   music, including the tags of the Work Hierarchy plugin for Picard
+- Show the name of each work above its movements in the queue, with a line
+  between works
+- Read the credits in the descriptions of YouTube downloads, which yt-dlp
+  stores as `SYNOPSIS`
 - A sleep timer, which can let the last track finish
-- A track menu, and a track information dialog
+- A track menu, and a track information dialog (Ctrl+I) with every tag,
+  links to MusicBrainz, and the format and ReplayGain of the file
+- A button that shows the playing track in the queue, and a menu for the
+  playing track with Copy, Go to Album and Open Directory
+- A Remove All button in the playlist pane
+- Resize the playlist pane by dragging its edge; a double click goes back
+  to the automatic width
+- Shortcuts for the pages: Ctrl+1, Ctrl+2 or Ctrl+G, and Ctrl+3; Page Up,
+  Page Down, Home and End scroll the list under the pointer
+- Show when the Music folder is being scanned, and how many tracks changed
+  after a rescan
+- A `move-from-header-bars` setting, with no switch in the UI, to keep the
+  header bars from moving the window
 - Copy the library, queue, playlists and settings of Amberol on the first run
+- Add Norwegian Nynorsk, Telugu, Vietnamese, Thai and Chinese (Taiwan)
+  translations
 
 ### Changed
 
@@ -58,18 +145,66 @@ The first release of Dismas, a fork of Amberol's development version after
 - Call the list of tracks to play the queue, and audio files "tracks"
 - Fit the player to the window, growing the cover and waveform into the
   room left
-- Toggle playback with Space
+- Show the cover in the player at full size, rather than scaled up from a
+  small copy
+- Grow the album covers with the width of the grid
+- In a narrow window, push the player aside with the playlist pane rather
+  than covering it
+- Put the playlist pane toggle and the main menu on every page, and the
+  repeat and shuffle buttons beside previous and next
+- Move Copy, Open Directory, Track Information and Clear from the main
+  menu to buttons and menus next to what they act on
+- Toggle playback with Space, rather than Ctrl+P
+- Search the queue for every word, ignoring case and accents, rather than
+  by fuzzy matching, and keep the order of the queue
+- Pause the playing track when it's clicked in the queue, where it shows a
+  pause icon while paused
+- Go back to the queue search with Ctrl+F rather than closing it, and hide
+  the playlist pane with Esc in a wide window too
+- Scroll a long label in the player once, rather than over and over
 - Load tracks in parallel worker threads, and decode cover art in sandboxed
   glycin loaders
 - Scale each channel of the waveform by its own loudest peak
+- Update dependencies, including gtk-rs 0.11
+- Translation updates
 
 ### Fixed
 
 - Don't crash on paths that aren't valid UTF-8, files without a local path,
   or tags that make the reader panic
+- Don't write cover thumbnails outside the cache directory for a crafted
+  MusicBrainz release ID
+- Don't crash at startup on a malformed saved queue, and keep the names
+  that aren't valid UTF-8 in it
 - Keep the shuffled order in step with changes to the queue
+- Keep the current track when removing another one from the queue, and
+  keep playing when one track is left
+- Move on from the playing track when removing it with Repeat One
+- Make the Play button of the "Added a new track" toast play that track
 - Keep the MPRIS cover and the album thumbnails up to date
 - Support setting the position over MPRIS
+- Start playing from the play/pause media key when stopped, and show the
+  track in the desktop's media controls at startup
+- Stop the previous track's waveform from being drawn over the next one's,
+  and don't cache a waveform that couldn't be read whole
+- Show "Unknown artist" for tracks without an artist tag
+- Find the cover of a track whose extension doesn't match its type, such
+  as Opus in an `.ogg` file
+- Follow symbolic links to tracks and folders that are opened or dropped
+- Keep the Background Playback menu item in step with its setting when the
+  portal turns it down
+- Show the About dialog without a window, while playing in the background
+- Name the PulseAudio stream after the application
+- Close the main menu with F10
+- Keep the playlist pane hidden after narrowing and widening the window
+- Scroll to the playing track at its place in the searched queue
+- Scroll long lists without stalling, especially on X11
+
+### Removed
+
+- The Add Song and Add Folder actions, and their shortcuts, Ctrl+S and
+  Ctrl+A: tracks come from the album grid, or are opened from the file
+  manager or dropped on the window
 
 ## [2026.1] - 2026-04-05
 
