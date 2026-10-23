@@ -2505,27 +2505,6 @@ mod tests {
         assert_eq!(normalize_search_text("Søren Łukasz"), "soren lukasz");
     }
 
-    // A WAV file of silence, 8000 bytes a second
-    fn write_wav(path: &std::path::Path, seconds: u32) {
-        let data_size = 8000 * seconds;
-        let mut bytes = Vec::new();
-        bytes.extend(b"RIFF");
-        bytes.extend((36 + data_size).to_le_bytes());
-        bytes.extend(b"WAVEfmt ");
-        bytes.extend(16u32.to_le_bytes());
-        // PCM, mono, 8000 Hz, 8000 bytes a second, 1 byte a frame, 8 bits
-        bytes.extend(1u16.to_le_bytes());
-        bytes.extend(1u16.to_le_bytes());
-        bytes.extend(8000u32.to_le_bytes());
-        bytes.extend(8000u32.to_le_bytes());
-        bytes.extend(1u16.to_le_bytes());
-        bytes.extend(8u16.to_le_bytes());
-        bytes.extend(b"data");
-        bytes.extend(data_size.to_le_bytes());
-        bytes.resize(bytes.len() + data_size as usize, 128);
-        std::fs::write(path, bytes).unwrap();
-    }
-
     // The tracks read from some files, as the queue gets them
     fn read_tracks(files: &[&std::path::Path]) -> Vec<Vec<super::TrackData>> {
         use super::{Claims, FileCache, TrackData};
@@ -2550,7 +2529,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dismas-cue-tracks-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let wav = dir.join("Album.wav");
-        write_wav(&wav, 10);
+        crate::utils::write_test_wav(&wav, 10);
         let cue = dir.join("Album.cue");
         std::fs::write(
             &cue,

@@ -294,6 +294,28 @@ pub fn disable_window_drag(widget: &gtk::Widget) {
     }
 }
 
+// A WAV file of silence, 8000 bytes a second
+#[cfg(test)]
+pub fn write_test_wav(path: &std::path::Path, seconds: u32) {
+    let data_size = 8000 * seconds;
+    let mut bytes = Vec::new();
+    bytes.extend(b"RIFF");
+    bytes.extend((36 + data_size).to_le_bytes());
+    bytes.extend(b"WAVEfmt ");
+    bytes.extend(16u32.to_le_bytes());
+    // PCM, mono, 8000 Hz, 8000 bytes a second, 1 byte a frame, 8 bits
+    bytes.extend(1u16.to_le_bytes());
+    bytes.extend(1u16.to_le_bytes());
+    bytes.extend(8000u32.to_le_bytes());
+    bytes.extend(8000u32.to_le_bytes());
+    bytes.extend(1u16.to_le_bytes());
+    bytes.extend(8u16.to_le_bytes());
+    bytes.extend(b"data");
+    bytes.extend(data_size.to_le_bytes());
+    bytes.resize(bytes.len() + data_size as usize, 128);
+    std::fs::write(path, bytes).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

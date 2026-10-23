@@ -280,6 +280,24 @@ pub fn parse_location(path: &Path) -> Option<(&Path, u32)> {
     sheet.is_file().then_some((sheet, number))
 }
 
+// The file of a track: its sheet for a track of a sheet
+pub fn real_path(path: &Path) -> &Path {
+    parse_location(path).map_or(path, |(sheet, _)| sheet)
+}
+
+// The audio file of a track
+pub fn audio_path(path: &Path) -> Option<PathBuf> {
+    let Some((sheet, number)) = parse_location(path) else {
+        return Some(path.to_path_buf());
+    };
+    if !is_cue_path(sheet) {
+        return Some(sheet.to_path_buf());
+    }
+    let sheet = SplitSheet::read(sheet)?;
+    let (_, audio) = sheet.track(number)?;
+    Some(audio.to_path_buf())
+}
+
 fn is_audio_file(path: &Path) -> bool {
     utils::is_audio_path(path) && path.is_file()
 }
@@ -738,6 +756,7 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         let location = track_location(&sheet, 3);
         assert_eq!(location, dir.join("Album.cue/track03"));
         assert_eq!(parse_location(&location), Some((sheet.as_path(), 3)));
+        assert_eq!(real_path(&location), sheet);
         assert_eq!(parse_location(&dir.join("Album.cue/track")), None);
         assert_eq!(parse_location(&dir.join("Album.cue/track+3")), None);
         // A folder can have any name
@@ -771,6 +790,8 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         let split = SplitSheet::read(&sheet).unwrap();
         assert_eq!(split.tracks().count(), 3);
         assert!(split.splits(&dir.join("Album.flac")));
+        let location = track_location(&sheet, 2);
+        assert_eq!(audio_path(&location), Some(dir.join("Album.flac")));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

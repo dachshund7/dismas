@@ -20,7 +20,7 @@ use std::{
 
 pub use album::{Album, AlbumSort};
 use async_channel::Sender;
-use gtk::{gio, glib, prelude::*};
+use gtk::{gio, glib};
 use itertools::Itertools;
 use lofty::{
     config::ParseOptions,
@@ -37,13 +37,44 @@ use crate::{
         CoverCache, ExtraComments, normalize_search_text, plain_commas, read_tagged_file,
         tag_search_text,
     },
+    cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
     utils,
 };
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
+
+// The paths of the tracks are kept as bytes, as they are not always valid
+// UTF-8. The path of a track of a CUE sheet is under its sheet, which is
+// the file the track comes from, with the audio files the sheet splits;
+// the times and the size are those of the files
+const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
+    CREATE TABLE tracks (
+        path BLOB PRIMARY KEY,
+        file BLOB NOT NULL,
+        mtime INTEGER NOT NULL,
+        ctime INTEGER NOT NULL,
+        size INTEGER NOT NULL,
+        added INTEGER NOT NULL,
+        album_id TEXT,
+        album TEXT,
+        album_artist TEXT,
+        artist TEXT,
+        artist_sort TEXT,
+        year TEXT,
+        disc INTEGER,
+        track INTEGER,
+        title TEXT,
+        search TEXT
+    );
+    CREATE INDEX tracks_album ON tracks (album_id);
+    CREATE INDEX tracks_file ON tracks (file);
+    CREATE TABLE IF NOT EXISTS covers (
+        album_id TEXT PRIMARY KEY,
+        path TEXT
+    );";
 
 // The size of the covers in the grid, twice the largest one for HiDPI
 const THUMBNAIL_SIZE: u32 = 480;
@@ -155,34 +186,9 @@ fn open() -> rusqlite::Result<Connection> {
     if version != SCHEMA_VERSION {
         // The tracks are read again; the covers of the albums are kept, as
         // they take a while to create, and the scan replaces the ones of the
-        // albums that are gone or changed. Paths are kept as bytes, as
-        // they are not always valid UTF-8
+        // albums that are gone or changed
         debug!("Library schema version {version}, recreating it");
-        tx.execute_batch(
-            "DROP TABLE IF EXISTS tracks;
-             CREATE TABLE tracks (
-                 path BLOB PRIMARY KEY,
-                 mtime INTEGER NOT NULL,
-                 ctime INTEGER NOT NULL,
-                 size INTEGER NOT NULL,
-                 added INTEGER NOT NULL,
-                 album_id TEXT,
-                 album TEXT,
-                 album_artist TEXT,
-                 artist TEXT,
-                 artist_sort TEXT,
-                 year TEXT,
-                 disc INTEGER,
-                 track INTEGER,
-                 title TEXT,
-                 search TEXT
-             );
-             CREATE INDEX tracks_album ON tracks (album_id);
-             CREATE TABLE IF NOT EXISTS covers (
-                 album_id TEXT PRIMARY KEY,
-                 path TEXT
-             );",
-        )?;
+        tx.execute_batch(SCHEMA)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()?;
@@ -348,131 +354,219 @@ pub fn scan(music_dir: &Path, sender: &Sender<ScanEvent>) {
 }
 
 fn scan_internal(music_dir: &Path, sender: &Sender<ScanEvent>) -> rusqlite::Result<ScanResult> {
-    with_connection(|conn| scan_with(conn, music_dir, sender))
+    with_connection(|conn| {
+        let (result, stale_albums) = scan_with(conn, music_dir, sender)?;
+        update_covers(conn, &stale_albums)?;
+        Ok(result)
+    })
 }
 
-fn scan_with(
-    conn: &mut Connection,
-    music_dir: &Path,
-    sender: &Sender<ScanEvent>,
-) -> rusqlite::Result<ScanResult> {
-    let files = utils::load_files_from_folder(&gio::File::for_path(music_dir), true);
+// When the file of tracks last changed, and its size: with the audio
+// files that a CUE sheet splits, the last change of any, and their sizes
+// together
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Stamp {
+    mtime: i64,
+    ctime: i64,
+    size: i64,
+}
 
-    // Find the files that are new or changed since the last scan
-    let mut known = std::collections::HashMap::new();
-    {
-        let mut stmt = conn.prepare("SELECT path, mtime, ctime, size FROM tracks")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, Vec<u8>>(0)?,
-                (
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                ),
-            ))
-        })?;
-        for row in rows {
-            let (path, stamp) = row?;
-            known.insert(path, stamp);
-        }
-    }
+// A file that tracks come from: an audio file, or a CUE sheet with the
+// audio files it splits
+struct Source {
+    path: PathBuf,
+    stamp: Stamp,
+    // When it was created; a new track counts as added then, so that the
+    // tracks that were in the Music folder before the library existed are
+    // sorted by when they were added too
+    created: i64,
+    // The audio files a sheet splits
+    audio: Vec<PathBuf>,
+}
 
-    let mut present = HashSet::new();
-    let mut changed = Vec::new();
-    for file in files {
-        let Some(path) = file.path() else {
-            continue;
-        };
-        if !utils::is_audio_path(&path) {
-            continue;
-        }
-        let Ok(metadata) = std::fs::metadata(&path) else {
-            continue;
-        };
+impl Source {
+    fn new(path: PathBuf, audio: Vec<PathBuf>) -> Option<Self> {
         let seconds = |t: std::io::Result<std::time::SystemTime>| {
             t.ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
         };
-        let mtime = seconds(metadata.modified()).unwrap_or_default();
-        let ctime = change_time(&metadata);
-        let size = metadata.len() as i64;
-        // When the file was created, so that the tracks that were in the
-        // Music folder before the library existed are sorted by when they
-        // were added too; it's only used for new tracks, as the time is
-        // kept when a track changes
-        let added = seconds(metadata.created()).unwrap_or(mtime);
-
-        if known.get(path_bytes(&path)) != Some(&(mtime, ctime, size)) {
-            changed.push((path.clone(), mtime, ctime, size, added));
+        let mut stamp = Stamp {
+            mtime: 0,
+            ctime: 0,
+            size: 0,
+        };
+        let mut created = i64::MAX;
+        for file in std::iter::once(&path).chain(&audio) {
+            let metadata = std::fs::metadata(file).ok()?;
+            let mtime = seconds(metadata.modified()).unwrap_or_default();
+            stamp.mtime = stamp.mtime.max(mtime);
+            stamp.ctime = stamp.ctime.max(change_time(&metadata));
+            stamp.size += metadata.len() as i64;
+            created = created.min(seconds(metadata.created()).unwrap_or(mtime));
         }
-        present.insert(path_bytes(&path).to_vec());
+        Some(Self {
+            path,
+            stamp,
+            created,
+            audio,
+        })
+    }
+}
+
+// Updates the tracks, and returns the albums whose cover should be looked
+// for again
+fn scan_with(
+    conn: &mut Connection,
+    music_dir: &Path,
+    sender: &Sender<ScanEvent>,
+) -> rusqlite::Result<(ScanResult, HashSet<String>)> {
+    let paths: Vec<PathBuf> = utils::load_files_from_folder(&gio::File::for_path(music_dir), true)
+        .iter()
+        .filter_map(gio::prelude::FileExt::path)
+        .collect();
+
+    // The CUE sheets that split audio files have their tracks, in place
+    // of the files
+    let claims = Claims::new(paths.iter().map(PathBuf::as_path));
+
+    // When each file changed at the last scan, and when its tracks were
+    // added
+    let mut known = HashMap::new();
+    {
+        let mut stmt =
+            conn.prepare("SELECT file, mtime, ctime, size, MIN(added) FROM tracks GROUP BY file")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                Stamp {
+                    mtime: row.get(1)?,
+                    ctime: row.get(2)?,
+                    size: row.get(3)?,
+                },
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (file, stamp, added) = row?;
+            known.insert(file, (stamp, added));
+        }
+    }
+
+    // Find the files that are new or changed since the last scan
+    let mut present = HashSet::new();
+    let mut changed = Vec::new();
+    for path in paths {
+        let audio: Vec<PathBuf> = if cue_sheet::is_cue_path(&path) {
+            let audio: Vec<PathBuf> = claims
+                .tracks_of(&path)
+                .into_iter()
+                .map(|(_, audio)| audio.to_path_buf())
+                .unique()
+                .collect();
+            if audio.is_empty() {
+                continue;
+            }
+            audio
+        } else if utils::is_audio_path(&path) && claims.sheet_of(&path).is_none() {
+            Vec::new()
+        } else {
+            continue;
+        };
+        let Some(source) = Source::new(path, audio) else {
+            continue;
+        };
+
+        let key = path_bytes(&source.path).to_vec();
+        if known.get(&key).map(|(stamp, _)| stamp) != Some(&source.stamp) {
+            changed.push(source);
+        }
+        present.insert(key);
     }
 
     debug!(
-        "Library: {} tracks, {} new or changed",
+        "Library: {} files of tracks, {} new or changed",
         present.len(),
         changed.len()
     );
 
     // The albums whose cover should be looked for again
     let mut stale_albums = HashSet::new();
+    let mut updated = Vec::new();
+    let mut n_changed = 0;
 
     let total = changed.len();
     for (i, chunk) in changed.chunks(200).enumerate() {
         let tx = conn.transaction()?;
         {
-            let mut old_album =
-                tx.prepare("SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL")?;
-            // A changed track keeps the time it was added
-            let mut upsert = tx.prepare(
-                "INSERT INTO tracks
-                 (path, mtime, ctime, size, album_id, album, album_artist, artist,
-                  artist_sort, year, disc, track, title, search, added)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-                 ON CONFLICT (path) DO UPDATE SET
-                  mtime = excluded.mtime, ctime = excluded.ctime, size = excluded.size,
-                  album_id = excluded.album_id, album = excluded.album,
-                  album_artist = excluded.album_artist, artist = excluded.artist,
-                  artist_sort = excluded.artist_sort, year = excluded.year,
-                  disc = excluded.disc, track = excluded.track,
-                  title = excluded.title, search = excluded.search",
+            let mut old_albums = tx.prepare(
+                "SELECT DISTINCT album_id FROM tracks WHERE file = ?1 AND album_id IS NOT NULL",
             )?;
-            for (path, mtime, ctime, size, added) in chunk {
-                let key = path_bytes(path);
-                if let Some(id) = old_album
-                    .query_row([key], |row| row.get::<_, String>(0))
-                    .optional()?
-                {
-                    stale_albums.insert(id);
+            let mut delete = tx.prepare("DELETE FROM tracks WHERE file = ?1")?;
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO tracks
+                 (path, file, mtime, ctime, size, album_id, album, album_artist, artist,
+                  artist_sort, year, disc, track, title, search, added)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            )?;
+            for source in chunk {
+                let key = path_bytes(&source.path);
+                for id in old_albums.query_map([key], |row| row.get::<_, String>(0))? {
+                    stale_albums.insert(id?);
                 }
+                delete.execute([key])?;
 
-                // A changed track might have new cover art; new tracks
-                // don't make the cover of their album stale, so that the
-                // covers are kept when the whole library is read again
-                let tags = read_tags(path);
-                if let Some(id) = tags.album_id.as_ref().filter(|_| known.contains_key(key)) {
-                    stale_albums.insert(id.clone());
+                // A changed track keeps the time it was added, as do the
+                // tracks of an audio file that a CUE sheet splits now
+                let was_known = known.contains_key(key);
+                let added = std::iter::once(&source.path)
+                    .chain(&source.audio)
+                    .filter_map(|path| known.get(path_bytes(path)))
+                    .map(|(_, added)| *added)
+                    .min()
+                    .unwrap_or(source.created);
+
+                let tracks = if source.audio.is_empty() {
+                    read_tags(&source.path)
+                } else {
+                    claims
+                        .sheets
+                        .get(&source.path)
+                        .map_or_else(Vec::new, |sheet| {
+                            read_sheet_tags(sheet, claims.tracks_of(&source.path))
+                        })
+                };
+                for (path, tags) in tracks {
+                    // A changed track might have new cover art; new tracks
+                    // don't make the cover of their album stale, so that the
+                    // covers are kept when the whole library is read again
+                    if let Some(id) = tags.album_id.as_ref().filter(|_| was_known) {
+                        stale_albums.insert(id.clone());
+                    }
+
+                    insert.execute(params![
+                        path_bytes(&path),
+                        key,
+                        source.stamp.mtime,
+                        source.stamp.ctime,
+                        source.stamp.size,
+                        tags.album_id,
+                        tags.album,
+                        tags.album_artist,
+                        tags.artist,
+                        tags.artist_sort,
+                        tags.year,
+                        tags.disc,
+                        tags.track,
+                        tags.title,
+                        tags.search,
+                        added,
+                    ])?;
+                    n_changed += 1;
+                    if was_known {
+                        updated.push(path);
+                    }
                 }
-
-                upsert.execute(params![
-                    key,
-                    mtime,
-                    ctime,
-                    size,
-                    tags.album_id,
-                    tags.album,
-                    tags.album_artist,
-                    tags.artist,
-                    tags.artist_sort,
-                    tags.year,
-                    tags.disc,
-                    tags.track,
-                    tags.title,
-                    tags.search,
-                    added,
-                ])?;
             }
         }
         tx.commit()?;
@@ -484,39 +578,28 @@ fn scan_with(
     // Forget the files that are gone
     let gone: Vec<Vec<u8>> = known
         .keys()
-        .filter(|path| !present.contains(*path))
+        .filter(|file| !present.contains(*file))
         .cloned()
         .collect();
     if !gone.is_empty() {
-        debug!("Library: {} tracks removed", gone.len());
+        debug!("Library: {} files of tracks removed", gone.len());
         let tx = conn.transaction()?;
         {
-            let mut old_album =
-                tx.prepare("SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL")?;
-            let mut delete = tx.prepare("DELETE FROM tracks WHERE path = ?1")?;
-            for path in &gone {
-                if let Some(id) = old_album
-                    .query_row([path.as_slice()], |row| row.get::<_, String>(0))
-                    .optional()?
-                {
-                    stale_albums.insert(id);
+            let mut old_albums = tx.prepare(
+                "SELECT DISTINCT album_id FROM tracks WHERE file = ?1 AND album_id IS NOT NULL",
+            )?;
+            let mut delete = tx.prepare("DELETE FROM tracks WHERE file = ?1")?;
+            for file in &gone {
+                for id in old_albums.query_map([file.as_slice()], |row| row.get::<_, String>(0))? {
+                    stale_albums.insert(id?);
                 }
-                delete.execute([path.as_slice()])?;
+                n_changed += delete.execute([file.as_slice()])?;
             }
         }
         tx.commit()?;
     }
 
-    update_covers(conn, &stale_albums)?;
-
-    Ok(ScanResult {
-        n_changed: changed.len() + gone.len(),
-        updated: changed
-            .into_iter()
-            .map(|(path, ..)| path)
-            .filter(|path| known.contains_key(path_bytes(path)))
-            .collect(),
-    })
+    Ok((ScanResult { updated, n_changed }, stale_albums))
 }
 
 // When the file last changed, in nanoseconds: unlike the modification
@@ -575,7 +658,7 @@ fn update_covers(conn: &mut Connection, stale_albums: &HashSet<String>) -> rusql
             // newer than the thumbnail, or the album had no cover before. The
             // folder is read once, as albums can share one
             let mut cover_time = || {
-                let dir = first_track.parent()?;
+                let dir = cue_sheet::real_path(&first_track).parent()?;
                 *cover_times
                     .entry(dir.to_path_buf())
                     .or_insert_with(|| cover_file_time(dir))
@@ -656,6 +739,10 @@ fn cover_file_time(dir: &Path) -> Option<std::time::SystemTime> {
 }
 
 fn create_thumbnail(track: &Path, dest: &Path) -> bool {
+    let Some(track) = cue_sheet::audio_path(track) else {
+        return false;
+    };
+    let track = track.as_path();
     // The type of the file is guessed from its contents, as the extension
     // can be wrong, e.g. Opus in an ".ogg" file
     let tagged_file = Probe::open(track)
@@ -684,7 +771,9 @@ fn create_thumbnail(track: &Path, dest: &Path) -> bool {
     }
 }
 
-fn read_tags(path: &Path) -> TrackTags {
+// An audio file's tags, and the items lofty leaves out of them, without
+// the covers and properties, which the library doesn't keep
+fn read_file_tags(path: &Path) -> Option<(lofty::file::TaggedFile, ExtraComments)> {
     let mut options = ParseOptions::new();
     options.read_cover_art(false).read_properties(false);
 
@@ -692,29 +781,77 @@ fn read_tags(path: &Path) -> TrackTags {
         Ok(Ok(p)) => p,
         Ok(Err(e)) => {
             warn!("Unable to parse file type {path:?}: {e}");
-            return TrackTags::default();
+            return None;
         }
         Err(e) => {
             warn!("Unable to open {path:?}: {e}");
-            return TrackTags::default();
+            return None;
         }
     };
     // The extra comments have the descriptions from YouTube, for searching
-    let (tagged_file, extra) = match read_tagged_file(probe, options) {
-        Ok(f) => f,
+    match read_tagged_file(probe, options) {
+        Ok(f) => Some(f),
         Err(e) => {
             warn!("Unable to read {path:?}: {e}");
-            return TrackTags::default();
+            None
         }
-    };
-
-    match tagged_file
-        .primary_tag()
-        .or_else(|| tagged_file.first_tag())
-    {
-        Some(tag) => TrackTags::from_tag(tag, &extra, path),
-        None => TrackTags::default(),
     }
+}
+
+// The tracks of an audio file: the file, or the tracks that the CUE sheet
+// in its tags splits it into
+fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
+    let Some((tagged_file, extra)) = read_file_tags(path) else {
+        return vec![(path.to_path_buf(), TrackTags::default())];
+    };
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
+
+    let sheet = extra
+        .cue_sheet
+        .as_deref()
+        .and_then(|text| SplitSheet::embedded(path, text));
+    if let Some(sheet) = sheet {
+        let album_tag = cue_sheet::album_tag(tag, &sheet.sheet);
+        return sheet
+            .tracks()
+            .map(|(track, _)| cue_track_tags(&sheet, &album_tag, track))
+            .collect();
+    }
+
+    let tags = tag.map_or_else(TrackTags::default, |tag| {
+        TrackTags::from_tag(tag, &extra, path)
+    });
+    vec![(path.to_path_buf(), tags)]
+}
+
+// The tracks that a ".cue" file splits audio files into
+fn read_sheet_tags(
+    sheet: &SplitSheet,
+    tracks: Vec<(&CueTrack, &Path)>,
+) -> Vec<(PathBuf, TrackTags)> {
+    let mut album_tags = HashMap::new();
+    tracks
+        .into_iter()
+        .map(|(track, audio)| {
+            let album_tag = album_tags.entry(audio).or_insert_with(|| {
+                let file = read_file_tags(audio);
+                let tag = file
+                    .as_ref()
+                    .and_then(|(f, _)| f.primary_tag().or_else(|| f.first_tag()));
+                cue_sheet::album_tag(tag, &sheet.sheet)
+            });
+            cue_track_tags(sheet, album_tag, track)
+        })
+        .collect()
+}
+
+fn cue_track_tags(sheet: &SplitSheet, album_tag: &Tag, track: &CueTrack) -> (PathBuf, TrackTags) {
+    let tag = cue_sheet::track_tag(album_tag, &sheet.sheet, track);
+    // The album is in the folder of the sheet
+    let tags = TrackTags::from_tag(&tag, &ExtraComments::default(), &sheet.path);
+    (sheet.location(track), tags)
 }
 
 // MusicBrainz ids are UUIDs; the album id names the file of its cover, so
@@ -831,5 +968,106 @@ mod tests {
         assert!(!is_mbid(""));
         assert!(!is_mbid("../../Pictures/photo"));
         assert!(!is_mbid("/home/user/Pictures/photo"));
+    }
+
+    // A track in the database, with paths from the music folder
+    #[derive(Debug, PartialEq)]
+    struct Row {
+        path: String,
+        file: String,
+        track: Option<u32>,
+        title: Option<String>,
+        added: i64,
+    }
+
+    fn tracks(conn: &rusqlite::Connection, music: &std::path::Path) -> Vec<Row> {
+        let relative = |bytes: Vec<u8>| {
+            path_from_bytes(bytes)
+                .strip_prefix(music)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        let mut stmt = conn
+            .prepare("SELECT path, file, track, title, added FROM tracks ORDER BY path")
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok(Row {
+                path: relative(row.get(0)?),
+                file: relative(row.get(1)?),
+                track: row.get(2)?,
+                title: row.get(3)?,
+                added: row.get(4)?,
+            })
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn the_tracks_of_a_cue_sheet_take_the_place_of_its_file() {
+        use super::{SCHEMA, scan_with};
+        use crate::utils::write_test_wav;
+
+        let music = std::env::temp_dir().join(format!("dismas-library-cue-{}", std::process::id()));
+        std::fs::create_dir_all(music.join("Album")).unwrap();
+        std::fs::create_dir_all(music.join("Other")).unwrap();
+        write_test_wav(&music.join("Album/Album.wav"), 10);
+        write_test_wav(&music.join("Other/Song.wav"), 1);
+        let cue = music.join("Album/Album.cue");
+        std::fs::write(
+            &cue,
+            "TITLE \"Album\"\nFILE \"Album.wav\" WAVE\n\
+             TRACK 01 AUDIO\nTITLE \"One\"\nINDEX 01 00:00:00\n\
+             TRACK 02 AUDIO\nTITLE \"Two\"\nINDEX 01 00:03:00\n",
+        )
+        .unwrap();
+
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        let (sender, _receiver) = async_channel::unbounded();
+
+        let (result, _) = scan_with(&mut conn, &music, &sender).unwrap();
+        assert_eq!(result.n_changed, 3);
+        let found = tracks(&conn, &music);
+        let files: Vec<_> = found
+            .iter()
+            .map(|row| (row.path.as_str(), row.file.as_str()))
+            .collect();
+        assert_eq!(
+            files,
+            vec![
+                ("Album/Album.cue/track01", "Album/Album.cue"),
+                ("Album/Album.cue/track02", "Album/Album.cue"),
+                ("Other/Song.wav", "Other/Song.wav"),
+            ]
+        );
+        let titles: Vec<_> = found
+            .iter()
+            .map(|row| (row.track, row.title.as_deref()))
+            .collect();
+        assert_eq!(
+            titles,
+            vec![(Some(1), Some("One")), (Some(2), Some("Two")), (None, None)]
+        );
+        let added = found[0].added;
+
+        // Nothing changed
+        let (result, _) = scan_with(&mut conn, &music, &sender).unwrap();
+        assert_eq!(result.n_changed, 0);
+
+        // Without the sheet, the file is a track again, added when its
+        // tracks were
+        std::fs::remove_file(&cue).unwrap();
+        let (result, _) = scan_with(&mut conn, &music, &sender).unwrap();
+        assert_eq!(result.n_changed, 3);
+        let found = tracks(&conn, &music);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].path, "Album/Album.wav");
+        assert_eq!(found[0].file, "Album/Album.wav");
+        assert_eq!(found[0].added, added);
+
+        std::fs::remove_dir_all(&music).unwrap();
     }
 }
