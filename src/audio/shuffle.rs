@@ -26,8 +26,9 @@ const FAVORITE_PLAYS: u32 = 10;
 // What the shuffle knows of a track
 #[derive(Clone, Debug, Default)]
 pub struct Entry {
-    // The work and composer of a movement, as in the headers of the queue
-    pub work: Option<(String, String)>,
+    // Whether the track is a movement that continues the work of the
+    // track before it, as in the headers of the queue (`continues_work()`)
+    pub continues_work: bool,
     // The artist that shouldn't come twice in a row: for a movement, the
     // composers. Tracks without one are never the same artist as another
     pub artist: Option<String>,
@@ -87,9 +88,8 @@ fn units(entries: &[Entry], now: i64) -> Vec<Unit> {
     let mut artists: HashMap<String, usize> = HashMap::new();
     let mut units: Vec<Unit> = Vec::new();
     for (pos, entry) in entries.iter().enumerate() {
-        let same_work = entry.work.is_some() && pos > 0 && entries[pos - 1].work == entry.work;
         match units.last_mut() {
-            Some(unit) if same_work => unit.tracks.end = pos + 1,
+            Some(unit) if entry.continues_work => unit.tracks.end = pos + 1,
             _ => {
                 let artist = entry.artist.as_ref().map(|artist| {
                     let next = artists.len();
@@ -285,11 +285,12 @@ mod tests {
         }
     }
 
-    fn movement(work: &str, composer: &str) -> Entry {
-        Entry {
-            work: Some((work.to_string(), composer.to_string())),
-            ..track(composer)
-        }
+    // The movements of a work, each after the first continuing it
+    fn work(movements: usize) -> impl Iterator<Item = Entry> {
+        (0..movements).map(|i| Entry {
+            continues_work: i > 0,
+            ..track("Beethoven")
+        })
     }
 
     // The same tracks, each once
@@ -361,15 +362,9 @@ mod tests {
     fn the_movements_of_a_work_stay_together_in_order() {
         let mut entries: Vec<Entry> = (0..6).map(|i| track(&format!("{i}"))).collect();
         // Two works next to each other, then the first one again
-        entries.splice(
-            2..2,
-            (0..4).map(|_| movement("Symphony No. 5", "Beethoven")),
-        );
-        entries.splice(
-            6..6,
-            (0..3).map(|_| movement("Symphony No. 7", "Beethoven")),
-        );
-        entries.push(movement("Symphony No. 5", "Beethoven"));
+        entries.splice(2..2, work(4));
+        entries.splice(6..6, work(3));
+        entries.extend(work(1));
         let n = entries.len();
 
         let mut apart = false;
@@ -386,9 +381,20 @@ mod tests {
     }
 
     #[test]
+    fn a_work_played_again_is_a_unit_of_its_own() {
+        // Two recordings of a work, or the same one added twice
+        let entries: Vec<Entry> = work(3).chain(work(3)).collect();
+        let units: Vec<Range<usize>> = units(&entries, NOW)
+            .into_iter()
+            .map(|unit| unit.tracks)
+            .collect();
+        assert_eq!(units, [0..3, 3..6]);
+    }
+
+    #[test]
     fn a_kept_movement_keeps_its_work_first() {
         let mut entries: Vec<Entry> = (0..5).map(|i| track(&format!("{i}"))).collect();
-        entries.extend((0..4).map(|_| movement("Symphony No. 5", "Beethoven")));
+        entries.extend(work(4));
         for seed in 0..20 {
             let order = shuffled_order(&entries, Some(6), NOW, &mut seeded(seed));
             assert_eq!(order[..4], [5, 6, 7, 8]);

@@ -170,6 +170,11 @@ All notable changes to this project will be documented in this file.
   off on some screens
 - The playlist pane's title moved off-center in a narrow pane, when the
   time left under it was long
+- A work's movements were split under several headers when some of them
+  credited other composers too, such as the hymn's author in the chorale
+  of a Bach cantata, or Süßmayr in Mozart's Requiem
+- Two recordings of a work one after the other, or a work added twice,
+  were shown under one header, and shuffled as one
 
 ### Removed
 

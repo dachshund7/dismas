@@ -109,6 +109,11 @@ pub struct TrackCredits {
     // on separate lines, as the movement would be cut off
     pub movement_levels: Option<(String, String)>,
     pub composers: Vec<String>,
+    // The composers of the work, from the "Work Hierarchy" plugin; empty
+    // if it didn't record them. Its movements can credit others too, e.g.
+    // the author of the hymn in a chorale of a Bach cantata, or Süßmayr in
+    // the movements of Mozart's Requiem he completed
+    pub work_composers: Vec<String>,
     pub lyricists: Vec<String>,
     pub arrangers: Vec<String>,
     pub conductors: Vec<String>,
@@ -196,6 +201,7 @@ impl TrackCredits {
             movement,
             partial,
             movement_position,
+            composers,
         }) = extra
             .work_hierarchy
             .as_deref()
@@ -231,6 +237,7 @@ impl TrackCredits {
             };
             credits.work_title = (title != work).then_some(title);
             credits.work = Some(work);
+            credits.work_composers = composers;
             credits.movement = movement.as_ref().map(MovementName::full);
             credits.movement_number = None;
             credits.movement_levels =
@@ -250,6 +257,7 @@ impl TrackCredits {
                 .map(ToString::to_string),
             movement_levels: None,
             composers: tag_strings(tag, ItemKey::Composer),
+            work_composers: Vec::new(),
             lyricists: tag_strings(tag, ItemKey::Lyricist),
             arrangers: tag_strings(tag, ItemKey::Arranger),
             conductors: tag_strings(tag, ItemKey::Conductor),
@@ -772,6 +780,8 @@ struct PathWork<'a> {
     position: Option<u32>,
     // The number of parts of the work, 0 if the plugin didn't record it
     part_total: u64,
+    // The names of its composers; `None` if the plugin didn't record them
+    composers: Option<Vec<&'a str>>,
 }
 
 impl PathWork<'_> {
@@ -817,6 +827,9 @@ struct WorkLabels {
     partial: bool,
     // The position of the movement, if the track performs a single one
     movement_position: Option<u32>,
+    // The composers of the work, or of the nearest work above it with
+    // some; empty if none has any
+    composers: Vec<String>,
 }
 
 // The work and the movement to display, from the JSON written by the
@@ -860,6 +873,12 @@ fn work_hierarchy_labels(json: &str, movement_number: Option<&str>) -> Option<Wo
                             .as_u64()
                             .and_then(|p| u32::try_from(p).ok()),
                         part_total: work["part_total"].as_u64().unwrap_or(0),
+                        composers: work["composers"].as_array().map(|composers| {
+                            composers
+                                .iter()
+                                .filter_map(|composer| composer["name"].as_str())
+                                .collect()
+                        }),
                     })
                 })
                 .collect::<Option<Vec<_>>>()
@@ -919,12 +938,21 @@ fn work_hierarchy_labels(json: &str, movement_number: Option<&str>) -> Option<Wo
             .and_then(|movement| movement.position),
         _ => None,
     };
+    // MusicBrainz often links the composer to a work but not to its parts
+    let composers = first[..=depth]
+        .iter()
+        .rev()
+        .filter_map(|work| work.composers.as_ref())
+        .find(|composers| !composers.is_empty())
+        .map(|composers| composers.iter().map(ToString::to_string).collect())
+        .unwrap_or_default();
     Some(WorkLabels {
         work: work.name.to_string(),
         title: work.title.to_string(),
         movement: (!parts.is_empty()).then(|| movement_name(&parts)),
         partial,
         movement_position,
+        composers,
     })
 }
 
@@ -2379,6 +2407,46 @@ impl Track {
         self.imp().composer()
     }
 
+    // The composers of the work a movement is part of, which all its
+    // movements share, or `composer()` if the tags don't say
+    pub fn work_composers(&self) -> String {
+        let composers = self.imp().data.borrow().credits().work_composers.join(", ");
+        if composers.is_empty() {
+            self.composer()
+        } else {
+            composers
+        }
+    }
+
+    // The release the track is from: its MusicBrainz id, or else its album
+    // and album artist
+    pub fn release_key(&self) -> String {
+        let data = self.imp().data.borrow();
+        let credits = data.credits();
+        match &credits.musicbrainz.release {
+            Some(id) => id.clone(),
+            None => format!(
+                "{}\0{}",
+                data.shown_album(),
+                credits.album_artist.as_deref().unwrap_or_default()
+            ),
+        }
+    }
+
+    // Whether the track comes after another on their album, by disc and
+    // track number, or else whether it's another track
+    pub fn follows_on_album(&self, other: &Track) -> bool {
+        let position = |track: &Track| {
+            let data = track.imp().data.borrow();
+            let credits = data.credits();
+            Some((credits.disc_number.unwrap_or(1), credits.track_number?))
+        };
+        match (position(other), position(self)) {
+            (Some(before), Some(after)) => after > before,
+            _ => self.uri() != other.uri(),
+        }
+    }
+
     // The artist that shuffling keeps from coming twice in a row: the
     // composers of a movement, as its work shows them, and otherwise the
     // artist in the tags
@@ -2447,8 +2515,8 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        Credit, ExtraComments, MovementName, MusicBrainzIds, TrackCredits, TrackData, WorkLabels,
-        album_title_search_text, catalogue_numbers, is_numbered, normalize_search_text,
+        Credit, ExtraComments, MovementName, MusicBrainzIds, Track, TrackCredits, TrackData,
+        WorkLabels, album_title_search_text, catalogue_numbers, is_numbered, normalize_search_text,
         position_ranges, tag_search_text, title_from_name, track_album, track_title,
         work_hierarchy_composer_ids, work_hierarchy_labels,
     };
@@ -2881,6 +2949,7 @@ mod tests {
                 }),
                 partial: false,
                 movement_position: Some(2),
+                composers: Vec::new(),
             })
         );
         // A whole Prelude and Fugue in one track is a work, not a movement
@@ -3272,6 +3341,128 @@ mod tests {
             work_hierarchy_composer_ids(&json.to_string()),
             Some(vec!["bbbb".to_string(), "cccc".to_string()])
         );
+    }
+
+    #[test]
+    fn work_composers_are_those_of_the_work_not_the_movement() {
+        let work = |id: &str, name: &str, part_total: u64, composers: serde_json::Value| {
+            serde_json::json!({
+                "id": id, "title": name, "name": name, "position": null,
+                "part_total": part_total, "composers": composers,
+            })
+        };
+        let composers = |path: Vec<serde_json::Value>| {
+            let json = serde_json::json!({ "version": 1, "segments": [{ "path": path }] });
+            work_hierarchy_labels(&json.to_string(), None).map(|labels| labels.composers)
+        };
+        let vivaldi = serde_json::json!([{ "id": "aaaa", "name": "Antonio Vivaldi" }]);
+
+        // MusicBrainz credits Bottesini on two movements of RV 531, which
+        // would split the work in the queue
+        assert_eq!(
+            composers(vec![
+                work(
+                    "rv531",
+                    "Concerto for Two Cellos in G minor, RV 531",
+                    3,
+                    vivaldi
+                ),
+                work(
+                    "largo",
+                    "Largo",
+                    0,
+                    serde_json::json!([
+                        { "id": "bbbb", "name": "Giovanni Bottesini" },
+                        { "id": "aaaa", "name": "Antonio Vivaldi" },
+                    ]),
+                ),
+            ]),
+            Some(vec!["Antonio Vivaldi".to_string()])
+        );
+
+        // A part of a collection that is the work has its own, or else
+        // those of the nearest work above it with some
+        let bach = serde_json::json!([{ "id": "cccc", "name": "Johann Sebastian Bach" }]);
+        let wtc = |pf_composers| {
+            composers(vec![
+                work("wtc", "The Well-Tempered Clavier", 2, bach.clone()),
+                work("book1", "Book I", 24, serde_json::json!([])),
+                work(
+                    "bwv846",
+                    "Prelude and Fugue no. 1 in C major, BWV 846",
+                    2,
+                    pf_composers,
+                ),
+                work("f", "Fugue", 0, serde_json::Value::Null),
+            ])
+        };
+        let anon = serde_json::json!([{ "id": "dddd", "name": "Anonymous" }]);
+        assert_eq!(wtc(anon), Some(vec!["Anonymous".to_string()]));
+        assert_eq!(
+            wtc(serde_json::Value::Null),
+            Some(vec!["Johann Sebastian Bach".to_string()])
+        );
+
+        // And none if no work has any
+        assert_eq!(
+            composers(vec![
+                work(
+                    "fvb",
+                    "Fitzwilliam Virginal Book",
+                    297,
+                    serde_json::json!([])
+                ),
+                work("walsingham", "Walsingham", 0, serde_json::Value::Null),
+            ]),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn a_movement_continues_its_work_in_the_order_of_its_album() {
+        use crate::work_sections::continues_work;
+
+        let movement = |release: &str, track: Option<u32>, composers: &[&str], file: &str| {
+            Track::new(TrackData {
+                credits: TrackCredits {
+                    work: Some("Concerto for Two Cellos in G minor, RV 531".to_string()),
+                    movement: Some("Allegro".to_string()),
+                    composers: composers.iter().map(ToString::to_string).collect(),
+                    work_composers: vec!["Antonio Vivaldi".to_string()],
+                    track_number: track,
+                    musicbrainz: MusicBrainzIds {
+                        release: Some(release.to_string()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                file: gtk::gio::File::for_path(file),
+                ..Default::default()
+            })
+        };
+        let vivaldi = ["Antonio Vivaldi"];
+        let bottesini = ["Giovanni Bottesini", "Antonio Vivaldi"];
+        let x2 = [
+            movement("x2", Some(4), &vivaldi, "/x2/04.opus"),
+            movement("x2", Some(5), &bottesini, "/x2/05.opus"),
+            movement("x2", Some(6), &bottesini, "/x2/06.opus"),
+        ];
+
+        // Whatever else its movements credit
+        assert!(continues_work(&x2[0], &x2[1]));
+        assert!(continues_work(&x2[1], &x2[2]));
+        // Not another recording
+        let bizarri = movement("bizarri", Some(11), &vivaldi, "/bizarri/11.opus");
+        assert!(!continues_work(&x2[2], &bizarri));
+        // Nor the work added again
+        assert!(!continues_work(&x2[2], &x2[0]));
+        assert!(!continues_work(&x2[1], &x2[1]));
+
+        // Without track numbers, only the same track again
+        let a = movement("x2", None, &vivaldi, "/x2/a.opus");
+        let b = movement("x2", None, &vivaldi, "/x2/b.opus");
+        assert!(continues_work(&a, &b));
+        assert!(!continues_work(&a, &a));
     }
 
     #[test]

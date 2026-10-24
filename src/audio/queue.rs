@@ -15,7 +15,7 @@ use crate::{
         shuffle::{Entry, shuffled_order},
     },
     play_stats::TrackStats,
-    work_sections::work_key,
+    work_sections::continues_work,
 };
 
 mod imp {
@@ -232,8 +232,9 @@ impl Queue {
         let tracks = self.tracks();
         let entries: Vec<Entry> = tracks
             .iter()
-            .map(|track| Entry {
-                work: work_key(track),
+            .enumerate()
+            .map(|(pos, track)| Entry {
+                continues_work: pos > 0 && continues_work(&tracks[pos - 1], track),
                 artist: track.shuffle_artist(),
                 stats: stats.get(&track.uri()).copied(),
             })

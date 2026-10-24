@@ -5,7 +5,9 @@
 // work into sections, so that the queue can separate the works.
 // The order of the tracks is not changed: if the movements of a work are not
 // next to each other, for instance after moving some of them, each run of
-// movements gets its own section.
+// movements gets its own section. So does each recording of the work, and
+// each time it's played again: a movement that doesn't come after the one
+// above it on their album starts a new section.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -59,15 +61,13 @@ mod imp {
                 return (n_items, u32::MAX);
             }
 
-            let key = section_key(model, position);
-
             let mut start = position;
-            while start > 0 && section_key(model, start - 1) == key {
+            while start > 0 && same_section(model, start) {
                 start -= 1;
             }
 
             let mut end = position + 1;
-            while end < n_items && section_key(model, end) == key {
+            while end < n_items && same_section(model, end) {
                 end += 1;
             }
 
@@ -107,18 +107,38 @@ impl WorkSectionModel {
     }
 }
 
-// The section of a track; all the tracks that are not movements share the
-// same key, so consecutive ones end up in a single section
-fn section_key(model: &gio::ListModel, position: u32) -> Option<(String, String)> {
-    work_key(&model.item(position)?.downcast::<Track>().ok()?)
+// Whether the track at `position` is in the same section as the one before
+// it: a movement that continues the work of the one before it, or two
+// tracks that are not movements, so that consecutive ones end up in a
+// single section
+fn same_section(model: &gio::ListModel, position: u32) -> bool {
+    let track = |position| model.item(position).and_downcast::<Track>();
+    let (Some(previous), Some(track)) = (track(position - 1), track(position)) else {
+        return false;
+    };
+    continues_work(&previous, &track)
+        || (previous.movement_work().is_none() && track.movement_work().is_none())
 }
 
-// The work and composer of a movement, which the queue shows over the
-// movements of the same work next to each other, and the shuffle moves
-// together
-pub fn work_key(track: &Track) -> Option<(String, String)> {
+// The work of a movement, the composers of the work and the release the
+// movement is from. The composers are the work's, which all its movements
+// share: a movement can credit others too, e.g. the author of the hymn in
+// a chorale of a Bach cantata. The header shows the first movement's own,
+// as MusicBrainz sometimes credits a work to someone else, e.g. Bach's BWV
+// 981 to Marcello, whose concerto it arranges
+fn work_key(track: &Track) -> Option<(String, String, String)> {
     let work = track.movement_work()?;
-    Some((work, track.composer()))
+    Some((work, track.work_composers(), track.release_key()))
+}
+
+// Whether a movement continues the work of the track before it, so that
+// the queue shows them under one header, and the shuffle moves them
+// together: the same work by the same composers, from the same release, and
+// later on the album. Two recordings of the work one after the other are
+// apart, and so is the work added twice
+pub fn continues_work(previous: &Track, track: &Track) -> bool {
+    work_key(track).is_some_and(|key| work_key(previous) == Some(key))
+        && track.follows_on_album(previous)
 }
 
 // The headers of the sections in the queue: a line between each section,
