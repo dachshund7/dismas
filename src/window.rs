@@ -133,6 +133,11 @@ mod imp {
         pub queue_shuffled: Cell<bool>,
         #[property(get, set = Self::set_playlist_visible, explicit_notify)]
         pub playlist_visible: Cell<bool>,
+        // The same, as the user shows and hides the pane, with the pane
+        // button, F9 and Esc, which is kept for the next start; the pane
+        // also opens by itself, e.g. to show the tracks added
+        #[property(name = "user-playlist-visible", get = Self::user_playlist_visible, set = Self::set_user_playlist_visible, explicit_notify, type = bool)]
+        user_playlist_visible: std::marker::PhantomData<bool>,
         #[property(get, set = Self::set_queue_selection, explicit_notify)]
         pub queue_selection: Cell<bool>,
         // The last track selected or unselected with a click, where
@@ -377,13 +382,13 @@ mod imp {
                     return glib::Propagation::Stop;
                 }
                 if win.playlist_visible() && !win.imp().split_view.is_collapsed() {
-                    win.set_playlist_visible(false);
+                    win.set_user_playlist_visible(false);
                     return glib::Propagation::Stop;
                 }
                 glib::Propagation::Proceed
             });
 
-            klass.install_property_action("queue.toggle", "playlist-visible");
+            klass.install_property_action("queue.toggle", "user-playlist-visible");
             klass.install_property_action("queue.shuffle", "queue-shuffled");
             klass.install_property_action("queue.select", "queue-selection");
             klass.install_property_action("queue.search", "queue-search");
@@ -423,6 +428,7 @@ mod imp {
                 narrow_breakpoint: TemplateChild::default(),
                 queue_shuffled: Cell::new(false),
                 playlist_visible: Cell::new(true),
+                user_playlist_visible: std::marker::PhantomData,
                 queue_selection: Cell::new(false),
                 queue_anchor: glib::WeakRef::new(),
                 queue_search: Cell::new(false),
@@ -536,6 +542,25 @@ mod imp {
             if visible != self.playlist_visible.replace(visible) {
                 self.split_view.set_show_sidebar(visible);
                 self.obj().notify_playlist_visible();
+                self.obj().notify_user_playlist_visible();
+            }
+        }
+
+        fn user_playlist_visible(&self) -> bool {
+            self.playlist_visible.get()
+        }
+
+        // In the collapsed split view, the pane covers the player for a
+        // while, and what's kept is whether it shows once the window is
+        // wide again
+        fn set_user_playlist_visible(&self, visible: bool) {
+            let obj = self.obj();
+            obj.set_playlist_visible(visible);
+            if !self.split_view.is_collapsed()
+                && self.settings.boolean("playlist-visible") != visible
+                && let Err(e) = self.settings.set_boolean("playlist-visible", visible)
+            {
+                debug!("Unable to store playlist-visible: {e}");
             }
         }
 
@@ -971,6 +996,21 @@ impl Window {
         let width = settings.int("window-width");
         let height = settings.int("window-height");
         self.set_default_size(width, height);
+        self.set_playlist_visible(settings.boolean("playlist-visible"));
+    }
+
+    // When the window is closed, and when quitting, which doesn't close it;
+    // the playlist pane is stored when the user shows or hides it
+    pub fn save_window_state(&self) {
+        debug!("Saving window state");
+        let (width, height) = self.default_size();
+        let settings = &self.imp().settings;
+        settings
+            .set_int("window-width", width)
+            .expect("Unable to store window-width");
+        settings
+            .set_int("window-height", height)
+            .expect("Unable to store window-height");
     }
 
     // The music folders are read again once the dialog is closed, if they

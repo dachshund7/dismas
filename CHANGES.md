@@ -34,7 +34,8 @@ All notable changes to this project will be documented in this file.
 - Music folders, in Preferences, to show albums from other folders than
   the Music folder, like a second drive; while a folder isn't there, its
   albums are hidden, and they come back without being read again
-- Remember the volume and the repeat mode
+- Remember the volume, the repeat mode, and whether the playlist pane is
+  open
 - The track menu has Open Directory, and in the playlist pane Remove,
   which removes all the selected tracks when the track is one of them;
   Go to Album is only in the playlist pane, as an album's tracks are
@@ -110,6 +111,8 @@ All notable changes to this project will be documented in this file.
 - GLib warnings when nothing was left to play
 - GTK themes installed for libadwaita apps, like Colloid, drew the outlines
   and corners of their cards on the covers of the track rows
+- The window's size wasn't saved when quitting with Ctrl+Q, only when
+  closing the window
 
 ### Removed
 

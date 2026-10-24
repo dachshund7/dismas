@@ -393,17 +393,7 @@ impl Window {
             .replace(Some(notify_high_contrast_id));
 
         self.connect_close_request(move |window| {
-            debug!("Saving window state");
-            let width = window.default_size().0;
-            let height = window.default_size().1;
-
-            let settings = utils::settings_manager();
-            settings
-                .set_int("window-width", width)
-                .expect("Unable to store window-width");
-            settings
-                .set_int("window-height", height)
-                .expect("Unable to stop window-height");
+            window.save_window_state();
 
             // While playing in the background, the window only hides, so
             // that it comes back as it was, without reading the albums

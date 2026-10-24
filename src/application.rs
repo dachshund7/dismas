@@ -126,6 +126,12 @@ mod imp {
         }
 
         fn shutdown(&self) {
+            // Quitting doesn't close the window, which saves its state then
+            for window in self.obj().windows() {
+                if let Ok(window) = window.downcast::<Window>() {
+                    window.save_window_state();
+                }
+            }
             self.obj().save_resume_point();
             // The settings are written in the background, which would
             // stop with the process

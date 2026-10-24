@@ -144,7 +144,10 @@ impl Window {
         }
 
         self.set_loading(true);
-        self.set_playlist_visible(true);
+        // At startup, the pane is as the user last showed or hid it
+        if !(mode == QueueMode::Restore && self.imp().starting.get()) {
+            self.set_playlist_visible(true);
+        }
 
         // Begin the trace
         let now = Instant::now();
