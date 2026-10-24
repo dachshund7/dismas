@@ -102,6 +102,12 @@ All notable changes to this project will be documented in this file.
   the performers, the player and the queue show the performers from the
   album artist, such as "Kammerchor Stuttgart & Frieder Bernius" from
   "Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius"
+- When a track's tags credit an orchestra, a choir, a string quartet or
+  another group, the player and the queue name the group and its soloists
+  rather than every player, such as "Adrian Chandler · La Serenissima":
+  the soloists are those marked solo or named in the album artist, and up
+  to four singers. A track that names more than five players and no group
+  shows the performers in the album artist instead
 - With the tags of the Work Hierarchy plugin, a part of a collection that
   has its own catalogue number, such as each Prelude and Fugue of The
   Well-Tempered Clavier (BWV 846, BWV 847, …), is a work of its own, with

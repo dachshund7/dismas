@@ -63,7 +63,34 @@ impl Credit {
             role: None,
         }
     }
+
+    // A soloist, by the role MusicBrainz gives one, e.g. "solo violin",
+    // "soprano solo" or "soloist"
+    fn is_soloist(&self) -> bool {
+        self.role
+            .as_deref()
+            .is_some_and(|r| r.to_lowercase().contains("solo"))
+    }
+
+    // A singer, e.g. "soprano vocals", but not a choir
+    fn is_singer(&self) -> bool {
+        self.role
+            .as_deref()
+            .is_some_and(|r| r.ends_with("vocals") && !GROUP_ROLES.contains(&r))
+    }
 }
+
+// The roles Picard gives a group rather than a player, e.g. "La
+// Serenissima (orchestra)" or "Vogler Quartett (string quartet)". It gives
+// "instruments" to both, so that one is left to `TrackCredits::is_group`
+const GROUP_ROLES: [&str; 6] = [
+    "orchestra",
+    "string quartet",
+    "ensemble",
+    "musical ensemble",
+    "choir",
+    "choir vocals",
+];
 
 // The additional credits and release information in the tags, mostly
 // relevant for classical music
@@ -297,8 +324,6 @@ impl TrackCredits {
         Some(self.composers.join(", "))
     }
 
-    // A single line with the conductors and performers, skipping the
-    // names that are already displayed as the artist
     // The movement, with its number if any, e.g. "2. Adagio"; only set if
     // the track is part of a larger work, as tagged by MusicBrainz Picard's
     // "Work & Movement" or "Work Hierarchy" plugins
@@ -369,19 +394,109 @@ impl TrackCredits {
         }
     }
 
+    // Whether the album artist names someone, as a release credits there
+    // its soloists and the groups that play it
+    fn album_artist_names(&self, name: &str) -> bool {
+        self.album_artist
+            .as_deref()
+            .is_some_and(|a| a.contains(name))
+    }
+
+    // Whether a performer is a group rather than a player. Picard gives
+    // "instruments" to both, e.g. "The Purcell Quartet (instruments)" and
+    // a single player of the Royal Swedish Navy Band, so it only counts
+    // when the album artist names the performer
+    fn is_group(&self, performer: &Credit) -> bool {
+        match performer.role.as_deref() {
+            Some("instruments") => self.album_artist_names(&performer.name),
+            Some(role) => GROUP_ROLES.contains(&role),
+            None => false,
+        }
+    }
+
+    // The performers to name in the credits line. Picard lists every
+    // player of a group with it, e.g. the nineteen of "La Serenissima
+    // (orchestra)" or the four of "Vogler Quartett (string quartet)", so
+    // with a group, only the soloists are named, before the groups: those
+    // marked solo, those the album artist names, and the singers if there
+    // are at most four, like the soloists of a mass, as the members of a
+    // vocal ensemble are credited as singers too
+    fn featured_performers(&self) -> Vec<&Credit> {
+        if !self.performers.iter().any(|p| self.is_group(p)) {
+            return self.performers.iter().collect();
+        }
+        let singers = self
+            .performers
+            .iter()
+            .filter(|p| p.is_singer())
+            .map(|p| &p.name)
+            .unique()
+            .count();
+        let (groups, soloists): (Vec<_>, Vec<_>) = self
+            .performers
+            .iter()
+            .filter(|p| {
+                self.is_group(p)
+                    || p.is_soloist()
+                    || self.album_artist_names(&p.name)
+                    || (p.is_singer() && singers <= 4)
+            })
+            .partition(|p| self.is_group(p));
+        soloists.into_iter().chain(groups).collect()
+    }
+
+    // The performers in the album artist, in place of a list of more than
+    // five players with no group, e.g. "Ensemble Zefiro, Alfredo
+    // Bernardini" for the fourteen players of a wind band on "Wolfgang
+    // Amadeus Mozart; Ensemble Zefiro, Alfredo Bernardini"; the players of
+    // a quintet still fit in the line, and larger groups are usually
+    // orchestras. They're after the last semicolon, or the whole album
+    // artist if it has none and doesn't name a composer, e.g. "Sol
+    // Gabetta"
+    fn ensemble_in_album_artist(&self) -> Option<&str> {
+        let players = self.performers.iter().map(|p| &p.name).unique().count();
+        if players <= 5 || self.performers.iter().any(|p| self.is_group(p)) {
+            return None;
+        }
+        let album_artist = self.album_artist.as_deref()?;
+        let performers = match album_artist.rsplit_once(';') {
+            Some((_, performers)) => performers.trim(),
+            None if self
+                .composers
+                .iter()
+                .any(|c| names_composer(album_artist, c)) =>
+            {
+                return None;
+            }
+            None => album_artist.trim(),
+        };
+        (!performers.is_empty() && performers != "Various Artists").then_some(performers)
+    }
+
+    // A single line with the conductors and performers, skipping the
+    // names that are already displayed as the artist; the performers are
+    // the featured ones, or the ones in the album artist in place of a
+    // long list of players
     pub fn summary(&self, artist: Option<&str>) -> String {
+        let ensemble = self.ensemble_in_album_artist();
         let conductors = self
             .conductors
             .iter()
-            .filter(|c| Some(c.as_str()) != artist)
+            .filter(|c| {
+                Some(c.as_str()) != artist && !ensemble.is_some_and(|e| e.contains(c.as_str()))
+            })
             .join(", ");
-        let performers = self
-            .performers
-            .iter()
-            .map(|p| p.name.as_str())
-            .filter(|name| Some(*name) != artist && !self.conductors.iter().any(|c| c == name))
-            .unique()
-            .join(", ");
+        let performers = match ensemble {
+            Some(ensemble) if Some(ensemble) == artist => String::new(),
+            Some(ensemble) => ensemble.to_string(),
+            None => self
+                .featured_performers()
+                .into_iter()
+                .map(|p| p.name.as_str())
+                .filter(|name| Some(*name) != artist && !self.conductors.iter().any(|c| c == name))
+                .unique()
+                .join(", "),
+        };
 
         [conductors, performers]
             .iter()
@@ -3298,6 +3413,218 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(savall.performers_of_composer(Some("Jordi Savall")), None);
+    }
+
+    #[test]
+    fn groups_are_named_in_place_of_their_players() {
+        let credits = |album_artist: &str, conductors: &[&str], performers: &[&str]| TrackCredits {
+            album_artist: Some(album_artist.to_string()),
+            conductors: conductors.iter().map(ToString::to_string).collect(),
+            performers: performers.iter().map(|p| Credit::parse(p)).collect(),
+            ..Default::default()
+        };
+
+        // The orchestra stands for its players, with the soloist, who
+        // conducts too
+        let concerto = credits(
+            "Antonio Vivaldi; La Serenissima, Adrian Chandler",
+            &["Adrian Chandler"],
+            &[
+                "Robin Bigwood (harpsichord)",
+                "Robin Bigwood (organ)",
+                "Lynda Sayce (theorbo)",
+                "Abel Balazs (violin)",
+                "Ellen Bundy (violin)",
+                "Carina Drury (cello)",
+                "Adrian Chandler (solo violin)",
+                "Sam Kennedy (viola)",
+                "Jan Zahourek (double bass)",
+                "La Serenissima (orchestra)",
+            ],
+        );
+        assert_eq!(
+            concerto.summary(Some("Antonio Vivaldi")),
+            "Adrian Chandler · La Serenissima"
+        );
+
+        // The soloists of a double concerto, before the orchestra
+        let horns = credits(
+            "Antonio Vivaldi; Adrian Chandler, La Serenissima",
+            &["Adrian Chandler"],
+            &[
+                "La Serenissima (orchestra)",
+                "Abel Balazs (violin)",
+                "Jocelyn Lightfoot (solo horn)",
+                "Anneke Scott (solo horn)",
+            ],
+        );
+        assert_eq!(
+            horns.summary(Some("Antonio Vivaldi")),
+            "Adrian Chandler · Jocelyn Lightfoot, Anneke Scott, La Serenissima"
+        );
+
+        // A soloist that isn't marked solo is in the album artist
+        let cello = credits(
+            "Antonín Dvořák; Czech Philharmonic, Jiří Bělohlávek, Alisa Weilerstein",
+            &["Jiří Bělohlávek"],
+            &["Česká filharmonie (orchestra)", "Alisa Weilerstein (cello)"],
+        );
+        assert_eq!(
+            cello.summary(Some("Antonín Dvořák")),
+            "Jiří Bělohlávek · Alisa Weilerstein, Česká filharmonie"
+        );
+
+        // A quartet stands for its members, but not for its guests
+        let quartet = credits(
+            "Franz Schubert; Pavel Haas Quartet, Danjulo Ishizaka",
+            &[],
+            &[
+                "Pavel Haas Quartet (string quartet)",
+                "Peter Jarůšek (cello)",
+                "Veronika Jarůšková (violin)",
+                "Marek Zwiebel (violin)",
+                "Pavel Nikl (viola)",
+            ],
+        );
+        assert_eq!(
+            quartet.summary(Some("Franz Schubert")),
+            "Pavel Haas Quartet"
+        );
+        let sextet = credits(
+            "Johannes Brahms; Belcea Quartet, Tabea Zimmermann, Jean‐Guihen Queyras",
+            &[],
+            &[
+                "Belcea Quartet (string quartet)",
+                "Corina Belcea (violin)",
+                "Axel Schacher (violin)",
+                "Krzysztof Chorzelski (viola)",
+                "Tabea Zimmermann (viola)",
+                "Antoine Lederlin (cello)",
+                "Jean‐Guihen Queyras (cello)",
+            ],
+        );
+        assert_eq!(
+            sextet.summary(Some("Johannes Brahms")),
+            "Tabea Zimmermann, Jean‐Guihen Queyras, Belcea Quartet"
+        );
+
+        // Up to four singers are soloists
+        let stabat_mater = credits(
+            "Antonín Dvořák; Collegium Vocale Gent, Antwerp Symphony Orchestra, Philippe Herreweghe",
+            &["Philippe Herreweghe"],
+            &[
+                "Antwerp Symphony Orchestra (orchestra)",
+                "Florian Boesch (bass vocals)",
+                "Collegium Vocale Gent (choir vocals)",
+                "Ilse Eerens (soprano vocals)",
+                "Maximilian Schmitt (tenor vocals)",
+                "Michaela Selinger (mezzo-soprano vocals)",
+            ],
+        );
+        assert_eq!(
+            stabat_mater.summary(Some("Antonín Dvořák")),
+            "Philippe Herreweghe · Florian Boesch, Ilse Eerens, Maximilian Schmitt, \
+             Michaela Selinger, Antwerp Symphony Orchestra, Collegium Vocale Gent"
+        );
+        // More are the members of a vocal ensemble
+        let motet = credits(
+            "Giovanni Pierluigi da Palestrina; Stile Antico",
+            &[],
+            &[
+                "James Arthur (bass vocals)",
+                "Nathan Harrison (bass vocals)",
+                "Emma Ashby (alto vocals)",
+                "Cara Curran (alto vocals)",
+                "Helen Ashby (soprano vocals)",
+                "Andrew Griffiths (tenor vocals)",
+                "Stile Antico (choir vocals)",
+            ],
+        );
+        assert_eq!(
+            motet.summary(Some("Giovanni Pierluigi da Palestrina")),
+            "Stile Antico"
+        );
+
+        // "instruments" is a group's when the album artist names it
+        let sonata = credits(
+            "Arcangelo Corelli; The Purcell Quartet",
+            &[],
+            &[
+                "Richard Boothby (cello)",
+                "Catherine Mackintosh (violin)",
+                "Elizabeth Wallfisch (violin)",
+                "The Purcell Quartet (instruments)",
+                "Robert Woolley (organ)",
+            ],
+        );
+        assert_eq!(
+            sonata.summary(Some("Arcangelo Corelli")),
+            "The Purcell Quartet"
+        );
+
+        // Without a group, the album artist names the performers of a long
+        // list, and its conductor isn't named twice
+        let players = [
+            "Elin Fleischer (concertmaster)",
+            "Jörgen Ådvall (tuba)",
+            "Simon Fröh (tuba)",
+            "Bo Åhgren (wind instruments)",
+            "Per Fastrup (wind instruments)",
+            "Carl‐Johan Andersson (instruments)",
+            "Ebba Eriksson (clarinet)",
+        ];
+        let march = credits(
+            "Carl Teike; The Royal Swedish Navy Band, Alexander Hanson",
+            &["Alexander Hanson"],
+            &players,
+        );
+        assert_eq!(
+            march.summary(Some("Carl Teike")),
+            "The Royal Swedish Navy Band, Alexander Hanson"
+        );
+        // Or the whole album artist, if it has no composer
+        let romanesca = credits("Sol Gabetta", &["Dmitry Smirnov"], &players);
+        assert_eq!(
+            romanesca.summary(Some("[anonymous]")),
+            "Dmitry Smirnov · Sol Gabetta"
+        );
+        // But not if it names the composer, or nobody
+        let various = credits("Various Artists", &[], &players[..6]);
+        assert_eq!(
+            various.summary(None),
+            "Elin Fleischer, Jörgen Ådvall, Simon Fröh, Bo Åhgren, Per Fastrup, \
+             Carl‐Johan Andersson"
+        );
+        let zefiro = TrackCredits {
+            composers: vec!["Ludwig van Beethoven".to_string()],
+            ..credits("Ludwig van Beethoven, Ensemble Zefiro", &[], &players[..6])
+        };
+        assert_eq!(zefiro.summary(None), various.summary(None));
+        // The players of a quintet still fit
+        let quintet = credits("Anton Eberl; Consortium Classicum", &[], &players[..5]);
+        assert_eq!(
+            quintet.summary(Some("Anton Eberl")),
+            "Elin Fleischer, Jörgen Ådvall, Simon Fröh, Bo Åhgren, Per Fastrup"
+        );
+
+        // Copy names the same performers
+        let allegro = TrackData {
+            title: Some(
+                "Concerto VII for Violin, Strings and Continuo in D minor, RV 242: Allegro"
+                    .to_string(),
+            ),
+            artist: Some("Antonio Vivaldi".to_string()),
+            credits: TrackCredits {
+                composers: vec!["Antonio Vivaldi".to_string()],
+                ..concerto
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            allegro.copied_details(),
+            "Concerto VII for Violin, Strings and Continuo in D minor, RV 242: Allegro — \
+             Antonio Vivaldi; Adrian Chandler · La Serenissima"
+        );
     }
 
     #[test]
