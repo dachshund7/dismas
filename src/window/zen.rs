@@ -19,7 +19,9 @@ impl Window {
     // once the pointer leaves the window, focused or not: with focus following
     // the pointer, the window keeps the focus when the pointer goes to an empty
     // part of the screen. They come back when the pointer enters the window,
-    // or when it gets the focus, and on touchscreens with a tap
+    // or when it gets the focus, and on touchscreens with a tap. In
+    // fullscreen, which the pointer can't leave, they always fade out once
+    // the pointer stays still, and the pointer hides with them
     pub(super) fn setup_zen_mode(&self) {
         let imp = self.imp();
 
@@ -42,9 +44,16 @@ impl Window {
         motion.connect_motion(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, _, _| {
+            move |_, x, y| {
                 let imp = win.imp();
-                if imp.zen_timeout.borrow().is_some() || imp.main_box.zen_progress() > 0.0 {
+                // Each move starts the wait again; X11 can send a motion
+                // without one, which doesn't count
+                if win.is_fullscreen() {
+                    if imp.zen_pointer.replace(Some((x, y))) != Some((x, y)) {
+                        win.show_controls();
+                        win.update_zen();
+                    }
+                } else if imp.zen_timeout.borrow().is_some() || imp.main_box.zen_progress() > 0.0 {
                     win.show_controls();
                 }
             }
@@ -78,6 +87,24 @@ impl Window {
         });
         self.connect_playlist_visible_notify(Self::update_zen);
         self.connect_page_notify(Self::update_zen);
+        self.connect_fullscreened_notify(|win| {
+            win.show_controls();
+            win.update_zen();
+        });
+        // In fullscreen, the controls stay while a menu of the player or a
+        // dialog is open, as the pointer could stay still over them
+        let control = &imp.playback_control;
+        for button in [control.sleep_timer_button(), control.more_button()] {
+            button.connect_active_notify(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_| win.update_zen()
+            ));
+        }
+        adw::prelude::AdwApplicationWindowExt::connect_visible_dialog_notify(
+            self,
+            Self::update_zen,
+        );
         // The wait starts again at each step of a resize, as dragging an edge
         // of the window has the pointer on the edge, outside the window. A
         // window resized by the window manager can also end up away from the
@@ -108,13 +135,20 @@ impl Window {
         });
     }
 
-    // Whether the controls can fade out: in zen mode, on the player without
-    // the playlist, with the pointer elsewhere
+    // Whether the controls can fade out, on the player without the playlist:
+    // in fullscreen, without a menu or a dialog open, and otherwise in zen
+    // mode, with the pointer elsewhere
     fn is_left_alone(&self) -> bool {
-        self.imp().settings.boolean("zen-mode")
-            && !self.playlist_visible()
-            && self.page() == "player"
-            && self.pointer_widget().is_none()
+        let imp = self.imp();
+        if self.playlist_visible() || self.page() != "player" {
+            return false;
+        }
+        if self.is_fullscreen() {
+            !imp.playback_control.has_open_menu()
+                && adw::prelude::AdwApplicationWindowExt::visible_dialog(self).is_none()
+        } else {
+            imp.settings.boolean("zen-mode") && self.pointer_widget().is_none()
+        }
     }
 
     fn update_zen(&self) {
@@ -213,5 +247,15 @@ impl Window {
         imp.main_box.set_zen_progress(progress);
         imp.player_header_bar.set_opacity(1.0 - progress);
         imp.player_header_bar.set_can_target(progress < 1.0);
+
+        // In fullscreen, the pointer hides once the controls are gone
+        let hide = progress >= 1.0 && self.is_fullscreen();
+        if hide != self.cursor().is_some() {
+            if hide {
+                self.set_cursor_from_name(Some("none"));
+            } else {
+                self.set_cursor(None::<&gdk::Cursor>);
+            }
+        }
     }
 }

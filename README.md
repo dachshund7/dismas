@@ -58,7 +58,9 @@ What Dismas adds
   background, and the media controls or opening Dismas again bring it back.
 - **Layout:** the player fits itself to the window, and the cover and waveform
   grow into any spare room. Turn off Show Waveform in Preferences for a plain
-  seek bar instead.
+  seek bar instead. In fullscreen (F11), the player is by itself, larger,
+  over a blurred copy of the cover, and its controls fade out while the
+  pointer stays still.
 - **Robustness:** tags and covers load in parallel worker threads, and cover
   art is decoded in sandboxed [glycin](https://gitlab.gnome.org/GNOME/glycin)
   loaders. Unreadable files, odd tags and file names that aren't valid UTF-8
@@ -79,6 +81,7 @@ Keyboard shortcuts
 | Ctrl+R              | Shuffle                       |
 | Ctrl+L              | Clear the queue               |
 | F9                  | Show or hide the playlist pane |
+| F11                 | Fullscreen                    |
 | Ctrl+Q              | Quit                          |
 
 Building

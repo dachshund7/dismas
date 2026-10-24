@@ -100,6 +100,7 @@ mod imp {
             obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
             obj.set_accels_for_action("win.preferences", &["<primary>comma"]);
+            obj.set_accels_for_action("win.fullscreen", &["F11"]);
             // In the order of the buttons of the pages
             obj.set_accels_for_action("win.page::player", &["<primary>1"]);
             obj.set_accels_for_action("win.page::library", &["<primary>2", "<primary>g"]);

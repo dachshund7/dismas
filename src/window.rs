@@ -3,6 +3,7 @@
 
 mod albums;
 mod bindings;
+mod fullscreen;
 mod loading;
 mod now_playing;
 mod playlist;
@@ -33,6 +34,7 @@ use crate::{
     album_tracks::AlbumTracks,
     audio::{AudioPlayer, CoverCache, RepeatMode, ReplayGainMode, Track, load_tracks},
     config::APPLICATION_ID,
+    cover_backdrop::CoverBackdrop,
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album},
@@ -103,6 +105,8 @@ mod imp {
         pub menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub player_header_bar: TemplateChild<adw::HeaderBar>,
+        #[template_child]
+        pub player_backdrop: TemplateChild<CoverBackdrop>,
         #[template_child]
         pub main_box: TemplateChild<PlayerBox>,
         #[template_child]
@@ -186,6 +190,15 @@ mod imp {
         // Zen mode: the wait before the controls fade out, and their fading
         pub zen_timeout: RefCell<Option<glib::SourceId>>,
         pub zen_animation: RefCell<Option<adw::TimedAnimation>>,
+        // Where the pointer last moved to, as only moving it counts in
+        // fullscreen
+        pub zen_pointer: Cell<Option<(f64, f64)>>,
+
+        // Fullscreen: the cover the backdrop is blurred from, and the page
+        // and the pane to go back to
+        pub backdrop_source: RefCell<Option<gdk::Texture>>,
+        pub page_before_fullscreen: RefCell<Option<String>>,
+        pub pane_before_fullscreen: Cell<bool>,
 
         pub queue_filtermodel: RefCell<Option<gio::ListModel>>,
         // The rows of the queue, to slide them to their new places when
@@ -374,9 +387,10 @@ mod imp {
                 "queue.remove-selected",
             );
 
-            // Esc leaves selection mode, or else hides the playlist pane;
-            // the collapsed split view hides its pane on Esc by itself, so
-            // the pane only needs hiding here when it's beside the content
+            // Esc leaves selection mode, or else hides the playlist pane, or
+            // else leaves fullscreen; the collapsed split view hides its
+            // pane on Esc by itself, so the pane only needs hiding here when
+            // it's beside the content
             klass.add_binding(gdk::Key::Escape, gdk::ModifierType::empty(), |win| {
                 if win.exit_selection_mode() {
                     return glib::Propagation::Stop;
@@ -385,9 +399,16 @@ mod imp {
                     win.set_user_playlist_visible(false);
                     return glib::Propagation::Stop;
                 }
+                if win.is_fullscreen() {
+                    win.unfullscreen();
+                    return glib::Propagation::Stop;
+                }
                 glib::Propagation::Proceed
             });
 
+            // GtkWindow's own property, which also follows the window
+            // manager's fullscreen
+            klass.install_property_action("win.fullscreen", "fullscreened");
             klass.install_property_action("queue.toggle", "user-playlist-visible");
             klass.install_property_action("queue.shuffle", "queue-shuffled");
             klass.install_property_action("queue.select", "queue-selection");
@@ -397,6 +418,7 @@ mod imp {
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
+            CoverBackdrop::static_type();
             PlayerBox::static_type();
             PushBin::static_type();
             obj.init_template();
@@ -412,6 +434,7 @@ mod imp {
                 playback_control: TemplateChild::default(),
                 menu_button: TemplateChild::default(),
                 player_header_bar: TemplateChild::default(),
+                player_backdrop: TemplateChild::default(),
                 main_box: TemplateChild::default(),
                 waveform_view: TemplateChild::default(),
                 seek_scale: TemplateChild::default(),
@@ -455,6 +478,10 @@ mod imp {
                 sidebar_visible_uncollapsed: Cell::new(true),
                 zen_timeout: RefCell::default(),
                 zen_animation: RefCell::default(),
+                zen_pointer: Cell::new(None),
+                backdrop_source: RefCell::default(),
+                page_before_fullscreen: RefCell::default(),
+                pane_before_fullscreen: Cell::new(false),
                 provider: gtk::CssProvider::new(),
                 settings: utils::settings_manager(),
                 notify_playing_id: RefCell::new(None),
@@ -768,6 +795,7 @@ impl Window {
         win.setup_playlist();
         win.setup_sidebar_handle();
         win.setup_zen_mode();
+        win.setup_fullscreen();
         win.setup_drop_target();
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         win.setup_x11_drop_shape();

@@ -192,8 +192,13 @@ impl Window {
     }
 
     // Collapses the split view where the sidebar no longer fits next to the
-    // content, and keeps the window from getting smaller than the content
+    // content, and keeps the window from getting smaller than the content.
+    // In fullscreen, the player is larger, and the limits stay those of the
+    // window it goes back to, which would otherwise be made larger
     fn update_size_limits(&self) {
+        if self.is_fullscreen() {
+            return;
+        }
         let imp = self.imp();
         let limits = self.measure_size_limits();
         if imp.size_limits.replace(Some(limits)) == Some(limits) {
@@ -219,7 +224,10 @@ impl Window {
     // a resize; the measures are cached, so checking them is cheap
     pub(super) fn queue_size_limits_update(&self) {
         let imp = self.imp();
-        if imp.size_limits_idle.get() || imp.size_limits.get() == Some(self.measure_size_limits()) {
+        if imp.size_limits_idle.get()
+            || self.is_fullscreen()
+            || imp.size_limits.get() == Some(self.measure_size_limits())
+        {
             return;
         }
 

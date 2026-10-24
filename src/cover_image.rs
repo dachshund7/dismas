@@ -14,7 +14,7 @@
 use std::{io::Cursor, path::Path, time::Duration};
 
 use color_thief::{ColorFormat, get_palette};
-use gtk::{gdk, glib};
+use gtk::{gdk, gdk::prelude::TextureExt, glib};
 use image::{ImageBuffer, ImageFormat, Pixel, Rgb, Rgba, imageops::FilterType};
 use log::warn;
 
@@ -22,6 +22,12 @@ use log::warn;
 // more than a few thousand pixels wide
 const MAX_DIMENSIONS: (u32, u32) = (8192, 8192);
 const TIMEOUT: Duration = Duration::from_secs(10);
+
+// The blurred copy of the cover behind the player in fullscreen is made
+// small, and scaled up to fill the screen, which smooths it further; how
+// blurred it is, in pixels of the small copy
+const BACKDROP_SIZE: u32 = 64;
+const BACKDROP_BLUR: f32 = 4.0;
 
 // The pixels of a decoded cover, with no padding between the rows
 #[derive(Clone)]
@@ -72,9 +78,49 @@ impl CoverImage {
         cover.scaled(max_size)
     }
 
+    // The pixels of a texture made from a cover, without its transparency
+    pub fn from_texture(texture: &gdk::Texture) -> Option<Self> {
+        let width = u32::try_from(texture.width()).ok()?;
+        let height = u32::try_from(texture.height()).ok()?;
+        let mut downloader = gdk::TextureDownloader::new(texture);
+        downloader.set_format(gdk::MemoryFormat::R8g8b8);
+        let (bytes, stride) = downloader.download_bytes();
+
+        let row_len = width as usize * 3;
+        if row_len == 0 || height == 0 || stride < row_len {
+            return None;
+        }
+        let mut pixels = Vec::with_capacity(row_len * height as usize);
+        for row in bytes.chunks(stride).take(height as usize) {
+            pixels.extend_from_slice(row.get(..row_len)?);
+        }
+        if pixels.len() != row_len * height as usize {
+            return None;
+        }
+
+        Some(CoverImage {
+            width,
+            height,
+            has_alpha: false,
+            pixels,
+        })
+    }
+
     // A copy of the cover, scaled down to fit in `max_size`
     pub fn thumbnail(&self, max_size: u32) -> Option<Self> {
         self.clone().scaled(max_size)
+    }
+
+    // A small blurred copy of the cover, to fill the screen behind the
+    // player in fullscreen
+    pub fn backdrop(&self) -> Option<Self> {
+        let small = self.thumbnail(BACKDROP_SIZE)?;
+        let pixels = if small.has_alpha {
+            blur::<Rgba<u8>>(small.width, small.height, small.pixels)?
+        } else {
+            blur::<Rgb<u8>>(small.width, small.height, small.pixels)?
+        };
+        Some(CoverImage { pixels, ..small })
     }
 
     fn scaled(self, max_size: u32) -> Option<Self> {
@@ -299,6 +345,16 @@ where
     Some(image::imageops::resize(&image, new_width, new_height, FilterType::CatmullRom).into_raw())
 }
 
+// The edges of the blurred image take the colors of the edges of the image,
+// rather than darkening
+fn blur<P>(width: u32, height: u32, pixels: Vec<u8>) -> Option<Vec<u8>>
+where
+    P: Pixel<Subpixel = u8> + 'static,
+{
+    let image = ImageBuffer::<P, Vec<u8>>::from_raw(width, height, pixels)?;
+    Some(image::imageops::fast_blur(&image, BACKDROP_BLUR).into_raw())
+}
+
 #[cfg(test)]
 mod tests {
     use gtk::{gdk, glib, prelude::*};
@@ -481,6 +537,45 @@ mod tests {
 
         let texture = cover.into_texture();
         assert_eq!((texture.width(), texture.height()), (384, 192));
+    }
+
+    // A cover half black and half white, read back from its texture
+    #[test]
+    fn backdrops_are_small_and_blurred() {
+        let (width, height) = (200, 100);
+        let pixels = (0..width * height)
+            .flat_map(|i| {
+                if i % width < width / 2 {
+                    [0; 3]
+                } else {
+                    [255; 3]
+                }
+            })
+            .collect();
+        let texture = CoverImage {
+            width,
+            height,
+            has_alpha: false,
+            pixels,
+        }
+        .into_texture();
+
+        let cover = CoverImage::from_texture(&texture).unwrap();
+        assert_eq!((cover.width, cover.height), (200, 100));
+        assert_eq!(&cover.pixels[..3], &[0, 0, 0]);
+        assert_eq!(&cover.pixels[cover.pixels.len() - 3..], &[255; 3]);
+
+        let backdrop = cover.backdrop().unwrap();
+        assert_eq!((backdrop.width, backdrop.height), (64, 32));
+        assert_eq!(backdrop.pixels.len(), 64 * 32 * 3);
+
+        // The middle row goes from black to white through greys, without
+        // darkening at the edges
+        let row = &backdrop.pixels[16 * 64 * 3..17 * 64 * 3];
+        let greys = row.chunks(3).filter(|p| p[0] > 32 && p[0] < 224).count();
+        assert!(greys >= 4, "{greys} greys");
+        assert!(row[0] < 16);
+        assert!(row[row.len() - 1] > 240);
     }
 
     #[test]

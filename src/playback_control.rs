@@ -138,6 +138,16 @@ impl PlaybackControl {
         self.imp().more_button.get()
     }
 
+    pub fn sleep_timer_button(&self) -> gtk::MenuButton {
+        self.imp().sleep_timer_button.get()
+    }
+
+    // Whether the sleep timer or the menu of more options is open
+    pub fn has_open_menu(&self) -> bool {
+        let imp = self.imp();
+        imp.sleep_timer_button.is_active() || imp.more_button.is_active()
+    }
+
     pub fn close_sleep_timer(&self) {
         self.imp().sleep_timer_popover.popdown();
     }

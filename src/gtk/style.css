@@ -351,6 +351,85 @@ dialog.track-info.recolored headerbar {
   box-shadow: none;
 }
 
+/* Fullscreen shows the player by itself, larger, in white over a blurred
+ * copy of the cover, darkened so that white text can be read on it
+ * whatever the cover and the color scheme; it's dark without a cover, and
+ * in high contrast. Popovers set colors of their own, which stay the
+ * system's */
+coverbackdrop.fullscreen {
+  background-color: #1e1e20;
+  color: white;
+  --window-fg-color: white;
+  --headerbar-fg-color: white;
+  --card-bg-color: rgb(255 255 255 / 8%);
+  --card-fg-color: white;
+}
+
+coverbackdrop.fullscreen > toolbarview {
+  background-color: rgb(0 0 0 / 55%);
+}
+
+/* Without a compositor, the frame drawn around the window is its padding,
+ * which libadwaita keeps in fullscreen, where it would be a light border
+ * around the player */
+window.solid-csd.fullscreen {
+  padding: 0;
+}
+
+coverbackdrop.fullscreen trackdetails label.track-title {
+  font-size: 28pt;
+}
+
+coverbackdrop.fullscreen trackdetails label.track-movement {
+  font-size: 20pt;
+}
+
+coverbackdrop.fullscreen trackdetails label.track-artist {
+  font-size: 18pt;
+  font-weight: 700;
+}
+
+coverbackdrop.fullscreen trackdetails label.track-album {
+  font-size: 16pt;
+  font-weight: 600;
+}
+
+coverbackdrop.fullscreen trackdetails label.track-credits {
+  font-size: 13pt;
+}
+
+coverbackdrop.fullscreen .main-box label.caption.numeric {
+  font-size: 12pt;
+}
+
+/* The buttons under the main ones, and the volume */
+coverbackdrop.fullscreen playbackcontrol button.circular,
+coverbackdrop.fullscreen playbackcontrol menubutton.circular > button {
+  min-width: 44px;
+  min-height: 44px;
+  -gtk-icon-size: 20px;
+}
+
+coverbackdrop.fullscreen playbackcontrol volume {
+  -gtk-icon-size: 20px;
+}
+
+coverbackdrop.fullscreen playbackcontrol box.controls {
+  border-spacing: 12px;
+}
+
+coverbackdrop.fullscreen playbackcontrol box.controls button.circular {
+  min-width: 56px;
+  min-height: 56px;
+  -gtk-icon-size: 24px;
+}
+
+coverbackdrop.fullscreen playbackcontrol box.controls button.large {
+  min-width: 88px;
+  min-height: 88px;
+  -gtk-icon-size: 40px;
+}
+
 volume:hover > scale { color: inherit; }
 
 volume > scale trough highlight { min-height: 12px; min-width: 12px; }

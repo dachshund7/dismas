@@ -264,7 +264,9 @@ impl Window {
                 self,
                 move |split_view, _| {
                     // The sidebar is pinned, so that it's only shown again
-                    // when uncollapsing if it was showing before collapsing
+                    // when uncollapsing if it was showing before collapsing;
+                    // in fullscreen, it's only shown again once the window
+                    // leaves it (window/fullscreen.rs)
                     let imp = win.imp();
                     if split_view.is_collapsed() {
                         split_view.add_css_class("collapsed");
@@ -273,7 +275,7 @@ impl Window {
                         split_view.set_show_sidebar(false);
                     } else {
                         split_view.remove_css_class("collapsed");
-                        if imp.sidebar_visible_uncollapsed.get() {
+                        if imp.sidebar_visible_uncollapsed.get() && !win.is_fullscreen() {
                             split_view.set_show_sidebar(true);
                         }
                     }
@@ -376,7 +378,7 @@ impl Window {
         );
         let _dummy = self.imp().settings.boolean("enable-recoloring");
 
-        // High contrast turns recoloring off
+        // High contrast turns recoloring off, and the backdrop in fullscreen
         let notify_high_contrast_id =
             adw::StyleManager::default().connect_high_contrast_notify(clone!(
                 #[weak(rename_to = this)]
@@ -386,6 +388,7 @@ impl Window {
                         let state = player.state();
                         this.update_style(state.track().as_ref());
                     }
+                    this.update_backdrop();
                 }
             ));
         self.imp()

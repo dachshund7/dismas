@@ -28,106 +28,127 @@ template $DismasWindow: Adw.ApplicationWindow {
             StackPage {
               name: "player";
 
-              child: Adw.ToolbarView {
-                [top]
-                // Fades out with the controls in zen mode
-                Adw.HeaderBar player_header_bar {
-                  show-title: false;
+              // The blurred cover behind the player in fullscreen
+              child: $DismasCoverBackdrop player_backdrop {
+                child: Adw.ToolbarView {
+                  [top]
+                  // Fades out with the controls in zen mode and in fullscreen,
+                  // where it only has the button to leave it
+                  Adw.HeaderBar player_header_bar {
+                    show-title: false;
+                    show-start-title-buttons: bind template.fullscreened inverted;
+                    show-end-title-buttons: bind template.fullscreened inverted;
 
-                  [start]
-                  $DismasPageSwitcher {}
+                    [start]
+                    $DismasPageSwitcher {
+                      visible: bind template.fullscreened inverted;
+                    }
 
-                  [end]
-                  MenuButton menu_button {
-                    icon-name: "open-menu-symbolic";
-                    tooltip-text: _("Main Menu");
+                    [end]
+                    MenuButton menu_button {
+                      icon-name: "open-menu-symbolic";
+                      tooltip-text: _("Main Menu");
+                      visible: bind template.fullscreened inverted;
 
-                    accessibility {
-                      label: C_("a11y", "Primary menu");
+                      accessibility {
+                        label: C_("a11y", "Primary menu");
+                      }
+                    }
+
+                    [end]
+                    Button {
+                      icon-name: "view-restore-symbolic";
+                      action-name: "win.fullscreen";
+                      tooltip-text: _("Leave Fullscreen");
+                      visible: bind template.fullscreened;
+
+                      accessibility {
+                        label: C_("a11y", "Leave fullscreen");
+                      }
                     }
                   }
-                }
 
-                content: $DismasPlayerBox main_box {
-                  vexpand: true;
-
-                  styles [
-                    "main-box",
-                  ]
-
-                  $DismasTrackCover track_cover {}
-
-                  Box {
-                    orientation: vertical;
-                    spacing: 2;
-                    width-request: 256;
+                  content: $DismasPlayerBox main_box {
+                    vexpand: true;
 
                     styles [
-                      "cover-width",
-                      "player-controls",
+                      "main-box",
                     ]
 
-                    $DismasWaveformView waveform_view {
-                      can-focus: "true";
-                    }
+                    $DismasTrackCover track_cover {}
 
-                    // In place of the waveform, without the "show-waveform"
-                    // setting; the position is a fraction of the track, as
-                    // the waveform's is
-                    Scale seek_scale {
-                      adjustment: Adjustment {
-                        lower: 0;
-                        upper: 1;
-                        step-increment: 0.05;
-                        page-increment: 0.05;
-                      };
-                    }
-
-                    CenterBox {
-                      orientation: horizontal;
+                    Box {
+                      orientation: vertical;
+                      spacing: 2;
                       width-request: 256;
 
-                      [start]
-                      Label elapsed_label {
-                        label: "0:00";
+                      styles [
+                        "cover-width",
+                        "player-controls",
+                      ]
 
-                        accessibility {
-                          label: C_("a11y", "Elapsed time");
-                        }
-
-                        styles [
-                          "caption",
-                          "numeric",
-                        ]
+                      $DismasWaveformView waveform_view {
+                        can-focus: "true";
                       }
 
-                      [end]
-                      Label remaining_label {
-                        label: "0:00";
+                      // In place of the waveform, without the "show-waveform"
+                      // setting; the position is a fraction of the track, as
+                      // the waveform's is
+                      Scale seek_scale {
+                        adjustment: Adjustment {
+                          lower: 0;
+                          upper: 1;
+                          step-increment: 0.05;
+                          page-increment: 0.05;
+                        };
+                      }
 
-                        accessibility {
-                          label: C_("a11y", "Remaining time");
+                      CenterBox {
+                        orientation: horizontal;
+                        width-request: 256;
+
+                        [start]
+                        Label elapsed_label {
+                          label: "0:00";
+
+                          accessibility {
+                            label: C_("a11y", "Elapsed time");
+                          }
+
+                          styles [
+                            "caption",
+                            "numeric",
+                          ]
                         }
 
-                        styles [
-                          "caption",
-                          "numeric",
-                        ]
+                        [end]
+                        Label remaining_label {
+                          label: "0:00";
+
+                          accessibility {
+                            label: C_("a11y", "Remaining time");
+                          }
+
+                          styles [
+                            "caption",
+                            "numeric",
+                          ]
+                        }
                       }
                     }
-                  }
 
-                  $DismasTrackDetails track_details {}
+                    $DismasTrackDetails track_details {}
 
-                  $DismasPlaybackControl playback_control {
-                    halign: "center";
-                    margin-top: "0";
-                    margin-bottom: "24";
+                    $DismasPlaybackControl playback_control {
+                      halign: "center";
+                      margin-top: "0";
+                      margin-bottom: "24";
 
-                    styles [
-                      "player-controls",
-                    ]
-                  }
+                      styles [
+                        "player-controls",
+                      ]
+                    }
+                  };
                 };
               };
             }

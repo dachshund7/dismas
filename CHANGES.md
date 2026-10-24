@@ -30,6 +30,9 @@ All notable changes to this project will be documented in this file.
 - Zen Mode, in Preferences: with the playlist hidden, the controls fade
   out once the pointer leaves the window, leaving the cover and the track
   details in the middle; the pointer or a tap brings them back
+- Fullscreen with F11: the player by itself, with larger text and
+  controls, in white over a blurred copy of the cover; the controls and the
+  pointer fade out while the pointer stays still, and Esc or F11 leaves it
 - Change the volume with Ctrl+Up and Ctrl+Down
 - Music folders, in Preferences, to show albums from other folders than
   the Music folder, like a second drive; while a folder isn't there, its

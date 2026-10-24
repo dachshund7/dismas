@@ -66,6 +66,7 @@ impl Window {
                 track_cover.show_cover_image(false);
             }
         }
+        self.update_backdrop();
     }
 
     // The cover shared by all the tracks of an album is too small for the

@@ -6,6 +6,7 @@ mod album_tracks;
 mod application;
 mod audio;
 mod config;
+mod cover_backdrop;
 mod cover_image;
 mod cover_picture;
 mod cue_sheet;
