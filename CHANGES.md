@@ -81,6 +81,10 @@ All notable changes to this project will be documented in this file.
 - Tracks without an album tag are in the album grid, grouped by the folder
   they're in and named after it, which is also shown as their album and
   can be searched; a file without tags shows its folder's cover file
+- When a classical track's artist is its composer and its tags don't name
+  the performers, the player and the queue show the performers from the
+  album artist, such as "Kammerchor Stuttgart & Frieder Bernius" from
+  "Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius"
 - Update dependencies
 
 ### Fixed

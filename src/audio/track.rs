@@ -271,21 +271,48 @@ impl TrackCredits {
     // The performers to show in the queue for a track that is not part of
     // a larger work, when the artist is its composer, as classical
     // releases are often tagged; the artist would be the only name shown.
-    // Not when the artist performs too, as songwriters do, whose band
-    // would only clutter the row
+    // They come from the tags, or else from the album artist. Not when the
+    // artist performs too, as songwriters do, whose band would only
+    // clutter the row
     pub fn performers_of_composer(&self, artist: Option<&str>) -> Option<String> {
         let artist = artist?;
-        if self.composers.is_empty() || !self.artist_is_composer(artist) {
-            return None;
-        }
-        if self
-            .performers
-            .iter()
-            .any(|p| artist.contains(p.name.as_str()))
+        // Without composers in the tags, the album artist tells whether the
+        // artist is the composer
+        let is_composer = if self.composers.is_empty() {
+            self.album_performers_of_composer(artist).is_some()
+        } else {
+            self.artist_is_composer(artist)
+        };
+        if !is_composer
+            || self
+                .performers
+                .iter()
+                .any(|p| artist.contains(p.name.as_str()))
         {
             return None;
         }
-        Some(self.summary(Some(artist))).filter(|s| !s.is_empty())
+        Some(self.summary(Some(artist)))
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                self.album_performers_of_composer(artist)
+                    .map(ToString::to_string)
+            })
+    }
+
+    // The performers in the album artist, when the artist is one of the
+    // composers it lists before them, as MusicBrainz Picard tags classical
+    // releases, e.g. "Kammerchor Stuttgart & Frieder Bernius" for "Johannes
+    // Brahms" and "Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius".
+    // The performers are after the last semicolon, as composers can be
+    // separated by semicolons too, e.g. "František Ignác Tůma; Jan Dismas
+    // Zelenka; Collegium 1704, Václav Luks". Not when the artist is among
+    // the performers, as a composer playing their own music would be shown
+    // twice
+    fn album_performers_of_composer(&self, artist: &str) -> Option<&str> {
+        let (composers, performers) = self.album_artist.as_deref()?.rsplit_once(';')?;
+        let performers = performers.trim();
+        (composers.contains(artist) && !performers.is_empty() && !performers.contains(artist))
+            .then_some(performers)
     }
 
     // Whether the artist names every composer: going by their MusicBrainz
@@ -1701,7 +1728,9 @@ mod imp {
         #[property(name = "artist", get = Self::artist, type = String)]
         #[property(name = "title", get = Self::title, type = String)]
         #[property(name = "album", get = Self::album, type = String)]
-        // The conductors and performers, as a single line
+        // The conductors and performers, as a single line; if the tags
+        // have none and the artist is the composer, the performers in the
+        // album artist
         #[property(name = "credits", get = Self::credits, type = String)]
         // The main line in the track details: the work, for movements, and
         // the title otherwise
@@ -1765,7 +1794,15 @@ mod imp {
 
         fn credits(&self) -> String {
             let data = self.data.borrow();
-            data.credits().summary(data.artist())
+            let credits = data.credits();
+            let summary = credits.summary(data.artist());
+            if summary.is_empty() {
+                credits
+                    .performers_of_composer(data.artist())
+                    .unwrap_or_default()
+            } else {
+                summary
+            }
         }
 
         fn heading(&self) -> String {
@@ -2584,6 +2621,57 @@ mod tests {
                 .as_deref(),
             Some("Alexander Detisov, Alexander Osokin")
         );
+
+        // Without performers in the tags, they come from the album artist,
+        // when the artist is one of the composers it lists first
+        let requiem = TrackCredits {
+            album_artist: Some(
+                "Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius".to_string(),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            requiem
+                .performers_of_composer(Some("Johannes Brahms"))
+                .as_deref(),
+            Some("Kammerchor Stuttgart & Frieder Bernius")
+        );
+        let tagged_requiem = TrackCredits {
+            composers: vec!["Johannes Brahms".to_string()],
+            ..requiem.clone()
+        };
+        assert_eq!(
+            tagged_requiem
+                .performers_of_composer(Some("Johannes Brahms"))
+                .as_deref(),
+            Some("Kammerchor Stuttgart & Frieder Bernius")
+        );
+        assert_eq!(
+            requiem.performers_of_composer(Some("Frieder Bernius")),
+            None
+        );
+
+        // The composers can be separated by semicolons too
+        let vespers = TrackCredits {
+            album_artist: Some(
+                "František Ignác Tůma; Jan Dismas Zelenka; Collegium 1704, Václav Luks".to_string(),
+            ),
+            ..Default::default()
+        };
+        for composer in ["František Ignác Tůma", "Jan Dismas Zelenka"] {
+            assert_eq!(
+                vespers.performers_of_composer(Some(composer)).as_deref(),
+                Some("Collegium 1704, Václav Luks")
+            );
+        }
+
+        // Not when the composer performs too, as their name would be shown
+        // twice
+        let savall = TrackCredits {
+            album_artist: Some("Jordi Savall; Jordi Savall, Hespèrion XXI".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(savall.performers_of_composer(Some("Jordi Savall")), None);
     }
 
     #[test]
