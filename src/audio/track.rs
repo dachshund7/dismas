@@ -937,8 +937,8 @@ fn movement_name(parts: &[&[PathWork]]) -> MovementName {
 }
 
 // Whether a name starts with a number, e.g. "no. 22. Chorus", "Nr. 3.
-// Tragödie", "LXVII. Diffusa est", "1a. Introduction", "16: Minuet" or
-// "b. Benedictus"
+// Tragödie", "LXVII. Diffusa est", "1a. Introduction", "12a Recitativo",
+// "IIIa. [Allegro]", "16: Minuet" or "b. Benedictus"
 fn is_numbered(name: &str) -> bool {
     let lower = name.to_lowercase();
     let after_no = ["no.", "no ", "nr.", "nr ", "nº", "n°", "№"]
@@ -952,15 +952,22 @@ fn is_numbered(name: &str) -> bool {
         .find(|c: char| !c.is_alphanumeric())
         .unwrap_or(name.len());
     let (token, after) = name.split_at(end);
-    let digits = token.trim_end_matches(|c: char| c.is_ascii_lowercase());
-    if !digits.is_empty()
-        && digits.chars().all(|c| c.is_ascii_digit())
-        && token.len() - digits.len() <= 1
-    {
-        return after.starts_with(['.', ')', ':']);
+    // A number can have a letter for a part of it, e.g. "12a" or "IIIa"
+    let number = token
+        .strip_suffix(|c: char| c.is_ascii_lowercase())
+        .unwrap_or(token);
+    let part = number.len() < token.len();
+    if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) {
+        // Without a dot only with a letter, as "2 Waltzes" is a count
+        return after.starts_with(['.', ')', ':']) || (part && after.starts_with(' '));
     }
-    let roman = !token.is_empty() && token.chars().all(|c| "IVXLC".contains(c));
+    let roman = !number.is_empty() && number.chars().all(|c| "IVXLC".contains(c));
     let letter = token.len() == 1 && token.chars().all(|c| c.is_ascii_lowercase());
+    // A range of parts, e.g. "IIa-b." for the bars of a movement
+    let after = match after.strip_prefix(['-', '–']) {
+        Some(rest) if part && roman => rest.trim_start_matches(|c: char| c.is_ascii_lowercase()),
+        _ => after,
+    };
     (roman || letter) && after.starts_with(['.', ')'])
 }
 
@@ -2440,6 +2447,24 @@ mod tests {
     }
 
     #[test]
+    fn work_hierarchy_keeps_the_numbers_of_parts_of_movements() {
+        // The third movement of the suite, in three tracks
+        let json = r#"{"version":1,"segments":[{"path":[
+            {"id":"w","title":"Water Music, HWV 348–350","name":"Water Music, HWV 348–350","position":null},
+            {"id":"s","title":"Water Music Suite no. 1 in F major, HWV 348","name":"Water Music Suite no. 1 in F major, HWV 348","position":1},
+            {"id":"3","title":"Water Music Suite no. 1 in F major, HWV 348: III. Allegro - Andante - Allegro da capo","name":"Allegro - Andante - Allegro da capo","position":3},
+            {"id":"3a","title":"Water Music, Suite no. 1 in F major, HWV 348: IIIa. [Allegro]","name":"IIIa. [Allegro]","position":1}
+        ]}]}"#;
+        assert_eq!(
+            work_hierarchy_labels(json, None)
+                .and_then(|l| l.movement)
+                .map(|m| m.full())
+                .as_deref(),
+            Some("III. Allegro - Andante - Allegro da capo: IIIa. [Allegro]")
+        );
+    }
+
+    #[test]
     fn work_hierarchy_numbers_the_lowest_level() {
         let wtc = ("wtc", "The Well-Tempered Clavier", None);
         let book = ("book1", "Book I", Some(1));
@@ -2764,6 +2789,13 @@ mod tests {
             "LXVII. Diffusa est gratia",
             "b. Benedictus",
             "IV) Finale",
+            // Parts of a number
+            "IIIa. [Allegro]",
+            "XXVIIa. Arie (Sopran, Alt) und Chor",
+            // No. 50a of the St Matthew Passion
+            "La. Recitativo (Evangelista)",
+            "12a Recitativo \"Und Hannas sandte ihn gebunden\"",
+            "IIa-b. Andante quasi Allegretto [Bars 1-50]",
         ] {
             assert!(is_numbered(name), "{name}");
         }
@@ -2777,6 +2809,10 @@ mod tests {
             "I lacci tende più forti",
             "Scena I. (no. 1) Duetto",
             "D. 960",
+            "2 Waltzes, op. 54",
+            "Il Contento",
+            "La Balançoire",
+            "In der Ferne",
         ] {
             assert!(!is_numbered(name), "{name}");
         }

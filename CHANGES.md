@@ -104,6 +104,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Movements numbered as parts of another, such as "IIIa." or "12a", got a
+  second number in front of theirs, as in "1. IIIa. [Allegro]"
 - With "Restore Queue at Startup" off, opening the window again while
   playing in the background replaced the queue with the playing tracks
 - Without a Background portal, as in many window manager sessions,
