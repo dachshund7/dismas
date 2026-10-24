@@ -50,6 +50,10 @@ const DAY: i64 = 24 * 60 * 60;
 const KEPT: i64 = 365 * DAY;
 // How far back Most Played looks
 const MOST_PLAYED_SPAN: i64 = 182 * DAY;
+// How long the tracks of Not Heard Lately haven't been heard, about 2
+// months, and the plays they need, all time, to have been played often
+const NOT_HEARD_SPAN: i64 = 61 * DAY;
+const NOT_HEARD_PLAYS: u32 = 3;
 // The number of tracks in a smart playlist
 const SMART_PLAYLIST_SIZE: i64 = 100;
 
@@ -290,6 +294,33 @@ fn query_most_played(conn: &Connection, now: i64) -> rusqlite::Result<Vec<String
     stmt.query_map([now - MOST_PLAYED_SPAN, SMART_PLAYLIST_SIZE], |row| {
         row.get(0)
     })?
+    .collect()
+}
+
+// The URIs of the tracks played the most, all time, that haven't been
+// heard in the last 2 months, even for less than a play. Tracks with the
+// same number of plays are in the order they were last heard, so that a
+// work heard through keeps its movements in order, and the ones kept are
+// those that went unheard the longest
+pub fn not_heard_lately() -> Vec<String> {
+    match with_connection(|conn| query_not_heard_lately(conn, now())) {
+        Ok(uris) => uris,
+        Err(e) => {
+            warn!("Unable to load the tracks not heard lately: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn query_not_heard_lately(conn: &Connection, now: i64) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT uri FROM totals WHERE plays >= ?1 AND last_played < ?2
+         ORDER BY plays DESC, last_played LIMIT ?3",
+    )?;
+    stmt.query_map(
+        params![NOT_HEARD_PLAYS, now - NOT_HEARD_SPAN, SMART_PLAYLIST_SIZE],
+        |row| row.get(0),
+    )?
     .collect()
 }
 
@@ -612,6 +643,52 @@ mod tests {
         }
         let expected: Vec<String> = (1..=size).map(|i| i.to_string()).collect();
         assert_eq!(query_most_played(&conn, now).unwrap(), expected);
+    }
+
+    #[test]
+    fn not_heard_lately_is_the_most_played_not_heard_in_2_months() {
+        let mut conn = test_db();
+        let now = 1_800_000_000;
+        let long_ago = now - 300 * DAY;
+        for i in 0..3 {
+            insert_listen(&mut conn, &played("three plays", long_ago + i)).unwrap();
+        }
+        for i in 0..5 {
+            insert_listen(&mut conn, &played("five plays", long_ago + i)).unwrap();
+        }
+        // Heard lately, if only for less than a play
+        for i in 0..8 {
+            insert_listen(&mut conn, &played("heard lately", long_ago + i)).unwrap();
+        }
+        insert_listen(&mut conn, &listen("heard lately", now - 10 * DAY, 60)).unwrap();
+        // Not played often enough
+        for i in 0..2 {
+            insert_listen(&mut conn, &played("two plays", long_ago + i)).unwrap();
+        }
+        // Played often more than a year ago, which only the totals keep
+        for i in 0..4 {
+            insert_listen(&mut conn, &played("year ago", now - 400 * DAY + i)).unwrap();
+        }
+        assert_eq!(
+            query_not_heard_lately(&conn, now).unwrap(),
+            ["five plays", "year ago", "three plays"]
+        );
+    }
+
+    #[test]
+    fn a_work_not_heard_lately_keeps_its_order() {
+        let mut conn = test_db();
+        let now = 1_800_000_000;
+        for play in 0..3 {
+            for (i, movement) in ["I", "II", "III"].iter().enumerate() {
+                let ended = now - (100 - play) * DAY + i as i64 * 600;
+                insert_listen(&mut conn, &played(movement, ended)).unwrap();
+            }
+        }
+        assert_eq!(
+            query_not_heard_lately(&conn, now).unwrap(),
+            ["I", "II", "III"]
+        );
     }
 
     #[test]

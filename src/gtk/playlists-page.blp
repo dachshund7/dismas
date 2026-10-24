@@ -115,6 +115,19 @@ template $DismasPlaylistsPage: Widget {
                 icon-name: "media-playback-start-symbolic";
               }
             }
+
+            Adw.ActionRow {
+              title: _("Not Heard Lately");
+              subtitle: _("The tracks played the most, but not heard in the last 2 months");
+              activatable: true;
+              action-name: "win.play-smart-playlist";
+              action-target: "'not-heard-lately'";
+
+              [suffix]
+              Image {
+                icon-name: "media-playback-start-symbolic";
+              }
+            }
           }
         };
       };

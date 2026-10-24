@@ -46,9 +46,11 @@ All notable changes to this project will be documented in this file.
 - While a search of the album grid matches only some of an album's
   tracks, its cover says how many, and its track list has a banner with
   Show All, to see and play the whole album
-- Recently Played and Most Played, on the Playlists page, play the last
-  100 tracks heard, in the order they were heard, or the ones played the
-  most in the last 6 months, in place of the queue, with an Undo
+- Recently Played, Most Played and Not Heard Lately, on the Playlists
+  page, play the last 100 tracks heard, in the order they were heard, the
+  ones played the most in the last 6 months, or the ones played the most
+  that weren't heard in the last 2 months, in place of the queue, with an
+  Undo
 - Mark tracks as favorites with the heart next to the Sleep Timer, Ctrl+D
   or the track menu; Favorites, on the Playlists page, plays them in the
   order they were marked, in place of the queue, with an Undo

@@ -12,6 +12,10 @@ impl Window {
             "favorites" => (play_stats::favorites, i18n("No favorite tracks yet")),
             "recently-played" => (play_stats::recently_played, i18n("No tracks played yet")),
             "most-played" => (play_stats::most_played, i18n("No tracks played yet")),
+            "not-heard-lately" => (
+                play_stats::not_heard_lately,
+                i18n("No often played tracks have gone 2 months unheard yet"),
+            ),
             _ => return,
         };
         // What was heard of the track playing isn't saved until it ends,
