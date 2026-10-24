@@ -1085,15 +1085,10 @@ impl Window {
     }
 
     // The music folders are read again once the dialog is closed, if they
-    // changed: a scan can't be stopped, so a folder added by mistake and
-    // removed again isn't read in the meantime
+    // or the folders they leave out changed: a scan can't be stopped, so a
+    // folder added by mistake and removed again isn't read in the meantime
     fn show_preferences(&self) {
-        let folders = |win: &Self| -> HashSet<PathBuf> {
-            library::music_folders(&win.imp().settings)
-                .into_iter()
-                .map(|folder| folder.path)
-                .collect()
-        };
+        let folders = |win: &Self| library::music_folders(&win.imp().settings);
         let before = folders(self);
         let dialog = PreferencesDialog::default();
         adw::prelude::AdwDialogExt::connect_closed(

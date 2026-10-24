@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    cell::{Cell, OnceCell},
+    cell::{Cell, OnceCell, RefCell},
+    collections::HashSet,
     path::{Path, PathBuf},
 };
 
@@ -12,7 +13,7 @@ use gtk::{CompositeTemplate, gdk, gio, glib};
 
 use crate::{
     application::Application,
-    i18n::{i18n, i18n_k},
+    i18n::{i18n, i18n_k, ni18n_k},
     library::{self, MusicFolder},
     utils,
 };
@@ -47,6 +48,9 @@ mod imp {
         // A folder in the list was added again, e.g. one whose access was
         // taken back and given again, so they're read again all the same
         pub rescan: Cell<bool>,
+        // The paths of the folders that are missing or empty, which their
+        // rows say
+        pub unavailable: RefCell<HashSet<PathBuf>>,
     }
 
     #[glib::object_subclass]
@@ -175,15 +179,14 @@ impl PreferencesDialog {
     }
 
     fn folder_row(&self, item: &glib::Object) -> gtk::Widget {
-        let folder = item
+        let item = item
             .downcast_ref::<glib::BoxedAnyObject>()
-            .expect("The folders are boxed")
-            .borrow::<MusicFolder>()
-            .clone();
-        let shown = folder.shown_path().to_path_buf();
-        let row = adw::ActionRow::builder()
-            .title(folder_name(&shown))
-            .subtitle(home_path(&shown))
+            .expect("The folders are boxed");
+        let folder = item.borrow::<MusicFolder>().clone();
+        // The folders it leaves out are listed when it's expanded, so they
+        // don't make the page longer
+        let row = adw::ExpanderRow::builder()
+            .title(folder_name(folder.shown_path()))
             .use_markup(false)
             .build();
 
@@ -204,13 +207,46 @@ impl PreferencesDialog {
             self,
             #[weak]
             item,
-            move |_| dialog.remove_folder(&item)
+            move |_| dialog.remove_folder(item.upcast_ref())
         ));
         row.add_suffix(&remove);
+
+        let leave_out = adw::ButtonRow::builder()
+            .title(i18n("_Leave Out a Folder…"))
+            .start_icon_name("list-add-symbolic")
+            .use_underline(true)
+            .build();
+        leave_out.connect_activated(clone!(
+            #[weak(rename_to = dialog)]
+            self,
+            #[weak]
+            item,
+            #[weak]
+            row,
+            move |leave_out| {
+                glib::spawn_future_local(clone!(
+                    #[weak]
+                    dialog,
+                    #[weak]
+                    item,
+                    #[weak]
+                    row,
+                    #[weak]
+                    leave_out,
+                    async move { dialog.exclude_folder(&item, &row, &leave_out).await }
+                ));
+            }
+        ));
+        self.fill_exclusions(item, &row, &leave_out);
+        self.update_folder_subtitle(item, &row);
 
         // Finding out whether it's there can take a moment, e.g. on a
         // network drive. Its albums are kept, but hidden, until it's back
         glib::spawn_future_local(clone!(
+            #[weak(rename_to = dialog)]
+            self,
+            #[weak]
+            item,
             #[weak]
             row,
             async move {
@@ -218,23 +254,95 @@ impl PreferencesDialog {
                 let available = gio::spawn_blocking(move || library::is_available(&path))
                     .await
                     .unwrap_or(true);
-                if !available {
+                let unavailable = &dialog.imp().unavailable;
+                if available {
+                    unavailable.borrow_mut().remove(&folder.path);
+                } else {
+                    unavailable.borrow_mut().insert(folder.path.clone());
                     row.add_prefix(
                         &gtk::Image::builder()
                             .icon_name("dialog-warning-symbolic")
                             .css_classes(["warning"])
                             .build(),
                     );
-                    row.set_subtitle(&format!(
-                        "{}\n{}",
-                        home_path(&shown),
-                        i18n("Not found or empty; its albums are hidden")
-                    ));
                 }
+                dialog.update_folder_subtitle(&item, &row);
             }
         ));
 
         row.upcast()
+    }
+
+    // The path of a folder's row, whether it's there, and how many folders
+    // it leaves out
+    fn update_folder_subtitle(&self, item: &glib::BoxedAnyObject, row: &adw::ExpanderRow) {
+        let folder = item.borrow::<MusicFolder>();
+        let mut lines = vec![home_path(folder.shown_path())];
+        if self.imp().unavailable.borrow().contains(&folder.path) {
+            lines.push(i18n("Not found or empty; its albums are hidden"));
+        }
+        if !folder.excluded.is_empty() {
+            let n = folder.excluded.len() as u32;
+            lines.push(ni18n_k(
+                // Translators: the `{n}` must be left unmodified
+                "{n} folder left out",
+                "{n} folders left out",
+                n,
+                &[("n", &n.to_string())],
+            ));
+        }
+        row.set_subtitle(&lines.join("\n"));
+    }
+
+    // Lists the folders a folder leaves out, in its row, in their order,
+    // with the button that leaves out another one last
+    fn fill_exclusions(
+        &self,
+        item: &glib::BoxedAnyObject,
+        row: &adw::ExpanderRow,
+        leave_out: &adw::ButtonRow,
+    ) {
+        let mut child = leave_out.parent().and_then(|list| list.first_child());
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            row.remove(&widget);
+        }
+        let excluded = item.borrow::<MusicFolder>().excluded.clone();
+        for relative in excluded {
+            row.add_row(&self.exclusion_row(item, row, relative));
+        }
+        row.add_row(leave_out);
+    }
+
+    fn exclusion_row(
+        &self,
+        item: &glib::BoxedAnyObject,
+        row: &adw::ExpanderRow,
+        relative: PathBuf,
+    ) -> adw::ActionRow {
+        let exclusion = adw::ActionRow::builder()
+            .title(relative.to_string_lossy())
+            .use_markup(false)
+            .build();
+        let remove = gtk::Button::builder()
+            .icon_name("list-remove-symbolic")
+            .tooltip_text(i18n("Include Again"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        remove.connect_clicked(clone!(
+            #[weak(rename_to = dialog)]
+            self,
+            #[weak]
+            item,
+            #[weak]
+            row,
+            #[weak]
+            exclusion,
+            move |_| dialog.remove_exclusion(&item, &row, &exclusion, &relative)
+        ));
+        exclusion.add_suffix(&remove);
+        exclusion
     }
 
     fn toast(&self, title: &str) {
@@ -279,11 +387,16 @@ impl PreferencesDialog {
         // it was made again, and it's back if its access was taken back and
         // given again. Either way, its row and its albums are brought up to
         // date
+        let mut folder = folder;
         if let Some(pos) = keys.iter().position(|other| *other == key) {
-            let same = store
+            let old = store
                 .item(pos as u32)
-                .and_downcast::<glib::BoxedAnyObject>()
-                .is_some_and(|item| *item.borrow::<MusicFolder>() == folder);
+                .and_downcast::<glib::BoxedAnyObject>();
+            // It leaves out the same folders as before
+            if let Some(old) = &old {
+                folder.excluded = old.borrow::<MusicFolder>().excluded.clone();
+            }
+            let same = old.is_some_and(|old| *old.borrow::<MusicFolder>() == folder);
             store.splice(pos as u32, 1, &[glib::BoxedAnyObject::new(folder)]);
             self.store_folders();
             self.imp().rescan.set(true);
@@ -297,13 +410,110 @@ impl PreferencesDialog {
             return;
         }
 
-        // The folders in it go, as it has their albums
+        // The folders in it go, as it has their albums, and it leaves out
+        // the folders they left out
         for pos in (0..keys.len()).rev() {
-            if keys[pos].starts_with(&key) {
-                store.remove(pos as u32);
+            let Ok(inner) = keys[pos].strip_prefix(&key) else {
+                continue;
+            };
+            if let Some(item) = store
+                .item(pos as u32)
+                .and_downcast::<glib::BoxedAnyObject>()
+            {
+                let excluded = &item.borrow::<MusicFolder>().excluded;
+                folder
+                    .excluded
+                    .splice(0..0, excluded.iter().map(|other| inner.join(other)));
             }
+            store.remove(pos as u32);
         }
         store.append(&glib::BoxedAnyObject::new(folder));
+        self.store_folders();
+    }
+
+    async fn exclude_folder(
+        &self,
+        item: &glib::BoxedAnyObject,
+        row: &adw::ExpanderRow,
+        leave_out: &adw::ButtonRow,
+    ) {
+        let folder = item.borrow::<MusicFolder>().clone();
+        let file_dialog = gtk::FileDialog::builder()
+            .title(i18n("Leave Out a Folder"))
+            .modal(true)
+            .initial_folder(&gio::File::for_path(&folder.path))
+            .build();
+        let parent = self.root().and_downcast::<gtk::Window>();
+        let Ok(file) = file_dialog.select_folder_future(parent.as_ref()).await else {
+            return;
+        };
+
+        // This blocks, as the files of the document portal can be slow
+        let name = folder_name(folder.shown_path());
+        let relative = match file.path() {
+            Some(path) => gio::spawn_blocking(move || {
+                library::relative_to(&library::resolve_folder(&path), &folder)
+            })
+            .await
+            .ok()
+            .flatten(),
+            None => None,
+        };
+        let Some(relative) = relative else {
+            self.toast(&i18n_k(
+                // Translators: the `{folder}` must be left unmodified; it's
+                // the name of a music folder
+                "Only folders in “{folder}” can be left out",
+                &[("folder", &name)],
+            ));
+            return;
+        };
+        // It might have been removed in the meantime
+        if self.folders().find(item).is_none() {
+            return;
+        }
+
+        {
+            let mut folder = item.borrow_mut::<MusicFolder>();
+            if folder
+                .excluded
+                .iter()
+                .any(|other| relative.starts_with(other))
+            {
+                drop(folder);
+                self.toast(&i18n("The folder is already left out"));
+                return;
+            }
+            // The folders in it go, as it has them
+            folder
+                .excluded
+                .retain(|other| !other.starts_with(&relative));
+            folder.excluded.push(relative);
+        }
+        self.fill_exclusions(item, row, leave_out);
+        self.update_folder_subtitle(item, row);
+        leave_out.grab_focus();
+        self.store_folders();
+    }
+
+    fn remove_exclusion(
+        &self,
+        item: &glib::BoxedAnyObject,
+        row: &adw::ExpanderRow,
+        exclusion: &adw::ActionRow,
+        relative: &Path,
+    ) {
+        item.borrow_mut::<MusicFolder>()
+            .excluded
+            .retain(|other| other != relative);
+        // Its row is gone with the focus, which goes to the row after it,
+        // the button that leaves out another folder if it was the last
+        let next = exclusion.next_sibling();
+        row.remove(exclusion);
+        if let Some(next) = next {
+            next.grab_focus();
+        }
+        self.update_folder_subtitle(item, row);
         self.store_folders();
     }
 

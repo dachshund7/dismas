@@ -1021,7 +1021,8 @@ impl LibraryView {
     // Reads the albums from the database, in a separate thread; the albums
     // of the last reload are shown, e.g. the one after a scan rather than
     // the one before it, if it takes longer. Those of the music folders
-    // that aren't there are hidden, as they can't play
+    // that aren't there are hidden, as they can't play, and so are those of
+    // the folders left out, until the scan forgets them
     pub fn reload(&self) {
         let imp = self.imp();
         let generation = imp.reload_generation.get().wrapping_add(1);
@@ -1033,7 +1034,8 @@ impl LibraryView {
             self,
             async move {
                 let (hidden, albums) = gio::spawn_blocking(move || {
-                    let hidden = library::roots(&folders).unavailable;
+                    let roots = library::roots(&folders);
+                    let hidden = [roots.unavailable, roots.excluded].concat();
                     let albums = library::albums(&hidden);
                     (hidden, albums)
                 })

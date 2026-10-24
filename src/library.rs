@@ -127,21 +127,34 @@ struct TrackTags {
 // A folder whose albums are in the grid: the path that's read, and the
 // path outside the sandbox of a folder that came through the document
 // portal, which names it and tells it apart even when it's gone, e.g.
-// when its access was taken back
+// when its access was taken back. The folders in it that are left out are
+// relative to it
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicFolder {
     pub path: PathBuf,
     pub host: Option<PathBuf>,
+    pub excluded: Vec<PathBuf>,
 }
 
 impl MusicFolder {
     pub fn new(path: PathBuf) -> Self {
-        Self { path, host: None }
+        Self {
+            path,
+            host: None,
+            excluded: Vec::new(),
+        }
     }
 
     // The path to show
     pub fn shown_path(&self) -> &Path {
         self.host.as_deref().unwrap_or(&self.path)
+    }
+
+    // The paths of the folders left out, as they're read
+    pub fn excluded_paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.excluded
+            .iter()
+            .map(|relative| self.path.join(relative))
     }
 }
 
@@ -154,26 +167,57 @@ pub fn default_music_dir() -> PathBuf {
 }
 
 // The music folders in the settings, where an empty list means the XDG
-// Music folder. They're kept as URIs, as the strings of the settings must
-// be UTF-8; the ones without a local path are left out
+// Music folder, with the folders they leave out. They're kept as URIs, as
+// the strings of the settings must be UTF-8; the ones without a local path
+// are left out
 pub fn music_folders(settings: &gio::Settings) -> Vec<MusicFolder> {
-    folders_from_entries(settings.get::<Vec<(String, String)>>("music-folders"))
+    folders_from_entries(
+        settings.get::<Vec<(String, String)>>("music-folders"),
+        settings.get::<Vec<String>>("excluded-folders"),
+    )
 }
 
-fn folders_from_entries(entries: Vec<(String, String)>) -> Vec<MusicFolder> {
-    if entries.is_empty() {
-        return vec![MusicFolder::new(default_music_dir())];
+fn folders_from_entries(entries: Vec<(String, String)>, excluded: Vec<String>) -> Vec<MusicFolder> {
+    let mut folders: Vec<MusicFolder> = if entries.is_empty() {
+        vec![MusicFolder::new(default_music_dir())]
+    } else {
+        entries
+            .into_iter()
+            .filter_map(|(uri, host)| {
+                let path = gio::File::for_uri(&uri).path()?;
+                let host = Some(host)
+                    .filter(|host| !host.is_empty())
+                    .and_then(|host| gio::File::for_uri(&host).path());
+                Some(MusicFolder {
+                    path,
+                    host,
+                    excluded: Vec::new(),
+                })
+            })
+            .collect()
+    };
+
+    // A folder that's left out belongs to the music folder it's in; one
+    // that isn't in any is forgotten when the folders are stored again
+    for path in excluded
+        .iter()
+        .filter_map(|uri| gio::File::for_uri(uri).path())
+    {
+        let found = folders.iter_mut().find_map(|folder| {
+            let relative = path
+                .strip_prefix(&folder.path)
+                .ok()
+                .filter(|relative| !relative.as_os_str().is_empty())?
+                .to_path_buf();
+            Some((folder, relative))
+        });
+        if let Some((folder, relative)) = found
+            && !folder.excluded.contains(&relative)
+        {
+            folder.excluded.push(relative);
+        }
     }
-    entries
-        .into_iter()
-        .filter_map(|(uri, host)| {
-            let path = gio::File::for_uri(&uri).path()?;
-            let host = Some(host)
-                .filter(|host| !host.is_empty())
-                .and_then(|host| gio::File::for_uri(&host).path());
-            Some(MusicFolder { path, host })
-        })
-        .collect()
+    folders
 }
 
 pub fn store_music_folders(settings: &gio::Settings, folders: &[MusicFolder]) {
@@ -185,7 +229,15 @@ pub fn store_music_folders(settings: &gio::Settings, folders: &[MusicFolder]) {
             (uri(&folder.path), host)
         })
         .collect();
-    if let Err(e) = settings.set("music-folders", entries.to_variant()) {
+    let excluded: Vec<String> = folders
+        .iter()
+        .flat_map(MusicFolder::excluded_paths)
+        .map(|path| uri(&path))
+        .collect();
+    if let Err(e) = settings
+        .set("music-folders", entries.to_variant())
+        .and_then(|()| settings.set("excluded-folders", excluded.to_variant()))
+    {
         warn!("Unable to store the music folders: {e}");
     }
 }
@@ -209,8 +261,8 @@ pub fn resolve_folder(path: &Path) -> MusicFolder {
         return MusicFolder::new(music.join(relative));
     }
     MusicFolder {
-        path: path.to_path_buf(),
         host: Some(host),
+        ..MusicFolder::new(path.to_path_buf())
     }
 }
 
@@ -241,28 +293,41 @@ pub fn folder_key(folder: &MusicFolder) -> PathBuf {
 
 // The folders to read, and those that aren't there, whose tracks are
 // kept, as reading them again when they're back takes a while, but hidden,
-// as they can't play
+// as they can't play. The folders left out of them aren't read, and their
+// tracks are hidden until the scan forgets them
 #[derive(Debug, Default)]
 pub struct Roots {
     pub available: Vec<PathBuf>,
     pub unavailable: Vec<PathBuf>,
+    pub excluded: Vec<PathBuf>,
 }
 
 // The music folders, without those in another one; this blocks
 pub fn roots(folders: &[MusicFolder]) -> Roots {
     let keyed = folders
         .iter()
-        .map(|folder| (folder_key(folder), folder.path.clone()))
+        .map(|folder| (folder_key(folder), folder))
         .collect();
     let mut roots = Roots::default();
-    for path in outermost(keyed) {
-        if is_available(&path) {
-            roots.available.push(path);
+    for folder in outermost(keyed) {
+        roots.excluded.extend(folder.excluded_paths());
+        if is_available(&folder.path) {
+            roots.available.push(folder.path.clone());
         } else {
-            roots.unavailable.push(path);
+            roots.unavailable.push(folder.path.clone());
         }
     }
     roots
+}
+
+// The path of a folder relative to a music folder it's in, to leave it
+// out; this blocks
+pub fn relative_to(folder: &MusicFolder, music_folder: &MusicFolder) -> Option<PathBuf> {
+    folder_key(folder)
+        .strip_prefix(folder_key(music_folder))
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(Path::to_path_buf)
 }
 
 // The values whose keys are neither in another's, nor the same as an
@@ -291,8 +356,11 @@ pub fn is_available(path: &Path) -> bool {
 // Hidden files and folders aren't part of the library, like the trash of
 // a drive, which keeps deleted files under their own names, and neither is
 // Windows' recycle bin
-fn is_library_entry(name: &Path) -> bool {
-    let name = name.as_os_str().as_encoded_bytes();
+fn is_library_entry(path: &Path) -> bool {
+    let Some(name) = path.file_name() else {
+        return true;
+    };
+    let name = name.as_encoded_bytes();
     !name.starts_with(b".") && name != b"$RECYCLE.BIN"
 }
 
@@ -642,11 +710,9 @@ fn scan_with(
         .available
         .iter()
         .flat_map(|root| {
-            utils::load_files_from_folder_filtered(
-                &gio::File::for_path(root),
-                true,
-                &is_library_entry,
-            )
+            utils::load_files_from_folder_filtered(&gio::File::for_path(root), true, &|path| {
+                is_library_entry(path) && !roots.excluded.iter().any(|excluded| excluded == path)
+            })
         })
         .filter_map(|file| file.path())
         .collect();
@@ -800,9 +866,9 @@ fn scan_with(
         let _ = sender.try_send(ScanEvent::Progress(done, total));
     }
 
-    // Forget the files that are gone, but not those of the folders that
-    // aren't there, e.g. on a drive that isn't plugged in, which aren't read
-    // again once they're back
+    // Forget the files that are gone, or left out, but not those of the
+    // folders that aren't there, e.g. on a drive that isn't plugged in, which
+    // aren't read again once they're back
     let gone: Vec<Vec<u8>> = known
         .keys()
         .filter(|file| !present.contains(*file))
@@ -1540,28 +1606,156 @@ mod tests {
 
     #[test]
     fn the_settings_list_the_folders() {
+        use gtk::gio::prelude::*;
+
         use super::{default_music_dir, folders_from_entries};
 
         assert_eq!(
-            folders_from_entries(Vec::new()),
+            folders_from_entries(Vec::new(), Vec::new()),
             vec![MusicFolder::new(default_music_dir())]
         );
         assert_eq!(
-            folders_from_entries(vec![
-                ("file:///music/A".to_string(), String::new()),
-                (
-                    "file:///run/user/1000/doc/1a2b/B".to_string(),
-                    "file:///media/drive/B".to_string()
-                ),
-            ]),
+            folders_from_entries(
+                vec![
+                    ("file:///music/A".to_string(), String::new()),
+                    (
+                        "file:///run/user/1000/doc/1a2b/B".to_string(),
+                        "file:///media/drive/B".to_string()
+                    ),
+                ],
+                vec![
+                    "file:///run/user/1000/doc/1a2b/B/Podcasts/Old".to_string(),
+                    "file:///music/A/Audiobooks".to_string(),
+                    "file:///music/A/Audiobooks".to_string(),
+                    // Neither in a folder, nor one of its folders
+                    "file:///music/Other".to_string(),
+                    "file:///music/A".to_string(),
+                ]
+            ),
             vec![
-                MusicFolder::new(PathBuf::from("/music/A")),
+                MusicFolder {
+                    path: PathBuf::from("/music/A"),
+                    host: None,
+                    excluded: vec![PathBuf::from("Audiobooks")],
+                },
                 MusicFolder {
                     path: PathBuf::from("/run/user/1000/doc/1a2b/B"),
                     host: Some(PathBuf::from("/media/drive/B")),
+                    excluded: vec![PathBuf::from("Podcasts/Old")],
                 },
             ]
         );
+
+        // Those of the XDG Music folder too
+        let audiobooks = default_music_dir().join("Audiobooks");
+        let uri = gtk::gio::File::for_path(&audiobooks).uri().to_string();
+        assert_eq!(
+            folders_from_entries(Vec::new(), vec![uri])[0].excluded,
+            vec![PathBuf::from("Audiobooks")]
+        );
+    }
+
+    #[test]
+    fn left_out_folders_are_not_read() {
+        use super::scan_with;
+        use crate::utils::write_test_wav;
+
+        let dir = test_dir("excluded");
+        for folder in ["Album", "Audiobooks/Book", "Podcasts/New", "Podcasts/Old"] {
+            std::fs::create_dir_all(dir.join(folder)).unwrap();
+        }
+        write_test_wav(&dir.join("Album/One.wav"), 1);
+        write_test_wav(&dir.join("Audiobooks/Book/Two.wav"), 1);
+        write_test_wav(&dir.join("Podcasts/New/Three.wav"), 1);
+        write_test_wav(&dir.join("Podcasts/Old/Four.wav"), 1);
+
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        let paths = |conn: &rusqlite::Connection| -> Vec<String> {
+            tracks(conn, &dir).into_iter().map(|row| row.path).collect()
+        };
+        let folder = |excluded: &[&str]| MusicFolder {
+            excluded: excluded.iter().map(PathBuf::from).collect(),
+            ..MusicFolder::new(dir.clone())
+        };
+
+        let roots = super::roots(&[folder(&["Podcasts/Old"])]);
+        assert_eq!(roots.excluded, vec![dir.join("Podcasts/Old")]);
+        scan_with(&mut conn, &roots, &sender).unwrap();
+        assert_eq!(
+            paths(&conn),
+            vec![
+                "Album/One.wav",
+                "Audiobooks/Book/Two.wav",
+                "Podcasts/New/Three.wav"
+            ]
+        );
+
+        // The tracks read before a folder was left out are forgotten
+        let roots = super::roots(&[folder(&["Audiobooks", "Podcasts"])]);
+        let (result, _) = scan_with(&mut conn, &roots, &sender).unwrap();
+        assert_eq!(result.n_changed, 2);
+        assert_eq!(paths(&conn), vec!["Album/One.wav"]);
+
+        // And read again once it's back
+        let (result, _) = scan_with(&mut conn, &super::roots(&[folder(&[])]), &sender).unwrap();
+        assert_eq!(result.n_changed, 3);
+
+        // Those of a folder inside another one don't count, as the other
+        // one is read
+        let inner = MusicFolder {
+            excluded: vec![PathBuf::from("Old")],
+            ..MusicFolder::new(dir.join("Podcasts"))
+        };
+        let roots = super::roots(&[folder(&[]), inner]);
+        assert!(roots.excluded.is_empty());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn left_out_folders_are_relative_to_their_music_folder() {
+        use super::relative_to;
+
+        let dir = test_dir("relative");
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Audiobooks")).unwrap();
+        let link = dir.join("Link");
+        std::os::unix::fs::symlink(&music, &link).unwrap();
+
+        let folder = |path: PathBuf| MusicFolder::new(path);
+        assert_eq!(
+            relative_to(&folder(music.join("Audiobooks")), &folder(music.clone())),
+            Some(PathBuf::from("Audiobooks"))
+        );
+        // Picked through a link to the music folder
+        assert_eq!(
+            relative_to(&folder(link.join("Audiobooks")), &folder(music.clone())),
+            Some(PathBuf::from("Audiobooks"))
+        );
+        assert_eq!(
+            relative_to(&folder(music.clone()), &folder(music.clone())),
+            None
+        );
+        assert_eq!(
+            relative_to(&folder(dir.clone()), &folder(music.clone())),
+            None
+        );
+        // Through the document portal, by the paths outside the sandbox
+        let portal = |path: &str, host: &str| MusicFolder {
+            host: Some(PathBuf::from(host)),
+            ..MusicFolder::new(PathBuf::from(path))
+        };
+        assert_eq!(
+            relative_to(
+                &portal("/run/user/1000/doc/9z/Old", "/media/drive/B/Podcasts/Old"),
+                &portal("/run/user/1000/doc/1a2b/B", "/media/drive/B")
+            ),
+            Some(PathBuf::from("Podcasts/Old"))
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

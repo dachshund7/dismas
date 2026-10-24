@@ -36,7 +36,9 @@ All notable changes to this project will be documented in this file.
 - Change the volume with Ctrl+Up and Ctrl+Down
 - Music folders, in Preferences, to show albums from other folders than
   the Music folder, like a second drive; while a folder isn't there, its
-  albums are hidden, and they come back without being read again
+  albums are hidden, and they come back without being read again. A music
+  folder's row expands to leave out folders in it, such as audiobooks or
+  podcasts, whose albums then aren't in the album grid
 - Remember the volume, the repeat mode, and whether the playlist pane is
   open
 - The track menu has Open Directory, and in the playlist pane Remove,

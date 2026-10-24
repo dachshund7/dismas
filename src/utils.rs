@@ -207,10 +207,10 @@ fn load_files_from_folder_internal(
 
     let mut files = Vec::new();
     while let Some(info) = enumerator.next().and_then(Result::ok) {
-        if !keep(&info.name()) {
+        let child = enumerator.child(&info);
+        if child.path().is_some_and(|path| !keep(&path)) {
             continue;
         }
-        let child = enumerator.child(&info);
         if recursive && info.file_type() == gio::FileType::Directory {
             let mut res = load_files_from_folder_internal(base, &child, recursive, keep);
             files.append(&mut res);
@@ -273,7 +273,7 @@ pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::F
     load_files_from_folder_filtered(folder, recursive, &|_| true)
 }
 
-// The files of a folder, without the files and folders whose names `keep`
+// The files of a folder, without the files and folders whose paths `keep`
 // turns down
 pub fn load_files_from_folder_filtered(
     folder: &gio::File,
