@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use crate::{
     album_cell::AlbumCell,
     audio::normalize_search_text,
-    i18n::{i18n, i18n_k, ni18n_f},
+    i18n::{i18n, i18n_f, i18n_k, ni18n_f},
     library::{self, Album, AlbumSort, ScanEvent, ScanResult},
     square_bin::SquareBin,
     utils,
@@ -140,8 +140,9 @@ mod imp {
         pub filter: RefCell<Option<gtk::CustomFilter>>,
         pub sorter: RefCell<Option<gtk::CustomSorter>>,
         pub settings: OnceCell<gio::Settings>,
-        // The albums matching the search, if there is one
-        pub search_matches: RefCell<Option<HashSet<String>>>,
+        // The albums matching the search, if there is one, with the
+        // number of their tracks that match it and the number of all of them
+        pub search_matches: RefCell<Option<HashMap<String, (u32, u32)>>>,
         // The words of the search the matches are for
         pub search_words: RefCell<Vec<String>>,
         pub textures: RefCell<TextureCache>,
@@ -329,7 +330,7 @@ impl LibraryView {
             move |item| {
                 let album = item.downcast_ref::<Album>().unwrap();
                 match this.imp().search_matches.borrow().as_ref() {
-                    Some(matches) => matches.contains(&album.id()),
+                    Some(matches) => matches.contains_key(&album.id()),
                     None => true,
                 }
             }
@@ -472,6 +473,7 @@ impl LibraryView {
                     .child(&placeholder)
                     .build();
                 overlay.add_overlay(&picture);
+                overlay.add_overlay(&match_count_badge(item));
                 let cover = SquareBin::new(&overlay, MIN_COVER_SIZE, MAX_COVER_SIZE);
 
                 let title = gtk::Label::builder()
@@ -553,9 +555,12 @@ impl LibraryView {
                 };
                 let content = item.child().unwrap();
                 let cover = content.first_child().unwrap();
+                // The cover's overlay has the placeholder, the picture and
+                // the badge, in that order
                 let picture = cover
                     .first_child()
-                    .and_then(|overlay| overlay.last_child())
+                    .and_then(|overlay| overlay.first_child())
+                    .and_then(|placeholder| placeholder.next_sibling())
                     .and_downcast::<gtk::Picture>()
                     .unwrap();
                 let title = cover.next_sibling().and_downcast::<gtk::Label>().unwrap();
@@ -809,7 +814,25 @@ impl LibraryView {
         ));
     }
 
-    fn set_search_matches(&self, words: Vec<String>, matches: Option<HashSet<String>>) {
+    fn set_search_matches(&self, words: Vec<String>, matches: Option<HashMap<String, (u32, u32)>>) {
+        // The covers of the albums the search matches only partly say how
+        // many of their tracks it does
+        if let Some(model) = self.imp().model.borrow().as_ref() {
+            for album in model.iter::<Album>().flatten() {
+                let (matching, total) = matches
+                    .as_ref()
+                    .and_then(|matches| matches.get(&album.id()).copied())
+                    .filter(|(matching, total)| matching < total)
+                    .unwrap_or_default();
+                if album.matching_tracks() != matching {
+                    album.set_matching_tracks(matching);
+                }
+                if album.track_count() != total {
+                    album.set_track_count(total);
+                }
+            }
+        }
+
         self.imp().search_words.replace(words);
         self.imp().search_matches.replace(matches);
         if let Some(filter) = self.imp().filter.borrow().as_ref() {
@@ -842,7 +865,7 @@ impl LibraryView {
             .search_matches
             .borrow()
             .as_ref()
-            .is_some_and(|m| !m.contains(album_id));
+            .is_some_and(|m| !m.contains_key(album_id));
         if hidden {
             imp.search_entry.set_text("");
             self.set_search_matches(Vec::new(), None);
@@ -1177,6 +1200,44 @@ impl LibraryView {
 
 // The copy of an album that follows the pointer while it's dragged: its
 // cover, with the number of albums when there are several
+// The badge on the cover of an album the search matches only partly,
+// with the number of its tracks that match and the number of all of them,
+// e.g. "9 of 12"
+fn match_count_badge(item: &gtk::ListItem) -> gtk::Label {
+    let badge = gtk::Label::builder()
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::End)
+        .margin_end(6)
+        .margin_bottom(6)
+        .can_target(false)
+        .css_classes(["match-count"])
+        .build();
+
+    let album = item.property_expression("item");
+    let matching = album.chain_property::<Album>("matching-tracks");
+    let total = album.chain_property::<Album>("track-count");
+    gtk::ClosureExpression::new::<String>(
+        [&matching, &total],
+        glib::closure!(|_: Option<glib::Object>, matching: u32, total: u32| {
+            i18n_f(
+                // Translators: The first '{}' is the number of tracks of an
+                // album that match the search, and the second the number of
+                // all of them; both must be left unmodified
+                "{} of {}",
+                &[&matching.to_string(), &total.to_string()],
+            )
+        }),
+    )
+    .bind(&badge, "label", gtk::Widget::NONE);
+    matching
+        .chain_closure::<bool>(glib::closure!(
+            |_: Option<glib::Object>, matching: u32| matching > 0
+        ))
+        .bind(&badge, "visible", gtk::Widget::NONE);
+
+    badge
+}
+
 fn album_drag_icon(cover: Option<&gdk::Paintable>, n_albums: usize) -> gtk::Widget {
     let icon = gtk::Box::builder()
         .spacing(8)

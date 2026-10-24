@@ -527,6 +527,17 @@ gridview.album-grid .album-cover {
   background-color: alpha(currentColor, 0.08);
 }
 
+/* How many of the tracks of an album the search matches, when it's only
+ * some of them */
+gridview.album-grid .album-cover label.match-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+  font-weight: bold;
+  font-size: 85%;
+}
+
 /* The albums being dragged */
 gridview.album-grid .album-cell.dragging,
 gridview.album-grid.dragging-selection .album-cell.selected-item {

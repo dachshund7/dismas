@@ -34,6 +34,8 @@ mod imp {
         #[template_child]
         pub album_artist: TemplateChild<gtk::Label>,
         #[template_child]
+        pub banner: TemplateChild<adw::Banner>,
+        #[template_child]
         pub tracks_view: TemplateChild<gtk::ListView>,
         #[template_child]
         pub play_button: TemplateChild<gtk::Button>,
@@ -56,6 +58,15 @@ mod imp {
 
         pub tracks: RefCell<Option<gio::ListStore>>,
         pub files: RefCell<Vec<gio::File>>,
+        // The album that is showing, and the words of the search it was
+        // shown for
+        pub album: RefCell<Option<Album>>,
+        pub search_words: RefCell<Vec<String>>,
+        // While the search leaves out some of the tracks, the number of
+        // the tracks that match it and the number of all of them
+        pub left_out: Cell<Option<(u32, u32)>>,
+        // All the tracks are showing, though the search leaves some out
+        pub show_all: Cell<bool>,
         // Bumped for each album, to stop loading the tracks of the
         // previous one
         pub generation: Cell<u32>,
@@ -291,6 +302,17 @@ impl AlbumTracks {
             move |_| this.select_all()
         ));
 
+        // Show All, or Show Matching once all the tracks are showing
+        imp.banner.connect_button_clicked(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| {
+                let imp = this.imp();
+                imp.show_all.set(!imp.show_all.get());
+                this.load(None);
+            }
+        ));
+
         // Clicking a track plays the album from there, or selects it
         imp.tracks_view.connect_activate(clone!(
             #[weak(rename_to = this)]
@@ -454,12 +476,73 @@ impl AlbumTracks {
     // and flashes once it's read
     pub fn show_album(&self, album: &Album, search_words: &[String], reveal: Option<&gio::File>) {
         let imp = self.imp();
-        self.set_selection_mode(false);
-
         imp.album_title.set_label(&album.title());
         imp.album_title.set_tooltip_text(Some(&album.title()));
         imp.album_artist.set_label(&album.artist());
 
+        imp.album.replace(Some(album.clone()));
+        imp.search_words.replace(search_words.to_vec());
+        imp.show_all.set(false);
+        self.load(reveal);
+    }
+
+    // Shows all the tracks of the album, though the search leaves some
+    // out, scrolled to the track of `reveal`, if any
+    pub fn show_all_tracks(&self, reveal: Option<&gio::File>) {
+        self.imp().show_all.set(true);
+        self.load(reveal);
+    }
+
+    // Whether the search leaves out some of the tracks of the album, and
+    // they aren't showing
+    pub fn leaves_out_tracks(&self) -> bool {
+        let imp = self.imp();
+        imp.left_out.get().is_some() && !imp.show_all.get()
+    }
+
+    // Says how many of the tracks the search leaves out, with a button to
+    // show them all, or to go back to the ones that match it
+    fn update_banner(&self) {
+        let imp = self.imp();
+        let Some((matching, total)) = imp.left_out.get() else {
+            imp.banner.set_revealed(false);
+            return;
+        };
+
+        if imp.show_all.get() {
+            imp.banner.set_title(&ni18n_f(
+                // Translators: The '{}' must be left unmodified, and it is
+                // expanded to the number of tracks of the album
+                "Showing {} track",
+                "Showing all {} tracks",
+                total,
+                &[&total.to_string()],
+            ));
+            imp.banner.set_button_label(Some(&i18n("Show Matching")));
+        } else {
+            imp.banner.set_title(&ni18n_f(
+                // Translators: The first '{}' is the number of tracks of the
+                // album that match the search, and the second the number of
+                // all of them; both must be left unmodified
+                "The search matches {} of {} track",
+                "The search matches {} of {} tracks",
+                total,
+                &[&matching.to_string(), &total.to_string()],
+            ));
+            imp.banner.set_button_label(Some(&i18n("Show All")));
+        }
+        imp.banner.set_revealed(true);
+    }
+
+    // Reads the tracks of the album that match the search, or all of them
+    // with Show All
+    fn load(&self, reveal: Option<&gio::File>) {
+        let imp = self.imp();
+        self.set_selection_mode(false);
+
+        let Some(album) = imp.album.borrow().clone() else {
+            return;
+        };
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
@@ -473,20 +556,36 @@ impl AlbumTracks {
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
         let album_id = album.id();
-        let search_words = search_words.to_vec();
+        let show_all = imp.show_all.get();
+        let search_words = imp.search_words.borrow().clone();
         let reveal = reveal.cloned();
         let mut revealed = false;
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
-                let paths =
-                    gio::spawn_blocking(move || library::album_tracks(&album_id, &search_words))
-                        .await
-                        .unwrap_or_default();
+                // With a search, the album's tracks are counted too, to tell
+                // whether it leaves some out; Show All keeps the counts
+                let (paths, total) = gio::spawn_blocking(move || {
+                    if show_all || search_words.is_empty() {
+                        (library::album_tracks(&album_id, &[]), None)
+                    } else {
+                        let total = library::album_tracks(&album_id, &[]).len();
+                        (library::album_tracks(&album_id, &search_words), Some(total))
+                    }
+                })
+                .await
+                .unwrap_or_default();
                 if this.imp().generation.get() != generation {
                     return;
                 }
+                if !show_all {
+                    let left_out = total
+                        .filter(|&total| paths.len() < total)
+                        .map(|total| (paths.len() as u32, total as u32));
+                    this.imp().left_out.set(left_out);
+                }
+                this.update_banner();
                 let files: Vec<gio::File> = paths.into_iter().map(gio::File::for_path).collect();
                 this.imp().files.replace(files.clone());
 

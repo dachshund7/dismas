@@ -465,33 +465,45 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
 }
 
 // The albums with a track that contains every word, which must be
-// normalized with `normalize_search_text()`, like in the queue; the
+// normalized with `normalize_search_text()`, like in the queue, with the
+// number of their tracks that do and the number of all their tracks; the
 // tracks in the `hidden` folders are left out, as in `albums()`
-pub fn search_albums(words: &[String], hidden: &[PathBuf]) -> HashSet<String> {
-    let query = |conn: &Connection| -> rusqlite::Result<HashSet<String>> {
-        use rusqlite::types::Value;
-
-        let conditions = vec!["instr(search, ?) > 0"; words.len()].join(" AND ");
-        let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
-        let mut stmt = conn.prepare(&format!(
-            "SELECT DISTINCT album_id FROM tracks
-             WHERE album_id IS NOT NULL AND {conditions}{hidden_sql}"
-        ))?;
-        let params = words
-            .iter()
-            .map(|word| Value::Text(word.clone()))
-            .chain(hidden_params.into_iter().map(Value::Blob));
-        stmt.query_map(rusqlite::params_from_iter(params), |row| row.get(0))?
-            .collect()
-    };
-
-    match with_connection(|conn| query(conn)) {
+pub fn search_albums(words: &[String], hidden: &[PathBuf]) -> HashMap<String, (u32, u32)> {
+    match with_connection(|conn| query_search_albums(conn, words, hidden)) {
         Ok(albums) => albums,
         Err(e) => {
             warn!("Unable to search the albums: {e}");
-            HashSet::new()
+            HashMap::new()
         }
     }
+}
+
+fn query_search_albums(
+    conn: &Connection,
+    words: &[String],
+    hidden: &[PathBuf],
+) -> rusqlite::Result<HashMap<String, (u32, u32)>> {
+    use rusqlite::types::Value;
+
+    // A track without search text matches nothing
+    let conditions = vec!["instr(search, ?) > 0"; words.len()].join(" AND ");
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT album_id, SUM(CASE WHEN {conditions} THEN 1 ELSE 0 END) AS matching,
+                COUNT(*)
+         FROM tracks
+         WHERE album_id IS NOT NULL{hidden_sql}
+         GROUP BY album_id
+         HAVING matching > 0"
+    ))?;
+    let params = words
+        .iter()
+        .map(|word| Value::Text(word.clone()))
+        .chain(hidden_params.into_iter().map(Value::Blob));
+    stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        Ok((row.get(0)?, (row.get(1)?, row.get(2)?)))
+    })?
+    .collect()
 }
 
 // The files of the tracks of an album, in order; with search words, only
@@ -1329,6 +1341,61 @@ mod tests {
         assert!(search.contains("two"));
 
         std::fs::remove_dir_all(&music).unwrap();
+    }
+
+    #[test]
+    fn searching_counts_the_matching_tracks_of_each_album() {
+        let conn = test_db();
+        let tracks: [(&str, &str, Option<&str>); 6] = [
+            ("/music/mass/1.opus", "mass", Some("kyrie soprano gardiner")),
+            ("/music/mass/2.opus", "mass", Some("gloria gardiner")),
+            ("/music/mass/3.opus", "mass", None),
+            (
+                "/music/passion/1.opus",
+                "passion",
+                Some("aria soprano gardiner"),
+            ),
+            ("/music/unmounted/1.opus", "passion", Some("aria gardiner")),
+            ("/music/songs/1.opus", "songs", Some("lied tenor")),
+        ];
+        for (path, album_id, search) in tracks {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, search)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3)",
+                rusqlite::params![path.as_bytes(), album_id, search],
+            )
+            .unwrap();
+        }
+        let search = |words: &[&str]| {
+            let words: Vec<String> = words.iter().map(ToString::to_string).collect();
+            let hidden = [PathBuf::from("/music/unmounted")];
+            let mut albums: Vec<(String, (u32, u32))> =
+                super::query_search_albums(&conn, &words, &hidden)
+                    .unwrap()
+                    .into_iter()
+                    .collect();
+            albums.sort();
+            albums
+        };
+
+        // The track without search text counts towards its album only, and
+        // the one in a folder that isn't there doesn't count at all
+        assert_eq!(
+            search(&["gardiner"]),
+            [
+                ("mass".to_string(), (2, 3)),
+                ("passion".to_string(), (1, 1))
+            ]
+        );
+        assert_eq!(
+            search(&["soprano", "gardiner"]),
+            [
+                ("mass".to_string(), (1, 3)),
+                ("passion".to_string(), (1, 1))
+            ]
+        );
+        assert_eq!(search(&["tenor"]), [("songs".to_string(), (1, 1))]);
+        assert!(search(&["bass"]).is_empty());
     }
 
     #[test]

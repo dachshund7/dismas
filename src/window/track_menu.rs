@@ -6,8 +6,9 @@ use crate::utils::ATTRIBUTE_HOST_PATH;
 
 impl Window {
     // The menu of a track, at the given point of its row; a row of the
-    // queue, rather than of an album's tracks, can go to its album and be
-    // removed
+    // queue, rather than of an album's tracks, can be removed. Both can go
+    // to the album, the tracks of an album only while the search leaves
+    // some of them out
     pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, in_queue: bool) {
         let Some(track) = row.track() else {
             return;
@@ -17,7 +18,9 @@ impl Window {
         let section = gio::Menu::new();
 
         // The album is looked up while the menu opens, and the item stays
-        // off for the tracks that are not in the album grid
+        // off for the tracks that are not in the album grid; the tracks of
+        // an album show all of them, scrolled to the track
+        let album_tracks = self.imp().album_tracks.get();
         if in_queue {
             let album_id: Rc<RefCell<Option<String>>> = Rc::default();
             let go_to_album = gio::SimpleAction::new("go-to-album", None);
@@ -49,6 +52,17 @@ impl Window {
                     }
                 }
             ));
+            section.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
+        } else if album_tracks.leaves_out_tracks() {
+            let go_to_album = gio::SimpleAction::new("go-to-album", None);
+            go_to_album.connect_activate(clone!(
+                #[weak]
+                album_tracks,
+                #[strong]
+                track,
+                move |_, _| album_tracks.show_all_tracks(Some(&track.file()))
+            ));
+            actions.add_action(&go_to_album);
             section.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
         }
 

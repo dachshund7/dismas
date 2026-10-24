@@ -41,8 +41,11 @@ All notable changes to this project will be documented in this file.
   open
 - The track menu has Open Directory, and in the playlist pane Remove,
   which removes all the selected tracks when the track is one of them;
-  Go to Album is only in the playlist pane, as an album's tracks are
-  already there
+  Go to Album is in the playlist pane, and in an album's tracks while a
+  search leaves some of them out
+- While a search of the album grid matches only some of an album's
+  tracks, its cover says how many, and its track list has a banner with
+  Show All, to see and play the whole album
 - Recently Played and Most Played, on the Playlists page, play the last
   100 tracks heard, in the order they were heard, or the ones played the
   most in the last 6 months, in place of the queue, with an Undo

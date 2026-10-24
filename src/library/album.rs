@@ -67,6 +67,12 @@ mod imp {
         // Whether the album is selected in the grid
         #[property(get, set)]
         pub selected: Cell<bool>,
+        // While a search of the grid matches only some of the tracks, the
+        // number that do, and the number of all of them; otherwise 0
+        #[property(get, set)]
+        pub matching_tracks: Cell<u32>,
+        #[property(get, set)]
+        pub track_count: Cell<u32>,
 
         // The keys the grid is sorted by, in the order of the locale
         pub artist_key: OnceCell<glib::CollationKey>,
