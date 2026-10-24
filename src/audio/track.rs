@@ -167,11 +167,41 @@ impl TrackCredits {
             work,
             title,
             movement,
+            partial,
+            movement_position,
         }) = extra
             .work_hierarchy
             .as_deref()
             .and_then(|json| work_hierarchy_labels(json, credits.movement_number.as_deref()))
         {
+            // Only the title tells which part of a movement a track is,
+            // when the movement is in several tracks: the hierarchy names
+            // all of them the same, e.g. "1. Ouverture" for "Ia. Overture –
+            // Adagio" and "Ib. Allegro – Lentement – Allegro"
+            let part = track_title(tag)
+                .as_deref()
+                .and_then(title_after_work)
+                .map(ToString::to_string);
+            let movement = match (part, movement) {
+                (Some(part), Some(movement)) if partial => Some(MovementName {
+                    levels: None,
+                    // With the number of the movement, unless the part has
+                    // its own, e.g. "3 Sarabande", or starts with the act
+                    // it's in, like the titles of operas: the number would
+                    // be the one in the act
+                    movement: match movement_position {
+                        Some(position)
+                            if movement.levels.is_none()
+                                && !is_numbered(&part)
+                                && !part.starts_with(|c: char| c.is_ascii_digit()) =>
+                        {
+                            format!("{position}. {part}")
+                        }
+                        _ => part,
+                    },
+                }),
+                (_, movement) => movement,
+            };
             credits.work_title = (title != work).then_some(title);
             credits.work = Some(work);
             credits.movement = movement.as_ref().map(MovementName::full);
@@ -667,6 +697,11 @@ struct WorkLabels {
     title: String,
     // None if the track performs the whole work
     movement: Option<MovementName>,
+    // Whether the track is only a part of one of the movements it
+    // performs, as MusicBrainz marks them
+    partial: bool,
+    // The position of the movement, if the track performs a single one
+    movement_position: Option<u32>,
 }
 
 // The work and the movement to display, from the JSON written by the
@@ -689,8 +724,13 @@ fn work_hierarchy_labels(json: &str, movement_number: Option<&str>) -> Option<Wo
         return None;
     }
 
-    let mut paths = hierarchy["segments"]
-        .as_array()?
+    let segments = hierarchy["segments"].as_array()?;
+    let partial = segments.iter().any(|segment| {
+        segment["attributes"]
+            .as_array()
+            .is_some_and(|attributes| attributes.iter().any(|a| a == "partial"))
+    });
+    let mut paths = segments
         .iter()
         .map(|segment| {
             segment["path"]
@@ -757,11 +797,28 @@ fn work_hierarchy_labels(json: &str, movement_number: Option<&str>) -> Option<Wo
     if parts.is_empty() && depth == 0 {
         return None;
     }
+    let movement_position = match &paths[..] {
+        [path] => path
+            .last()
+            .filter(|movement| movement.part_total == 0)
+            .and_then(|movement| movement.position),
+        _ => None,
+    };
     Some(WorkLabels {
         work: work.name.to_string(),
         title: work.title.to_string(),
         movement: (!parts.is_empty()).then(|| movement_name(&parts)),
+        partial,
+        movement_position,
     })
+}
+
+// The part of a track's title after the work, e.g. "Ia. Overture –
+// Adagio" in "Music for the Royal Fireworks, HWV 351: Ia. Overture –
+// Adagio"
+fn title_after_work(title: &str) -> Option<&str> {
+    let (_, part) = title.split_once(": ").or_else(|| title.split_once(" - "))?;
+    Some(part.trim()).filter(|part| !part.is_empty())
 }
 
 // The catalogues of composers' works, as written before the numbers, e.g.
@@ -2262,7 +2319,7 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        Credit, MovementName, MusicBrainzIds, TrackCredits, TrackData, WorkLabels,
+        Credit, ExtraComments, MovementName, MusicBrainzIds, TrackCredits, TrackData, WorkLabels,
         album_title_search_text, catalogue_numbers, is_numbered, normalize_search_text,
         position_ranges, tag_search_text, title_from_name, track_album, track_title,
         work_hierarchy_composer_ids, work_hierarchy_labels,
@@ -2465,6 +2522,86 @@ mod tests {
     }
 
     #[test]
+    fn a_part_of_a_movement_is_named_after_its_title() {
+        let hierarchy = |attributes: &[&str]| {
+            serde_json::json!({ "version": 1, "segments": [{ "attributes": attributes, "path": [
+                { "id": "hwv351", "title": "Music for the Royal Fireworks, HWV 351",
+                  "name": "Music for the Royal Fireworks, HWV 351", "position": null, "part_total": 5 },
+                { "id": "i", "title": "Music for the Royal Fireworks, HWV 351: I. Ouverture",
+                  "name": "Ouverture", "position": 1, "part_total": 0 },
+            ]}]})
+            .to_string()
+        };
+        let movement = |title: &str, attributes: &[&str]| {
+            let mut tag = Tag::new(TagType::VorbisComments);
+            tag.insert_text(ItemKey::TrackTitle, title.to_string());
+            let extra = ExtraComments {
+                work_hierarchy: Some(hierarchy(attributes)),
+                ..Default::default()
+            };
+            TrackCredits::from_tag(&tag, &extra).movement_label()
+        };
+        // An overture in two tracks
+        assert_eq!(
+            movement(
+                "Music for the Royal Fireworks, HWV 351: Ia. Overture – Adagio",
+                &["live", "partial"]
+            )
+            .as_deref(),
+            Some("Ia. Overture – Adagio")
+        );
+        assert_eq!(
+            movement("Mass for Four Voices - IIa. Gloria", &["partial"]).as_deref(),
+            Some("IIa. Gloria")
+        );
+        // The number of the movement goes before a part without one
+        assert_eq!(
+            movement("Music for the Royal Fireworks: Adagio", &["partial"]).as_deref(),
+            Some("1. Adagio")
+        );
+        assert_eq!(
+            movement("Suite in C, BuxWV 226: 3 Sarabande", &["partial"]).as_deref(),
+            Some("3 Sarabande")
+        );
+        // A whole movement keeps its name, and so does a part whose title
+        // doesn't name it
+        assert_eq!(
+            movement(
+                "Music for the Royal Fireworks, HWV 351: I. Overture",
+                &["live"]
+            )
+            .as_deref(),
+            Some("1. Ouverture")
+        );
+        assert_eq!(
+            movement("Ouverture", &["partial"]).as_deref(),
+            Some("1. Ouverture")
+        );
+
+        // A number of an opera, whose title starts with its act
+        let json = serde_json::json!({ "version": 1, "segments": [{ "attributes": ["partial"], "path": [
+            { "id": "lakme", "title": "Lakmé", "name": "Lakmé", "position": null, "part_total": 3 },
+            { "id": "act1", "title": "Lakmé: Acte I", "name": "Acte I", "position": 1, "part_total": 9 },
+            { "id": "air", "title": "…", "name": "Air « Prendre le dessin d’un bijou »", "position": 8, "part_total": 0 },
+        ]}]});
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(
+            ItemKey::TrackTitle,
+            "Lakmé : Acte I. Air « Prendre le dessin d’un bijou » (Gerald)".to_string(),
+        );
+        let extra = ExtraComments {
+            work_hierarchy: Some(json.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            TrackCredits::from_tag(&tag, &extra)
+                .movement_label()
+                .as_deref(),
+            Some("Acte I. Air « Prendre le dessin d’un bijou » (Gerald)")
+        );
+    }
+
+    #[test]
     fn work_hierarchy_numbers_the_lowest_level() {
         let wtc = ("wtc", "The Well-Tempered Clavier", None);
         let book = ("book1", "Book I", Some(1));
@@ -2614,6 +2751,8 @@ mod tests {
                     levels: None,
                     movement: "2. Fugue".to_string(),
                 }),
+                partial: false,
+                movement_position: Some(2),
             })
         );
         // A whole Prelude and Fugue in one track is a work, not a movement

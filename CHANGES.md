@@ -100,6 +100,9 @@ All notable changes to this project will be documented in this file.
   Prelude and Fugue in it is a track of its own rather than a movement of
   the collection; Track Information shows the work's full title, with the
   collection
+- A track with only part of a movement, such as half of an overture in two
+  tracks, is named after its title, such as "Ia. Overture – Adagio", rather
+  than after the whole movement, which the tracks shared
 - Update dependencies
 
 ### Fixed
