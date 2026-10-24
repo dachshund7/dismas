@@ -1135,6 +1135,34 @@ impl TrackData {
         &self.credits
     }
 
+    // The title and the artist, as Copy puts them on the clipboard, e.g.
+    // "Summer of '69 — Bryan Adams"; for classical music, the composers
+    // and then the performers, as MusicBrainz credits classical releases,
+    // e.g. "Zefiro torna — Claudio Monteverdi; Núria Rial". The title
+    // comes first, as the performers can be a long list. Nothing is
+    // translated, so they can be pasted into a search or a message as
+    // they are
+    pub fn copied_details(&self) -> String {
+        let title = self.shown_title();
+        let artist = self.artist();
+        // Classical releases are often tagged with the composer as the
+        // artist; the performers then come after the composer
+        let (composers, artist) = match self.credits.performers_of_composer(artist) {
+            Some(performers) => (artist.map(ToString::to_string), Some(performers)),
+            None => (
+                self.credits.listed_composers(artist),
+                artist.map(ToString::to_string),
+            ),
+        };
+
+        let names = [composers, artist].into_iter().flatten().join("; ");
+        if names.is_empty() {
+            title.to_string()
+        } else {
+            format!("{title} — {names}")
+        }
+    }
+
     pub fn uuid(&self) -> Option<&str> {
         self.uuid.as_deref()
     }
@@ -1983,6 +2011,10 @@ impl Track {
         self.imp().data.borrow().credits().clone()
     }
 
+    pub fn copied_details(&self) -> String {
+        self.imp().data.borrow().copied_details()
+    }
+
     pub fn file_details(&self) -> FileDetails {
         self.imp().data.borrow().details().clone()
     }
@@ -2086,9 +2118,9 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        Credit, MovementName, MusicBrainzIds, TrackCredits, album_title_search_text, is_numbered,
-        normalize_search_text, position_ranges, tag_search_text, title_from_name, track_album,
-        track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
+        Credit, MovementName, MusicBrainzIds, TrackCredits, TrackData, album_title_search_text,
+        is_numbered, normalize_search_text, position_ranges, tag_search_text, title_from_name,
+        track_album, track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
     };
 
     #[test]
@@ -2476,6 +2508,92 @@ mod tests {
                 .as_deref(),
             Some("Alexander Porfyrevich Borodin")
         );
+    }
+
+    #[test]
+    fn copied_details_name_the_composers_of_classical_music() {
+        let song = TrackData {
+            title: Some("Help!".to_string()),
+            artist: Some("The Beatles".to_string()),
+            credits: TrackCredits {
+                composers: vec!["John Lennon".to_string(), "Paul McCartney".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(song.copied_details(), "Help! — The Beatles");
+
+        let madrigal = TrackData {
+            title: Some("Zefiro torna".to_string()),
+            artist: Some("Núria Rial, Oleguer Aymamí".to_string()),
+            credits: TrackCredits {
+                composers: vec!["Claudio Monteverdi".to_string()],
+                genres: vec!["Classical".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            madrigal.copied_details(),
+            "Zefiro torna — Claudio Monteverdi; Núria Rial, Oleguer Aymamí"
+        );
+
+        // Without an artist, the title from the file name if need be
+        let untagged = TrackData {
+            title: None,
+            fallback_title: "Zefiro torna".to_string(),
+            artist: None,
+            ..madrigal
+        };
+        assert_eq!(
+            untagged.copied_details(),
+            "Zefiro torna — Claudio Monteverdi"
+        );
+
+        // With the composer as the artist, the performers come from the
+        // album artist, or from the track's tags if it has them
+        let requiem = TrackData {
+            title: Some("Ein deutsches Requiem, Op. 45: 1. Selig sind".to_string()),
+            artist: Some("Johannes Brahms".to_string()),
+            credits: TrackCredits {
+                album_artist: Some(
+                    "Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius".to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            requiem.copied_details(),
+            "Ein deutsches Requiem, Op. 45: 1. Selig sind — \
+             Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius"
+        );
+        let requiem = TrackData {
+            credits: TrackCredits {
+                composers: vec!["Johannes Brahms".to_string()],
+                conductors: vec!["Frieder Bernius".to_string()],
+                performers: vec![Credit::parse("Kammerchor Stuttgart (choir vocals)")],
+                ..requiem.credits
+            },
+            ..requiem
+        };
+        assert_eq!(
+            requiem.copied_details(),
+            "Ein deutsches Requiem, Op. 45: 1. Selig sind — \
+             Johannes Brahms; Frieder Bernius · Kammerchor Stuttgart"
+        );
+
+        // Not when the artist isn't among the names before the semicolon
+        let duet = TrackData {
+            title: Some("Song".to_string()),
+            artist: Some("Singer".to_string()),
+            credits: TrackCredits {
+                album_artist: Some("Band; Singer".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(duet.copied_details(), "Song — Singer");
     }
 
     #[test]

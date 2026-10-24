@@ -81,6 +81,12 @@ All notable changes to this project will be documented in this file.
 - Tracks without an album tag are in the album grid, grouped by the folder
   they're in and named after it, which is also shown as their album and
   can be searched; a file without tags shows its folder's cover file
+- Copy (Ctrl+C) puts only the playing track's title and artist on the
+  clipboard, such as "Summer of '69 — Bryan Adams", instead of a
+  "Currently playing" sentence in the language of the interface; classical
+  tracks have their composers and then their performers, such as "Ein
+  deutsches Requiem — Johannes Brahms; Kammerchor Stuttgart & Frieder
+  Bernius"
 - When a classical track's artist is its composer and its tags don't name
   the performers, the player and the queue show the performers from the
   album artist, such as "Kammerchor Stuttgart & Frieder Bernius" from

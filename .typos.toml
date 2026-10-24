@@ -11,3 +11,5 @@ seeked = "seeked"
 [default.extend-words]
 # George Frideric Handel, in examples of classical tags
 Handel = "Handel"
+# "Ein deutsches Requiem", in examples of classical titles
+Ein = "Ein"

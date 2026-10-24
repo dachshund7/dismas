@@ -140,14 +140,7 @@ impl Window {
         if let Some(player) = self.player() {
             let state = player.state();
             if let Some(track) = state.track() {
-                let s = i18n_k(
-                    // Translators: `{title}` and `{artist}` must be left
-                    // untranslated; they will expand to the title and
-                    // artist of the currently playing track, respectively
-                    "Currently playing “{title}” by “{artist}”",
-                    &[("title", &track.title()), ("artist", &track.artist())],
-                );
-                self.clipboard().set_text(&s);
+                self.clipboard().set_text(&track.copied_details());
             }
         }
     }
