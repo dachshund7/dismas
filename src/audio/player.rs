@@ -20,6 +20,7 @@ use crate::{
         Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, SleepTimer,
         Track, TrackSource, WaveformGenerator,
     },
+    play_stats::{self, ListenTracker},
     utils,
 };
 
@@ -152,6 +153,8 @@ pub struct AudioPlayer {
     // Whether the last track of the queue played to its end; playing
     // again then starts over
     finished: Cell<bool>,
+    // How long the current track has been heard, for the smart playlists
+    listens: RefCell<ListenTracker>,
 }
 
 impl fmt::Debug for AudioPlayer {
@@ -216,6 +219,7 @@ impl AudioPlayer {
             waveform_generator,
             settings,
             finished: Cell::new(false),
+            listens: RefCell::default(),
         });
 
         res.clone().setup_channel();
@@ -369,6 +373,7 @@ impl AudioPlayer {
         // At the end of the queue, the track stays, at its end, until
         // playing again starts over
         if self.state.track().is_some() && self.queue.peek_next_track().is_none() {
+            self.end_listen();
             self.set_playback_state(PlaybackState::Stopped);
             self.update_position(self.state.duration(), true);
             self.finished.set(true);
@@ -427,6 +432,10 @@ impl AudioPlayer {
     // Shows the track as the one playing
     fn show_track(&self, track: Track) {
         self.finished.set(false);
+        self.end_listen();
+        self.listens
+            .borrow_mut()
+            .start(track.uri(), track.duration());
         for c in &self.controllers {
             c.set_track(&track);
         }
@@ -689,9 +698,29 @@ impl AudioPlayer {
     }
 
     fn clear_current_track(&self) {
+        self.end_listen();
+        self.listens.borrow_mut().clear();
         self.state.set_current_track(None);
         for c in &self.controllers {
             c.clear_track();
+        }
+    }
+
+    // Logs the listen to the current track, if it was heard long enough,
+    // in the background
+    fn end_listen(&self) {
+        if let Some(listen) = self.listens.borrow_mut().finish(play_stats::now()) {
+            gio::spawn_blocking(move || play_stats::record(&listen));
+        }
+    }
+
+    // Logs it right away: on quitting, which wouldn't wait for the
+    // background, and before a smart playlist is read, so that the track
+    // playing is on it. If the track keeps playing, the rest of it is
+    // another listen
+    pub fn save_listen(&self) {
+        if let Some(listen) = self.listens.borrow_mut().finish(play_stats::now()) {
+            play_stats::record(&listen);
         }
     }
 
@@ -712,6 +741,9 @@ impl AudioPlayer {
 
     fn update_position(&self, position: u64, notify: bool) {
         self.state.set_position(position);
+        self.listens
+            .borrow_mut()
+            .advance(position, self.state.playing());
 
         for c in &self.controllers {
             c.set_position(position, notify);

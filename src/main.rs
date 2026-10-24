@@ -18,6 +18,7 @@ mod library_view;
 mod marquee;
 mod migrate;
 mod page_switcher;
+mod play_stats;
 mod playback_control;
 mod player_box;
 mod playlist_view;

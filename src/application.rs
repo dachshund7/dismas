@@ -134,6 +134,7 @@ mod imp {
                 }
             }
             self.obj().save_resume_point();
+            self.obj().player().save_listen();
             // The settings are written in the background, which would
             // stop with the process
             gio::Settings::sync();

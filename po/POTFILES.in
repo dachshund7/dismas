@@ -32,4 +32,5 @@ src/window/loading.rs
 src/window/selected_playlist.rs
 src/window/selection.rs
 src/window/sleep_timer.rs
+src/window/smart_playlists.rs
 src/window/track_menu.rs

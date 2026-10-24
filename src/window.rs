@@ -11,6 +11,7 @@ mod selected_playlist;
 mod selection;
 mod sidebar;
 mod sleep_timer;
+mod smart_playlists;
 mod track_menu;
 mod zen;
 
@@ -313,6 +314,17 @@ mod imp {
                     if let Some(name) = param.and_then(String::from_variant) {
                         win.set_playlists_visible(false);
                         win.select_playlist(&name);
+                    }
+                },
+            );
+            klass.install_action(
+                "win.play-smart-playlist",
+                Some(glib::VariantTy::STRING),
+                move |win, _, param| {
+                    debug!("Window::win.play-smart-playlist()");
+                    if let Some(name) = param.and_then(String::from_variant) {
+                        win.set_playlists_visible(false);
+                        win.play_smart_playlist(&name);
                     }
                 },
             );

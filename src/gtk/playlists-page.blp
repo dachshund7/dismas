@@ -55,17 +55,54 @@ template $DismasPlaylistsPage: Widget {
         margin-start: 12;
         margin-end: 12;
 
-        child: ListBox playlists_list {
+        child: Box {
+          orientation: vertical;
           valign: start;
-          selection-mode: none;
+          spacing: 24;
 
-          accessibility {
-            label: C_("a11y", "Playlists");
+          ListBox playlists_list {
+            selection-mode: none;
+
+            accessibility {
+              label: C_("a11y", "Playlists");
+            }
+
+            styles [
+              "boxed-list",
+            ]
           }
 
-          styles [
-            "boxed-list",
-          ]
+          // They play a snapshot in place of the queue, so they're never
+          // the selected playlist
+          Adw.PreferencesGroup {
+            title: _("Smart Playlists");
+
+            Adw.ActionRow {
+              title: _("Recently Played");
+              subtitle: _("The last 100 tracks played");
+              activatable: true;
+              action-name: "win.play-smart-playlist";
+              action-target: "'recently-played'";
+
+              [suffix]
+              Image {
+                icon-name: "media-playback-start-symbolic";
+              }
+            }
+
+            Adw.ActionRow {
+              title: _("Most Played");
+              subtitle: _("The tracks played the most in the last 6 months");
+              activatable: true;
+              action-name: "win.play-smart-playlist";
+              action-target: "'most-played'";
+
+              [suffix]
+              Image {
+                icon-name: "media-playback-start-symbolic";
+              }
+            }
+          }
         };
       };
     };

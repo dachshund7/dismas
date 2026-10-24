@@ -43,6 +43,9 @@ All notable changes to this project will be documented in this file.
   which removes all the selected tracks when the track is one of them;
   Go to Album is only in the playlist pane, as an album's tracks are
   already there
+- Recently Played and Most Played, on the Playlists page, play the last
+  100 tracks heard, in the order they were heard, or the ones played the
+  most in the last 6 months, in place of the queue, with an Undo
 
 ### Changed
 

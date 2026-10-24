@@ -103,6 +103,7 @@ impl Window {
         self.update_queue_actions();
         for action in [
             "win.select-playlist",
+            "win.play-smart-playlist",
             "win.new-playlist",
             "win.rename-playlist",
             "win.delete-playlist",
@@ -325,14 +326,19 @@ impl Window {
                     win.add_toast(i18n("No available track found"));
                     return;
                 }
-
-                let replaced = win.replaced_queue();
-                win.select_queue_to_play();
-                win.clear_queue();
-                win.show_playlist_view();
-                win.load_into_queue(queue, QueueMode::Play(0), None, None, Some(replaced), None);
+                win.play_in_place_of_queue(queue);
             }
         ));
+    }
+
+    // Plays the tracks in place of those of the queue, selecting it if a
+    // saved playlist was; the toast's Undo puts them back
+    pub(super) fn play_in_place_of_queue(&self, files: Vec<gio::File>) {
+        let replaced = self.replaced_queue();
+        self.select_queue_to_play();
+        self.clear_queue();
+        self.show_playlist_view();
+        self.load_into_queue(files, QueueMode::Play(0), None, None, Some(replaced), None);
     }
 
     fn add_replaced_toast(&self, n_tracks: usize, replaced: ReplacedQueue) {
