@@ -1998,9 +1998,14 @@ impl Track {
         }
     }
 
-    // The title and album in the tags, without the ones shown in their place
+    // The title, artist and album in the tags, without the ones shown in
+    // their place
     pub fn tag_title(&self) -> Option<String> {
         self.imp().data.borrow().title().map(ToString::to_string)
+    }
+
+    pub fn tag_artist(&self) -> Option<String> {
+        self.imp().data.borrow().artist().map(ToString::to_string)
     }
 
     pub fn tag_album(&self) -> Option<String> {

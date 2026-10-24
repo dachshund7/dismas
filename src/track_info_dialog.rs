@@ -92,8 +92,11 @@ impl TrackInfoDialog {
             .tag_title()
             .filter(|t| movement.is_none() && credits.work.as_ref() != Some(t));
 
+        // The artist is shown even when it repeats the composer or the
+        // performers, so that the tag can be checked as it is
         let work = [
             (i18n("Title"), title.into_iter().collect()),
+            (i18n("Artist"), track.tag_artist().into_iter().collect()),
             (i18n("Work"), credits.work.clone().into_iter().collect()),
             (i18n("Movement"), movement.into_iter().collect()),
             (i18n("Composer"), credits.composers.clone()),

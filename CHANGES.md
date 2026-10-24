@@ -87,6 +87,8 @@ All notable changes to this project will be documented in this file.
   tracks have their composers and then their performers, such as "Ein
   deutsches Requiem — Johannes Brahms; Kammerchor Stuttgart & Frieder
   Bernius"
+- Track Information shows the artist tag, even when it repeats the
+  composer or the performers
 - When a classical track's artist is its composer and its tags don't name
   the performers, the player and the queue show the performers from the
   album artist, such as "Kammerchor Stuttgart & Frieder Bernius" from
