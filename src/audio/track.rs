@@ -70,6 +70,10 @@ impl Credit {
 #[derive(Debug, Clone, Default)]
 pub struct TrackCredits {
     pub work: Option<String>,
+    // The full title of the work, when it's part of a larger one, e.g.
+    // "The Well-Tempered Clavier, Book I: Prelude and Fugue no. 1 in C
+    // major, BWV 846"
+    pub work_title: Option<String>,
     pub movement: Option<String>,
     pub movement_number: Option<String>,
     // The levels of the work above the movement, and the movement, when
@@ -155,17 +159,25 @@ impl TrackCredits {
             .as_deref()
             .and_then(work_hierarchy_composer_ids);
         // The hierarchy has the numbers of every level, so the movement
-        // includes them where they belong, and the work is always the
-        // top-level one, whichever the plugin was set to tag
-        if let Some((work, movement)) = extra
+        // includes them where they belong, and the work is the same
+        // whichever level the plugin was set to tag: the top-level one,
+        // or a part of it with a catalogue number of its own. A track of a
+        // whole part like that is not a movement
+        if let Some(WorkLabels {
+            work,
+            title,
+            movement,
+        }) = extra
             .work_hierarchy
             .as_deref()
             .and_then(|json| work_hierarchy_labels(json, credits.movement_number.as_deref()))
         {
+            credits.work_title = (title != work).then_some(title);
             credits.work = Some(work);
-            credits.movement = Some(movement.full());
+            credits.movement = movement.as_ref().map(MovementName::full);
             credits.movement_number = None;
-            credits.movement_levels = movement.levels.map(|levels| (levels, movement.movement));
+            credits.movement_levels =
+                movement.and_then(|movement| Some((movement.levels?, movement.movement)));
         }
 
         credits
@@ -174,6 +186,7 @@ impl TrackCredits {
     fn from_tag_items(tag: &Tag) -> Self {
         TrackCredits {
             work: tag.get_string(ItemKey::Work).map(ToString::to_string),
+            work_title: None,
             movement: tag.get_string(ItemKey::Movement).map(ToString::to_string),
             movement_number: tag
                 .get_string(ItemKey::MovementNumber)
@@ -612,6 +625,8 @@ struct PathWork<'a> {
     name: &'a str,
     // The position in the parent work, if MusicBrainz has one
     position: Option<u32>,
+    // The number of parts of the work, 0 if the plugin didn't record it
+    part_total: u64,
 }
 
 impl PathWork<'_> {
@@ -641,6 +656,19 @@ impl PathWork<'_> {
     }
 }
 
+// The work and the movement to display, from the "WORK_HIERARCHY" tag
+#[derive(Debug, PartialEq)]
+struct WorkLabels {
+    // The name of the work, e.g. "Prelude and Fugue no. 1 in C major, BWV
+    // 846"
+    work: String,
+    // Its full title, with the works it's part of, e.g. "The Well-Tempered
+    // Clavier, Book I: Prelude and Fugue no. 1 in C major, BWV 846"
+    title: String,
+    // None if the track performs the whole work
+    movement: Option<MovementName>,
+}
+
 // The work and the movement to display, from the JSON written by the
 // "Work Hierarchy" plugin of MusicBrainz Picard; the movement names the
 // levels below the work. MusicBrainz doesn't always have the position of
@@ -649,10 +677,7 @@ impl PathWork<'_> {
 // performs parts of different works, or a work without parts, which may
 // still be a movement in the tags if MusicBrainz didn't link it to its
 // parent work
-fn work_hierarchy_labels(
-    json: &str,
-    movement_number: Option<&str>,
-) -> Option<(String, MovementName)> {
+fn work_hierarchy_labels(json: &str, movement_number: Option<&str>) -> Option<WorkLabels> {
     let hierarchy = match serde_json::from_str::<serde_json::Value>(json) {
         Ok(h) => h,
         Err(e) => {
@@ -679,6 +704,7 @@ fn work_hierarchy_labels(
                         position: work["position"]
                             .as_u64()
                             .and_then(|p| u32::try_from(p).ok()),
+                        part_total: work["part_total"].as_u64().unwrap_or(0),
                     })
                 })
                 .collect::<Option<Vec<_>>>()
@@ -697,15 +723,121 @@ fn work_hierarchy_labels(
         return None;
     }
 
+    // A part of a collection can be a work in its own right, with a
+    // catalogue number that the collection doesn't have, like each Prelude
+    // and Fugue of The Well-Tempered Clavier: the work is then the deepest
+    // of those, and otherwise the top-level one. The names of movements
+    // often repeat the number of their work, e.g. "Französische Suite no.
+    // 2 c-Moll, BWV 813: I. Allemande", which doesn't make them works.
+    // Their names can have other numbers too, e.g. "K359: Variation I" in
+    // "12 Variations, K. 374a/359", so the work a track performs only
+    // counts if it has parts, as a whole Prelude and Fugue in one track
+    let first = &paths[0];
+    let depth = (1..first.len())
+        .rev()
+        .find(|&depth| {
+            has_own_catalogue_number(&first[depth], &first[..depth])
+                && paths.iter().all(|path| {
+                    path.get(depth).is_some_and(|work| {
+                        work.id == first[depth].id
+                            && (depth + 1 < path.len() || work.part_total > 0)
+                    })
+                })
+        })
+        .unwrap_or(0);
+    let work = &first[depth];
+
     let parts = paths
         .iter()
-        .map(|path| &path[1..])
+        .map(|path| &path[depth + 1..])
         .filter(|parts| !parts.is_empty())
         .collect::<Vec<_>>();
-    if parts.is_empty() {
+    // A track of a whole work of a collection, e.g. a Prelude and Fugue in
+    // one track; the top-level work without parts is left to the tags
+    if parts.is_empty() && depth == 0 {
         return None;
     }
-    Some((top.name.to_string(), movement_name(&parts)))
+    Some(WorkLabels {
+        work: work.name.to_string(),
+        title: work.title.to_string(),
+        movement: (!parts.is_empty()).then(|| movement_name(&parts)),
+    })
+}
+
+// The catalogues of composers' works, as written before the numbers, e.g.
+// "BWV 846", "op. 2 no. 4", "K. 331" or "TWV 40:18"
+const CATALOGUES: &[&str] = &[
+    "anh", "b", "bb", "buxwv", "bwv", "cw", "d", "fp", "fwv", "gwv", "h", "hob", "hwv", "jw", "k",
+    "kv", "l", "lwv", "m", "mwv", "op", "rv", "s", "sv", "swv", "sz", "trv", "twv", "w", "wab",
+    "wd", "woo", "wq", "z", "zwv",
+];
+
+// The catalogue numbers in the name of a work, lowercase and without
+// dots, e.g. "bwv 846" in "Prelude and Fugue no. 1 in C major, BWV 846" or
+// "op 2 no 4" in "Sonata da camera a trè in E minor, op. 2 no. 4"; none
+// in "Book I" or "Act II"
+fn catalogue_numbers(name: &str) -> Vec<String> {
+    let words: Vec<&str> = name
+        .split(|c: char| c.is_whitespace() || ",;()[]\"“”„".contains(c))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let catalogue = |word: &str| {
+        let catalogue = word.strip_suffix('.').unwrap_or(word).to_lowercase();
+        CATALOGUES
+            .contains(&catalogue.as_str())
+            .then_some(catalogue)
+    };
+    let is_number = |catalogue: &str, number: &str| {
+        // Haydn's and Janáček's catalogues number their groups in Roman
+        // numerals, e.g. "Hob. XVI:52"
+        number.starts_with(|c: char| c.is_ascii_digit())
+            || (["hob", "jw"].contains(&catalogue) && number.starts_with(['I', 'V', 'X']))
+    };
+    // Without the punctuation after it, e.g. "899" in "D. 899: No. 1"
+    let trimmed = |number: &str| number.trim_end_matches(['.', ':']).to_lowercase();
+
+    let mut numbers = Vec::new();
+    for (i, &word) in words.iter().enumerate() {
+        // "BWV 846", or written as one word, "op.2" or "W389"
+        let (letters, rest) = word.split_at(
+            word.find(|c: char| !c.is_alphabetic())
+                .unwrap_or(word.len()),
+        );
+        let rest = rest.strip_prefix('.').unwrap_or(rest);
+        let (catalogue, number, after) = match (catalogue(word), words.get(i + 1)) {
+            (Some(catalogue), Some(&number)) if is_number(&catalogue, number) => {
+                (catalogue, number, i + 2)
+            }
+            _ => match catalogue(letters) {
+                Some(catalogue) if is_number(&catalogue, rest) => (catalogue, rest, i + 1),
+                _ => continue,
+            },
+        };
+        let mut found = format!("{catalogue} {}", trimmed(number));
+        // A number in a set, e.g. "op. 2 no. 4", unless the name of a part
+        // follows a colon, as in "op. 90, D. 899: No. 1"
+        if !number.ends_with(':')
+            && let [no, n, ..] = &words[after..]
+            && ["no", "nr", "nº", "n°"].contains(&no.trim_end_matches('.').to_lowercase().as_str())
+            && n.starts_with(|c: char| c.is_ascii_digit())
+        {
+            found.push_str(&format!(" no {}", trimmed(n)));
+        }
+        numbers.push(found);
+    }
+    numbers
+}
+
+// Whether a work has a catalogue number that none of the works above it
+// has, as a work in its own right
+fn has_own_catalogue_number(work: &PathWork, above: &[PathWork]) -> bool {
+    let above: Vec<String> = above
+        .iter()
+        .flat_map(|work| catalogue_numbers(work.name))
+        .collect();
+    catalogue_numbers(work.name)
+        .iter()
+        .any(|number| !above.contains(number))
 }
 
 // The ids of the composers of the works a track performs, the last in each
@@ -2123,9 +2255,10 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        Credit, MovementName, MusicBrainzIds, TrackCredits, TrackData, album_title_search_text,
-        is_numbered, normalize_search_text, position_ranges, tag_search_text, title_from_name,
-        track_album, track_title, work_hierarchy_composer_ids, work_hierarchy_labels,
+        Credit, MovementName, MusicBrainzIds, TrackCredits, TrackData, WorkLabels,
+        album_title_search_text, catalogue_numbers, is_numbered, normalize_search_text,
+        position_ranges, tag_search_text, title_from_name, track_album, track_title,
+        work_hierarchy_composer_ids, work_hierarchy_labels,
     };
 
     #[test]
@@ -2230,7 +2363,8 @@ mod tests {
     }
 
     fn labels(paths: &[&[Work]]) -> Option<(String, String)> {
-        work_hierarchy_labels(&hierarchy(paths), None).map(|(work, m)| (work, m.full()))
+        work_hierarchy_labels(&hierarchy(paths), None)
+            .map(|l| (l.work, l.movement.map_or_else(String::new, |m| m.full())))
     }
 
     fn movement(paths: &[&[Work]]) -> Option<String> {
@@ -2265,13 +2399,15 @@ mod tests {
         let json = hierarchy(&[&[concerto, ("ii", "Andante", None)]]);
         assert_eq!(
             work_hierarchy_labels(&json, Some("2"))
-                .map(|(_, m)| m.full())
+                .and_then(|l| l.movement)
+                .map(|m| m.full())
                 .as_deref(),
             Some("2. Andante")
         );
         assert_eq!(
             work_hierarchy_labels(&json, None)
-                .map(|(_, m)| m.full())
+                .and_then(|l| l.movement)
+                .map(|m| m.full())
                 .as_deref(),
             Some("Andante")
         );
@@ -2279,7 +2415,8 @@ mod tests {
         let json = hierarchy(&[&[concerto, ("ii", "Andante", Some(3))]]);
         assert_eq!(
             work_hierarchy_labels(&json, Some("2"))
-                .map(|(_, m)| m.full())
+                .and_then(|l| l.movement)
+                .map(|m| m.full())
                 .as_deref(),
             Some("3. Andante")
         );
@@ -2295,7 +2432,8 @@ mod tests {
         ]}]}"#;
         assert_eq!(
             work_hierarchy_labels(json, None)
-                .map(|(_, m)| m.full())
+                .and_then(|l| l.movement)
+                .map(|m| m.full())
                 .as_deref(),
             Some("I. oddíl: III. Sequentia: 3. Quid sum miser")
         );
@@ -2305,14 +2443,10 @@ mod tests {
     fn work_hierarchy_numbers_the_lowest_level() {
         let wtc = ("wtc", "The Well-Tempered Clavier", None);
         let book = ("book1", "Book I", Some(1));
-        let pf = (
-            "pf12",
-            "Prelude and Fugue no. 12 in F minor, BWV 857",
-            Some(12),
-        );
+        let pf = ("pf12", "Prelude and Fugue no. 12 in F minor", Some(12));
         assert_eq!(
             movement(&[&[wtc, book, pf, ("p", "Prelude", Some(1))]]).as_deref(),
-            Some("Book I: Prelude and Fugue no. 12 in F minor, BWV 857: 1. Prelude")
+            Some("Book I: Prelude and Fugue no. 12 in F minor: 1. Prelude")
         );
 
         // The levels in common are only named once
@@ -2343,7 +2477,12 @@ mod tests {
 
     #[test]
     fn work_hierarchy_separates_the_levels_above_the_movement() {
-        let name = |paths: &[&[Work]]| work_hierarchy_labels(&hierarchy(paths), None).unwrap().1;
+        let name = |paths: &[&[Work]]| {
+            work_hierarchy_labels(&hierarchy(paths), None)
+                .unwrap()
+                .movement
+                .unwrap()
+        };
         let wtc = ("wtc", "The Well-Tempered Clavier", None);
         let book = ("book1", "Book I", Some(1));
         let pf = ("pf1", "Prelude and Fugue no. 1", Some(1));
@@ -2416,6 +2555,182 @@ mod tests {
             work_hierarchy_labels(r#"{"version":1,"segments":[]}"#, None),
             None
         );
+    }
+
+    #[test]
+    fn a_part_with_its_own_catalogue_number_is_the_work() {
+        let wtc = ("wtc", "The Well-Tempered Clavier", None);
+        let book = ("book1", "Book I", Some(1));
+        let pf = (
+            "bwv846",
+            "Prelude and Fugue no. 1 in C major, BWV 846",
+            Some(1),
+        );
+        let prelude = ("p", "Prelude", Some(1));
+        let fugue = ("f", "Fugue", Some(2));
+        let json = serde_json::json!({ "version": 1, "segments": [{ "path": [
+            { "id": "wtc", "title": "The Well-Tempered Clavier",
+              "name": "The Well-Tempered Clavier", "position": null },
+            { "id": "book1", "title": "The Well-Tempered Clavier, Book I",
+              "name": "Book I", "position": 1 },
+            { "id": "bwv846",
+              "title": "The Well-Tempered Clavier, Book I: Prelude and Fugue no. 1 in C major, BWV 846",
+              "name": "Prelude and Fugue no. 1 in C major, BWV 846", "position": 1 },
+            { "id": "f", "title": "…: Fugue", "name": "Fugue", "position": 2 },
+        ]}]});
+        assert_eq!(
+            work_hierarchy_labels(&json.to_string(), None),
+            Some(WorkLabels {
+                work: "Prelude and Fugue no. 1 in C major, BWV 846".to_string(),
+                title:
+                    "The Well-Tempered Clavier, Book I: Prelude and Fugue no. 1 in C major, BWV 846"
+                        .to_string(),
+                movement: Some(MovementName {
+                    levels: None,
+                    movement: "2. Fugue".to_string(),
+                }),
+            })
+        );
+        // A whole Prelude and Fugue in one track is a work, not a movement
+        let whole = serde_json::json!({ "version": 1, "segments": [{ "path": [
+            { "id": "wtc", "title": "The Well-Tempered Clavier",
+              "name": "The Well-Tempered Clavier", "position": null, "part_total": 2 },
+            { "id": "book1", "title": "The Well-Tempered Clavier, Book I",
+              "name": "Book I", "position": 1, "part_total": 24 },
+            { "id": "bwv846", "title": "…", "name": "Prelude and Fugue no. 1 in C major, BWV 846",
+              "position": 1, "part_total": 2 },
+        ]}]});
+        let labels_of_whole = work_hierarchy_labels(&whole.to_string(), Some("1")).unwrap();
+        assert_eq!(
+            labels_of_whole.work,
+            "Prelude and Fugue no. 1 in C major, BWV 846"
+        );
+        assert_eq!(labels_of_whole.movement, None);
+        // Unless it has no parts, like a movement with a number of its own
+        assert_eq!(
+            labels(&[&[wtc, book, pf]]),
+            Some((
+                "The Well-Tempered Clavier".to_string(),
+                "Book I: 1. Prelude and Fugue no. 1 in C major, BWV 846".to_string()
+            ))
+        );
+        let variations = ("k359", "12 Variations, K. 374a/359", None);
+        let variation = ("v1", "Variations in G major, K359: Variation I", Some(2));
+        assert_eq!(
+            labels(&[&[variations, variation]]).map(|(work, _)| work),
+            Some("12 Variations, K. 374a/359".to_string())
+        );
+        // Both movements of the same part
+        assert_eq!(
+            labels(&[&[wtc, book, pf, prelude], &[wtc, book, pf, fugue]]),
+            Some((
+                "Prelude and Fugue no. 1 in C major, BWV 846".to_string(),
+                "1–2. Prelude / Fugue".to_string()
+            ))
+        );
+        // Movements of two of them are only parts of the same collection
+        let pf2 = (
+            "bwv847",
+            "Prelude and Fugue no. 2 in C minor, BWV 847",
+            Some(2),
+        );
+        assert_eq!(
+            labels(&[&[wtc, book, pf, fugue], &[wtc, book, pf2, prelude]]),
+            Some((
+                "The Well-Tempered Clavier".to_string(),
+                "Book I: Prelude and Fugue no. 1 in C major, BWV 846: 2. Fugue / Prelude and Fugue no. 2 in C minor, BWV 847: 1. Prelude"
+                    .to_string()
+            ))
+        );
+
+        // The parts of a set, with numbers of their own
+        let set = ("op2", "12 sonate da camera, op. 2", None);
+        let sonata = (
+            "op2no4",
+            "Sonata da camera a trè in E minor, op. 2 no. 4",
+            Some(4),
+        );
+        assert_eq!(
+            labels(&[&[set, sonata, ("g", "Giga", Some(3))]]),
+            Some((
+                "Sonata da camera a trè in E minor, op. 2 no. 4".to_string(),
+                "3. Giga".to_string()
+            ))
+        );
+        // The levels below the work are still named
+        let water_music = ("hwv348-350", "Water Music, HWV 348–350", None);
+        let suite = (
+            "hwv348",
+            "Water Music Suite no. 1 in F major, HWV 348",
+            Some(1),
+        );
+        let group = ("aaa", "Allegro - Andante - Allegro da capo", Some(3));
+        assert_eq!(
+            labels(&[&[water_music, suite, group, ("an", "Andante", Some(2))]]),
+            Some((
+                "Water Music Suite no. 1 in F major, HWV 348".to_string(),
+                "Allegro - Andante - Allegro da capo: 2. Andante".to_string()
+            ))
+        );
+
+        // Acts and parts are not works of their own
+        let act = ("act2", "Act II", Some(2));
+        assert_eq!(
+            labels(&[&[MESSIAH, act, ("a", "Aria", Some(1))]]).map(|(work, _)| work),
+            Some("Messiah, HWV 56".to_string())
+        );
+        // Nor are movements that repeat the number of their work
+        let suite = ("bwv813", "Französische Suite Nr. 2 c-Moll, BWV 813", None);
+        let allemande = (
+            "a",
+            "Französische Suite no. 2 c-Moll, BWV 813: I. Allemande",
+            Some(1),
+        );
+        assert_eq!(
+            labels(&[&[suite, allemande]]).map(|(work, _)| work),
+            Some("Französische Suite Nr. 2 c-Moll, BWV 813".to_string())
+        );
+    }
+
+    #[test]
+    fn catalogue_numbers_are_found_in_names() {
+        for (name, numbers) in [
+            (
+                "Prelude and Fugue no. 1 in C major, BWV 846",
+                &["bwv 846"][..],
+            ),
+            (
+                "Sonata da camera a trè in E minor, op. 2 no. 4",
+                &["op 2 no 4"],
+            ),
+            ("12 sonate da camera, op. 2", &["op 2"]),
+            ("Fantasia in A major, TWV 40:18", &["twv 40:18"]),
+            ("Sonata in E-flat major, Hob. XVI:52", &["hob xvi:52"]),
+            ("Piano Sonata no. 11 in A major, K. 331", &["k 331"]),
+            ("4 Impromptus, op. 90, D. 899", &["op 90", "d 899"]),
+            // The name of the movement after the colon isn't a number
+            (
+                "Impromptu in C minor, op. 90, D. 899: No. 1. Allegro",
+                &["op 90", "d 899"],
+            ),
+            (
+                "Cantata, BuxWV 75a \"Membra Jesu Nostri: Ad Pedes\"",
+                &["buxwv 75a"],
+            ),
+            ("Sonata, op.2", &["op 2"]),
+            ("Bachianas Brasileiras nº 5, W389", &["w 389"]),
+            ("Suite (BWV 1007)", &["bwv 1007"]),
+            ("Book I", &[]),
+            ("Act II", &[]),
+            ("Atto IV", &[]),
+            ("No. 4 in E minor", &[]),
+            ("Allegro - Andante - Allegro da capo", &[]),
+            ("Suite in D major", &[]),
+            ("Opus Dei", &[]),
+            ("Sonata, op. posth.", &[]),
+        ] {
+            assert_eq!(catalogue_numbers(name), numbers, "{name}");
+        }
     }
 
     #[test]

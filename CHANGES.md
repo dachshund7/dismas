@@ -93,6 +93,13 @@ All notable changes to this project will be documented in this file.
   the performers, the player and the queue show the performers from the
   album artist, such as "Kammerchor Stuttgart & Frieder Bernius" from
   "Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius"
+- With the tags of the Work Hierarchy plugin, a part of a collection that
+  has its own catalogue number, such as each Prelude and Fugue of The
+  Well-Tempered Clavier (BWV 846, BWV 847, …), is a work of its own, with
+  its own header in the queue and the album view, and a track with a whole
+  Prelude and Fugue in it is a track of its own rather than a movement of
+  the collection; Track Information shows the work's full title, with the
+  collection
 - Update dependencies
 
 ### Fixed

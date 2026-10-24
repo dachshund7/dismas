@@ -97,7 +97,16 @@ impl TrackInfoDialog {
         let work = [
             (i18n("Title"), title.into_iter().collect()),
             (i18n("Artist"), track.tag_artist().into_iter().collect()),
-            (i18n("Work"), credits.work.clone().into_iter().collect()),
+            // With the works it's part of, which the queue leaves out
+            (
+                i18n("Work"),
+                credits
+                    .work_title
+                    .clone()
+                    .or_else(|| credits.work.clone())
+                    .into_iter()
+                    .collect(),
+            ),
             (i18n("Movement"), movement.into_iter().collect()),
             (i18n("Composer"), credits.composers.clone()),
             (i18n("Lyricist"), credits.lyricists.clone()),
