@@ -84,6 +84,22 @@ Keyboard shortcuts
 | F11                 | Fullscreen                    |
 | Ctrl+Q              | Quit                          |
 
+Command line
+------------
+
+```sh
+dismas FILE…           # open the files and folders in place of the queue, or
+                       # add them to the selected playlist if Dismas is running
+dismas --add FILE…     # add them to the end of the selected playlist, without
+                       # bringing up the window of a running Dismas
+dismas --play FILE…    # play them in place of the queue, with an Undo
+```
+
+Folders are read with their subfolders. If Dismas isn't running, `--add` and
+`--play` start it and open the selected playlist first, as at any startup:
+`--add` then adds to that playlist, and the Undo of `--play` puts it back. In the Flatpak, only files that Dismas can
+read from its sandbox can be added, such as those in the Music folder.
+
 Building
 --------
 

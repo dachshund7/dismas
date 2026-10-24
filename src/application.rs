@@ -3,6 +3,7 @@
 
 use std::{
     cell::{Cell, RefCell},
+    ops::ControlFlow,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -84,6 +85,7 @@ mod imp {
             obj.setup_gactions();
             obj.setup_settings();
             obj.setup_resume_point();
+            obj.setup_command_line();
 
             obj.set_accels_for_action("app.quit", &["<primary>q"]);
 
@@ -156,6 +158,42 @@ mod imp {
                 .present_main_window(false, None)
                 .open_files(files);
         }
+
+        // Runs in the process that was started, before the command line
+        // goes to the one that's running, if any
+        fn handle_local_options(&self, options: &glib::VariantDict) -> ControlFlow<glib::ExitCode> {
+            if options.contains("add") && options.contains("play") {
+                eprintln!("{}", i18n("--add and --play can't be used together"));
+                return ControlFlow::Break(glib::ExitCode::FAILURE);
+            }
+            ControlFlow::Continue(())
+        }
+
+        // Runs in the first Dismas, with the arguments and the switches of
+        // the command line it was started with, or that was run since
+        fn command_line(&self, command_line: &gio::ApplicationCommandLine) -> glib::ExitCode {
+            debug!("Application::command_line");
+
+            // Relative paths are in the folder the command was run in
+            let files: Vec<gio::File> = command_line
+                .arguments()
+                .iter()
+                .skip(1)
+                .map(|arg| command_line.create_file_for_arg(arg))
+                .collect();
+            let options = command_line.options_dict();
+            let obj = self.obj();
+            if files.is_empty() {
+                obj.activate();
+            } else if options.contains("add") {
+                obj.add_files(&files);
+            } else if options.contains("play") {
+                obj.play_files(&files);
+            } else {
+                obj.open(&files, "");
+            }
+            glib::ExitCode::SUCCESS
+        }
     }
 
     impl GtkApplicationImpl for Application {}
@@ -172,7 +210,11 @@ impl Default for Application {
     fn default() -> Self {
         glib::Object::builder::<Application>()
             .property("application-id", APPLICATION_ID)
-            .property("flags", gio::ApplicationFlags::HANDLES_OPEN)
+            // File managers open files over D-Bus, which goes to `open`
+            .property(
+                "flags",
+                gio::ApplicationFlags::HANDLES_OPEN | gio::ApplicationFlags::HANDLES_COMMAND_LINE,
+            )
             .property("resource-base-path", "/io/github/dachshund7/Dismas")
             .build()
     }
@@ -421,6 +463,44 @@ impl Application {
         }
         window.present();
         window
+    }
+
+    // Adds files from the command line to the end of the selected playlist.
+    // A window that's there already isn't brought up, also when it's hidden
+    // while playing in the background, so that a script can add tracks
+    // while the user does something else
+    fn add_files(&self, files: &[gio::File]) {
+        let window = match self.active_window().and_downcast::<Window>() {
+            Some(window) => window,
+            None => self.present_main_window(true, None),
+        };
+        window.add_files(files);
+    }
+
+    // Plays files from the command line in place of the queue. Starting
+    // Dismas restores the selected playlist first, for the Undo to put back
+    fn play_files(&self, files: &[gio::File]) {
+        self.present_main_window(true, None).play_files(files);
+    }
+
+    fn setup_command_line(&self) {
+        self.add_main_option(
+            "add",
+            glib::Char::from(b'a'),
+            glib::OptionFlags::NONE,
+            glib::OptionArg::None,
+            &i18n("Add the files and folders to the end of the selected playlist"),
+            None,
+        );
+        self.add_main_option(
+            "play",
+            glib::Char::from(b'p'),
+            glib::OptionFlags::NONE,
+            glib::OptionArg::None,
+            &i18n("Play the files and folders in place of the queue"),
+            None,
+        );
+        self.set_option_context_parameter_string(Some(&i18n("[FILE…]")));
     }
 
     fn setup_gactions(&self) {

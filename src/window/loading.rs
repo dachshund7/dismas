@@ -19,6 +19,23 @@ impl Window {
             .set_transition_type(gtk::StackTransitionType::None);
         self.update_library_for_queue();
         imp.content_stack.set_transition_type(transition);
+
+        let pending = imp.after_startup.take();
+        for f in pending {
+            f(self);
+        }
+    }
+
+    // The playlist of the last session is read at startup, at the same
+    // time as tracks loaded meanwhile, which would land in the middle of it
+    // and be stored without it, so they wait until it's in the queue
+    fn after_startup(&self, f: impl FnOnce(&Self) + 'static) {
+        let imp = self.imp();
+        if imp.starting.get() {
+            imp.after_startup.borrow_mut().push(Box::new(f));
+        } else {
+            f(self);
+        }
     }
 
     // Opens the playlist selected in the last session: a saved one always,
@@ -146,7 +163,7 @@ impl Window {
 
         self.set_loading(true);
         // At startup, the pane is as the user last showed or hid it
-        if !(mode == QueueMode::Restore && self.imp().starting.get()) {
+        if mode != QueueMode::Quiet && !(mode == QueueMode::Restore && self.imp().starting.get()) {
             self.set_playlist_visible(true);
         }
 
@@ -242,12 +259,12 @@ impl Window {
                             None => player.skip_to(0),
                         }
                     }
-                    if mode == QueueMode::Add {
+                    match mode {
                         // Show where the album went, even if the
                         // queue was closed while adding it
-                        win.set_playlist_visible(true);
-                    } else {
-                        win.set_library_visible(false);
+                        QueueMode::Add => win.set_playlist_visible(true),
+                        QueueMode::Quiet => {}
+                        _ => win.set_library_visible(false),
                     }
 
                     // Restoring the queue at startup is quiet, and
@@ -312,8 +329,8 @@ impl Window {
     }
 
     // Plays the audio files, and the ones in the folders, in place of the
-    // tracks of the queue, like an album's Play button; nothing is replaced
-    // until some are found
+    // tracks of the queue, like an album's Play button, for files dropped
+    // or from the command line; nothing is replaced until some are found
     fn play_dropped_files(&self, files: Vec<gio::File>) {
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
@@ -449,6 +466,19 @@ impl Window {
         }
 
         self.add_files_to_queue(files.to_vec(), QueueMode::Show, None);
+    }
+
+    // Adds files from the command line to the end of the selected playlist,
+    // leaving the page and the pane as they are
+    pub fn add_files(&self, files: &[gio::File]) {
+        let files = files.to_vec();
+        self.after_startup(move |win| win.add_files_to_queue(files, QueueMode::Quiet, None));
+    }
+
+    // Plays files from the command line in place of the queue
+    pub fn play_files(&self, files: &[gio::File]) {
+        let files = files.to_vec();
+        self.after_startup(move |win| win.play_dropped_files(files));
     }
 
     // A single target takes the files dropped anywhere on the window, and

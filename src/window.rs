@@ -60,6 +60,9 @@ use crate::{
     work_sections::{WorkSectionModel, work_header_factory},
 };
 
+// Something that waits for the end of startup, see `after_startup()`
+type AfterStartup = Box<dyn FnOnce(&Window)>;
+
 // What happens once tracks are added to the queue
 #[derive(Clone, Copy, PartialEq)]
 enum QueueMode {
@@ -72,6 +75,9 @@ enum QueueMode {
     Restore,
     // Show the player, and play the tracks from the given one
     Play(u32),
+    // Leave the page and the pane as they are, for tracks added from the
+    // command line while the user may be doing something else
+    Quiet,
 }
 
 mod imp {
@@ -174,6 +180,8 @@ mod imp {
         pub library_scanning: Cell<bool>,
         // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
+        // What waits for the end of startup, e.g. files from the command line
+        pub after_startup: RefCell<Vec<AfterStartup>>,
         // Whether to hide the focus again once the page is shown
         pub hide_focus_after_transition: Cell<bool>,
         // The playlist whose tracks are loading, to take the place of
@@ -482,6 +490,7 @@ mod imp {
                 player_available: Cell::new(false),
                 library_scanning: Cell::new(false),
                 starting: Cell::new(true),
+                after_startup: RefCell::default(),
                 pending_playlist: RefCell::default(),
                 queue_scroll_tick: RefCell::default(),
                 loads: Cell::new(0),
