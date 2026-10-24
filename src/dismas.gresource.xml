@@ -7,6 +7,8 @@
     <file alias="edit-select-all-symbolic.svg">assets/icons/edit-select-all-symbolic.svg</file>
     <file alias="folder-music-symbolic.svg">assets/icons/folder-music-symbolic.svg</file>
     <file alias="go-previous-symbolic.svg">assets/icons/go-previous-symbolic.svg</file>
+    <file alias="heart-filled-symbolic.svg">assets/icons/heart-filled-symbolic.svg</file>
+    <file alias="heart-outline-symbolic.svg">assets/icons/heart-outline-symbolic.svg</file>
     <file alias="media-playback-pause.svg">assets/icons/media-playback-pause-symbolic.svg</file>
     <file alias="media-playback-start.svg">assets/icons/media-playback-start-symbolic.svg</file>
     <file alias="media-playlist-consecutive.svg">assets/icons/media-playlist-consecutive-symbolic.svg</file>

@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
-use crate::play_stats;
 
 impl Window {
     // Plays the tracks of a smart playlist in place of the queue, like
-    // dropped files, with an Undo. They're read from the play stats each
-    // time, so it's never the selected playlist
+    // dropped files, with an Undo. They're read from the play stats, or
+    // the favorites, each time, so it's never the selected playlist
     pub(super) fn play_smart_playlist(&self, name: &str) {
-        let query: fn() -> Vec<String> = match name {
-            "recently-played" => play_stats::recently_played,
-            "most-played" => play_stats::most_played,
+        let (query, empty): (fn() -> Vec<String>, _) = match name {
+            "favorites" => (play_stats::favorites, i18n("No favorite tracks yet")),
+            "recently-played" => (play_stats::recently_played, i18n("No tracks played yet")),
+            "most-played" => (play_stats::most_played, i18n("No tracks played yet")),
             _ => return,
         };
         // What was heard of the track playing isn't saved until it ends,
@@ -28,7 +28,7 @@ impl Window {
                     return;
                 };
                 if uris.is_empty() {
-                    win.add_toast(i18n("No tracks played yet"));
+                    win.add_toast(empty);
                     return;
                 }
                 let files = uris.iter().map(|uri| gio::File::for_uri(uri)).collect();

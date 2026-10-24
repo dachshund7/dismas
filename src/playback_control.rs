@@ -41,6 +41,8 @@ mod imp {
         #[template_child]
         pub sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
         #[template_child]
+        pub favorite_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
         pub track_info_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub more_button: TemplateChild<gtk::MenuButton>,
@@ -84,6 +86,18 @@ mod imp {
                 } else {
                     i18n("Shuffle Tracks")
                 };
+                button.set_tooltip_text(Some(&tooltip));
+            });
+
+            // The heart is filled for a favorite, and the tooltip says what
+            // a click does
+            self.favorite_button.connect_active_notify(|button| {
+                let (icon, tooltip) = if button.is_active() {
+                    ("heart-filled-symbolic", i18n("Remove from Favorites"))
+                } else {
+                    ("heart-outline-symbolic", i18n("Add to Favorites"))
+                };
+                button.set_icon_name(icon);
                 button.set_tooltip_text(Some(&tooltip));
             });
 

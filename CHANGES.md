@@ -49,6 +49,9 @@ All notable changes to this project will be documented in this file.
 - Recently Played and Most Played, on the Playlists page, play the last
   100 tracks heard, in the order they were heard, or the ones played the
   most in the last 6 months, in place of the queue, with an Undo
+- Mark tracks as favorites with the heart next to the Sleep Timer, Ctrl+D
+  or the track menu; Favorites, on the Playlists page, plays them in the
+  order they were marked, in place of the queue, with an Undo
 - `dismas --add FILE…` adds files and folders to the end of the selected
   playlist, also in a Dismas that's already running, without bringing up
   its window; `dismas --play FILE…` plays them in place of the queue, with

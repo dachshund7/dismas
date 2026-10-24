@@ -3,6 +3,7 @@
 
 mod albums;
 mod bindings;
+mod favorites;
 mod fullscreen;
 mod loading;
 mod now_playing;
@@ -41,6 +42,7 @@ use crate::{
     library::{self, Album},
     library_view::{AlbumDrag, LibraryView},
     page_switcher::PageSwitcher,
+    play_stats,
     playback_control::PlaybackControl,
     player_box::PlayerBox,
     playlist_view::PlaylistView,
@@ -142,6 +144,9 @@ mod imp {
 
         #[property(get, set = Self::set_queue_shuffled, explicit_notify)]
         pub queue_shuffled: Cell<bool>,
+        // Whether the playing track is a favorite, for the heart button
+        #[property(get, set = Self::set_track_favorite, explicit_notify)]
+        pub track_favorite: Cell<bool>,
         #[property(get, set = Self::set_playlist_visible, explicit_notify)]
         pub playlist_visible: Cell<bool>,
         // The same, as the user shows and hides the pane, with the pane
@@ -431,6 +436,7 @@ mod imp {
             klass.install_property_action("win.fullscreen", "fullscreened");
             klass.install_property_action("queue.toggle", "user-playlist-visible");
             klass.install_property_action("queue.shuffle", "queue-shuffled");
+            klass.install_property_action("win.favorite", "track-favorite");
             klass.install_property_action("queue.select", "queue-selection");
             klass.install_property_action("queue.search", "queue-search");
             klass.install_property_action("win.page", "page");
@@ -470,6 +476,7 @@ mod imp {
                 sidebar_handle: TemplateChild::default(),
                 narrow_breakpoint: TemplateChild::default(),
                 queue_shuffled: Cell::new(false),
+                track_favorite: Cell::new(false),
                 playlist_visible: Cell::new(true),
                 user_playlist_visible: std::marker::PhantomData,
                 queue_selection: Cell::new(false),
@@ -627,6 +634,21 @@ mod imp {
                 obj.unshuffle_queue();
             }
             obj.sync_queue_shuffled();
+        }
+
+        // Asked for with the heart button or its shortcut; it follows the
+        // playing track with `sync_track_favorite()`
+        fn set_track_favorite(&self, favorite: bool) {
+            let obj = self.obj();
+            if favorite == self.track_favorite.get() {
+                return;
+            }
+            let Some(track) = obj.player().and_then(|p| p.state().track()) else {
+                return;
+            };
+            play_stats::set_favorite(&track.uri(), favorite);
+            self.track_favorite.set(favorite);
+            obj.notify_track_favorite();
         }
 
         fn set_queue_selection(&self, selection: bool) {

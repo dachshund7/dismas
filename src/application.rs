@@ -101,6 +101,7 @@ mod imp {
             obj.set_accels_for_action("win.next", &["<Alt>Right"]);
             obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
+            obj.set_accels_for_action("win.favorite", &["<primary>d"]);
             obj.set_accels_for_action("win.preferences", &["<primary>comma"]);
             obj.set_accels_for_action("win.fullscreen", &["F11"]);
             // In the order of the buttons of the pages

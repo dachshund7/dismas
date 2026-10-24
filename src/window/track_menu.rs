@@ -6,9 +6,9 @@ use crate::utils::ATTRIBUTE_HOST_PATH;
 
 impl Window {
     // The menu of a track, at the given point of its row; a row of the
-    // queue, rather than of an album's tracks, can be removed. Both can go
-    // to the album, the tracks of an album only while the search leaves
-    // some of them out
+    // queue, rather than of an album's tracks, can be removed. Both can be
+    // marked as favorites, and go to the album, the tracks of an album only
+    // while the search leaves some of them out
     pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, in_queue: bool) {
         let Some(track) = row.track() else {
             return;
@@ -16,6 +16,25 @@ impl Window {
 
         let actions = gio::SimpleActionGroup::new();
         let section = gio::Menu::new();
+
+        // Only the track clicked, even when it's selected, as the selected
+        // tracks can be some favorites and some not
+        let favorite = play_stats::is_favorite(&track.uri());
+        let mark_favorite = gio::SimpleAction::new("favorite", None);
+        mark_favorite.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_, _| win.mark_favorite(&track, !favorite)
+        ));
+        actions.add_action(&mark_favorite);
+        let label = if favorite {
+            i18n("Remove from Favorites")
+        } else {
+            i18n("Add to Favorites")
+        };
+        section.append(Some(&label), Some("track.favorite"));
 
         // The album is looked up while the menu opens, and the item stays
         // off for the tracks that are not in the album grid; the tracks of

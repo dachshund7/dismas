@@ -73,9 +73,22 @@ template $DismasPlaylistsPage: Widget {
           }
 
           // They play a snapshot in place of the queue, so they're never
-          // the selected playlist
+          // the selected playlist; Favorites too, though it's made by hand
           Adw.PreferencesGroup {
             title: _("Smart Playlists");
+
+            Adw.ActionRow {
+              title: _("Favorites");
+              subtitle: _("The tracks marked as favorites");
+              activatable: true;
+              action-name: "win.play-smart-playlist";
+              action-target: "'favorites'";
+
+              [suffix]
+              Image {
+                icon-name: "media-playback-start-symbolic";
+              }
+            }
 
             Adw.ActionRow {
               title: _("Recently Played");

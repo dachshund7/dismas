@@ -69,10 +69,11 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC-BY-SA-3.0"
 
-# The app icons carry their own copyright and license; this entry comes after
-# the one for all SVG files, so that it's the one that applies to them
+# The app icons and the hearts were drawn for Dismas, and carry their own
+# copyright and license; this entry comes after the one for all SVG files,
+# so that it's the one that applies to them
 [[annotations]]
-path = ["data/icons/hicolor/scalable/apps/io.github.dachshund7.Dismas*.svg", "data/icons/hicolor/symbolic/apps/io.github.dachshund7.Dismas*.svg"]
+path = ["data/icons/hicolor/scalable/apps/io.github.dachshund7.Dismas*.svg", "data/icons/hicolor/symbolic/apps/io.github.dachshund7.Dismas*.svg", "src/assets/icons/heart-*-symbolic.svg"]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026  John Hamilton"
 SPDX-License-Identifier = "CC-BY-SA-3.0"

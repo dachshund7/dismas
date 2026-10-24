@@ -122,6 +122,22 @@ template $DismasPlaybackControl: Widget {
           }
         }
 
+        ToggleButton favorite_button {
+          icon-name: "heart-outline-symbolic";
+          action-name: "win.favorite";
+          valign: center;
+          tooltip-text: _("Add to Favorites");
+
+          styles [
+            "circular",
+            "favorite",
+          ]
+
+          accessibility {
+            label: C_("a11y", "Favorite");
+          }
+        }
+
         Button locate_button {
           icon-name: "find-location-symbolic";
           action-name: "win.show-playing-track";

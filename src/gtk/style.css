@@ -99,6 +99,26 @@ playbackcontrol button.shuffle:checked:active {
   background-image: image(color-mix(in srgb, currentColor 20%, transparent));
 }
 
+/* The heart of a favorite is filled, so it shows without filling the
+ * button too; it's red rather than the accent color, whatever the theme
+ * and the cover. The button keeps the background of an unchecked one */
+playbackcontrol button.favorite:checked {
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+playbackcontrol button.favorite:checked:hover {
+  background-color: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+playbackcontrol button.favorite:checked:active,
+playbackcontrol button.favorite:checked.keyboard-activating {
+  background-color: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+playbackcontrol button.favorite:checked > image {
+  color: var(--red-2);
+}
+
 /* The title of the playlist pane switches playlists; it's only a little
  * taller than its label, to keep the time left under it within the header
  * bar, and wider, as the time left is apart from it */

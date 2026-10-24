@@ -48,6 +48,7 @@ impl Window {
             self.update_title(state.track().as_ref());
             self.update_style(state.track().as_ref());
         }
+        self.sync_track_favorite();
     }
 
     pub(super) fn update_cover(&self) {

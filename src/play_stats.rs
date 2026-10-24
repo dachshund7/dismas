@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! What has been played, for the smart playlists
+//! What has been played, and the favorite tracks, for the smart playlists
 //!
 //! Each listen to a track is logged with the seconds heard, in a database
 //! of its own: the library's is a cache that is made again when its schema
-//! changes, and the history can't be read again from anywhere. The log
-//! keeps the last year; the totals of each track are kept for good.
+//! changes, and neither the history nor the favorites can be read again
+//! from anywhere. The log keeps the last year; the totals of each track
+//! are kept for good.
 
 use std::{
     cell::RefCell,
@@ -19,7 +20,7 @@ use gtk::glib;
 use log::{debug, warn};
 use rusqlite::{Connection, TransactionBehavior, params};
 
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 // Tracks are told apart by their URI, as for the resume points; a moved
 // or renamed file starts with no stats
@@ -37,6 +38,11 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS listens (
         plays INTEGER NOT NULL,
         heard INTEGER NOT NULL,
         last_played INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS favorites (
+        uri TEXT PRIMARY KEY,
+        -- Seconds since the epoch, for the order of the list
+        added INTEGER NOT NULL
     );";
 
 const DAY: i64 = 24 * 60 * 60;
@@ -175,7 +181,9 @@ fn open() -> rusqlite::Result<Connection> {
 }
 
 // Unlike the library, the tables are never made again: a later version
-// changes them in place. One from a newer Dismas is left as it is
+// changes them in place. Version 2 only adds the favorites table, as each
+// statement of the schema leaves a table that's already there as it is.
+// A database from a newer Dismas is left as it is
 fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version >= SCHEMA_VERSION {
@@ -319,6 +327,68 @@ fn query_track_stats(
     }
     tx.commit()?;
     Ok(stats)
+}
+
+// The favorites are read and written on the main thread, as each is a
+// single row. If they were written in GLib's pool, like the listens, two
+// clicks on the heart close together could be written in the wrong order
+pub fn is_favorite(uri: &str) -> bool {
+    match with_connection(|conn| query_is_favorite(conn, uri)) {
+        Ok(favorite) => favorite,
+        Err(e) => {
+            warn!("Unable to find whether {uri} is a favorite: {e}");
+            false
+        }
+    }
+}
+
+fn query_is_favorite(conn: &Connection, uri: &str) -> rusqlite::Result<bool> {
+    conn.prepare_cached("SELECT 1 FROM favorites WHERE uri = ?1")?
+        .exists([uri])
+}
+
+pub fn set_favorite(uri: &str, favorite: bool) {
+    let result = with_connection(|conn| {
+        if favorite {
+            insert_favorite(conn, uri, now())
+        } else {
+            delete_favorite(conn, uri)
+        }
+    });
+    if let Err(e) = result {
+        warn!("Unable to change whether {uri} is a favorite: {e}");
+    }
+}
+
+// Marking a favorite again keeps its place in the list
+fn insert_favorite(conn: &Connection, uri: &str, added: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO favorites (uri, added) VALUES (?1, ?2)",
+        params![uri, added],
+    )?;
+    Ok(())
+}
+
+fn delete_favorite(conn: &Connection, uri: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM favorites WHERE uri = ?1", [uri])?;
+    Ok(())
+}
+
+// The URIs of the favorites, in the order they were marked, so that the
+// movements of a work marked one after another play in their order
+pub fn favorites() -> Vec<String> {
+    match with_connection(|conn| query_favorites(conn)) {
+        Ok(uris) => uris,
+        Err(e) => {
+            warn!("Unable to load the favorite tracks: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn query_favorites(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT uri FROM favorites ORDER BY added, rowid")?;
+    stmt.query_map([], |row| row.get(0))?.collect()
 }
 
 #[cfg(test)]
@@ -636,5 +706,55 @@ mod tests {
 
         migrate(&mut conn).unwrap();
         assert_eq!(query_recently_played(&conn).unwrap(), ["a"]);
+    }
+
+    #[test]
+    fn version_1_gains_the_favorites_and_keeps_the_listens() {
+        let mut conn = test_db();
+        insert_listen(&mut conn, &listen("a", 1_800_000_000, 60)).unwrap();
+        conn.execute_batch("DROP TABLE favorites").unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+
+        migrate(&mut conn).unwrap();
+        insert_favorite(&conn, "a", 1_800_000_000).unwrap();
+        assert_eq!(query_favorites(&conn).unwrap(), ["a"]);
+        assert_eq!(query_recently_played(&conn).unwrap(), ["a"]);
+    }
+
+    #[test]
+    fn a_favorite_can_be_marked_and_unmarked() {
+        let conn = test_db();
+        assert!(!query_is_favorite(&conn, "a").unwrap());
+        insert_favorite(&conn, "a", 1_800_000_000).unwrap();
+        assert!(query_is_favorite(&conn, "a").unwrap());
+        assert!(!query_is_favorite(&conn, "b").unwrap());
+        delete_favorite(&conn, "a").unwrap();
+        assert!(!query_is_favorite(&conn, "a").unwrap());
+    }
+
+    #[test]
+    fn favorites_are_in_the_order_they_were_marked() {
+        let conn = test_db();
+        let now = 1_800_000_000;
+        insert_favorite(&conn, "c", now - 100).unwrap();
+        insert_favorite(&conn, "a", now).unwrap();
+        // Marked in the same second, but after
+        insert_favorite(&conn, "b", now).unwrap();
+        assert_eq!(query_favorites(&conn).unwrap(), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn marking_a_favorite_again_keeps_its_place() {
+        let conn = test_db();
+        let now = 1_800_000_000;
+        insert_favorite(&conn, "a", now - 100).unwrap();
+        insert_favorite(&conn, "b", now - 50).unwrap();
+        insert_favorite(&conn, "a", now).unwrap();
+        assert_eq!(query_favorites(&conn).unwrap(), ["a", "b"]);
+
+        // Unmarked first, it goes to the end
+        delete_favorite(&conn, "a").unwrap();
+        insert_favorite(&conn, "a", now).unwrap();
+        assert_eq!(query_favorites(&conn).unwrap(), ["b", "a"]);
     }
 }
