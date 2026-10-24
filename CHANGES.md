@@ -158,6 +158,8 @@ All notable changes to this project will be documented in this file.
   and corners of their cards on the covers of the track rows
 - The window's size wasn't saved when quitting with Ctrl+Q, only when
   closing the window
+- The tops of the capitals in the player's line of performers were cut
+  off on some screens
 
 ### Removed
 

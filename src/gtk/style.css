@@ -63,8 +63,10 @@ trackdetails label.track-movement {
   font-weight: 600;
 }
 
+/* The size of the performers in the queue rows; at 90%, GTK cut off the top
+ * row of pixels of the capitals, with DejaVu Sans at a scale of 2 */
 trackdetails label.track-credits {
-  font-size: 90%;
+  font-size: 85%;
   opacity: 0.7;
 }
 
