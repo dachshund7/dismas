@@ -2264,6 +2264,19 @@ impl Track {
         self.imp().composer()
     }
 
+    // The artist that shuffling keeps from coming twice in a row: the
+    // composers of a movement, as its work shows them, and otherwise the
+    // artist in the tags
+    pub fn shuffle_artist(&self) -> Option<String> {
+        let data = self.imp().data.borrow();
+        let composers = &data.credits().composers;
+        if self.movement_work().is_some() && !composers.is_empty() {
+            Some(composers.join(", "))
+        } else {
+            data.artist().map(ToString::to_string)
+        }
+    }
+
     // The text that searching the queue looks into, normalized with
     // `normalize_search_text()`; computed once, until the tags change
     pub fn search_key(&self) -> String {

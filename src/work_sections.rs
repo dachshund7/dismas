@@ -4,8 +4,8 @@
 // A pass-through list model that groups consecutive movements of the same
 // work into sections, so that the queue can separate the works.
 // The order of the tracks is not changed: if the movements of a work are not
-// next to each other, for instance after shuffling, each run of movements
-// gets its own section.
+// next to each other, for instance after moving some of them, each run of
+// movements gets its own section.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -107,11 +107,16 @@ impl WorkSectionModel {
     }
 }
 
-// The work and composer of a movement; all the tracks that are not
-// movements share the same key, so consecutive ones end up in a single
-// section
+// The section of a track; all the tracks that are not movements share the
+// same key, so consecutive ones end up in a single section
 fn section_key(model: &gio::ListModel, position: u32) -> Option<(String, String)> {
-    let track = model.item(position)?.downcast::<Track>().ok()?;
+    work_key(&model.item(position)?.downcast::<Track>().ok()?)
+}
+
+// The work and composer of a movement, which the queue shows over the
+// movements of the same work next to each other, and the shuffle moves
+// together
+pub fn work_key(track: &Track) -> Option<(String, String)> {
     let work = track.movement_work()?;
     Some((work, track.composer()))
 }

@@ -60,6 +60,11 @@ All notable changes to this project will be documented in this file.
 - Shuffling reorders the playlist for real, so the order shown, played and
   saved is the same, until the shuffle button puts back the order from
   before; the button is filled while the playlist is shuffled
+- Shuffling goes by what was heard: tracks heard in the last few days tend
+  to go toward the end, and tracks played often that haven't been heard
+  for a while tend to come early. The movements of a work stay together and
+  in order, and the same artist doesn't come twice in a row unless one
+  artist has more than half of the tracks
 - Previous and next track are Alt+Left and Alt+Right, instead of Ctrl+B
   and Ctrl+N
 - "Match Cover Art" keeps the contrast of the text, with tints of the

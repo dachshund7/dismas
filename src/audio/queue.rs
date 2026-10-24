@@ -7,9 +7,16 @@ use std::{
 };
 
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
-use rand::{Rng, seq::SliceRandom};
+use rand::Rng;
 
-use crate::audio::{RepeatMode, Track};
+use crate::{
+    audio::{
+        RepeatMode, Track,
+        shuffle::{Entry, shuffled_order},
+    },
+    play_stats::TrackStats,
+    work_sections::work_key,
+};
 
 mod imp {
     use super::*;
@@ -211,16 +218,32 @@ impl Queue {
         self.update_current_pos(current);
     }
 
-    // Shuffles the tracks, in a single change. The track to keep comes
-    // first, and all the others after it, those that came before it too
-    pub fn shuffle(&self, keep: Option<&Track>, rng: &mut (impl Rng + ?Sized)) {
-        let mut tracks = self.tracks();
-        let kept = keep
-            .and_then(|keep| tracks.iter().position(|t| t == keep))
-            .map(|pos| tracks.remove(pos));
-        tracks.shuffle(rng);
-        tracks.splice(0..0, kept);
-        self.replace_order(&tracks);
+    // Shuffles the tracks, in a single change, by what was heard of them,
+    // from the stats of their URIs; see `shuffled_order()`. The track to
+    // keep comes first, with the other movements of its work around it, and
+    // all the others after it, those that came before it too
+    pub fn shuffle(
+        &self,
+        keep: Option<&Track>,
+        stats: &HashMap<String, TrackStats>,
+        now: i64,
+        rng: &mut (impl Rng + ?Sized),
+    ) {
+        let tracks = self.tracks();
+        let entries: Vec<Entry> = tracks
+            .iter()
+            .map(|track| Entry {
+                work: work_key(track),
+                artist: track.shuffle_artist(),
+                stats: stats.get(&track.uri()).copied(),
+            })
+            .collect();
+        let keep = keep.and_then(|keep| tracks.iter().position(|t| t == keep));
+        let shuffled: Vec<Track> = shuffled_order(&entries, keep, now, rng)
+            .into_iter()
+            .map(|pos| tracks[pos].clone())
+            .collect();
+        self.replace_order(&shuffled);
     }
 
     // Puts the tracks back in the order of the URIs saved before they were
@@ -569,7 +592,7 @@ mod tests {
             let (queue, t) = queue_of(10);
             queue.set_current_track(Some(t[6].clone()));
 
-            queue.shuffle(Some(&t[6]), &mut seeded(seed));
+            queue.shuffle(Some(&t[6]), &HashMap::new(), 0, &mut seeded(seed));
             let order = order(&queue, &t);
             assert_eq!(order[0], 6);
             assert!(is_permutation(&order, 10));
@@ -587,7 +610,7 @@ mod tests {
             for seed in 0..20 {
                 let (queue, t) = queue_of(10);
                 queue.set_current_track(Some(t[5].clone()));
-                queue.shuffle(keep.map(|k| &t[k]), &mut seeded(seed));
+                queue.shuffle(keep.map(|k| &t[k]), &HashMap::new(), 0, &mut seeded(seed));
 
                 let order = order(&queue, &t);
                 assert!(is_permutation(&order, 10));
@@ -611,7 +634,7 @@ mod tests {
             move |_, position, removed, added| changes.borrow_mut().push((position, removed, added))
         });
 
-        queue.shuffle(None, &mut seeded(1));
+        queue.shuffle(None, &HashMap::new(), 0, &mut seeded(1));
         assert_eq!(*changes.borrow(), [(0, 5, 5)]);
     }
 
@@ -661,7 +684,7 @@ mod tests {
     fn restore_order_keeps_the_current_track() {
         let (queue, t) = queue_of(4);
         queue.set_current_track(Some(t[1].clone()));
-        queue.shuffle(Some(&t[1]), &mut seeded(3));
+        queue.shuffle(Some(&t[1]), &HashMap::new(), 0, &mut seeded(3));
 
         // All the tracks have the same URI, so the order is the one they
         // have; what matters is that nothing is lost

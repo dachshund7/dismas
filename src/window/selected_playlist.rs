@@ -8,7 +8,7 @@
 use adw::prelude::*;
 
 use super::*;
-use crate::cue_sheet;
+use crate::{cue_sheet, play_stats};
 
 impl Window {
     pub(super) fn setup_playlists(&self) {
@@ -180,9 +180,11 @@ impl Window {
     }
 
     // Shuffles the tracks of the selected playlist, keeping the order they
-    // had to put it back. The track playing, or paused partway, e.g. where
-    // the last session stopped, comes first, to go on from there; otherwise
-    // the first of the shuffled tracks is ready to play
+    // had to put it back. The order goes by the play stats, which are read
+    // right away: it's a quick read, and the order is saved here as well.
+    // The track playing, or paused partway, e.g. where the last session
+    // stopped, comes first, to go on from there; otherwise the first of the
+    // shuffled tracks is ready to play
     pub(super) fn shuffle_queue(&self) {
         let Some(player) = self.player() else {
             return;
@@ -208,7 +210,9 @@ impl Window {
         let keep = queue
             .current()
             .filter(|_| state.playing() || state.position() > 0);
-        queue.shuffle(keep.as_ref(), &mut rand::rng());
+        let uris: Vec<String> = queue.files().iter().map(|f| f.uri().to_string()).collect();
+        let stats = play_stats::track_stats(&uris);
+        queue.shuffle(keep.as_ref(), &stats, play_stats::now(), &mut rand::rng());
         if keep.is_none() {
             player.skip_to(0);
         }

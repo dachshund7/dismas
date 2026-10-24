@@ -10,6 +10,7 @@
 
 use std::{
     cell::RefCell,
+    collections::HashMap,
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -61,6 +62,15 @@ pub struct Listen {
     pub heard: u64,
     // Whether it counts as a play
     pub counted: bool,
+}
+
+// What was heard of a track, from its totals
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TrackStats {
+    pub plays: u32,
+    // Seconds since the epoch: the end of the last listen logged, whether
+    // it counted as a play or not
+    pub last_heard: i64,
 }
 
 pub fn now() -> i64 {
@@ -273,6 +283,42 @@ fn query_most_played(conn: &Connection, now: i64) -> rusqlite::Result<Vec<String
         row.get(0)
     })?
     .collect()
+}
+
+// The totals of the tracks heard, by URI, for the shuffle; the tracks
+// never heard are left out
+pub fn track_stats(uris: &[String]) -> HashMap<String, TrackStats> {
+    match with_connection(|conn| query_track_stats(conn, uris)) {
+        Ok(stats) => stats,
+        Err(e) => {
+            warn!("Unable to load the play stats of the tracks: {e}");
+            HashMap::new()
+        }
+    }
+}
+
+fn query_track_stats(
+    conn: &mut Connection,
+    uris: &[String],
+) -> rusqlite::Result<HashMap<String, TrackStats>> {
+    // A single read, rather than one for each track
+    let tx = conn.transaction()?;
+    let mut stats = HashMap::new();
+    {
+        let mut stmt = tx.prepare_cached("SELECT plays, last_played FROM totals WHERE uri = ?1")?;
+        for uri in uris {
+            let mut rows = stmt.query([uri])?;
+            if let Some(row) = rows.next()? {
+                let track = TrackStats {
+                    plays: row.get(0)?,
+                    last_heard: row.get(1)?,
+                };
+                stats.insert(uri.clone(), track);
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(stats)
 }
 
 #[cfg(test)]
@@ -536,6 +582,35 @@ mod tests {
             .query_row("SELECT last_played FROM totals", [], |row| row.get(0))
             .unwrap();
         assert_eq!(last_played, now);
+    }
+
+    #[test]
+    fn track_stats_are_the_totals_of_the_tracks_heard() {
+        let mut conn = test_db();
+        let now = 1_800_000_000;
+        insert_listen(&mut conn, &played("a", now - DAY)).unwrap();
+        insert_listen(&mut conn, &played("a", now - 2 * DAY)).unwrap();
+        // Heard since, but not long enough to be a play
+        insert_listen(&mut conn, &listen("a", now, 60)).unwrap();
+        insert_listen(&mut conn, &listen("b", now - 3 * DAY, 60)).unwrap();
+
+        let uris = ["a", "b", "never heard"].map(String::from);
+        let stats = query_track_stats(&mut conn, &uris).unwrap();
+        assert_eq!(stats.len(), 2);
+        assert_eq!(
+            stats["a"],
+            TrackStats {
+                plays: 2,
+                last_heard: now
+            }
+        );
+        assert_eq!(
+            stats["b"],
+            TrackStats {
+                plays: 0,
+                last_heard: now - 3 * DAY
+            }
+        );
     }
 
     #[test]

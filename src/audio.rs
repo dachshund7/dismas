@@ -58,6 +58,7 @@ pub use gst_backend::{GstBackend, TrackSource};
 
 mod player;
 mod queue;
+mod shuffle;
 mod sleep_timer;
 mod state;
 mod track;
