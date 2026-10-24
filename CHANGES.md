@@ -168,6 +168,8 @@ All notable changes to this project will be documented in this file.
   closing the window
 - The tops of the capitals in the player's line of performers were cut
   off on some screens
+- The playlist pane's title moved off-center in a narrow pane, when the
+  time left under it was long
 
 ### Removed
 

@@ -7,7 +7,14 @@ using Adw 1;
 template $DismasPlaylistView: Widget {
   Adw.ToolbarView {
     [top]
-    Adw.HeaderBar {
+    // The time left often makes the title wider than the room between the
+    // one button at the start and the two at the end, which pushed it off
+    // center; it's shortened instead. The back button of the collapsed
+    // split view makes the end side wider still, so the title is only
+    // kept in the middle while it's hidden (playlist_view.rs)
+    Adw.HeaderBar header_bar {
+      centering-policy: strict;
+
       [start]
       ToggleButton search_button {
         icon-name: "system-search-symbolic";
@@ -17,7 +24,6 @@ template $DismasPlaylistView: Widget {
       }
 
       // The title switches to another playlist, as going back to the
-      // queue would otherwise take a trip through the Playlists page
       // queue would otherwise take a trip through the Playlists page. The
       // time left stays out of it, keeping the whole width of the title
       title-widget: Box queue_length_box {

@@ -19,6 +19,8 @@ mod imp {
     #[template(resource = "/io/github/dachshund7/Dismas/playlist-view.ui")]
     pub struct PlaylistView {
         #[template_child]
+        pub header_bar: TemplateChild<adw::HeaderBar>,
+        #[template_child]
         pub title_menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub title_label: TemplateChild<gtk::Label>,
@@ -87,6 +89,20 @@ mod imp {
             self.obj().setup_title_menu();
             // It names the selected playlist
             crate::utils::wrap_tooltip(&*self.back_button);
+
+            // Strict centering sizes both sides like the wider one, which
+            // with the back button would leave the title little room
+            self.back_button.connect_visible_notify(clone!(
+                #[weak(rename_to = header_bar)]
+                self.header_bar.get(),
+                move |button| {
+                    header_bar.set_centering_policy(if button.is_visible() {
+                        adw::CenteringPolicy::Loose
+                    } else {
+                        adw::CenteringPolicy::Strict
+                    });
+                }
+            ));
         }
     }
 
