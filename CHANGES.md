@@ -27,6 +27,9 @@ All notable changes to this project will be documented in this file.
   its header bars, for window managers that move windows themselves
 - Show Waveform, in Preferences, to show a plain seek bar instead of the
   waveform
+- Zen Mode, in Preferences: with the playlist hidden, the controls fade
+  out once the pointer leaves the window, leaving the cover and the track
+  details in the middle; the pointer or a tap brings them back
 - Change the volume with Ctrl+Up and Ctrl+Down
 - Music folders, in Preferences, to show albums from other folders than
   the Music folder, like a second drive; while a folder isn't there, its

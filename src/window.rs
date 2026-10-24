@@ -11,6 +11,7 @@ mod selection;
 mod sidebar;
 mod sleep_timer;
 mod track_menu;
+mod zen;
 
 use std::{
     cell::{Cell, RefCell},
@@ -101,6 +102,10 @@ mod imp {
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub player_header_bar: TemplateChild<adw::HeaderBar>,
+        #[template_child]
+        pub main_box: TemplateChild<PlayerBox>,
+        #[template_child]
         pub split_view: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
         pub playlist_view: TemplateChild<PlaylistView>,
@@ -172,6 +177,10 @@ mod imp {
         pub sidebar_was_visible: Cell<bool>,
         // Whether the sidebar was showing before the split view collapsed
         pub sidebar_visible_uncollapsed: Cell<bool>,
+
+        // Zen mode: the wait before the controls fade out, and their fading
+        pub zen_timeout: RefCell<Option<glib::SourceId>>,
+        pub zen_animation: RefCell<Option<adw::TimedAnimation>>,
 
         pub queue_filtermodel: RefCell<Option<gio::ListModel>>,
         // The rows of the queue, to slide them to their new places when
@@ -397,6 +406,8 @@ mod imp {
                 drag_overlay: TemplateChild::default(),
                 playback_control: TemplateChild::default(),
                 menu_button: TemplateChild::default(),
+                player_header_bar: TemplateChild::default(),
+                main_box: TemplateChild::default(),
                 waveform_view: TemplateChild::default(),
                 seek_scale: TemplateChild::default(),
                 elapsed_label: TemplateChild::default(),
@@ -436,6 +447,8 @@ mod imp {
                 hide_focus_after_transition: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),
                 sidebar_visible_uncollapsed: Cell::new(true),
+                zen_timeout: RefCell::default(),
+                zen_animation: RefCell::default(),
                 provider: gtk::CssProvider::new(),
                 settings: utils::settings_manager(),
                 notify_playing_id: RefCell::new(None),
@@ -729,6 +742,7 @@ impl Window {
         win.setup_sleep_timer();
         win.setup_playlist();
         win.setup_sidebar_handle();
+        win.setup_zen_mode();
         win.setup_drop_target();
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         win.setup_x11_drop_shape();

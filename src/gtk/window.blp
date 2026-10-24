@@ -30,7 +30,8 @@ template $DismasWindow: Adw.ApplicationWindow {
 
               child: Adw.ToolbarView {
                 [top]
-                Adw.HeaderBar {
+                // Fades out with the controls in zen mode
+                Adw.HeaderBar player_header_bar {
                   show-title: false;
 
                   [start]
@@ -63,6 +64,7 @@ template $DismasWindow: Adw.ApplicationWindow {
 
                     styles [
                       "cover-width",
+                      "player-controls",
                     ]
 
                     $DismasWaveformView waveform_view {
@@ -121,6 +123,10 @@ template $DismasWindow: Adw.ApplicationWindow {
                     halign: "center";
                     margin-top: "0";
                     margin-bottom: "24";
+
+                    styles [
+                      "player-controls",
+                    ]
                   }
                 };
               };

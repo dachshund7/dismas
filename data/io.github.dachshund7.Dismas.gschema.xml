@@ -40,6 +40,11 @@
 	    <summary>Show the waveform of the track</summary>
 	    <description>Whether the player shows the waveform of the track to seek in it, or a plain seek bar. Without the waveform, the tracks aren't read a second time to draw it</description>
 	  </key>
+	  <key name="zen-mode" type="b">
+	    <default>false</default>
+	    <summary>Fade out the controls when the window isn't in use</summary>
+	    <description>Whether the controls of the player fade out a few seconds after the pointer leaves the window, with the playlist hidden, leaving the cover and the track details in the middle of the window. They come back when the pointer enters the window or it gets the focus</description>
+	  </key>
     <key name="replay-gain" enum="io.github.dachshund7.Dismas.ReplayGainMode">
       <default>'off'</default>
     </key>

@@ -101,6 +101,12 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
         subtitle: _("Seek in the waveform of the track, instead of a plain bar");
         use-underline: true;
       }
+
+      Adw.SwitchRow zen_mode_row {
+        title: _("_Zen Mode");
+        subtitle: _("Fade out the controls when the window isn't in use and the playlist is hidden");
+        use-underline: true;
+      }
     }
 
     Adw.PreferencesGroup {

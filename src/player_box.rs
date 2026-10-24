@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::cell::Cell;
+
 use gtk::{glib, graphene, gsk, prelude::*, subclass::prelude::*};
 
 use crate::{
@@ -15,11 +17,22 @@ const SPACING: i32 = 6;
 // natural width
 const COVER_WIDTH: &str = "cover-width";
 
+// The style class of the children that fade out in zen mode, which leaves
+// the cover and the track details
+const CONTROLS: &str = "player-controls";
+
+// The space between the cover and the track details in zen mode, where the
+// seek bar no longer is between them
+const ZEN_SPACING: i32 = 18;
+
 mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct PlayerBox {}
+    pub struct PlayerBox {
+        // How far the player is into zen mode, from 0 to 1
+        pub zen_progress: Cell<f64>,
+    }
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlayerBox {
@@ -123,9 +136,36 @@ mod imp {
                     .iter()
                     .map(|(widget, min, nat)| child_height(widget, *min, *nat))
                     .sum::<i32>();
+
+            // In zen mode, the children that stay move from their places to
+            // the middle of the parent, the toolbar view, as its header bar
+            // fades out with the controls: what's above the box in it is the
+            // header bar. They keep their sizes, so the window keeps its own
+            let zen = self.zen_progress.get();
+            let stays = |widget: &gtk::Widget| !widget.has_css_class(CONTROLS);
+            let staying: Vec<i32> = children
+                .iter()
+                .filter(|(widget, _, _)| stays(widget))
+                .map(|(widget, min, nat)| child_height(widget, *min, *nat))
+                .collect();
+            let staying_total =
+                staying.iter().sum::<i32>() + ZEN_SPACING * (staying.len() as i32 - 1).max(0);
+            let above = self
+                .obj()
+                .parent()
+                .map_or(0, |parent| (parent.height() - height).max(0));
+            let mut zen_y = (height + above - staying_total) / 2 - above;
+
             let mut y = ((height - total) / 2).max(0);
             for (widget, min, nat) in &children {
                 let h = child_height(widget, *min, *nat);
+                let shown_y = if zen > 0.0 && stays(widget) {
+                    let shown = f64::from(y) + f64::from(zen_y - y) * zen;
+                    zen_y += h + ZEN_SPACING;
+                    shown.round() as i32
+                } else {
+                    y
+                };
                 let (x, w) = if widget.has_css_class(COVER_WIDTH) {
                     let (_, nat_width, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
                     let w = (nat_width + grow).min(width);
@@ -133,8 +173,8 @@ mod imp {
                 } else {
                     (0, width)
                 };
-                let transform =
-                    gsk::Transform::new().translate(&graphene::Point::new(x as f32, y as f32));
+                let transform = gsk::Transform::new()
+                    .translate(&graphene::Point::new(x as f32, shown_y as f32));
                 widget.allocate(w, h, -1, Some(transform));
                 y += h + SPACING;
             }
@@ -170,4 +210,26 @@ glib::wrapper! {
     pub struct PlayerBox(ObjectSubclass<imp::PlayerBox>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl PlayerBox {
+    // Fades out the controls, from 0 to 1, as the cover and the track details
+    // move to the middle. Once faded out, they don't take clicks and taps,
+    // which would press buttons that can't be seen
+    pub fn set_zen_progress(&self, progress: f64) {
+        self.imp().zen_progress.set(progress);
+        let mut child = self.first_child();
+        while let Some(widget) = child {
+            if widget.has_css_class(CONTROLS) {
+                widget.set_opacity(1.0 - progress);
+                widget.set_can_target(progress < 1.0);
+            }
+            child = widget.next_sibling();
+        }
+        self.queue_allocate();
+    }
+
+    pub fn zen_progress(&self) -> f64 {
+        self.imp().zen_progress.get()
+    }
 }

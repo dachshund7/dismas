@@ -36,6 +36,8 @@ mod imp {
         #[template_child]
         pub waveform_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub zen_mode_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub header_bars_row: TemplateChild<adw::SwitchRow>,
 
         pub settings: OnceCell<gio::Settings>,
@@ -82,6 +84,7 @@ mod imp {
                 ("restore-playlist", &self.restore_playlist_row),
                 ("enable-recoloring", &self.recoloring_row),
                 ("show-waveform", &self.waveform_row),
+                ("zen-mode", &self.zen_mode_row),
                 ("move-from-header-bars", &self.header_bars_row),
             ] {
                 settings.bind(key, &**row, "active").build();
