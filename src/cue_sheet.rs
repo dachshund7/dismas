@@ -40,6 +40,11 @@ const FRAMES_PER_SECOND: u64 = 75;
 // Sheets are a few kilobytes; a larger file is something else
 const MAX_SHEET_SIZE: u64 = 1024 * 1024;
 
+// The format numbers the tracks of a CD up to 99, but sheets that split
+// audiobooks into chapters can go on. Every track takes the tags of the
+// whole file, so a sheet with any number of tracks could fill the memory
+const MAX_TRACK_NUMBER: u32 = 999;
+
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct CueSheet {
     pub performer: Option<String>,
@@ -217,7 +222,10 @@ pub fn parse(text: &str) -> Option<CueSheet> {
         let Some((start, file)) = track.start else {
             continue;
         };
-        if !track.audio || track.track.number == 0 || !numbers.insert(track.track.number) {
+        if !track.audio
+            || !(1..=MAX_TRACK_NUMBER).contains(&track.track.number)
+            || !numbers.insert(track.track.number)
+        {
             continue;
         }
         // Index 01 is in the file where the track starts, after the gap
@@ -704,6 +712,19 @@ FILE "Elgar - Enigma Variations.wav" WAVE
     fn file_names_with_nul_bytes_are_dropped() {
         let sheet = parse("FILE \"a\0b.wav\" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\n").unwrap();
         assert_eq!(sheet.files, vec![""]);
+    }
+
+    #[test]
+    fn track_numbers_stop_at_999() {
+        let sheet = parse(
+            "FILE \"book.flac\" WAVE\n\
+             TRACK 998 AUDIO\nINDEX 01 00:00:00\n\
+             TRACK 999 AUDIO\nINDEX 01 01:00:00\n\
+             TRACK 1000 AUDIO\nINDEX 01 02:00:00\n",
+        )
+        .unwrap();
+        let numbers: Vec<u32> = sheet.tracks.iter().map(|t| t.number).collect();
+        assert_eq!(numbers, vec![998, 999]);
     }
 
     #[test]

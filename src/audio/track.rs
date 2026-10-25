@@ -590,6 +590,7 @@ pub fn tag_search_text(tag: &Tag) -> String {
             )
         })
         .filter_map(|item| item.value().text())
+        .map(|text| text_start(text, MAX_SEARCHED_TEXT))
         // Links, like the one to the video of a download from YouTube,
         // would make searching for their site match every track from it
         .flat_map(str::split_whitespace)
@@ -608,6 +609,20 @@ pub fn tag_search_text(tag: &Tag) -> String {
     }
 
     text
+}
+
+// How much of each tag is searched: enough for the lyrics of a song, while
+// a crafted comment of megabytes, which the tracks of a CUE sheet would
+// each copy, isn't kept for every track
+const MAX_SEARCHED_TEXT: usize = 16 * 1024;
+
+// The text up to `max` bytes, cut between characters
+fn text_start(text: &str, max: usize) -> &str {
+    let mut end = max.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 fn is_link(word: &str) -> bool {
@@ -2439,7 +2454,7 @@ mod tests {
     use super::{
         Credit, ExtraComments, MovementName, MusicBrainzIds, Track, TrackCredits, TrackData,
         WorkLabels, album_title_search_text, is_numbered, normalize_search_text, number_ranges,
-        sane_duration, tag_search_text, title_from_name, track_album, track_title,
+        sane_duration, tag_search_text, text_start, title_from_name, track_album, track_title,
         work_hierarchy_composer_ids, work_hierarchy_labels,
     };
 
@@ -2512,6 +2527,19 @@ mod tests {
         let text = normalize_search_text(&tag_search_text(&tag));
         assert!(!text.contains("youtube"));
         assert!(text.contains("aqua"));
+    }
+
+    #[test]
+    fn search_text_keeps_the_start_of_long_tags() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::TrackTitle, "Aqua".to_string());
+        // Two-byte characters, so that the limit falls inside one
+        tag.insert_text(ItemKey::Comment, "é".repeat(20_000));
+        let text = tag_search_text(&tag);
+        assert!(text.contains("Aqua"));
+        assert!(text.len() < 16 * 1024 + 100);
+        assert_eq!(text_start("éa", 1), "");
+        assert_eq!(text_start("éa", 3), "éa");
     }
 
     fn dates(date: Option<&str>, original_date: Option<&str>) -> TrackCredits {
