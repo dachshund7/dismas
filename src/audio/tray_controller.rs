@@ -151,7 +151,7 @@ impl ksni::Tray for DismasTray {
             return;
         }
         let steps = if self.plasma {
-            self.scrolled += delta;
+            self.scrolled = self.scrolled.saturating_add(delta);
             let steps = self.scrolled / PLASMA_NOTCH;
             self.scrolled %= PLASMA_NOTCH;
             steps

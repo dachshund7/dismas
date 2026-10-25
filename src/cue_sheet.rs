@@ -120,7 +120,8 @@ fn file_name(s: &str) -> Option<String> {
     }
 }
 
-// "mm:ss:ff"; the minutes can go past 99
+// "mm:ss:ff"; the minutes can go past 99, but not past what a duration in
+// nanoseconds holds
 fn parse_time(s: &str) -> Option<Duration> {
     let mut parts = s.trim().split(':');
     let minutes: u64 = parts.next()?.trim().parse().ok()?;
@@ -129,9 +130,13 @@ fn parse_time(s: &str) -> Option<Duration> {
     if parts.next().is_some() || seconds >= 60 || frames >= FRAMES_PER_SECOND {
         return None;
     }
-    let frames = (minutes * 60 + seconds) * FRAMES_PER_SECOND + frames;
+    let frames = minutes
+        .checked_mul(60)?
+        .checked_add(seconds)?
+        .checked_mul(FRAMES_PER_SECOND)?
+        .checked_add(frames)?;
     Some(Duration::from_nanos(
-        frames * 1_000_000_000 / FRAMES_PER_SECOND,
+        frames.checked_mul(1_000_000_000)? / FRAMES_PER_SECOND,
     ))
 }
 
@@ -690,6 +695,9 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         assert_eq!(parse_time("00:60:00"), None);
         assert_eq!(parse_time("00:00:75"), None);
         assert_eq!(parse_time("1:2"), None);
+        // Past what a duration in nanoseconds holds
+        assert_eq!(parse_time("99999999999999:00:00"), None);
+        assert_eq!(parse_time("18446744073709551615:59:74"), None);
     }
 
     #[test]

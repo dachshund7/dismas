@@ -112,7 +112,7 @@ fn units(entries: &[Entry], now: i64) -> Vec<Unit> {
             .filter_map(|entry| entry.stats);
         let last_heard = stats.clone().map(|stats| stats.last_heard).max();
         let plays = stats.map(|stats| stats.plays).max().unwrap_or(0);
-        let age = last_heard.map(|last_heard| now - last_heard);
+        let age = last_heard.map(|last_heard| now.saturating_sub(last_heard));
         unit.weight = freshness(age) * favorite(plays);
     }
     units

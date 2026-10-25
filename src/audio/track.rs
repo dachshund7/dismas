@@ -1085,7 +1085,7 @@ fn number_ranges(numbers: &[u32]) -> String {
     let mut ranges: Vec<(u32, u32)> = Vec::new();
     for &n in numbers {
         match ranges.last_mut() {
-            Some((_, end)) if n == *end + 1 => *end = n,
+            Some((_, end)) if end.checked_add(1) == Some(n) => *end = n,
             _ => ranges.push((n, n)),
         }
     }
@@ -3636,6 +3636,8 @@ mod tests {
         assert_eq!(number_ranges(&[5, 6]), "5–6");
         assert_eq!(number_ranges(&[1, 2, 3, 5]), "1–3, 5");
         assert_eq!(number_ranges(&[6, 5]), "6, 5");
+        // The largest number a tag can give, followed by another
+        assert_eq!(number_ranges(&[u32::MAX, 1]), format!("{}, 1", u32::MAX));
     }
 
     #[test]

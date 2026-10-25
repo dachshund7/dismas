@@ -157,10 +157,12 @@ fn rect(conn: &RustConnection, atoms: &Atoms, root: Window, window: Window) -> O
         .ok()?
         .reply()
         .ok()?;
+    // Any client can set the extents; as large as a window at most, the
+    // sums below stay well within an i32
     let [left, right, top, bottom] = property32(conn, window, atoms.frame_extents)
         .and_then(|extents| <[u32; 4]>::try_from(extents).ok())
         .unwrap_or_default()
-        .map(|extent| i32::try_from(extent).unwrap_or(0));
+        .map(|extent| i32::from(u16::try_from(extent).unwrap_or(u16::MAX)));
     Some(Rect {
         x: i32::from(origin.dst_x) + left,
         y: i32::from(origin.dst_y) + top,
