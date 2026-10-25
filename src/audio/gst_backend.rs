@@ -205,6 +205,23 @@ fn update_position(
     }
 }
 
+// Tells the player that the track playing failed; GstPlay has stopped the
+// pipeline. An error that comes while a track is loading belongs to the
+// track before it, which the player went on from, as positions do
+fn report_error(sender: &Sender<PlaybackAction>, gapless: &Mutex<Gapless>) {
+    let gapless = gapless.lock().unwrap();
+    if gapless.pending_loads > 0 {
+        return;
+    }
+    // The track handed over to playbin failed before it started
+    let handed = gapless.handed.is_some() && !gapless.started;
+    let action = PlaybackAction::TrackFailed(gapless.generation, handed);
+    drop(gapless);
+    if let Err(e) = sender.try_send(action) {
+        error!("Failed to send TrackFailed: {e}");
+    }
+}
+
 // A number of seconds as a clock time. Seek offsets come from other
 // programs over MPRIS, and lengths from the headers of files, so a value
 // too large for a clock time becomes the largest one rather than a panic
@@ -634,6 +651,7 @@ impl GstBackend {
                     }
                     gst_play::PlayMessage::Error(message) => {
                         error!("GStreamer error: {}", message.error());
+                        report_error(&sender, &gapless);
                     }
                     gst_play::PlayMessage::Warning(message) => {
                         warn!("GStreamer warning: {}", message.error());
@@ -1048,6 +1066,34 @@ mod tests {
             seek_destination(u64::MAX, u64::MAX, u64::MAX, Forward),
             Some(u64::MAX)
         );
+    }
+
+    #[test]
+    fn errors_name_the_failed_track() {
+        let (sender, receiver) = async_channel::unbounded();
+        let gapless = Mutex::new(Gapless {
+            current: Some(source("track01", 0, None)),
+            generation: 4,
+            ..Default::default()
+        });
+        report_error(&sender, &gapless);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::TrackFailed(4, false))
+        ));
+
+        // The next track, handed over to playbin, failed before it started
+        gapless.lock().unwrap().handed = Some(source("track02", 0, None));
+        report_error(&sender, &gapless);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::TrackFailed(4, true))
+        ));
+
+        // While a track loads, the error is the previous track's
+        gapless.lock().unwrap().pending_loads = 1;
+        report_error(&sender, &gapless);
+        assert!(receiver.try_recv().is_err());
     }
 
     #[test]

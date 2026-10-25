@@ -3,6 +3,7 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::HashSet,
     fmt::{self, Display, Formatter},
     rc::Rc,
 };
@@ -10,7 +11,7 @@ use std::{
 use async_channel::{Receiver, Sender};
 use glib::clone;
 use gtk::{gio, glib, prelude::*};
-use log::{debug, error};
+use log::{debug, error, warn};
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use crate::audio::TrayController;
@@ -48,6 +49,9 @@ pub enum PlaybackAction {
     TrackAdvanced(u64, String),
     // The backend loaded the tracks it was given
     TrackLoaded,
+    // The track of a generation failed to play; whether it was the track
+    // handed over without a gap, before it started
+    TrackFailed(u64, bool),
     SleepTimerExpired,
 
     Raise,
@@ -155,6 +159,9 @@ pub struct AudioPlayer {
     finished: Cell<bool>,
     // How long the current track has been heard, for the smart playlists
     listens: RefCell<ListenTracker>,
+    // The tracks that failed to play one after the other, to stop rather
+    // than go round a queue none of whose tracks plays
+    failed: RefCell<HashSet<Track>>,
 }
 
 impl fmt::Debug for AudioPlayer {
@@ -220,6 +227,7 @@ impl AudioPlayer {
             settings,
             finished: Cell::new(false),
             listens: RefCell::default(),
+            failed: RefCell::default(),
         });
 
         res.clone().setup_channel();
@@ -303,6 +311,9 @@ impl AudioPlayer {
             PlaybackAction::PlayNext => self.play_next(),
             PlaybackAction::TrackAdvanced(generation, uri) => self.track_advanced(generation, &uri),
             PlaybackAction::TrackLoaded => self.backend.loaded(),
+            PlaybackAction::TrackFailed(generation, handed) => {
+                self.track_failed(generation, handed);
+            }
             PlaybackAction::SleepTimerExpired => self.sleep_timer_expired(),
             PlaybackAction::Raise => self.present(),
             PlaybackAction::Repeat(mode) => self.update_repeat_mode(mode),
@@ -427,6 +438,51 @@ impl AudioPlayer {
             debug!("Playing next (gapless): {}", next_track.uri());
             self.backend.confirm_switch(&TrackSource::of(&next_track));
             self.show_track(next_track);
+        }
+    }
+
+    // Skips a track that can't be played, e.g. its file is gone or there's
+    // no decoder for it, after the window says so. It stops at the track
+    // when nothing comes after it, when the player was paused, as when a
+    // paused track is made ready to play, or when it would come back to a
+    // track that failed since the last one played
+    fn track_failed(&self, generation: u64, handed: bool) {
+        // The player loaded another track since
+        if generation != self.backend.generation() {
+            return;
+        }
+
+        // The track handed over without a gap failed, rather than the one
+        // shown, which ended. It's loaded like any next track, so that the
+        // backend has it if playback stops there
+        if handed && let Some(next_track) = self.queue.next_track() {
+            if let Some(current_track) = self.state.track() {
+                current_track.set_playing(false);
+            }
+            self.backend.set_track(Some(&TrackSource::of(&next_track)));
+            self.show_track(next_track);
+        }
+
+        let Some(track) = self.state.track() else {
+            return;
+        };
+        warn!("Unable to play {}", track.uri());
+        self.state.emit_track_failed(&track);
+
+        let next_track = {
+            let mut failed = self.failed.borrow_mut();
+            failed.insert(track);
+            self.queue
+                .peek_next_track()
+                .filter(|next_track| !failed.contains(next_track))
+        };
+        if self.sleep_timer.finishing_track() {
+            // As at the end of the track, which the sleep timer waited for
+            self.play_next();
+        } else if next_track.is_some() && self.state.playing() {
+            self.play_next_track(Queue::next_track);
+        } else {
+            self.set_playback_state(PlaybackState::Stopped);
         }
     }
 
@@ -664,6 +720,7 @@ impl AudioPlayer {
     fn clear_current_track(&self) {
         self.end_listen();
         self.listens.borrow_mut().clear();
+        self.failed.borrow_mut().clear();
         self.state.set_current_track(None);
         for c in &self.controllers {
             c.clear_track();
@@ -705,6 +762,10 @@ impl AudioPlayer {
 
     fn update_position(&self, position: u64, notify: bool) {
         self.state.set_position(position);
+        // A track plays, so the ones that failed before it don't count
+        if position > 0 && !self.failed.borrow().is_empty() {
+            self.failed.borrow_mut().clear();
+        }
         self.listens
             .borrow_mut()
             .advance(position, self.state.playing());

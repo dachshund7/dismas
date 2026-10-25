@@ -95,6 +95,21 @@ impl Window {
             );
             imp.notify_cover_id.replace(Some(notify_cover_id));
 
+            // The player goes on to the next track, if it can be played
+            let track_failed_id = state.connect_track_failed(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, track| {
+                    win.add_toast(i18n_k(
+                        // Translators: `{track}` must be left unmodified; it
+                        // is expanded to the title of a track
+                        "Unable to play “{track}”",
+                        &[("track", &track.title())],
+                    ));
+                }
+            ));
+            imp.track_failed_id.replace(Some(track_failed_id));
+
             // Bind the track properties to the UI
             state
                 .bind_property("heading", &imp.track_details.get().title_label(), "label")
@@ -167,6 +182,9 @@ impl Window {
                 state.disconnect(id);
             }
             if let Some(id) = self.imp().notify_cover_id.take() {
+                state.disconnect(id);
+            }
+            if let Some(id) = self.imp().track_failed_id.take() {
                 state.disconnect(id);
             }
         }

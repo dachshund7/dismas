@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, RefCell},
+    sync::LazyLock,
+};
 
+use glib::subclass::Signal;
 use gtk::{gdk, glib, prelude::*, subclass::prelude::*};
 
 use crate::audio::{PlaybackState, Track};
@@ -48,7 +52,20 @@ mod imp {
     }
 
     #[glib::derived_properties]
-    impl ObjectImpl for PlayerState {}
+    impl ObjectImpl for PlayerState {
+        fn signals() -> &'static [Signal] {
+            static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
+                // A track couldn't be played, and was skipped if any track
+                // after it could
+                vec![
+                    Signal::builder("track-failed")
+                        .param_types([Track::static_type()])
+                        .build(),
+                ]
+            });
+            SIGNALS.as_ref()
+        }
+    }
 
     impl PlayerState {
         fn playing(&self) -> bool {
@@ -146,6 +163,21 @@ impl PlayerState {
         self.notify_movement();
         self.notify_duration();
         self.notify_cover();
+    }
+
+    pub fn emit_track_failed(&self, track: &Track) {
+        self.emit_by_name::<()>("track-failed", &[track]);
+    }
+
+    pub fn connect_track_failed<F: Fn(&Self, &Track) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "track-failed",
+            false,
+            glib::closure_local!(move |state: &Self, track: &Track| f(state, track)),
+        )
     }
 
     pub fn set_position(&self, position: u64) {

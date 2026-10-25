@@ -205,6 +205,9 @@ All notable changes to this project will be documented in this file.
   made to it afterwards
 - Amberol's settings were copied again over those of Dismas whenever its
   data folder was missing, such as after clearing it
+- A track that couldn't be played, such as one whose file was gone or with
+  no decoder for its format, left the player showing it as playing, with
+  nothing heard; Dismas says so and goes on to the next track
 
 ### Removed
 
