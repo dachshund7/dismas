@@ -206,8 +206,9 @@ check_potfiles() {
 
     ui_files=(`/usr/bin/grep -lIrE '[C]?_\(' src/gtk/*.blp`)
 
-    # Get Rust files with regex 'i18n[!]?\('.
-    rs_files=(`/usr/bin/grep -lIrE 'i18n[!]?\(' --exclude=src/i18n.rs src/*`)
+    # Get Rust files with any of the functions of src/i18n.rs: i18n, ni18n,
+    # pi18n and pni18n, and their _f and _k forms.
+    rs_files=(`/usr/bin/grep -lIrE '\bp?n?i18n(_f|_k)?[!]?\(' --exclude=src/i18n.rs src/*`)
 
     # Remove common files
     to_diff1=("${ui_potfiles[@]}")

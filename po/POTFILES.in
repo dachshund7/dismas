@@ -29,6 +29,7 @@ src/queue_row.rs
 src/track_info_dialog.rs
 src/window/albums.rs
 src/window/loading.rs
+src/window/playlist.rs
 src/window/selected_playlist.rs
 src/window/selection.rs
 src/window/sleep_timer.rs
