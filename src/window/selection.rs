@@ -144,15 +144,27 @@ impl Window {
     // grid, the tracks of an album, or the queue. Selecting tracks in the
     // queue goes on whatever has the focus, which can stay in the search
     // entry of the grid while they're clicked. An empty playlist, whose
-    // pane stays open, leaves it to the grid
-    pub(super) fn select_all(&self) {
+    // pane stays open, leaves it to the grid.
+    //
+    // A search with text that isn't all selected keeps the key, to select
+    // its text, so that pressing Ctrl+A again selects what it found; while
+    // tracks of the queue are being selected, only the queue's own search
+    // does. Returns whether the key was used
+    pub(super) fn select_all(&self) -> bool {
         let imp = self.imp();
         let focus = gtk::prelude::GtkWindowExt::focus(self);
         let focus_in = |widget: &gtk::Widget| focus.as_ref().is_some_and(|f| f.is_ancestor(widget));
         let sidebar_page = imp.sidebar_stack.visible_child_name();
         let queue_shown = self.playlist_visible() && sidebar_page.as_deref() == Some("playlist");
+        let selecting_queue = queue_shown && self.queue_selection();
 
-        if queue_shown && self.queue_selection() {
+        if self.focused_editable().is_some_and(has_unselected_text)
+            && (!selecting_queue || focus_in(imp.playlist_view.upcast_ref()))
+        {
+            return false;
+        }
+
+        if selecting_queue {
             self.select_all_queue_tracks();
         } else if self.library_visible() && focus_in(imp.library_view.upcast_ref()) {
             imp.library_view.select_all();
@@ -165,19 +177,35 @@ impl Window {
         } else if self.library_visible() {
             imp.library_view.select_all();
         }
+        true
     }
 
-    // Ctrl+A selects the items of the pane with the focus, even from its
-    // search entry, so it's handled before the focused widget gets it; the
-    // grid and the lists would otherwise take it for their own selection,
-    // which does nothing, and the search entries for selecting their text
+    // Ctrl+A is handled before the focused widget gets it: the grid and the
+    // lists would take it for their own selection, which does nothing, and
+    // the searches would always take it for their text, even an empty one,
+    // such as the album search when the grid opens. The key goes on to a
+    // search that `select_all()` leaves it to
     pub(super) fn setup_select_all_shortcut(&self) {
         let controller = gtk::ShortcutController::new();
         controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         controller.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("<Control>a"),
-            Some(gtk::NamedAction::new("queue.select-all")),
+            Some(gtk::CallbackAction::new(|widget, _| {
+                let win = widget.downcast_ref::<Window>().unwrap();
+                if win.select_all() {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            })),
         ));
         self.add_controller(controller);
     }
+}
+
+// Whether an entry has text that isn't all selected. Its positions count
+// characters, not bytes
+fn has_unselected_text(entry: gtk::Editable) -> bool {
+    let len = entry.text().chars().count() as i32;
+    len > 0 && entry.selection_bounds() != Some((0, len))
 }

@@ -390,10 +390,6 @@ mod imp {
                 win.set_queue_search(true);
                 win.imp().playlist_view.queue_searchentry().grab_focus();
             });
-            klass.install_action("queue.select-all", None, move |win, _, _| {
-                debug!("Window::queue.select-all()");
-                win.select_all();
-            });
             klass.install_action("queue.remove-selected", None, move |win, _, _| {
                 debug!("Window::queue.remove-selected()");
                 win.remove_selected_tracks();
@@ -984,13 +980,7 @@ impl Window {
 
             let win = controller.widget().and_downcast::<Window>().unwrap();
             let focus = gtk::prelude::GtkWindowExt::focus(&win);
-            let entry = focus.as_ref().and_then(|focus| {
-                focus
-                    .clone()
-                    .downcast::<gtk::Editable>()
-                    .ok()
-                    .or_else(|| focus.ancestor(gtk::Editable::static_type()).and_downcast())
-            });
+            let entry = win.focused_editable();
             let in_entry = entry.is_some();
             let in_text = entry.is_some_and(|entry| !entry.text().is_empty());
             let handled = match keyval {
@@ -1051,6 +1041,14 @@ impl Window {
         {
             scrolled.emit_scroll_child(scroll, false);
         }
+    }
+
+    // The text entry with the focus: the focus is on the entry's text, or on
+    // the entry itself
+    fn focused_editable(&self) -> Option<gtk::Editable> {
+        gtk::prelude::GtkWindowExt::focus(self)?
+            .ancestor(gtk::Editable::static_type())
+            .and_downcast()
     }
 
     // The widget under the pointer, if it's over the window
