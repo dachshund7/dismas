@@ -617,7 +617,7 @@ impl Window {
     // player or device, keeping the tracks that are here; it isn't
     // selected, so that what's playing goes on
     pub(super) async fn import_playlist(&self) {
-        let dialog = playlist_file_dialog(&i18n("Import a Playlist"));
+        let dialog = playlist_file_dialog(&i18n("Import a Playlist")).await;
         let Ok(file) = dialog.open_future(Some(self)).await else {
             // Cancelled
             return;
@@ -684,7 +684,7 @@ impl Window {
         } else {
             name.to_string()
         };
-        let dialog = playlist_file_dialog(&i18n("Export the Playlist"));
+        let dialog = playlist_file_dialog(&i18n("Export the Playlist")).await;
         dialog.set_initial_name(Some(&format!("{title}.m3u8")));
         let Ok(file) = dialog.save_future(Some(self)).await else {
             // Cancelled
@@ -695,7 +695,16 @@ impl Window {
             return;
         };
 
-        let message = match playlists::export(name, &path) {
+        // Written in another thread, as it's often to a USB stick or a phone
+        let export = {
+            let name = name.to_string();
+            let path = path.clone();
+            gio::spawn_blocking(move || playlists::export(&name, &path)).await
+        };
+        let Ok(export) = export else {
+            return;
+        };
+        let message = match export {
             // Translators: `{playlist}` must be left unmodified; it is
             // expanded to the name of a playlist
             Ok(0) => i18n_k("Exported “{playlist}”", &[("playlist", &title)]),
@@ -719,8 +728,9 @@ impl Window {
 }
 
 // A dialog for M3U playlists, starting in the first music folder that's
-// there
-fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
+// there. Which ones are there is found in another thread, as a network
+// drive that's gone can keep it waiting
+async fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
     let filter = gtk::FileFilter::new();
     filter.set_name(Some(&i18n("Playlists")));
     filter.add_mime_type("audio/x-mpegurl");
@@ -737,8 +747,17 @@ fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
         .default_filter(&filter)
         .build();
     let folders = library::music_folders(&utils::settings_manager());
-    if let Some(folder) = folders.into_iter().find(|folder| folder.path.is_dir()) {
-        dialog.set_initial_folder(Some(&gio::File::for_path(folder.path)));
+    let folder = gio::spawn_blocking(move || {
+        folders
+            .into_iter()
+            .find(|folder| folder.path.is_dir())
+            .map(|folder| folder.path)
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some(folder) = folder {
+        dialog.set_initial_folder(Some(&gio::File::for_path(folder)));
     }
     dialog
 }
