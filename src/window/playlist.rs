@@ -507,9 +507,10 @@ impl Window {
         }
     }
 
-    pub fn remove_track(&self, track: &Track) {
+    // Removes tracks from the queue, in a single change
+    pub fn remove_tracks(&self, tracks: &[Track]) {
         if let Some(p) = self.player() {
-            p.remove_track(track);
+            p.remove_tracks(tracks);
         }
         self.update_selected_count();
         self.update_queue_time();

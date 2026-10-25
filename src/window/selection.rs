@@ -104,16 +104,8 @@ impl Window {
     pub(super) fn remove_selected_tracks(&self) {
         if let Some(player) = self.player() {
             let queue = player.queue();
-            // Collect all tracks to be removed first, since we can't
-            // remove objects from the model while we're iterating it
-            let remove_tracks: Vec<Track> = (0..queue.n_tracks())
-                .filter_map(|idx| queue.track_at(idx))
-                .filter(Track::selected)
-                .collect();
-
-            for track in remove_tracks {
-                self.remove_track(&track);
-            }
+            let tracks = queue.selected_tracks();
+            self.remove_tracks(&tracks);
 
             // Store the current state of the queue
             self.store_queue();

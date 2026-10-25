@@ -3,7 +3,7 @@
 
 use std::{
     cell::Cell,
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
 };
 
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
@@ -161,19 +161,66 @@ impl Queue {
     }
 
     pub fn remove_track(&self, track: &Track) {
-        let n_tracks = self.n_tracks();
+        self.remove_tracks(std::slice::from_ref(track));
+    }
+
+    // Removes tracks in a single change of the list, which replaces the
+    // tracks from the first removed one to the last with those kept among
+    // them, as `move_tracks()` does; removing them one at a time would make
+    // the list, the sections of the works and the window catch up with each
+    // one. Removing tracks moves the ones after them, so the current track
+    // is found again first, for the handlers of the number of tracks
+    pub fn remove_tracks(&self, tracks: &[Track]) {
+        let removed: HashSet<&Track> = tracks.iter().collect();
+        let old = self.tracks();
+        let Some(start) = old.iter().position(|t| removed.contains(t)) else {
+            return;
+        };
+        let end = old
+            .iter()
+            .rposition(|t| removed.contains(t))
+            .unwrap_or(start);
+        let kept: Vec<Track> = old[start..=end]
+            .iter()
+            .filter(|t| !removed.contains(t))
+            .cloned()
+            .collect();
+
         let current = self.current();
-        if let Some(pos) = self.position(track) {
-            self.imp().store.remove(pos);
-        }
-
-        // Removing a track moves the ones after it; the current track is
-        // found again first, for the handlers of the number of tracks
+        self.imp()
+            .store
+            .splice(start as u32, (end - start + 1) as u32, &kept);
         self.update_current_pos(current);
+        self.notify_n_tracks();
+    }
 
-        if n_tracks != self.n_tracks() {
-            self.notify_n_tracks();
-        }
+    // Where playback goes when the current track is removed with others:
+    // the first track after it that can play and stays, round to the start
+    // when the queue repeats all of it, and even when it repeats the track
+    pub fn following_except(&self, removed: &HashSet<Track>) -> Option<u32> {
+        let n_tracks = self.imp().store.n_items();
+        let current = self.current_track_index()?;
+        let stays = |pos: u32| {
+            self.playable(pos)
+                && self
+                    .track_at(pos)
+                    .is_some_and(|track| !removed.contains(&track))
+        };
+        let wrap = self.imp().repeat_mode.get() == RepeatMode::RepeatAll;
+        let before = if wrap { 0..current } else { 0..0 };
+        (current + 1..n_tracks)
+            .chain(before)
+            .find(|&pos| stays(pos))
+    }
+
+    // The first track that can play and isn't removed
+    pub fn first_except(&self, removed: &HashSet<Track>) -> Option<u32> {
+        (0..self.imp().store.n_items()).find(|&pos| {
+            self.playable(pos)
+                && self
+                    .track_at(pos)
+                    .is_some_and(|track| !removed.contains(&track))
+        })
     }
 
     // Moves a track before another one, or to the end
@@ -324,15 +371,6 @@ impl Queue {
 
     pub fn next_track(&self) -> Option<Track> {
         self.advance(self.imp().repeat_mode.get())
-    }
-
-    // The track after the current one, even when repeating it
-    pub fn following_track(&self) -> Option<Track> {
-        let repeat_mode = match self.imp().repeat_mode.get() {
-            RepeatMode::RepeatOne => RepeatMode::Consecutive,
-            repeat_mode => repeat_mode,
-        };
-        self.advance(repeat_mode)
     }
 
     // The track that `next_track` would go to, without going there
@@ -570,6 +608,66 @@ mod tests {
         queue.remove_track(&t[0]);
         assert_eq!(seen.take(), Some(Some(t[2].clone())));
         assert_eq!(queue.current_track_index(), Some(1));
+    }
+
+    #[test]
+    fn remove_tracks_is_one_change() {
+        let (queue, t) = queue_of(6);
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        queue.model().connect_items_changed({
+            let changes = changes.clone();
+            move |_, position, removed, added| changes.borrow_mut().push((position, removed, added))
+        });
+
+        // Scattered, given out of order
+        queue.remove_tracks(&[t[4].clone(), t[1].clone(), t[2].clone()]);
+        assert_eq!(order(&queue, &t), [0, 3, 5]);
+        // From the first removed track to the last, with the one kept
+        assert_eq!(*changes.borrow(), [(1, 4, 1)]);
+    }
+
+    #[test]
+    fn remove_tracks_at_the_ends_and_all_of_them() {
+        let (queue, t) = queue_of(4);
+        queue.remove_tracks(&[t[0].clone(), t[3].clone()]);
+        assert_eq!(order(&queue, &t), [1, 2]);
+        // Tracks that aren't in the queue change nothing
+        queue.remove_tracks(&[t[0].clone()]);
+        assert_eq!(order(&queue, &t), [1, 2]);
+        queue.remove_tracks(&[t[2].clone(), t[1].clone()]);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn remove_tracks_keeps_the_current_track() {
+        let (queue, t) = queue_of(5);
+        queue.set_current_track(Some(t[3].clone()));
+        queue.remove_tracks(&[t[0].clone(), t[2].clone()]);
+        assert_eq!(queue.current(), Some(t[3].clone()));
+        assert_eq!(queue.current_track_index(), Some(1));
+
+        // The current one goes too
+        queue.remove_tracks(&[t[3].clone()]);
+        assert_eq!(queue.current(), None);
+    }
+
+    #[test]
+    fn playback_goes_on_from_a_track_that_stays() {
+        let (queue, t) = queue_of(5);
+        queue.set_current_track(Some(t[1].clone()));
+        let removed: HashSet<Track> = [1, 2, 4].map(|i| t[i].clone()).into();
+        assert_eq!(queue.following_except(&removed), Some(3));
+        assert_eq!(queue.first_except(&removed), Some(0));
+
+        // Past the end, round to the start only when repeating
+        let removed: HashSet<Track> = [1, 2, 3, 4].map(|i| t[i].clone()).into();
+        assert_eq!(queue.following_except(&removed), None);
+        queue.set_repeat_mode(RepeatMode::RepeatAll);
+        assert_eq!(queue.following_except(&removed), Some(0));
+        // Repeating the track goes on to the next one too
+        queue.set_repeat_mode(RepeatMode::RepeatOne);
+        let removed: HashSet<Track> = [1].map(|i| t[i].clone()).into();
+        assert_eq!(queue.following_except(&removed), Some(2));
     }
 
     fn seeded(seed: u64) -> rand::rngs::StdRng {

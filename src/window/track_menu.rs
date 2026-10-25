@@ -133,7 +133,7 @@ impl Window {
                     if selection {
                         win.remove_selected_tracks();
                     } else {
-                        win.remove_track(&track);
+                        win.remove_tracks(std::slice::from_ref(&track));
                         win.store_queue();
                     }
                 }

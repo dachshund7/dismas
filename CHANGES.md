@@ -212,6 +212,9 @@ All notable changes to this project will be documented in this file.
   those on a drive that wasn't plugged in, were dropped from it for good
   at the next change to it; they stay in their places, greyed out, and
   playback skips them until their files are back
+- Removing many selected tracks at once froze the window for a while,
+  and removing the playing track with the ones after it loaded each of
+  them into the player in turn
 
 ### Removed
 

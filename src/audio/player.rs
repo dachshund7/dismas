@@ -850,13 +850,28 @@ impl AudioPlayer {
         self.queue.move_tracks(tracks, before);
     }
 
-    pub fn remove_track(&self, track: &Track) {
-        // Repeating the track would keep playing it after it's gone
-        if track.playing() {
-            self.play_next_track(Queue::following_track);
+    // Removes tracks from the queue. When the current track is one of
+    // them, playback goes on from the first track after it that stays, as
+    // repeating the track would keep playing it after it's gone; that's one
+    // load into the backend, rather than one for each removed track after it
+    pub fn remove_tracks(&self, tracks: &[Track]) {
+        let removed: HashSet<Track> = tracks.iter().cloned().collect();
+        if let Some(current_track) = self.state.track().filter(|t| removed.contains(t)) {
+            current_track.set_playing(false);
+            if let Some(pos) = self.queue.following_except(&removed) {
+                self.skip_to(pos);
+            } else if let Some(pos) = self.queue.first_except(&removed) {
+                // As at the end of the queue
+                self.set_playback_state(PlaybackState::Stopped);
+                self.skip_to(pos);
+            } else {
+                self.backend.set_track(None);
+                self.clear_current_track();
+                self.announce_state(PlaybackState::Stopped);
+            }
         }
 
-        self.queue.remove_track(track);
+        self.queue.remove_tracks(tracks);
 
         if self.queue.is_empty() {
             self.clear_current_track();
