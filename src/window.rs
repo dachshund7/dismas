@@ -788,9 +788,9 @@ mod imp {
                 if let Some(p) = obj.player() {
                     p.set_replaygain(replaygain);
                 }
-                self.settings
-                    .set_enum("replay-gain", replaygain.into())
-                    .expect("Unable to store setting");
+                if let Err(e) = self.settings.set_enum("replay-gain", replaygain.into()) {
+                    log::warn!("Unable to store the ReplayGain mode: {e}");
+                }
 
                 obj.notify_replaygain_mode();
             }
@@ -1069,17 +1069,18 @@ impl Window {
     }
 
     // When the window is closed, and when quitting, which doesn't close it;
-    // the playlist pane is stored when the user shows or hides it
+    // the playlist pane is stored when the user shows or hides it. The keys
+    // can be locked down by the system administrator
     pub fn save_window_state(&self) {
         debug!("Saving window state");
         let (width, height) = self.default_size();
         let settings = &self.imp().settings;
-        settings
+        if let Err(e) = settings
             .set_int("window-width", width)
-            .expect("Unable to store window-width");
-        settings
-            .set_int("window-height", height)
-            .expect("Unable to store window-height");
+            .and_then(|()| settings.set_int("window-height", height))
+        {
+            log::warn!("Unable to store the window size: {e}");
+        }
     }
 
     // The music folders are read again once the dialog is closed, if they

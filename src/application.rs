@@ -561,10 +561,9 @@ impl Application {
                 Ok(_) | Err(ashpd::Error::Response(_)) => {
                     warn!("Background request denied");
                     // Drops the hold
-                    self.imp()
-                        .settings
-                        .set_boolean("background-play", false)
-                        .expect("Unable to set background-play settings key");
+                    if let Err(e) = self.imp().settings.set_boolean("background-play", false) {
+                        warn!("Unable to turn off background-play: {e}");
+                    }
                 }
                 Err(err) => debug!("No Background portal: {err}"),
             }

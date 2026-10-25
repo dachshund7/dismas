@@ -35,10 +35,10 @@ impl Window {
 
     // Only changes which playlist the tracks of the queue are saved to
     pub(super) fn set_selected_playlist(&self, name: &str) {
-        self.imp()
-            .settings
-            .set_string("selected-playlist", name)
-            .expect("Unable to store setting");
+        // The key can be locked down by the system administrator
+        if let Err(e) = self.imp().settings.set_string("selected-playlist", name) {
+            log::warn!("Unable to store the selected playlist: {e}");
+        }
         self.update_playlist_labels();
         self.update_playlists_menu();
         if self.playlists_visible() {

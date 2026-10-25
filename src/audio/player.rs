@@ -113,13 +113,13 @@ pub enum ReplayGainMode {
     Off,
 }
 
+// As the replay-gain setting stores them
 impl From<i32> for ReplayGainMode {
     fn from(value: i32) -> Self {
         match value {
             0 => Self::Album,
             1 => Self::Track,
-            2 => Self::Off,
-            _ => panic!("invalid ReplayGainMode enum key"),
+            _ => Self::Off,
         }
     }
 }
@@ -849,5 +849,17 @@ mod tests {
             assert_eq!(RepeatMode::from(i32::from(mode)), mode);
         }
         assert_eq!(RepeatMode::from(7), RepeatMode::Consecutive);
+    }
+
+    #[test]
+    fn replaygain_mode_round_trips_through_the_setting() {
+        for mode in [
+            ReplayGainMode::Album,
+            ReplayGainMode::Track,
+            ReplayGainMode::Off,
+        ] {
+            assert_eq!(ReplayGainMode::from(i32::from(mode)), mode);
+        }
+        assert_eq!(ReplayGainMode::from(7), ReplayGainMode::Off);
     }
 }
