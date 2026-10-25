@@ -62,6 +62,8 @@ All notable changes to this project will be documented in this file.
   an Undo
 - A Flatpak of each release, `dismas.flatpak`, on the release's page on
   GitHub
+- The tags of the Work Hierarchy plugin for Picard are read from MP3 and
+  M4A files too, not only from FLAC, Ogg and Opus files
 
 ### Changed
 
@@ -126,10 +128,14 @@ All notable changes to this project will be documented in this file.
   its own header in the queue and the album view, and a track with a whole
   Prelude and Fugue in it is a track of its own rather than a movement of
   the collection; Track Information shows the work's full title, with the
-  collection
+  collection. The plugin picks the work now, so the files need saving again
+  with its version 0.3.0; until then, files saved with an older one show
+  their work and movement tags
 - A track with only part of a movement, such as half of an overture in two
-  tracks, is named after its title, such as "Ia. Overture – Adagio", rather
-  than after the whole movement, which the tracks shared
+  tracks, is named after its recording's title, such as "Ia. Overture –
+  Adagio", rather than after the whole movement, which the tracks shared;
+  a number of an opera keeps its act and its number, as in "Acte I: 8. Air
+  « Prendre le dessin d’un bijou » (Gerald)"
 - Update dependencies
 
 ### Fixed
