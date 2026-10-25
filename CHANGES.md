@@ -200,6 +200,9 @@ All notable changes to this project will be documented in this file.
   selected playlist
 - A damaged library database left the album grid empty for good; it's
   made again
+- A playlist could be given a name a few characters too long to save:
+  creating it failed, and renaming one to it worked but lost every change
+  made to it afterwards
 
 ### Removed
 

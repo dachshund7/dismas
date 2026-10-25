@@ -96,9 +96,12 @@ fn is_valid_name(name: &str) -> bool {
     !name.starts_with('.') && !name.contains(['/', '\\']) && !name.chars().any(char::is_control)
 }
 
-// File names are limited to 255 bytes
+// File names are limited to 255 bytes, and the playlist is written to a
+// temporary file first, whose name GLib makes by adding ".XXXXXX" to the
+// file's own, e.g. "Mix.m3u8.A1B2C3"
 fn fits_file_name(name: &str) -> bool {
-    name.len() + EXTENSION.len() < 255
+    const TEMPORARY_SUFFIX: &str = ".XXXXXX";
+    name.len() + ".".len() + EXTENSION.len() + TEMPORARY_SUFFIX.len() <= 255
 }
 
 // Creates an empty playlist; the name has been checked with `check_name()`
@@ -540,8 +543,10 @@ mod tests {
         assert_eq!(check_name("a\nb"), Err(NameError::Invalid));
         assert_eq!(check_name(&"x".repeat(300)), Err(NameError::TooLong));
         // Limited in bytes, which characters can take several of
-        assert_eq!(check_name(&"é".repeat(126)), Err(NameError::TooLong));
-        assert_eq!(check_name(&"x".repeat(250)), Ok(()));
+        assert_eq!(check_name(&"é".repeat(122)), Err(NameError::TooLong));
+        // Room for ".m3u8" and the ".XXXXXX" of the temporary file
+        assert_eq!(check_name(&"x".repeat(243)), Ok(()));
+        assert_eq!(check_name(&"x".repeat(244)), Err(NameError::TooLong));
         assert!(is_valid_name("Road trip: 2026 (best)"));
     }
 }
