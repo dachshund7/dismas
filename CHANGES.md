@@ -148,6 +148,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- For a file without its format's main tag, such as an MP3 file with ID3v1
+  and APE tags but no ID3v2 tag, the album grid and its covers only read
+  the first tag, where the queue filled in from the others
 - Movements numbered as parts of another, such as "IIIa." or "12a", got a
   second number in front of theirs, as in "1. IIIa. [Allegro]"
 - With "Restore Queue at Startup" off, opening the window again while

@@ -25,7 +25,6 @@ use itertools::Itertools;
 use lofty::{
     config::ParseOptions,
     prelude::{Accessor, TaggedFileExt},
-    probe::Probe,
     tag::{ItemKey, Tag},
 };
 use log::{debug, warn};
@@ -34,8 +33,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     audio::{
-        CoverCache, ExtraComments, plain_commas, read_tagged_file, search_key, tag_search_text,
-        title_from_file_name, track_title,
+        CoverCache, ExtraComments, file_tag, plain_commas, read_file_tags, search_key,
+        tag_search_text, title_from_file_name, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
@@ -44,7 +43,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 11;
+const SCHEMA_VERSION: i32 = 12;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -1093,21 +1092,13 @@ fn create_thumbnail(track: &Path, dest: &Path) -> bool {
         return false;
     };
     let track = track.as_path();
-    // The type of the file is guessed from its contents, as the extension
-    // can be wrong, e.g. Opus in an ".ogg" file
-    let tagged_file = Probe::open(track)
-        .ok()
-        .and_then(|p| p.guess_file_type().ok())
-        .and_then(|p| p.read().ok());
-    let Some(tagged_file) = tagged_file else {
+    let Some((tagged_file, _)) = read_file_tags(track, ParseOptions::new()) else {
         return false;
     };
     // A file without tags can still have a cover file next to it
     let empty = Tag::new(tagged_file.primary_tag_type());
-    let tag = tagged_file
-        .primary_tag()
-        .or_else(|| tagged_file.first_tag())
-        .unwrap_or(&empty);
+    let tag = file_tag(&tagged_file);
+    let tag = tag.as_deref().unwrap_or(&empty);
 
     let Some(image) = CoverCache::load_cover(tag, track.parent(), THUMBNAIL_SIZE) else {
         return false;
@@ -1122,49 +1113,29 @@ fn create_thumbnail(track: &Path, dest: &Path) -> bool {
     }
 }
 
-// An audio file's tags, and the items lofty leaves out of them, without
-// the covers and properties, which the library doesn't keep
-fn read_file_tags(path: &Path) -> Option<(lofty::file::TaggedFile, ExtraComments)> {
+// An audio file's tags, and the items lofty leaves out of them, which have
+// the CUE sheet in the tags, without the covers and properties, which the
+// library doesn't keep
+fn read_tags_only(path: &Path) -> Option<(lofty::file::TaggedFile, ExtraComments)> {
     let mut options = ParseOptions::new();
     options.read_cover_art(false).read_properties(false);
-
-    let probe = match Probe::open(path).map(|p| p.options(options).guess_file_type()) {
-        Ok(Ok(p)) => p,
-        Ok(Err(e)) => {
-            warn!("Unable to parse file type {path:?}: {e}");
-            return None;
-        }
-        Err(e) => {
-            warn!("Unable to open {path:?}: {e}");
-            return None;
-        }
-    };
-    // The extra comments have the CUE sheet in the tags, if there's one
-    match read_tagged_file(probe, options) {
-        Ok(f) => Some(f),
-        Err(e) => {
-            warn!("Unable to read {path:?}: {e}");
-            None
-        }
-    }
+    read_file_tags(path, options)
 }
 
 // The tracks of an audio file: the file, or the tracks that the CUE sheet
 // in its tags splits it into
 fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
-    let Some((tagged_file, extra)) = read_file_tags(path) else {
+    let Some((tagged_file, extra)) = read_tags_only(path) else {
         return vec![(path.to_path_buf(), TrackTags::default())];
     };
-    let tag = tagged_file
-        .primary_tag()
-        .or_else(|| tagged_file.first_tag());
+    let tag = file_tag(&tagged_file);
 
     let sheet = extra
         .cue_sheet
         .as_deref()
         .and_then(|text| SplitSheet::embedded(path, text));
     if let Some(sheet) = sheet {
-        let album_tag = cue_sheet::album_tag(tag, &sheet.sheet);
+        let album_tag = cue_sheet::album_tag(tag.as_deref(), &sheet.sheet);
         return sheet
             .tracks()
             .map(|(track, _)| cue_track_tags(&sheet, &album_tag, track))
@@ -1173,7 +1144,7 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
 
     // A file without tags is in the album of its folder too
     let empty = Tag::new(tagged_file.primary_tag_type());
-    let tags = TrackTags::from_tag(tag.unwrap_or(&empty), path, Some(path));
+    let tags = TrackTags::from_tag(tag.as_deref().unwrap_or(&empty), path, Some(path));
     vec![(path.to_path_buf(), tags)]
 }
 
@@ -1187,11 +1158,9 @@ fn read_sheet_tags(
         .into_iter()
         .map(|(track, audio)| {
             let album_tag = album_tags.entry(audio).or_insert_with(|| {
-                let file = read_file_tags(audio);
-                let tag = file
-                    .as_ref()
-                    .and_then(|(f, _)| f.primary_tag().or_else(|| f.first_tag()));
-                cue_sheet::album_tag(tag, &sheet.sheet)
+                let file = read_tags_only(audio);
+                let tag = file.as_ref().and_then(|(file, _)| file_tag(file));
+                cue_sheet::album_tag(tag.as_deref(), &sheet.sheet)
             });
             cue_track_tags(sheet, album_tag, track)
         })

@@ -4,6 +4,8 @@
 
 //! Reading the tags of a file, with the items lofty leaves out
 
+use std::{borrow::Cow, collections::HashSet};
+
 use super::*;
 
 // The Vorbis comments, APE items, ID3v2 frames and MP4 atoms that lofty
@@ -73,8 +75,64 @@ impl ExtraComments {
     }
 }
 
+// Opens a file and reads its tags, and the items in `ExtraComments` if it
+// has them; the options can leave out the covers and the properties
+pub fn read_file_tags(path: &Path, options: ParseOptions) -> Option<(TaggedFile, ExtraComments)> {
+    let probe = match Probe::open(path).map(|probe| probe.options(options).guess_file_type()) {
+        Ok(Ok(probe)) => probe,
+        Ok(Err(e)) => {
+            warn!("Unable to parse file type {path:?}: {e}");
+            return None;
+        }
+        Err(e) => {
+            warn!("Unable to open file {path:?}: {e}");
+            return None;
+        }
+    };
+    match read_tagged_file(probe, options) {
+        Ok(file) => Some(file),
+        Err(e) => {
+            warn!("Unable to read file {path:?}: {e}");
+            None
+        }
+    }
+}
+
+// The tag that the tracks of a file take, the same in the queue, the album
+// grid and the covers: the file's primary tag, or else its other tags
+// together, as one can fill in for another, the first one's items and
+// pictures over the next ones'
+pub fn file_tag(tagged_file: &TaggedFile) -> Option<Cow<'_, Tag>> {
+    merged_tag(tagged_file.primary_tag(), tagged_file.tags())
+}
+
+fn merged_tag<'a>(primary: Option<&'a Tag>, tags: &'a [Tag]) -> Option<Cow<'a, Tag>> {
+    if let Some(tag) = primary {
+        return Some(Cow::Borrowed(tag));
+    }
+    let (first, rest) = tags.split_first()?;
+    if rest.is_empty() {
+        return Some(Cow::Borrowed(first));
+    }
+    let mut merged = first.clone();
+    for tag in rest {
+        let keys: HashSet<ItemKey> = merged.items().map(TagItem::key).collect();
+        // The items of another format, whose keys the first one may not
+        // have, are kept as they are, to be read
+        for item in tag.items().filter(|item| !keys.contains(&item.key())) {
+            merged.push_unchecked(item.clone());
+        }
+        if merged.pictures().is_empty() {
+            for picture in tag.pictures() {
+                merged.push_picture(picture.clone());
+            }
+        }
+    }
+    Some(Cow::Owned(merged))
+}
+
 // Reads a file, and the items in `ExtraComments` if it has them
-pub fn read_tagged_file(
+fn read_tagged_file(
     probe: Probe<BufReader<File>>,
     options: ParseOptions,
 ) -> Result<(TaggedFile, ExtraComments), FileParseError> {
@@ -146,4 +204,64 @@ pub(super) fn track_album(tag: &Tag) -> Option<String> {
 // Real， Madrid", which look like large gaps
 pub fn plain_commas(name: &str) -> String {
     name.replace('，', ",")
+}
+
+#[cfg(test)]
+mod tests {
+    use lofty::{picture::Picture, tag::TagType};
+
+    use super::*;
+
+    fn tag(tag_type: TagType, items: &[(ItemKey, &str)]) -> Tag {
+        let mut tag = Tag::new(tag_type);
+        for (key, value) in items {
+            tag.push_unchecked(TagItem::new(*key, ItemValue::Text(value.to_string())));
+        }
+        tag
+    }
+
+    #[test]
+    fn the_tags_of_a_file_without_a_primary_one_fill_in_for_each_other() {
+        // An MP3 file with ID3v1 and APE tags, but no ID3v2 tag
+        let id3v1 = tag(
+            TagType::Id3v1,
+            &[
+                (ItemKey::TrackTitle, "Short"),
+                (ItemKey::TrackArtist, "Artist"),
+            ],
+        );
+        let mut ape = tag(
+            TagType::Ape,
+            &[
+                (ItemKey::TrackTitle, "Long"),
+                (ItemKey::AlbumTitle, "Album"),
+                (ItemKey::TrackArtist, "Other"),
+                (ItemKey::TrackArtist, "Another"),
+                (ItemKey::MusicBrainzReleaseId, "id"),
+            ],
+        );
+        ape.push_picture(Picture::unchecked(vec![1, 2, 3]).build());
+        let tags = [id3v1, ape];
+
+        let merged = merged_tag(None, &tags).unwrap();
+        assert_eq!(merged.title().as_deref(), Some("Short"));
+        assert_eq!(
+            merged.get_strings(ItemKey::TrackArtist).collect::<Vec<_>>(),
+            ["Artist"]
+        );
+        assert_eq!(merged.album().as_deref(), Some("Album"));
+        // ID3v1 has no MusicBrainz ids, but the APE tag's is kept
+        assert_eq!(merged.get_string(ItemKey::MusicBrainzReleaseId), Some("id"));
+        assert_eq!(merged.pictures().len(), 1);
+
+        // A primary tag, or a single tag, is read as it is
+        let primary = tag(TagType::Id3v2, &[(ItemKey::TrackTitle, "Primary")]);
+        let read = merged_tag(Some(&primary), &tags).unwrap();
+        assert_eq!(read.title().as_deref(), Some("Primary"));
+        assert!(matches!(
+            merged_tag(None, &tags[..1]),
+            Some(Cow::Borrowed(_))
+        ));
+        assert!(merged_tag(None, &[]).is_none());
+    }
 }

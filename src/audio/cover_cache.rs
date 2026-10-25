@@ -306,20 +306,12 @@ impl CoverCache {
     // use the cache, and it blocks, so it must not be called on the main
     // thread
     pub fn load_full_cover(path: &Path) -> Option<gdk::Texture> {
-        // The type of the file is guessed from its contents, as the
-        // extension can be wrong, e.g. Opus in an ".ogg" file
-        let tagged_file = lofty::probe::Probe::open(path)
-            .ok()?
-            .guess_file_type()
-            .ok()?
-            .read()
-            .ok()?;
+        let (tagged_file, _) =
+            crate::audio::read_file_tags(path, lofty::config::ParseOptions::new())?;
         // A file without tags can still have a cover file next to it
         let empty = lofty::tag::Tag::new(tagged_file.primary_tag_type());
-        let tag = tagged_file
-            .primary_tag()
-            .or_else(|| tagged_file.first_tag())
-            .unwrap_or(&empty);
+        let tag = crate::audio::file_tag(&tagged_file);
+        let tag = tag.as_deref().unwrap_or(&empty);
         let image = Self::load_cover(tag, path.parent(), FULL_COVER_SIZE)?;
 
         Some(image.into_texture())
@@ -418,7 +410,6 @@ mod tests {
     use std::{path::PathBuf, sync::Arc};
 
     use gtk::{gdk, gio, glib, prelude::*};
-    use lofty::prelude::TaggedFileExt;
 
     use super::{COVER_SIZE, CoverCache, write_cover_file};
     use crate::cover_image::{accent_color, oklch_chroma};
@@ -544,23 +535,15 @@ mod tests {
                         .starts_with("audio/")
                 })
                 .find_map(|path| {
-                    lofty::probe::Probe::open(path)
-                        .ok()?
-                        .guess_file_type()
-                        .ok()?
-                        .read()
-                        .ok()
+                    crate::audio::read_file_tags(path, lofty::config::ParseOptions::new())
                 });
-            let Some(tagged_file) = tagged_file else {
+            let Some((tagged_file, _)) = tagged_file else {
                 continue;
             };
-            let Some(tag) = tagged_file
-                .primary_tag()
-                .or_else(|| tagged_file.first_tag())
-            else {
+            let Some(tag) = crate::audio::file_tag(&tagged_file) else {
                 continue;
             };
-            let Some(image) = CoverCache::load_cover(tag, Some(&dir), COVER_SIZE) else {
+            let Some(image) = CoverCache::load_cover(&tag, Some(&dir), COVER_SIZE) else {
                 continue;
             };
             let Some(palette) = image.palette() else {

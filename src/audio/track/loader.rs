@@ -50,28 +50,7 @@ struct FileRead {
 
 impl FileRead {
     fn read(path: &Path) -> Option<Self> {
-        let file_probe = match Probe::open(path) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("Unable to open file {path:?}: {e}");
-                return None;
-            }
-        };
-
-        let (tagged_file, extra) = match file_probe.guess_file_type() {
-            Ok(t) => match read_tagged_file(t, ParseOptions::new()) {
-                Ok(f) => f,
-                Err(e) => {
-                    warn!("Unable to read parsed file {path:?}: {e}");
-                    return None;
-                }
-            },
-            Err(e) => {
-                warn!("Unable to parse file type {path:?}: {e}");
-                return None;
-            }
-        };
-
+        let (tagged_file, extra) = read_file_tags(path, ParseOptions::new())?;
         let info = gio::File::for_path(path)
             .query_info(
                 &format!("standard::display-name,standard::size,{ATTRIBUTE_HOST_PATH}"),
@@ -124,11 +103,8 @@ struct CueFile {
 
 impl CueFile {
     fn new(sheet: &cue_sheet::CueSheet, read: &FileRead) -> Self {
-        let file_tag = read
-            .tagged_file
-            .primary_tag()
-            .or_else(|| read.tagged_file.first_tag());
-        let mut tag = cue_sheet::album_tag(file_tag, sheet);
+        let file_tag = file_tag(&read.tagged_file);
+        let mut tag = cue_sheet::album_tag(file_tag.as_deref(), sheet);
         // All the tracks have the same album, so they share the cover
         let cover = CoverCache::cover_art(&read.path, &tag);
         while !tag.pictures().is_empty() {
@@ -348,8 +324,7 @@ impl TrackData {
     }
 
     fn read_audio_file(file: gio::File, path: &Path, files: &FileCache) -> Vec<Self> {
-        let (mime_type, _) = gio::content_type_guess(Some(path), None);
-        if !mime_type.starts_with("audio") || mime_type.ends_with("x-mpegurl") {
+        if !utils::is_audio_path(path) {
             return Vec::new();
         }
 
@@ -402,49 +377,14 @@ impl TrackData {
         let tagged_file = &read.tagged_file;
         let extra = &read.extra;
 
-        let mut artist = None;
-        let mut title = None;
-        let mut album = None;
-        let mut credits = TrackCredits::default();
-        let mut tag_text = String::new();
-        let mut cover: Option<AlbumCover> = None;
-        let mut replay_gain = ReplayGain::default();
-        if let Some(tag) = tagged_file.primary_tag() {
-            debug!("Found primary tag");
-            artist = track_artist(tag);
-            title = track_title(tag);
-            album = track_album(tag);
-            credits = TrackCredits::from_tag(tag, extra);
-            replay_gain = ReplayGain::from_tag(tag);
-            tag_text = tag_search_text(tag);
-            cover = Some(CoverCache::cover_art(path, tag));
-        } else {
-            warn!("Unable to load primary tag for: {path:?}");
-            for tag in tagged_file.tags() {
-                debug!("Found tag: {:?}", tag.tag_type());
-                // The tags that come later fill in for the ones missing
-                // from the first
-                artist = artist.or_else(|| track_artist(tag));
-                title = title.or_else(|| track_title(tag));
-                album = album.or_else(|| track_album(tag));
-                credits = TrackCredits::from_tag(tag, extra);
-                replay_gain = ReplayGain::from_tag(tag);
-                tag_text = tag_search_text(tag);
-                // The first tag with a cover has the one we keep
-                if cover.as_ref().is_none_or(|c| c.art().is_none()) {
-                    cover = Some(CoverCache::cover_art(path, tag));
-                }
-
-                if artist.is_some() && title.is_some() {
-                    break;
-                }
-            }
-        }
         // A file without tags can still have a cover file next to it
-        if cover.is_none() {
-            let tag = Tag::new(tagged_file.primary_tag_type());
-            cover = Some(CoverCache::cover_art(path, &tag));
-        }
+        let empty = Tag::new(tagged_file.primary_tag_type());
+        let tag = file_tag(tagged_file);
+        let tag = tag.as_deref().unwrap_or(&empty);
+        let artist = track_artist(tag);
+        let title = track_title(tag);
+        let album = track_album(tag);
+        let replay_gain = ReplayGain::from_tag(tag);
 
         let uuid = read
             .display_name
@@ -464,9 +404,9 @@ impl TrackData {
         };
 
         TrackData {
-            credits,
-            tag_text,
-            cover,
+            credits: TrackCredits::from_tag(tag, extra),
+            tag_text: tag_search_text(tag),
+            cover: Some(CoverCache::cover_art(path, tag)),
             uuid,
             duration: sane_duration(tagged_file.properties().duration()),
             details: read.details(replay_gain),

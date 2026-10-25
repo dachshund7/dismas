@@ -29,7 +29,7 @@ use lofty::{
     ogg::{OpusFile, SpeexFile, VorbisFile, tag::VorbisComments},
     prelude::{Accessor, TaggedFileExt},
     probe::Probe,
-    tag::{ItemKey, ItemValue, Tag},
+    tag::{ItemKey, ItemValue, Tag, TagItem},
     wavpack::WavPackFile,
 };
 use log::{debug, warn};
@@ -57,7 +57,7 @@ pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
 pub use search::{normalize_search_text, search_key, tag_search_text};
-pub use tags::{ExtraComments, plain_commas, read_tagged_file, track_title};
+pub use tags::{ExtraComments, file_tag, plain_commas, read_file_tags, track_title};
 use tags::{track_album, track_artist};
 use work_hierarchy::{MovementName, WorkHierarchy, WorkLabels};
 
