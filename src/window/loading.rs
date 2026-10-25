@@ -154,6 +154,12 @@ impl Window {
         insert_before: Option<Track>,
     ) {
         let play = matches!(mode, QueueMode::Play(_));
+        // The file to start playing from; its place among the tracks read
+        // can differ, as a file before it can fail to be read
+        let start_file = match mode {
+            QueueMode::Play(start) => queue.get(start as usize).cloned(),
+            _ => None,
+        };
         let replacing = replaced.is_some();
         if queue.is_empty() {
             self.add_toast(i18n("No available track found"));
@@ -244,8 +250,11 @@ impl Window {
                         was_empty,
                         queue.n_tracks()
                     );
-                    if let QueueMode::Play(start) = mode {
-                        player.skip_to(first_added + start);
+                    if play {
+                        let start = start_file
+                            .and_then(|file| tracks.iter().position(|t| t.file().equal(&file)))
+                            .unwrap_or(0);
+                        player.skip_to(first_added + start as u32);
                         player.play();
                     } else if was_empty {
                         let resume_at = resume.and_then(|r| {
