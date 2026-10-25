@@ -332,13 +332,6 @@ impl Window {
         }
     }
 
-    // Where a track is in the list of the queue, which only has the tracks
-    // matching the search, if there is one
-    fn queue_view_position(&self, track: &Track) -> Option<u32> {
-        let model = self.imp().playlist_view.queue_view().model()?;
-        (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
-    }
-
     // Only the last track to go to is scrolled to, e.g. skipping several
     pub(super) fn scroll_queue_to_track(&self) {
         let imp = self.imp();
@@ -361,11 +354,11 @@ impl Window {
             return;
         };
         let view = self.imp().playlist_view.queue_view();
-        let mut pos = self.queue_view_position(&track);
+        let mut pos = crate::queue_row::track_position(&view, &track);
         if pos.is_none() && self.queue_search() {
             self.imp().playlist_view.queue_searchentry().set_text("");
             self.set_queue_search(false);
-            pos = self.queue_view_position(&track);
+            pos = crate::queue_row::track_position(&view, &track);
         }
         let Some(pos) = pos else {
             return;

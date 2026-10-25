@@ -475,35 +475,7 @@ impl LibraryView {
                 overlay.add_overlay(&picture);
                 overlay.add_overlay(&match_count_badge(item));
                 let cover = SquareBin::new(&overlay, MIN_COVER_SIZE, MAX_COVER_SIZE);
-
-                let title = gtk::Label::builder()
-                    .ellipsize(gtk::pango::EllipsizeMode::End)
-                    .max_width_chars(1)
-                    .hexpand(true)
-                    .css_classes(["album-title"])
-                    .has_tooltip(true)
-                    .build();
-                // The title is often ellipsized, so the tooltip shows all of it;
-                // setting the tooltip text on each bind is slow, as it also updates
-                // the accessible description, so we only fill it in when it's shown
-                title.connect_query_tooltip(|label, _, _, _, tooltip| {
-                    tooltip.set_text(Some(&label.label()));
-                    true
-                });
-                let artist = gtk::Label::builder()
-                    .ellipsize(gtk::pango::EllipsizeMode::End)
-                    .max_width_chars(1)
-                    .hexpand(true)
-                    .css_classes(["caption", "dim-label"])
-                    .build();
-
-                let content = AlbumCell::default();
-                content.set_orientation(gtk::Orientation::Vertical);
-                content.set_spacing(3);
-                content.add_css_class("album-cell");
-                content.append(&cover);
-                content.append(&title);
-                content.append(&artist);
+                let content = AlbumCell::new(&cover, &picture);
 
                 // Ctrl+click selects the album, and Shift+click in selection
                 // mode the albums from the last one clicked, like in the
@@ -553,24 +525,9 @@ impl LibraryView {
                 let Some(album) = item.item().and_downcast::<Album>() else {
                     return;
                 };
-                let content = item.child().unwrap();
-                let cover = content.first_child().unwrap();
-                // The cover's overlay has the placeholder, the picture and
-                // the badge, in that order
-                let picture = cover
-                    .first_child()
-                    .and_then(|overlay| overlay.first_child())
-                    .and_then(|placeholder| placeholder.next_sibling())
-                    .and_downcast::<gtk::Picture>()
-                    .unwrap();
-                let title = cover.next_sibling().and_downcast::<gtk::Label>().unwrap();
-                let artist = content.last_child().and_downcast::<gtk::Label>().unwrap();
-
-                title.set_label(&album.title());
-                artist.set_label(&album.artist());
-
-                picture.set_paintable(gdk::Paintable::NONE);
-                this.load_cover(&album, &picture);
+                let cell = item.child().and_downcast::<AlbumCell>().unwrap();
+                cell.show_album(&album);
+                this.load_cover(&album, cell.picture());
             }
         ));
 

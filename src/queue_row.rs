@@ -780,6 +780,11 @@ impl QueueRow {
     }
 }
 
+// The frames a list is waited for to get its size, when it's just shown:
+// one hidden again before it gets it isn't scrolled to a track, rather
+// than redrawing the window at each frame until it's shown again
+const SIZE_WAIT_FRAMES: u32 = 60;
+
 // Scrolls a list to a track, places it in the middle of the list, if it can
 // scroll that far, and makes it flash for a moment, like its CSS
 // animation. The list was usually just shown, and can only scroll once
@@ -787,12 +792,13 @@ impl QueueRow {
 // of the track is then there in the next frame, to be centered
 pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) {
     let frames = Cell::new(0);
+    let waited = Cell::new(0);
     view.add_tick_callback(clone!(
         #[strong]
         track,
         move |view, _| {
             if view.height() == 0 {
-                return glib::ControlFlow::Continue;
+                return wait_for_size(&waited);
             }
             let frame = frames.get();
             frames.set(frame + 1);
@@ -833,13 +839,14 @@ pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) {
 // for frames where they are
 pub fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCallbackId {
     let frames = Cell::new(0);
+    let waited = Cell::new(0);
     let centering = Cell::new(false);
     view.add_tick_callback(clone!(
         #[strong]
         track,
         move |view, _| {
             if view.height() == 0 {
-                return glib::ControlFlow::Continue;
+                return wait_for_size(&waited);
             }
             let frame = frames.get();
             frames.set(frame + 1);
@@ -887,8 +894,19 @@ pub fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCallbackId 
     ))
 }
 
+// Waits one more frame for a list to get its size, unless it was waited for
+// long enough
+fn wait_for_size(waited: &Cell<u32>) -> glib::ControlFlow {
+    waited.set(waited.get() + 1);
+    if waited.get() < SIZE_WAIT_FRAMES {
+        glib::ControlFlow::Continue
+    } else {
+        glib::ControlFlow::Break
+    }
+}
+
 // Where a track is in a list, which can be filtered by a search
-fn track_position(view: &gtk::ListView, track: &Track) -> Option<u32> {
+pub fn track_position(view: &gtk::ListView, track: &Track) -> Option<u32> {
     let model = view.model()?;
     (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
 }
@@ -923,12 +941,19 @@ fn track_bounds(view: &gtk::ListView, track: &Track) -> Option<graphene::Rect> {
     Some(bounds)
 }
 
+// GTK has no API for the widgets of a list's rows and headers, so
+// header_above and track_item go through its children, which are GTK's
+// own: a widget per row, holding the row the factory made, and one of this
+// type per header. A GTK release could change them; the queue would then
+// scroll to its tracks less precisely, without the work over them
+const LIST_HEADER_TYPE: &str = "GtkListHeaderWidget";
+
 // The header of a section ending where a row starts, if it's laid out,
 // and where it is
 fn header_above(view: &gtk::ListView, top: f32) -> Option<(gtk::Widget, graphene::Rect)> {
     let mut child = view.first_child();
     while let Some(widget) = child {
-        if widget.type_().name() == "GtkListHeaderWidget"
+        if widget.type_().name() == LIST_HEADER_TYPE
             && let Some(bounds) = widget.compute_bounds(view)
             && bounds.height() > 0.0
             && (bounds.y() + bounds.height() - top).abs() < 1.0

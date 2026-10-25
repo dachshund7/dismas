@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The content of a cell of the album grid: a box that highlights the album
-// when it's selected in selection mode, and tells screen readers whether
-// it's selected
+// The content of a cell of the album grid: the cover over the album's title
+// and artist, in a box that highlights the album when it's selected in
+// selection mode, and tells screen readers whether it's selected
 
-use std::cell::Cell;
+use std::cell::{Cell, OnceCell};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
+
+use crate::library::Album;
 
 mod imp {
     use super::*;
@@ -19,6 +21,9 @@ mod imp {
         pub selected: Cell<bool>,
         #[property(get, set = Self::set_selection_mode, explicit_notify)]
         pub selection_mode: Cell<bool>,
+        pub picture: OnceCell<gtk::Picture>,
+        pub title: gtk::Label,
+        pub artist: gtk::Label,
     }
 
     #[glib::object_subclass]
@@ -60,13 +65,56 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
-impl Default for AlbumCell {
-    fn default() -> Self {
-        glib::Object::new()
-    }
-}
-
 impl AlbumCell {
+    // The cover has the picture the album's cover is loaded into
+    pub fn new(cover: &impl IsA<gtk::Widget>, picture: &gtk::Picture) -> Self {
+        let cell: Self = glib::Object::builder()
+            .property("orientation", gtk::Orientation::Vertical)
+            .property("spacing", 3)
+            .build();
+        cell.add_css_class("album-cell");
+        let imp = cell.imp();
+        imp.picture.set(picture.clone()).unwrap();
+
+        let title = &imp.title;
+        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        title.set_max_width_chars(1);
+        title.set_hexpand(true);
+        title.add_css_class("album-title");
+        // The title is often ellipsized, so the tooltip shows all of it;
+        // setting the tooltip text on each bind is slow, as it also updates
+        // the accessible description, so we only fill it in when it's shown
+        title.set_has_tooltip(true);
+        title.connect_query_tooltip(|label, _, _, _, tooltip| {
+            tooltip.set_text(Some(&label.label()));
+            true
+        });
+        let artist = &imp.artist;
+        artist.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        artist.set_max_width_chars(1);
+        artist.set_hexpand(true);
+        artist.add_css_class("caption");
+        artist.add_css_class("dim-label");
+
+        cell.append(cover);
+        cell.append(title);
+        cell.append(artist);
+        cell
+    }
+
+    pub fn picture(&self) -> &gtk::Picture {
+        self.imp().picture.get().unwrap()
+    }
+
+    // Shows the title and the artist of an album, and no cover until it's
+    // loaded
+    pub fn show_album(&self, album: &Album) {
+        let imp = self.imp();
+        imp.title.set_label(&album.title());
+        imp.artist.set_label(&album.artist());
+        self.picture().set_paintable(gtk::gdk::Paintable::NONE);
+    }
+
     // Selected albums are highlighted in selection mode, in place of a
     // check button over the cover
     fn update_selected(&self) {
