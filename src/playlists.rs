@@ -343,7 +343,9 @@ fn format_m3u(files: &[gio::File], relative_to: Option<&Path>) -> (String, usize
 fn parse_m3u(text: &str, base: &gio::File) -> Vec<gio::File> {
     text.lines()
         .map(|line| line.trim_start_matches('\u{feff}').trim())
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        // GLib can't take a path with a NUL byte, as in a UTF-16 playlist
+        // read as UTF-8, or a file with a block of zeros
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.contains('\0'))
         .map(|line| {
             if line.contains("://") {
                 return gio::File::for_uri(line);
@@ -381,6 +383,13 @@ mod tests {
             "\u{feff}#EXTM3U\n#EXTINF:254,Artist - Title\n/music/a.opus\n\n  \n/music/b.flac\r\n";
         let files = parse_m3u(text, &gio::File::for_path("/playlists"));
         assert_eq!(paths(&files), ["/music/a.opus", "/music/b.flac"]);
+    }
+
+    #[test]
+    fn parse_skips_lines_with_nul_bytes() {
+        let text = "/music/a.opus\n/music/\0b.flac\n\0\0\0\n/music/c.flac\n";
+        let files = parse_m3u(text, &gio::File::for_path("/playlists"));
+        assert_eq!(paths(&files), ["/music/a.opus", "/music/c.flac"]);
     }
 
     #[test]

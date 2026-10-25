@@ -195,6 +195,9 @@ All notable changes to this project will be documented in this file.
 - A file that the tag reader couldn't cope with stopped every scan of the
   music folders at the same place, so the album grid never got the files
   after it, never forgot removed ones, and never updated its covers
+- A playlist file with a NUL byte in a line, such as one saved in UTF-16,
+  crashed Dismas when it was opened, and at every start if it was the
+  selected playlist
 
 ### Removed
 

@@ -147,7 +147,10 @@ pub fn parse(text: &str) -> Option<CueSheet> {
         let track = tracks.last_mut();
         match (command.as_str(), track) {
             ("FILE", _) => {
-                sheet.files.push(file_name(rest).unwrap_or_default());
+                // GLib can't take a path with a NUL byte; the tracks of
+                // such a file are left without one
+                let name = file_name(rest).filter(|name| !name.contains('\0'));
+                sheet.files.push(name.unwrap_or_default());
                 file = Some(sheet.files.len() - 1);
             }
             ("TRACK", _) => {
@@ -687,6 +690,12 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         assert_eq!(parse_time("00:60:00"), None);
         assert_eq!(parse_time("00:00:75"), None);
         assert_eq!(parse_time("1:2"), None);
+    }
+
+    #[test]
+    fn file_names_with_nul_bytes_are_dropped() {
+        let sheet = parse("FILE \"a\0b.wav\" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\n").unwrap();
+        assert_eq!(sheet.files, vec![""]);
     }
 
     #[test]
