@@ -207,7 +207,8 @@ All notable changes to this project will be documented in this file.
   data folder was missing, such as after clearing it
 - A track that couldn't be played, such as one whose file was gone or with
   no decoder for its format, left the player showing it as playing, with
-  nothing heard; Dismas says so and goes on to the next track
+  nothing heard; Dismas says so and goes on to the next track, and greys
+  out a track whose file is gone, as when its playlist opens without it
 - The tracks of a playlist that weren't found when it opened, such as
   those on a drive that wasn't plugged in, were dropped from it for good
   at the next change to it; they stay in their places, greyed out, and

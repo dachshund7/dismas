@@ -2336,6 +2336,13 @@ impl Track {
         self.notify_missing();
     }
 
+    // Makes the track one whose file wasn't found, like those of a
+    // playlist that opens without their files, once its file turns out to
+    // be gone, e.g. when it fails to play
+    pub fn mark_missing(&self) {
+        self.update(TrackData::missing(self.file()));
+    }
+
     pub fn equals(&self, other: &Self) -> bool {
         if self.uuid().is_some() && other.uuid().is_some() {
             self.uuid() == other.uuid()
@@ -3953,6 +3960,20 @@ mod tests {
         let data = TrackData::missing(gtk::gio::File::for_path("/gone/Album/Album.cue/track03"));
         assert_eq!(data.shown_title(), "Track 3");
         assert_eq!(data.shown_album(), "Album");
+    }
+
+    #[test]
+    fn a_track_whose_file_is_gone_is_marked_missing() {
+        let file = gtk::gio::File::for_path("/gone/Album/02 Second.flac");
+        let mut data = TrackData::missing(file.clone());
+        data.missing = false;
+        let track = Track::new(data);
+        assert!(!track.missing());
+
+        track.mark_missing();
+        assert!(track.missing());
+        assert!(track.file().equal(&file));
+        assert_eq!(track.title(), "Second");
     }
 
     #[test]

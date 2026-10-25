@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use crate::cue_sheet;
 
 impl Window {
     // Called once the queue of the last session, or the files the
@@ -463,17 +464,65 @@ impl Window {
                         continue;
                     }
                     track.update(data);
+                    win.show_updated_track(&track);
+                }
+            }
+        ));
+    }
 
-                    let Some(player) = win.player() else {
-                        return;
-                    };
-                    player.queue().track_changed(&track);
-                    win.imp().album_tracks.track_changed(&track);
-                    if player.state().track().as_ref() == Some(&track) {
-                        player.current_track_changed();
-                        win.update_title(Some(&track));
-                        win.update_style(Some(&track));
+    // Shows the tags of a track that were read again, in the lists and, if
+    // it's the playing track, in the player
+    fn show_updated_track(&self, track: &Track) {
+        let Some(player) = self.player() else {
+            return;
+        };
+        player.queue().track_changed(track);
+        self.imp().album_tracks.track_changed(track);
+        if player.state().track().as_ref() == Some(track) {
+            player.current_track_changed();
+            self.update_title(Some(track));
+            self.update_style(Some(track));
+        }
+    }
+
+    // Says that a track couldn't be played; the player went on to the next
+    // track if it could. A track whose file is gone is greyed out from then
+    // on, as it would be after the playlist opens again. Looking for the
+    // file is done in another thread, as a network drive that's gone can
+    // keep it waiting
+    pub(super) fn report_failed_track(&self, track: &Track) {
+        let title = track.title();
+        let path = track.file().path();
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            async move {
+                let gone = gio::spawn_blocking(move || {
+                    path.is_some_and(|path| !cue_sheet::location_exists(&path))
+                })
+                .await
+                .unwrap_or(false);
+
+                if gone {
+                    if !track.missing() {
+                        track.mark_missing();
+                        win.show_updated_track(&track);
                     }
+                    win.add_toast(i18n_k(
+                        // Translators: `{track}` must be left unmodified; it
+                        // is expanded to the title of a track
+                        "“{track}” wasn't found",
+                        &[("track", &title)],
+                    ));
+                } else {
+                    win.add_toast(i18n_k(
+                        // Translators: `{track}` must be left unmodified; it
+                        // is expanded to the title of a track
+                        "Unable to play “{track}”",
+                        &[("track", &title)],
+                    ));
                 }
             }
         ));

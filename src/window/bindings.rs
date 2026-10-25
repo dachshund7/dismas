@@ -99,14 +99,7 @@ impl Window {
             let track_failed_id = state.connect_track_failed(clone!(
                 #[weak(rename_to = win)]
                 self,
-                move |_, track| {
-                    win.add_toast(i18n_k(
-                        // Translators: `{track}` must be left unmodified; it
-                        // is expanded to the title of a track
-                        "Unable to play “{track}”",
-                        &[("track", &track.title())],
-                    ));
-                }
+                move |_, track| win.report_failed_track(track)
             ));
             imp.track_failed_id.replace(Some(track_failed_id));
 
