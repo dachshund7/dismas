@@ -316,48 +316,49 @@ impl AudioPlayer {
             self.start_over();
         }
 
-        if let Some(current_track) = self.state.track() {
-            debug!("Current track: {}", current_track.uri());
-
-            self.state.set_playback_state(state);
-
-            for c in &self.controllers {
-                c.set_playback_state(state);
-            }
-
-            match state {
-                PlaybackState::Playing => self.backend.play(),
-                PlaybackState::Paused => self.backend.pause(),
-                PlaybackState::Stopped => self.backend.stop(),
-            }
-        } else {
-            debug!("Getting the next track");
-            if let Some(next_track) = self.queue.next_track() {
-                debug!("Next track: {}", next_track.uri());
-
-                self.backend.set_track(Some(&TrackSource::of(&next_track)));
-                self.show_track(next_track);
-                self.state.set_playback_state(state);
-
-                for c in &self.controllers {
-                    c.set_playback_state(state);
-                }
-
-                match state {
-                    PlaybackState::Playing => self.backend.play(),
-                    PlaybackState::Paused => self.backend.pause(),
-                    PlaybackState::Stopped => self.backend.stop(),
-                }
-            } else {
+        // Without a current track, the next one becomes current
+        if self.state.track().is_none() {
+            let Some(next_track) = self.queue.next_track() else {
                 debug!("No tracks left");
                 self.backend.set_track(None);
                 self.clear_current_track();
-                self.state.set_playback_state(PlaybackState::Stopped);
+                self.announce_state(PlaybackState::Stopped);
+                return;
+            };
+            debug!("Next track: {}", next_track.uri());
+            self.backend.set_track(Some(&TrackSource::of(&next_track)));
+            self.show_track(next_track);
+        }
 
-                for c in &self.controllers {
-                    c.set_playback_state(PlaybackState::Stopped);
-                }
-            }
+        self.announce_state(state);
+        match state {
+            PlaybackState::Playing => self.backend.play(),
+            PlaybackState::Paused => self.backend.pause(),
+            PlaybackState::Stopped => self.backend.stop(),
+        }
+    }
+
+    // Shows the playback state, and tells the controllers about it
+    fn announce_state(&self, state: PlaybackState) {
+        self.state.set_playback_state(state);
+        for c in &self.controllers {
+            c.set_playback_state(state);
+        }
+    }
+
+    // Loads a track in place of the current one, and shows it, playing it
+    // if the one before was playing
+    fn switch_to(&self, track: Track) {
+        let was_playing = self.state.playing();
+        if was_playing {
+            self.set_playback_state(PlaybackState::Paused);
+        }
+
+        self.backend.set_track(Some(&TrackSource::of(&track)));
+        self.show_track(track);
+
+        if was_playing {
+            self.set_playback_state(PlaybackState::Playing);
         }
     }
 
@@ -508,20 +509,7 @@ impl AudioPlayer {
 
         if let Some(prev_track) = self.queue.previous_track() {
             debug!("Playing previous: {}", prev_track.uri());
-
-            let was_playing = self.state.playing();
-            if was_playing {
-                self.set_playback_state(PlaybackState::Paused);
-            }
-
-            self.backend.set_track(Some(&TrackSource::of(&prev_track)));
-
-            debug!("Marking '{}' as playing", prev_track.uri());
-            self.show_track(prev_track);
-
-            if was_playing {
-                self.set_playback_state(PlaybackState::Playing);
-            }
+            self.switch_to(prev_track);
         }
     }
 
@@ -547,18 +535,7 @@ impl AudioPlayer {
 
         if let Some(next_track) = next_track(&self.queue) {
             debug!("Playing next (skip-next): {}", next_track.uri());
-
-            let was_playing = self.state.playing();
-            if was_playing {
-                self.set_playback_state(PlaybackState::Paused);
-            }
-
-            self.backend.set_track(Some(&TrackSource::of(&next_track)));
-            self.show_track(next_track);
-
-            if was_playing {
-                self.set_playback_state(PlaybackState::Playing);
-            }
+            self.switch_to(next_track);
         } else {
             self.skip_to(0);
             self.set_playback_state(PlaybackState::Stopped);
@@ -580,17 +557,7 @@ impl AudioPlayer {
 
         if let Some(track) = self.queue.skip_track(pos) {
             debug!("Playing next (skip-to): {}", track.uri());
-            let was_playing = self.state.playing();
-            if was_playing {
-                self.set_playback_state(PlaybackState::Paused);
-            }
-
-            self.backend.set_track(Some(&TrackSource::of(&track)));
-            self.show_track(track);
-
-            if was_playing {
-                self.set_playback_state(PlaybackState::Playing);
-            }
+            self.switch_to(track);
         } else {
             self.backend.set_track(None);
             self.clear_current_track();
@@ -675,10 +642,7 @@ impl AudioPlayer {
         if position > 0 {
             self.backend.resume_at(position);
         }
-        self.state.set_playback_state(PlaybackState::Paused);
-        for c in &self.controllers {
-            c.set_playback_state(PlaybackState::Paused);
-        }
+        self.announce_state(PlaybackState::Paused);
     }
 
     pub fn queue(&self) -> &Queue {
