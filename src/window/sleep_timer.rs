@@ -53,7 +53,7 @@ impl Window {
         ]);
 
         for property in ["active", "remaining", "finishing-track"] {
-            timer.connect_notify_local(
+            let id = timer.connect_notify_local(
                 Some(property),
                 clone!(
                     #[weak(rename_to = win)]
@@ -61,6 +61,7 @@ impl Window {
                     move |_, _| win.update_sleep_timer()
                 ),
             );
+            self.disconnect_on_close(timer, id);
         }
         self.update_sleep_timer();
     }

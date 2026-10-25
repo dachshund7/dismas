@@ -230,15 +230,10 @@ mod imp {
         // they aren't dropped
         pub pane_opened_for_drag: Cell<bool>,
 
-        pub notify_playing_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_position_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_track_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_cover_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub track_failed_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_ntracks_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_current_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_peaks_id: RefCell<Option<glib::SignalHandlerId>>,
-        pub notify_high_contrast_id: RefCell<Option<glib::SignalHandlerId>>,
+        // The handlers connected to objects that outlive the window, the
+        // player's and the style manager, which are disconnected when it
+        // closes: one reaching the closed window would find its widgets gone
+        pub handlers: RefCell<Vec<(glib::Object, glib::SignalHandlerId)>>,
     }
 
     #[glib::object_subclass]
@@ -513,15 +508,7 @@ mod imp {
                 pane_before_fullscreen: Cell::new(false),
                 provider: gtk::CssProvider::new(),
                 settings: utils::settings_manager(),
-                notify_playing_id: RefCell::new(None),
-                notify_position_id: RefCell::new(None),
-                notify_track_id: RefCell::new(None),
-                notify_cover_id: RefCell::new(None),
-                track_failed_id: RefCell::new(None),
-                notify_ntracks_id: RefCell::new(None),
-                notify_current_id: RefCell::new(None),
-                notify_peaks_id: RefCell::new(None),
-                notify_high_contrast_id: RefCell::new(None),
+                handlers: RefCell::default(),
             }
         }
     }

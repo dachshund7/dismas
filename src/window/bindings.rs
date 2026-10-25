@@ -20,16 +20,21 @@ impl Window {
                     }
                 ),
             );
-            self.imp().notify_peaks_id.replace(Some(notify_peaks_id));
+            self.disconnect_on_close(player.waveform_generator(), notify_peaks_id);
         }
     }
 
-    fn unbind_waveform(&self) {
-        if let Some(player) = self.player()
-            && let Some(id) = self.imp().notify_peaks_id.take()
-        {
-            player.waveform_generator().disconnect(id);
-        }
+    // Keeps a handler connected to an object that outlives the window, to
+    // disconnect it when the window closes
+    pub(super) fn disconnect_on_close(
+        &self,
+        object: &impl IsA<glib::Object>,
+        id: glib::SignalHandlerId,
+    ) {
+        self.imp()
+            .handlers
+            .borrow_mut()
+            .push((object.clone().upcast(), id));
     }
 
     // Bind the PlayerState to the UI
@@ -51,7 +56,7 @@ impl Window {
                     }
                 ),
             );
-            imp.notify_playing_id.replace(Some(notify_playing_id));
+            self.disconnect_on_close(state, notify_playing_id);
 
             // Update the position labels
             self.update_position_labels();
@@ -65,7 +70,7 @@ impl Window {
                     }
                 ),
             );
-            imp.notify_position_id.replace(Some(notify_position_id));
+            self.disconnect_on_close(state, notify_position_id);
 
             // Update the UI
             self.update_track();
@@ -79,7 +84,7 @@ impl Window {
                     }
                 ),
             );
-            imp.notify_track_id.replace(Some(notify_track_id));
+            self.disconnect_on_close(state, notify_track_id);
 
             // Update the cover, if any is available
             self.update_cover();
@@ -93,7 +98,7 @@ impl Window {
                     }
                 ),
             );
-            imp.notify_cover_id.replace(Some(notify_cover_id));
+            self.disconnect_on_close(state, notify_cover_id);
 
             // The player goes on to the next track, if it can be played
             let track_failed_id = state.connect_track_failed(clone!(
@@ -101,7 +106,7 @@ impl Window {
                 self,
                 move |_, track| win.report_failed_track(track)
             ));
-            imp.track_failed_id.replace(Some(track_failed_id));
+            self.disconnect_on_close(state, track_failed_id);
 
             // Bind the track properties to the UI
             state
@@ -161,28 +166,6 @@ impl Window {
         }
     }
 
-    fn unbind_state(&self) {
-        if let Some(player) = self.player() {
-            let state = player.state();
-
-            if let Some(id) = self.imp().notify_playing_id.take() {
-                state.disconnect(id);
-            }
-            if let Some(id) = self.imp().notify_position_id.take() {
-                state.disconnect(id);
-            }
-            if let Some(id) = self.imp().notify_track_id.take() {
-                state.disconnect(id);
-            }
-            if let Some(id) = self.imp().notify_cover_id.take() {
-                state.disconnect(id);
-            }
-            if let Some(id) = self.imp().track_failed_id.take() {
-                state.disconnect(id);
-            }
-        }
-    }
-
     // Bind the Queue to the UI
     pub(super) fn bind_queue(&self) {
         if let Some(player) = self.player() {
@@ -211,11 +194,9 @@ impl Window {
                     }
                 ),
             );
-            self.imp()
-                .notify_ntracks_id
-                .replace(Some(notify_ntracks_id));
+            self.disconnect_on_close(queue, notify_ntracks_id);
 
-            queue.connect_notify_local(
+            let notify_repeat_mode_id = queue.connect_notify_local(
                 Some("repeat-mode"),
                 clone!(
                     #[weak(rename_to = win)]
@@ -227,6 +208,7 @@ impl Window {
                     }
                 ),
             );
+            self.disconnect_on_close(queue, notify_repeat_mode_id);
 
             let notify_current_id = queue.connect_notify_local(
                 Some("current"),
@@ -249,21 +231,7 @@ impl Window {
                     }
                 ),
             );
-            self.imp()
-                .notify_current_id
-                .replace(Some(notify_current_id));
-        }
-    }
-
-    fn unbind_queue(&self) {
-        if let Some(player) = self.player() {
-            let queue = player.queue();
-            if let Some(id) = self.imp().notify_ntracks_id.take() {
-                queue.disconnect(id);
-            }
-            if let Some(id) = self.imp().notify_current_id.take() {
-                queue.disconnect(id);
-            }
+            self.disconnect_on_close(queue, notify_current_id);
         }
     }
 
@@ -390,21 +358,19 @@ impl Window {
         let _dummy = self.imp().settings.boolean("enable-recoloring");
 
         // High contrast turns recoloring off, and the backdrop in fullscreen
-        let notify_high_contrast_id =
-            adw::StyleManager::default().connect_high_contrast_notify(clone!(
-                #[weak(rename_to = this)]
-                self,
-                move |_| {
-                    if let Some(player) = this.player() {
-                        let state = player.state();
-                        this.update_style(state.track().as_ref());
-                    }
-                    this.update_backdrop();
+        let style_manager = adw::StyleManager::default();
+        let notify_high_contrast_id = style_manager.connect_high_contrast_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| {
+                if let Some(player) = this.player() {
+                    let state = player.state();
+                    this.update_style(state.track().as_ref());
                 }
-            ));
-        self.imp()
-            .notify_high_contrast_id
-            .replace(Some(notify_high_contrast_id));
+                this.update_backdrop();
+            }
+        ));
+        self.disconnect_on_close(&style_manager, notify_high_contrast_id);
 
         self.connect_close_request(move |window| {
             window.save_window_state();
@@ -417,11 +383,11 @@ impl Window {
                 return glib::Propagation::Stop;
             }
 
-            window.unbind_queue();
-            window.unbind_state();
-            window.unbind_waveform();
-            if let Some(id) = window.imp().notify_high_contrast_id.take() {
-                adw::StyleManager::default().disconnect(id);
+            for (object, id) in window.imp().handlers.take() {
+                object.disconnect(id);
+            }
+            if let Some(display) = gdk::Display::default() {
+                gtk::style_context_remove_provider_for_display(&display, &window.imp().provider);
             }
 
             glib::Propagation::Proceed
