@@ -129,17 +129,6 @@ impl Queue {
         self.imp().current_pos.get()
     }
 
-    pub fn add_track(&self, track: &Track) -> bool {
-        if track.equals(&Track::default()) {
-            false
-        } else {
-            // Add track to the backing store
-            self.imp().store.append(track);
-            self.notify_n_tracks();
-            true
-        }
-    }
-
     pub fn add_tracks(&self, tracks: &[impl IsA<glib::Object>]) {
         self.imp()
             .store

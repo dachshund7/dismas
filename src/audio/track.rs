@@ -617,10 +617,6 @@ impl Track {
         track
     }
 
-    pub fn empty() -> Self {
-        glib::Object::new()
-    }
-
     // Replaces the tags with the ones read again from the file, after it
     // changed; the track stays the same object, so it keeps its place in
     // the queue
@@ -649,14 +645,6 @@ impl Track {
     // be gone, e.g. when it fails to play
     pub fn mark_missing(&self) {
         self.update(TrackData::missing(self.file()));
-    }
-
-    pub fn equals(&self, other: &Self) -> bool {
-        if self.uuid().is_some() && other.uuid().is_some() {
-            self.uuid() == other.uuid()
-        } else {
-            self.uri() == other.uri()
-        }
     }
 
     // The title, artist and album in the tags, without the ones shown in
@@ -820,12 +808,6 @@ impl Track {
 
     pub fn gains(&self) -> Option<Gains> {
         self.imp().data.borrow().gains()
-    }
-}
-
-impl Default for Track {
-    fn default() -> Self {
-        Self::empty()
     }
 }
 
