@@ -909,7 +909,11 @@ impl Window {
             self,
             move |_, param| {
                 debug!("Window::win.selected-playlist()");
-                if let Some(name) = param.and_then(String::from_variant) {
+                // Unlike the actions installed on the class, this one can be
+                // activated over D-Bus, by other programs too
+                if let Some(name) = param.and_then(String::from_variant)
+                    && (name.is_empty() || playlists::exists(&name))
+                {
                     win.set_playlists_visible(false);
                     win.select_playlist(&name);
                 }

@@ -33,22 +33,42 @@ fn playlists_dir() -> PathBuf {
     data_dir().join("playlists")
 }
 
-fn playlist_path(name: &str) -> PathBuf {
+fn playlist_path(name: &str) -> Option<PathBuf> {
     path_in(&data_dir(), name)
 }
 
-fn unshuffled_path(name: &str) -> PathBuf {
+fn unshuffled_path(name: &str) -> Option<PathBuf> {
     path_in(&data_dir().join("unshuffled"), name)
 }
 
-// The queue is outside the directory of the saved playlists, so that it
-// isn't listed with them, and can't have the name of one
-fn path_in(dir: &Path, name: &str) -> PathBuf {
+// The file of a playlist. The queue is outside the directory of the saved
+// playlists, so that it isn't listed with them, and can't have the name of
+// one. A name that can't be the name of a file of its own has no file:
+// names also come from the settings, and from an action that other programs
+// can activate over D-Bus, where "../x" or "/x" would reach other files
+fn path_in(dir: &Path, name: &str) -> Option<PathBuf> {
     if name.is_empty() {
-        dir.join(format!("queue.{EXTENSION}"))
+        Some(dir.join(format!("queue.{EXTENSION}")))
+    } else if is_valid_name(name) {
+        Some(dir.join("playlists").join(format!("{name}.{EXTENSION}")))
     } else {
-        dir.join("playlists").join(format!("{name}.{EXTENSION}"))
+        warn!("Ignoring the playlist name {name:?}");
+        None
     }
+}
+
+fn invalid_name(name: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("Invalid playlist name {name:?}"),
+    )
+}
+
+fn invalid_name_error(name: &str) -> glib::Error {
+    glib::Error::new(
+        gio::IOErrorEnum::InvalidFilename,
+        &format!("Invalid playlist name {name:?}"),
+    )
 }
 
 // The names of the saved playlists, in alphabetical order
@@ -68,11 +88,12 @@ fn names_in(dir: &Path) -> Vec<String> {
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == EXTENSION))
         .filter_map(|path| Some(path.file_stem()?.to_str()?.to_string()))
+        .filter(|name| is_valid_name(name))
         .collect()
 }
 
 pub fn exists(name: &str) -> bool {
-    !name.is_empty() && playlist_path(name).is_file()
+    !name.is_empty() && playlist_path(name).is_some_and(|path| path.is_file())
 }
 
 // Whether the name, without surrounding spaces, can be used for a new
@@ -124,11 +145,12 @@ pub fn rename(name: &str, new_name: &str) -> std::io::Result<()> {
 }
 
 fn rename_in(dir: &Path, name: &str, new_name: &str) -> std::io::Result<()> {
-    std::fs::rename(path_in(dir, name), path_in(dir, new_name))?;
+    let path = |dir: &Path, name: &str| path_in(dir, name).ok_or_else(|| invalid_name(name));
+    std::fs::rename(path(dir, name)?, path(dir, new_name)?)?;
 
     let unshuffled_dir = dir.join("unshuffled");
-    let unshuffled = path_in(&unshuffled_dir, name);
-    let new_unshuffled = path_in(&unshuffled_dir, new_name);
+    let unshuffled = path(&unshuffled_dir, name)?;
+    let new_unshuffled = path(&unshuffled_dir, new_name)?;
     let result = if unshuffled.is_file() {
         std::fs::rename(unshuffled, new_unshuffled)
     } else {
@@ -143,25 +165,27 @@ fn rename_in(dir: &Path, name: &str, new_name: &str) -> std::io::Result<()> {
 // Moves a saved playlist to the trash, from where it can be restored; the
 // order it had before it was shuffled is gone
 pub fn trash(name: &str) -> Result<(), glib::Error> {
-    gio::File::for_path(playlist_path(name)).trash(gio::Cancellable::NONE)?;
+    let path = playlist_path(name).ok_or_else(|| invalid_name_error(name))?;
+    gio::File::for_path(path).trash(gio::Cancellable::NONE)?;
     drop_unshuffled(name);
     Ok(())
 }
 
 // Whether the playlist was shuffled, and keeps the order it had before
 pub fn is_shuffled(name: &str) -> bool {
-    unshuffled_path(name).is_file()
+    unshuffled_path(name).is_some_and(|path| path.is_file())
 }
 
 // Keeps the order of a playlist before it's shuffled; it's written before
 // the shuffled one, so that a crash in between can't lose it
 pub fn save_unshuffled(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
-    write_path(&unshuffled_path(name), files)
+    let path = unshuffled_path(name).ok_or_else(|| invalid_name_error(name))?;
+    write_path(&path, files)
 }
 
 // The order the playlist had before it was shuffled, if it was
 pub fn load_unshuffled(name: &str) -> Option<Vec<gio::File>> {
-    let path = unshuffled_path(name);
+    let path = unshuffled_path(name)?;
     if path.is_file() {
         read_m3u(&path)
     } else {
@@ -172,7 +196,10 @@ pub fn load_unshuffled(name: &str) -> Option<Vec<gio::File>> {
 // Forgets the order from before shuffling, once it's restored, or when the
 // tracks are replaced
 pub fn drop_unshuffled(name: &str) {
-    if let Err(e) = remove_if_exists(&unshuffled_path(name)) {
+    let Some(path) = unshuffled_path(name) else {
+        return;
+    };
+    if let Err(e) = remove_if_exists(&path) {
         warn!("Unable to remove the order of the playlist '{name}' before shuffling: {e}");
     }
 }
@@ -199,7 +226,8 @@ fn retain_unshuffled_in(dir: &Path, names: &[String]) {
     let unshuffled_dir = dir.join("unshuffled");
     for name in names_in(&unshuffled_dir.join("playlists")) {
         if !names.contains(&name)
-            && let Err(e) = remove_if_exists(&path_in(&unshuffled_dir, &name))
+            && let Some(path) = path_in(&unshuffled_dir, &name)
+            && let Err(e) = remove_if_exists(&path)
         {
             warn!("Unable to remove the order of the playlist '{name}' before shuffling: {e}");
         }
@@ -215,7 +243,7 @@ fn remove_if_exists(path: &Path) -> std::io::Result<()> {
 
 // The tracks of a playlist; the queue has none until it's first saved
 pub fn load(name: &str) -> Option<Vec<gio::File>> {
-    let path = playlist_path(name);
+    let path = playlist_path(name)?;
     if name.is_empty() && !path.exists() {
         return Some(Vec::new());
     }
@@ -290,7 +318,8 @@ pub fn save(name: &str, files: &[gio::File]) {
 }
 
 fn write(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
-    write_path(&playlist_path(name), files)
+    let path = playlist_path(name).ok_or_else(|| invalid_name_error(name))?;
+    write_path(&path, files)
 }
 
 fn write_path(path: &Path, files: &[gio::File]) -> Result<(), glib::Error> {
@@ -486,16 +515,22 @@ mod tests {
     fn shuffled_mix() -> PathBuf {
         let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
         let files = [gio::File::for_path("/music/a.opus")];
-        write_path(&path_in(&dir, "Mix"), &files).unwrap();
-        write_path(&path_in(&dir.join("unshuffled"), "Mix"), &files).unwrap();
+        write_path(&path_in(&dir, "Mix").unwrap(), &files).unwrap();
+        write_path(&path_in(&dir.join("unshuffled"), "Mix").unwrap(), &files).unwrap();
         dir
     }
 
     #[test]
     fn the_queue_and_a_playlist_named_queue_have_their_own_files() {
-        assert_ne!(playlist_path(""), playlist_path("queue"));
-        assert_ne!(unshuffled_path(""), unshuffled_path("queue"));
-        assert_ne!(unshuffled_path("Mix"), playlist_path("Mix"));
+        assert_ne!(playlist_path("").unwrap(), playlist_path("queue").unwrap());
+        assert_ne!(
+            unshuffled_path("").unwrap(),
+            unshuffled_path("queue").unwrap()
+        );
+        assert_ne!(
+            unshuffled_path("Mix").unwrap(),
+            playlist_path("Mix").unwrap()
+        );
     }
 
     #[test]
@@ -503,18 +538,18 @@ mod tests {
         let dir = shuffled_mix();
         let unshuffled_dir = dir.join("unshuffled");
         // Left from a playlist of that name deleted outside the app
-        write_path(&path_in(&unshuffled_dir, "Old"), &[]).unwrap();
+        write_path(&path_in(&unshuffled_dir, "Old").unwrap(), &[]).unwrap();
 
         rename_in(&dir, "Mix", "Road Trip").unwrap();
-        assert!(path_in(&dir, "Road Trip").is_file());
-        assert!(path_in(&unshuffled_dir, "Road Trip").is_file());
-        assert!(!path_in(&unshuffled_dir, "Mix").is_file());
+        assert!(path_in(&dir, "Road Trip").unwrap().is_file());
+        assert!(path_in(&unshuffled_dir, "Road Trip").unwrap().is_file());
+        assert!(!path_in(&unshuffled_dir, "Mix").unwrap().is_file());
 
         // Without an order of its own, a stale one under the new name goes
-        std::fs::remove_file(path_in(&unshuffled_dir, "Road Trip")).unwrap();
+        std::fs::remove_file(path_in(&unshuffled_dir, "Road Trip").unwrap()).unwrap();
         rename_in(&dir, "Road Trip", "Old").unwrap();
-        assert!(path_in(&dir, "Old").is_file());
-        assert!(!path_in(&unshuffled_dir, "Old").is_file());
+        assert!(path_in(&dir, "Old").unwrap().is_file());
+        assert!(!path_in(&unshuffled_dir, "Old").unwrap().is_file());
 
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -523,16 +558,32 @@ mod tests {
     fn drops_the_orders_of_playlists_that_are_gone() {
         let dir = shuffled_mix();
         let unshuffled_dir = dir.join("unshuffled");
-        write_path(&path_in(&unshuffled_dir, "Gone"), &[]).unwrap();
-        write_path(&path_in(&unshuffled_dir, ""), &[]).unwrap();
+        write_path(&path_in(&unshuffled_dir, "Gone").unwrap(), &[]).unwrap();
+        write_path(&path_in(&unshuffled_dir, "").unwrap(), &[]).unwrap();
 
         retain_unshuffled_in(&dir, &["Mix".to_string()]);
-        assert!(path_in(&unshuffled_dir, "Mix").is_file());
-        assert!(!path_in(&unshuffled_dir, "Gone").is_file());
+        assert!(path_in(&unshuffled_dir, "Mix").unwrap().is_file());
+        assert!(!path_in(&unshuffled_dir, "Gone").unwrap().is_file());
         // The queue is always there
-        assert!(path_in(&unshuffled_dir, "").is_file());
+        assert!(path_in(&unshuffled_dir, "").unwrap().is_file());
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn names_that_would_reach_other_files_have_none() {
+        let dir = Path::new("/data");
+        assert_eq!(path_in(dir, "../x"), None);
+        assert_eq!(path_in(dir, "/home/me/x"), None);
+        assert_eq!(path_in(dir, "a/b"), None);
+        assert_eq!(path_in(dir, ".."), None);
+        assert!(!exists("../../x"));
+        assert_eq!(load("/home/me/x"), None);
+        assert!(save_unshuffled("../x", &[]).is_err());
+        assert_eq!(
+            path_in(dir, "Mix"),
+            Some(PathBuf::from("/data/playlists/Mix.m3u8"))
+        );
     }
 
     #[test]
