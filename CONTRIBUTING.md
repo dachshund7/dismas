@@ -83,8 +83,9 @@ You will need:
    (including plugins-bad), SQLite, libseccomp and fontconfig
  - the glycin loaders, plus `bwrap` outside Flatpak, to decode cover art
 
-GNOME Builder can also build the project from the Flatpak manifest,
-`io.github.dachshund7.Dismas.json`, and download the dependencies for you.
+GNOME Builder can also build the project from the Flatpak manifest of the
+development version, `io.github.dachshund7.Dismas.Devel.json`, and download
+the dependencies for you.
 
 ### Getting started
 

@@ -1,5 +1,5 @@
 {
-    "app-id" : "io.github.dachshund7.Dismas.Devel",
+    "app-id" : "io.github.dachshund7.Dismas",
     "runtime" : "org.gnome.Platform",
     "runtime-version" : "51",
     "sdk" : "org.gnome.Sdk",
@@ -20,14 +20,7 @@
         "append-path" : "/usr/lib/sdk/rust-stable/bin",
         "build-args" : [
             "--share=network"
-        ],
-        "env" : {
-            "CARGO_INCREMENTAL" : "0",
-            "CARGO_PROFILE_DEV_DEBUG" : "line-tables-only",
-            "G_MESSAGES_DEBUG" : "none",
-            "RUST_BACKTRACE" : "1",
-            "RUST_LOG" : "dismas=debug,glib=debug"
-        }
+        ]
     },
     "cleanup" : [
         "/include",
@@ -45,9 +38,6 @@
             "name" : "dismas",
             "builddir" : true,
             "buildsystem" : "meson",
-            "config-opts": [
-                "-Dprofile=development"
-            ],
             "sources" : [
                 {
                     "type" : "dir",

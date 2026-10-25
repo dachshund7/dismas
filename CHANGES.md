@@ -60,6 +60,8 @@ All notable changes to this project will be documented in this file.
   playlist, also in a Dismas that's already running, without bringing up
   its window; `dismas --play FILE…` plays them in place of the queue, with
   an Undo
+- A Flatpak of each release, `dismas.flatpak`, on the release's page on
+  GitHub
 
 ### Changed
 

@@ -59,3 +59,5 @@ Checklist for a release.
 - [ ] `git commit -m 'Release Dismas $VERSION'`
 - [ ] `git tag -s $VERSION` (use the change log entry)
 - [ ] `git push origin HEAD && git push origin $VERSION`
+- [ ] Publish a release for the tag on GitHub; the Release workflow then
+  builds the Flatpak and attaches it to the release as `dismas.flatpak`

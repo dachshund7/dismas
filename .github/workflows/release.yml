@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026  John Hamilton
+# SPDX-License-Identifier: CC0-1.0
+
+name: Release
+
+# A Flatpak of the regular profile, attached to each release published on
+# GitHub as dismas.flatpak. Run by hand, it builds the bundle without
+# attaching it anywhere, in the artifacts of the run, to try the build
+# before a release
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-latest
+    # Attaching the bundle to the release writes to the repository
+    permissions:
+      contents: write
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+      # As in ci.yml, the runner's disk is too small for the SDK and the
+      # build, so the biggest of its preinstalled tools, which this job
+      # doesn't use, are mounted to be removed
+      volumes:
+        - /usr/local/lib/android:/host/android
+        - /usr/share/dotnet:/host/dotnet
+        - /opt/hostedtoolcache:/host/toolcache
+        - /opt/ghc:/host/ghc
+    steps:
+      - name: Free disk space
+        run: |
+          df -h /__w
+          rm -rf /host/android/* /host/dotnet/* /host/toolcache/* /host/ghc/*
+          df -h /__w
+
+      - uses: actions/checkout@v7
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: io.github.dachshund7.Dismas.json
+          bundle: dismas.flatpak
+
+      - name: Attach the bundle to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dismas.flatpak
+          fail_on_unmatched_files: true

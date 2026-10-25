@@ -28,7 +28,7 @@ SPDX-FileCopyrightText = "2026  John Hamilton"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = "io.github.dachshund7.Dismas.json"
+path = ["io.github.dachshund7.Dismas.json", "io.github.dachshund7.Dismas.Devel.json"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2022  Emmanuele Bassi"
 SPDX-License-Identifier = "CC0-1.0"

@@ -103,11 +103,15 @@ read from its sandbox can be added, such as those in the Music folder.
 Building
 --------
 
-There are no packaged builds of Dismas, so you need to build it from
-source. You'll need Meson, Ninja, Rust, `blueprint-compiler`, gettext, and the
-development files for gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20
-(including plugins-bad), SQLite, libseccomp and fontconfig. Decoding cover
-art needs the glycin loaders at run time, plus `bwrap` outside Flatpak.
+The releases after 2026.10 on GitHub come with a Flatpak, `dismas.flatpak`.
+Install it with `flatpak install --user dismas.flatpak`, which installs the
+GNOME runtime it needs from Flathub too. Dismas isn't on Flathub itself.
+
+Otherwise, you need to build Dismas from source. You'll need Meson, Ninja,
+Rust, `blueprint-compiler`, gettext, and the development files for gtk4 ≥
+4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20 (including plugins-bad), SQLite,
+libseccomp and fontconfig. Decoding cover art needs the glycin loaders at run
+time, plus `bwrap` outside Flatpak.
 
 ```sh
 meson setup _build                     # add -Dprofile=development for a debug build
@@ -124,13 +128,17 @@ To build a Flatpak instead, with `flatpak-builder`:
 ```sh
 flatpak-builder --user --install --install-deps-from=flathub --force-clean \
     flatpak-build io.github.dachshund7.Dismas.json
-flatpak run io.github.dachshund7.Dismas.Devel
+flatpak run io.github.dachshund7.Dismas
 ```
 
-That builds the development version, which has its own ID, so it can be
-installed next to a regular build. Each CI run on GitHub also makes one, as
-`dismas-devel.flatpak` in the run's artifacts; install it with
-`flatpak install --user dismas-devel.flatpak`.
+That builds the same Flatpak as the releases. For the development version,
+build `io.github.dachshund7.Dismas.Devel.json` instead, and run
+`io.github.dachshund7.Dismas.Devel`. It's a debug build, slower at reading a
+large library for instance, but it shows the commit it was built from in
+About, and it has an ID of its own, so it can be installed next to the
+regular Flatpak, with its own library, playlists, play history and settings.
+Each CI run on GitHub also makes one, as `dismas-devel.flatpak` in the run's
+artifacts; install it with `flatpak install --user dismas-devel.flatpak`.
 
 Dismas has its own application ID, `io.github.dachshund7.Dismas`, so it can be
 installed alongside Amberol. On its first run, it copies Amberol's library,
@@ -144,6 +152,10 @@ For a full debug log, run:
 or, once it's installed:
 
     RUST_BACKTRACE=1 RUST_LOG=dismas=debug dismas
+
+or, for the Flatpak:
+
+    flatpak run --env=RUST_BACKTRACE=1 --env=RUST_LOG=dismas=debug io.github.dachshund7.Dismas
 
 Contributing
 ------------
