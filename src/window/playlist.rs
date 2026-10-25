@@ -366,7 +366,13 @@ impl Window {
 
         self.show_playlist_view();
         self.set_playlist_visible(true);
-        crate::queue_row::flash_track(&view, pos, &track);
+        // A track change stops the glide, and scrolls to the new track
+        let imp = self.imp();
+        if let Some(tick) = imp.queue_scroll_tick.take() {
+            tick.remove();
+        }
+        let tick = crate::queue_row::flash_track(&view, pos, &track);
+        imp.queue_scroll_tick.replace(Some(tick));
     }
 
     // Moves a track above or below another one, dropped on its row. In

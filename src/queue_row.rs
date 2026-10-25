@@ -785,50 +785,151 @@ impl QueueRow {
 // than redrawing the window at each frame until it's shown again
 const SIZE_WAIT_FRAMES: u32 = 60;
 
-// Scrolls a list to a track, places it in the middle of the list, if it can
-// scroll that far, and makes it flash for a moment, like its CSS
-// animation. The list was usually just shown, and can only scroll once
-// it has its size, so this waits for a frame where it has it; the row
-// of the track is then there in the next frame, to be centered
-pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) {
-    let frames = Cell::new(0);
+// How long gliding to a track takes, however far it is: the list gets up
+// to speed quickly, most of the way goes by in the first half, and the
+// second half settles on the track (`ease`)
+const GLIDE_DURATION: std::time::Duration = std::time::Duration::from_millis(350);
+
+// Scrolls a list to a track, gliding to it, places it in the middle of the
+// list, if it can scroll that far, and makes it flash for a moment, like
+// its CSS animation. The list only lays out the rows in its view, so the
+// glide aims at where the row should be until the row is laid out, and at
+// the row from then on. Without animations, as GTK's settings can ask, the
+// list jumps to the track. The list was usually just shown, and can only
+// scroll once it has its size, so this waits for a frame where it has it
+pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCallbackId {
     let waited = Cell::new(0);
+    // When the glide started, in the frame clock's microseconds, and the
+    // share of the way that was left at the last frame
+    let glide = Cell::new(None::<(i64, f64)>);
+    // The frames since the list was asked to scroll to the track itself,
+    // when the glide ended where its row wasn't
+    let fallback = Cell::new(None::<u32>);
     view.add_tick_callback(clone!(
         #[strong]
         track,
-        move |view, _| {
+        move |view, clock| {
             if view.height() == 0 {
                 return wait_for_size(&waited);
             }
-            let frame = frames.get();
-            frames.set(frame + 1);
-            if frame == 0 {
-                view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
-                return glib::ControlFlow::Continue;
-            }
-
+            let Some(adjustment) = view.vadjustment() else {
+                return glib::ControlFlow::Break;
+            };
             // Only reads where the row is, as changing the rows of the
-            // list crashes GTK; a few frames in, it flashes anyway
+            // list crashes GTK
             let bounds = track_bounds(view, &track);
-            if bounds.is_none() && frame < 5 {
-                return glib::ControlFlow::Continue;
-            }
-            if let Some(bounds) = bounds {
-                center_bounds(view, &bounds);
+
+            if let Some(frames) = fallback.get() {
+                if bounds.is_none() && frames < 5 {
+                    fallback.set(Some(frames + 1));
+                    return glib::ControlFlow::Continue;
+                }
+                if let Some(bounds) = bounds {
+                    center_bounds(view, &bounds);
+                }
+                flash(&track);
+                return glib::ControlFlow::Break;
             }
 
-            track.set_flashing(true);
-            glib::timeout_add_local_once(
-                std::time::Duration::from_millis(1200),
-                clone!(
-                    #[weak]
-                    track,
-                    move || track.set_flashing(false)
-                ),
-            );
+            let target = match &bounds {
+                Some(bounds) => centered_value(view, &adjustment, bounds),
+                None => estimated_value(view, &adjustment, pos),
+            };
+            let duration = if view.settings().is_gtk_enable_animations() {
+                GLIDE_DURATION.as_micros() as i64
+            } else {
+                0
+            };
+            let now = clock.frame_time();
+            let Some((start, left_before)) = glide.get() else {
+                glide.set(Some((now, 1.0)));
+                if duration == 0 {
+                    adjustment.set_value(target);
+                }
+                return glib::ControlFlow::Continue;
+            };
+
+            let progress = if duration > 0 {
+                ((now - start) as f64 / duration as f64).min(1.0)
+            } else {
+                1.0
+            };
+            let (value, left) = glide_step(adjustment.value(), target, left_before, progress);
+            adjustment.set_value(value);
+            glide.set(Some((start, left)));
+            if progress < 1.0 {
+                return glib::ControlFlow::Continue;
+            }
+
+            if bounds.is_none() {
+                // The row wasn't where it should have been; the list knows
+                // where it is
+                view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+                fallback.set(Some(0));
+                return glib::ControlFlow::Continue;
+            }
+            flash(&track);
             glib::ControlFlow::Break
         }
-    ));
+    ))
+}
+
+// A frame of a glide: where it moves to from `value`, and the share of the
+// way still to go, once `progress` of its time has passed. Each frame goes
+// its part of what's left to `target`, rather than of the way from the
+// start, so that the glide follows the row as the list lays it out, and
+// still ends on it
+fn glide_step(value: f64, target: f64, left_before: f64, progress: f64) -> (f64, f64) {
+    let left = 1.0 - ease(progress);
+    let moved = if left_before > 0.0 {
+        1.0 - left / left_before
+    } else {
+        1.0
+    };
+    (value + (target - value) * moved, left)
+}
+
+// CSS's "ease", libadwaita's `Easing::Ease`, whose binding only works once
+// libadwaita is set up, unlike in the tests: a cubic Bézier curve with the
+// control points (0.25, 0.1) and (0.25, 1). It starts at less than half
+// the average speed, rather than all of it, as an ease-out would, which
+// looks like a jump, and gets up to speed within a few frames
+fn ease(progress: f64) -> f64 {
+    if progress <= 0.0 {
+        return 0.0;
+    }
+    if progress >= 1.0 {
+        return 1.0;
+    }
+    let bezier = |t: f64, p1: f64, p2: f64| {
+        let u = 1.0 - t;
+        3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
+    };
+    // The point of the curve at that much of the time, which only grows
+    // along it, so halving finds it
+    let (mut low, mut high) = (0.0, 1.0);
+    for _ in 0..30 {
+        let middle = (low + high) / 2.0;
+        if bezier(middle, 0.25, 0.25) < progress {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    bezier((low + high) / 2.0, 0.1, 1.0)
+}
+
+// Makes the row of a track flash, like its CSS animation
+fn flash(track: &Track) {
+    track.set_flashing(true);
+    glib::timeout_add_local_once(
+        std::time::Duration::from_millis(1200),
+        clone!(
+            #[weak]
+            track,
+            move || track.set_flashing(false)
+        ),
+    );
 }
 
 // Shows the playing track in the list, keeping the rows around it in view:
@@ -972,9 +1073,39 @@ fn center_bounds(view: &gtk::ListView, bounds: &graphene::Rect) -> bool {
         return false;
     };
     let old = adjustment.value();
-    let middle = f64::from(bounds.y() + bounds.height() / 2.0);
-    adjustment.set_value(old + middle - f64::from(view.height()) / 2.0);
+    adjustment.set_value(centered_value(view, &adjustment, bounds));
     (adjustment.value() - old).abs() >= 1.0
+}
+
+// Where the list scrolls to for a row to be in its middle, as far as it
+// can scroll
+fn centered_value(
+    view: &gtk::ListView,
+    adjustment: &gtk::Adjustment,
+    bounds: &graphene::Rect,
+) -> f64 {
+    let middle = f64::from(bounds.y() + bounds.height() / 2.0);
+    within_scroll(
+        adjustment,
+        adjustment.value() + middle - f64::from(view.height()) / 2.0,
+    )
+}
+
+// The same for a row that isn't laid out: the list reckons the rows it
+// hasn't laid out at the height of the others, on average
+fn estimated_value(view: &gtk::ListView, adjustment: &gtk::Adjustment, pos: u32) -> f64 {
+    let n_items = view.model().map_or(0, |model| model.n_items());
+    if n_items == 0 {
+        return adjustment.value();
+    }
+    let height = adjustment.upper() - adjustment.lower();
+    let middle = adjustment.lower() + height * (f64::from(pos) + 0.5) / f64::from(n_items);
+    within_scroll(adjustment, middle - adjustment.page_size() / 2.0)
+}
+
+fn within_scroll(adjustment: &gtk::Adjustment, value: f64) -> f64 {
+    let last = adjustment.upper() - adjustment.page_size();
+    value.min(last).max(adjustment.lower())
 }
 
 // The row showing a track in a list, if it has one, and the child of the
@@ -1004,4 +1135,27 @@ fn track_item(view: &gtk::ListView, track: &Track) -> Option<(gtk::Widget, Queue
         child = widget.next_sibling();
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glide_step;
+
+    #[test]
+    fn a_glide_eases_and_ends_on_its_target() {
+        // To a target that stays put, it goes along CSS's "ease"
+        let (mut value, mut left) = (0.0, 1.0);
+        for (progress, expected) in [(0.25, 40.85), (0.5, 80.24), (0.75, 96.05), (1.0, 100.0)] {
+            (value, left) = glide_step(value, 100.0, left, progress);
+            assert!((value - expected).abs() < 0.01, "{value} at {progress}");
+        }
+        assert_eq!(left, 0.0);
+
+        // When the row is laid out halfway and turns out further away, the
+        // glide goes on toward it, and still ends on it
+        let (value, left) = glide_step(0.0, 100.0, 1.0, 0.5);
+        let (value, left) = glide_step(value, 140.0, left, 0.75);
+        assert!(value > 96.05 && value < 140.0);
+        assert_eq!(glide_step(value, 140.0, left, 1.0).0, 140.0);
+    }
 }

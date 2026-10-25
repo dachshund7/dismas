@@ -67,6 +67,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Show the Playing Track and Go to Album glide to the track, rather than
+  jumping to it, and the rows of moved tracks slide into place more
+  gently, starting slowly instead of at full speed
 - Looking for new and changed files in the music folders, at each start,
   is much faster: listing a library of 23,000 files took 3.4 s, and now
   takes 0.2 s
