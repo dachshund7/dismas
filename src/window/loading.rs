@@ -473,6 +473,8 @@ impl Window {
     // Shows the tags of a track that were read again, in the lists and, if
     // it's the playing track, in the player
     fn show_updated_track(&self, track: &Track) {
+        // The cover can have changed without its id, which is the album's
+        self.imp().full_cover.take();
         let Some(player) = self.player() else {
             return;
         };

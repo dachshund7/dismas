@@ -211,6 +211,9 @@ mod imp {
         // Fullscreen: the cover the backdrop is blurred from, and the page
         // and the pane to go back to
         pub backdrop_source: RefCell<Option<gdk::Texture>>,
+        // The cover at full size, with the id of the album's cover, which
+        // the next tracks of the album show without decoding it again
+        pub full_cover: RefCell<Option<(String, gdk::Texture)>>,
         pub page_before_fullscreen: RefCell<Option<String>>,
         pub pane_before_fullscreen: Cell<bool>,
 
@@ -505,6 +508,7 @@ mod imp {
                 zen_animation: RefCell::default(),
                 zen_pointer: Cell::new(None),
                 backdrop_source: RefCell::default(),
+                full_cover: RefCell::default(),
                 page_before_fullscreen: RefCell::default(),
                 pane_before_fullscreen: Cell::new(false),
                 provider: gtk::CssProvider::new(),

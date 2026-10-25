@@ -74,6 +74,19 @@ impl Window {
     // main view, so we replace it with the full resolution cover of the
     // current track, once it has been loaded in a separate thread
     fn load_full_cover(&self, track: &Track) {
+        let uuid = track.cover_uuid();
+        let loaded = self
+            .imp()
+            .full_cover
+            .borrow()
+            .as_ref()
+            .filter(|(loaded, _)| Some(loaded) == uuid.as_ref())
+            .map(|(_, cover)| cover.clone());
+        if let Some(cover) = loaded {
+            self.imp().track_cover.album_image().set_cover(Some(&cover));
+            return;
+        }
+
         let Some(path) = track.audio_file().path() else {
             return;
         };
@@ -104,6 +117,9 @@ impl Window {
                     .get()
                     .album_image()
                     .set_cover(Some(&cover));
+                if let Some(uuid) = uuid {
+                    win.imp().full_cover.replace(Some((uuid, cover)));
+                }
             }
         ));
     }
