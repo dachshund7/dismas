@@ -25,7 +25,7 @@ meson devenv -C _build ./src/dismas    # run uninstalled
 
 ## Checks
 
-GitHub Actions (`.github/workflows/ci.yml`) runs these on pushes to main and on pull requests. The `lint` job runs `checks.sh` and `reuse` on Ubuntu. The `build` job builds the app with Meson and runs clippy, the tests and the data file validation in a `fedora:latest` container, because Ubuntu's GTK and libadwaita are too old. The `flatpak` job builds the Devel manifest in the `ghcr.io/flathub-infra/flatpak-github-actions:gnome-51` image and uploads `dismas-devel.flatpak` as an artifact. `.github/workflows/release.yml` builds the regular manifest the same way when a release is published on GitHub, and attaches `dismas.flatpak` to the release; run by hand, it only uploads the bundle as an artifact. To try the `build` job locally, run its commands in `podman run fedora:latest`; the `flatpak` job, with `flatpak-builder` in that image (`podman run --privileged`).
+GitHub Actions (`.github/workflows/ci.yml`) runs these on pushes to main and on pull requests. The `lint` job runs `checks.sh` and `reuse` on Ubuntu, and the `advisories` job checks Cargo.lock against the RustSec advisory database (`cargo deny check advisories`, set up in `deny.toml`), so a new advisory can fail it without a change to the code. The `build` job builds the app with Meson and runs clippy, the tests and the data file validation in a `fedora:latest` container, because Ubuntu's GTK and libadwaita are too old. The `flatpak` job builds the Devel manifest in the `ghcr.io/flathub-infra/flatpak-github-actions:gnome-51` image and uploads `dismas-devel.flatpak` as an artifact. `.github/workflows/release.yml` builds the regular manifest the same way when a release is published on GitHub, and attaches `dismas.flatpak` to the release; run by hand, it only uploads the bundle as an artifact. As it can write to the repository, its actions are pinned to commits, with the release each one is in a comment; update them by hand. To try the `build` job locally, run its commands in `podman run fedora:latest`; the `flatpak` job, with `flatpak-builder` in that image (`podman run --privileged`).
 
 ```sh
 cargo fmt --all -- --check                  # needs src/config.rs; a blank line is enough (CI writes one)
@@ -34,6 +34,7 @@ cargo test                                  # unit tests are in #[cfg(test)] mod
 cargo test <name>                           # a single test
 build-aux/checks.sh                         # fmt, typos (configured in .typos.toml), POTFILES.in, resource order
 reuse lint                                  # REUSE/SPDX licensing; needs reuse ≥ 4, older ones ignore REUSE.toml
+cargo deny check advisories                 # the dependencies against the RustSec advisories
 ```
 
 Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-Identifier`). REUSE.toml covers files that can't carry headers.

@@ -45,6 +45,20 @@ jobs:
       - name: Check licensing
         uses: fsfe/reuse-action@v6
 
+  # The crates in Cargo.lock against the RustSec advisory database, with
+  # deny.toml; a new advisory can fail it without a change to the code
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Check the dependencies for advisories
+        run: cargo deny check advisories
+
   # The build of the app, clippy, the unit tests, and the validation of the
   # desktop file, the metainfo and the settings schema. The app needs a
   # newer GTK and libadwaita than Ubuntu has, so these run in Fedora

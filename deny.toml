@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026  John Hamilton
+# SPDX-License-Identifier: CC0-1.0
+
+# cargo deny check advisories, which CI runs: the crates in Cargo.lock
+# against the RustSec advisory database. Only the advisories are checked;
+# the licenses and the sources of the crates are left to review
+[advisories]
+# A crate no longer maintained only fails the check if Dismas depends on
+# it itself; for the crates of its dependencies, it's up to them
+unmaintained = "workspace"
+# An advisory that doesn't apply to Dismas goes here, with the reason
+ignore = []

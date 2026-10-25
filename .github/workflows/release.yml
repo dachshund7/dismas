@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+# As this workflow can write to the repository, its actions are pinned to
+# commits, which a tag moved to other code can't change; the comments name
+# the releases they are
+
 jobs:
   flatpak:
     runs-on: ubuntu-latest
@@ -39,16 +43,16 @@ jobs:
           rm -rf /host/android/* /host/dotnet/* /host/toolcache/* /host/ghc/*
           df -h /__w
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
         with:
           manifest-path: io.github.dachshund7.Dismas.json
           bundle: dismas.flatpak
 
       - name: Attach the bundle to the release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dismas.flatpak
           fail_on_unmatched_files: true
