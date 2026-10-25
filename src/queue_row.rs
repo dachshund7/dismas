@@ -85,6 +85,9 @@ mod imp {
         // Follows the track, which flashes to show where it is
         #[property(get, set = Self::set_flashing, explicit_notify)]
         pub flashing: Cell<bool>,
+        // Follows the track, whose file wasn't found
+        #[property(get, set = Self::set_missing, explicit_notify)]
+        pub missing: Cell<bool>,
         // Whether the track can be dragged by its handle to another place
         // in the list
         #[property(get, set = Self::set_reorderable, explicit_notify)]
@@ -208,6 +211,18 @@ mod imp {
             }
         }
 
+        fn set_missing(&self, missing: bool) {
+            if missing != self.missing.replace(missing) {
+                let obj = self.obj();
+                if missing {
+                    obj.add_css_class("missing");
+                } else {
+                    obj.remove_css_class("missing");
+                }
+                obj.notify_missing();
+            }
+        }
+
         fn set_track_title(&self, title: String) {
             self.track_title_label.set_text(Some(&title));
         }
@@ -269,6 +284,8 @@ impl QueueRow {
             .bind(self, "selected", gtk::Widget::NONE);
         item.chain_property::<Track>("flashing")
             .bind(self, "flashing", gtk::Widget::NONE);
+        item.chain_property::<Track>("missing")
+            .bind(self, "missing", gtk::Widget::NONE);
 
         if let Some(app) = gio::Application::default().and_downcast::<Application>() {
             app.player()
@@ -743,6 +760,14 @@ impl QueueRow {
                 .unwrap_or_default()
                 .to_string(),
         );
+        // Where the file was looked for
+        if let Some(path) = track
+            .as_ref()
+            .filter(|t| t.missing())
+            .and_then(|t| t.file().path())
+        {
+            lines.push(path.display().to_string());
+        }
         if let Some(work) = track.and_then(|t| t.movement_work()) {
             lines.insert(0, work);
         }

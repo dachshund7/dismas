@@ -1267,6 +1267,8 @@ pub struct TrackData {
     file: gio::File,
     // The part of an audio file that a track of a CUE sheet plays
     audio: Option<CueAudio>,
+    // Whether the file wasn't found, see `TrackData::missing()`
+    missing: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1638,6 +1640,7 @@ impl TrackData {
             details: read.details(replay_gain),
             file,
             audio: None,
+            missing: false,
             artist,
             title,
             fallback_title,
@@ -1681,6 +1684,7 @@ impl TrackData {
                 end: track.end,
                 gains: Gains::from_tag(&tag),
             }),
+            missing: false,
             artist,
             title,
             // Translators: the title of a track of a CUE sheet that has
@@ -1694,6 +1698,49 @@ impl TrackData {
             },
             album,
         }
+    }
+
+    // A track of a playlist whose file isn't there, e.g. on a drive that
+    // isn't plugged in, with no tags but its name: it keeps its place in the
+    // playlist, which would lose it the next time it's saved, and playback
+    // skips it. The tracks of CUE sheets are named like the sheet names
+    // tracks without a title
+    pub fn missing(file: gio::File) -> Self {
+        let path = file.path().unwrap_or_default();
+        let (fallback_title, fallback_album) =
+            if let Some((sheet, number)) = cue_sheet::missing_location_parts(&path) {
+                (
+                    i18n_f("Track {}", &[&number.to_string()]),
+                    fallback_album(sheet),
+                )
+            } else {
+                let stem = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy())
+                    .unwrap_or_default();
+                // The folder isn't there to compare the names with
+                (title_from_name(&stem, |_| false), fallback_album(&path))
+            };
+        TrackData {
+            artist: None,
+            title: None,
+            fallback_title,
+            album: None,
+            fallback_album,
+            credits: TrackCredits::default(),
+            tag_text: String::new(),
+            cover: None,
+            uuid: None,
+            duration: 0,
+            details: FileDetails::default(),
+            file,
+            audio: None,
+            missing: true,
+        }
+    }
+
+    pub fn is_missing(&self) -> bool {
+        self.missing
     }
 
     pub fn uri(&self) -> String {
@@ -1945,8 +1992,13 @@ const MAX_LOADING_THREADS: usize = 4;
 // Reading the tags and decoding the covers takes a while, so the tracks
 // are read in a few threads. They are sent in the order of the files, all
 // the tracks of a file at once, which can be none; the threads stop once
-// the receiver is dropped
-pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Vec<TrackData>> {
+// the receiver is dropped. With `placeholders`, for the tracks of a
+// playlist, a file that isn't there is a track that `TrackData::missing()`
+// makes, so that saving the playlist doesn't lose it
+pub fn load_tracks(
+    files: Vec<gio::File>,
+    placeholders: bool,
+) -> async_channel::Receiver<Vec<TrackData>> {
     let (sender, receiver) = async_channel::unbounded();
 
     let uris: Arc<Vec<String>> = Arc::new(files.iter().map(|f| f.uri().to_string()).collect());
@@ -1974,7 +2026,16 @@ pub fn load_tracks(files: Vec<gio::File>) -> async_channel::Receiver<Vec<TrackDa
                     };
                     // A file whose tags make the reader panic is skipped,
                     // rather than leaving the tracks after it unread
-                    let data = utils::guarded(uri, || TrackData::read(uri, &cache), Vec::new);
+                    let mut data = utils::guarded(uri, || TrackData::read(uri, &cache), Vec::new);
+                    if data.is_empty() && placeholders {
+                        let file = gio::File::for_uri(uri);
+                        if file
+                            .path()
+                            .is_some_and(|path| !cue_sheet::location_exists(&path))
+                        {
+                            data.push(TrackData::missing(file));
+                        }
+                    }
                     if read_sender.send((index, data)).is_err() {
                         break;
                     }
@@ -2016,6 +2077,7 @@ impl Default for TrackData {
             details: FileDetails::default(),
             file: gio::File::for_path("/does-not-exist"),
             audio: None,
+            missing: false,
         }
     }
 }
@@ -2054,6 +2116,8 @@ mod imp {
         #[property(name = "cover", get = Self::cover, nullable, type = Option<gdk::Texture>)]
         // A small copy of the cover, for the rows of the lists
         #[property(name = "row-cover", get = Self::row_cover, nullable, type = Option<gdk::Texture>)]
+        // The file wasn't found when the playlist loaded
+        #[property(name = "missing", get = Self::missing, type = bool)]
         pub data: RefCell<TrackData>,
         #[property(get, set = Self::set_playing, explicit_notify)]
         pub playing: Cell<bool>,
@@ -2129,6 +2193,9 @@ mod imp {
         }
 
         fn row_subtitle(&self) -> String {
+            if self.missing() {
+                return i18n("File not found");
+            }
             match (self.movement_levels(), self.movement()) {
                 (Some((levels, _)), _) => levels,
                 // The artist of classical releases is often the composer
@@ -2199,6 +2266,10 @@ mod imp {
             self.data.borrow().duration()
         }
 
+        fn missing(&self) -> bool {
+            self.data.borrow().is_missing()
+        }
+
         fn cover(&self) -> Option<gdk::Texture> {
             self.data.borrow().cover_texture().cloned()
         }
@@ -2262,6 +2333,7 @@ impl Track {
         self.notify_duration();
         self.notify_cover();
         self.notify_row_cover();
+        self.notify_missing();
     }
 
     pub fn equals(&self, other: &Self) -> bool {
@@ -3866,6 +3938,21 @@ mod tests {
         assert_eq!(tracks[0].fallback_album(), None);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_files_are_named_after_their_paths() {
+        let data = TrackData::missing(gtk::gio::File::for_path("/gone/Album/01 - Intro.flac"));
+        assert!(data.is_missing());
+        assert_eq!(data.shown_title(), "Intro");
+        assert_eq!(data.shown_album(), "Album");
+        assert_eq!(data.duration(), 0);
+        assert_eq!(data.uri(), "file:///gone/Album/01%20-%20Intro.flac");
+
+        // A track of a CUE sheet that isn't there either
+        let data = TrackData::missing(gtk::gio::File::for_path("/gone/Album/Album.cue/track03"));
+        assert_eq!(data.shown_title(), "Track 3");
+        assert_eq!(data.shown_album(), "Album");
     }
 
     #[test]

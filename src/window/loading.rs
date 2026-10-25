@@ -172,7 +172,8 @@ impl Window {
 
         // The tracks are read in a separate thread, and added all at once
         let n_files = queue.len() as u32;
-        let receiver = load_tracks(queue);
+        // The tracks of a playlist that aren't there keep their places
+        let receiver = load_tracks(queue, mode == QueueMode::Restore);
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
@@ -233,7 +234,7 @@ impl Window {
 
                     // Store the current state of the queue; restoring
                     // doesn't change it, and saving it would drop the
-                    // tracks that couldn't be read, e.g. on another drive
+                    // tracks whose files are there but couldn't be read
                     if mode != QueueMode::Restore {
                         win.store_queue();
                     }
@@ -251,12 +252,24 @@ impl Window {
                             let uris: Vec<String> = tracks.iter().map(Track::uri).collect();
                             Some((r.find_track(&uris)?, r.position))
                         });
+                        // A track whose file isn't there can't play, so it
+                        // goes on from the start of the next one that can
+                        let playable = |pos| queue.track_at(pos).is_some_and(|t| !t.missing());
                         match resume_at {
-                            Some((pos, position)) => {
+                            Some((pos, position)) if playable(pos) => {
                                 player.skip_to(pos);
                                 player.resume_at(position.into());
                             }
-                            None => player.skip_to(0),
+                            Some((pos, _)) => {
+                                if let Some(pos) = queue.playable_from(pos) {
+                                    player.skip_to(pos);
+                                }
+                            }
+                            None => {
+                                if let Some(pos) = queue.playable_from(0) {
+                                    player.skip_to(pos);
+                                }
+                            }
                         }
                     }
                     match mode {
@@ -380,7 +393,9 @@ impl Window {
     // Reads the tags of the tracks in the queue and in the album shown in
     // the sidebar again when their files changed, e.g. when a scan of the
     // library finds new tags; the tracks are updated in place, so the
-    // lists keep their order and the current track keeps playing
+    // lists keep their order and the current track keeps playing. The
+    // tracks whose files weren't found are looked for again, as a scan
+    // follows plugging in a drive
     pub(super) fn reload_changed_tracks(&self, uris: &[String]) {
         let Some(player) = self.player() else {
             return;
@@ -403,7 +418,8 @@ impl Window {
         let tracks: Vec<Track> = shown
             .into_iter()
             .filter(|track| {
-                uris.contains(&track.uri())
+                track.missing()
+                    || uris.contains(&track.uri())
                     || track
                         .cover_uuid()
                         .is_some_and(|uuid| covers.contains(&uuid))
@@ -419,7 +435,7 @@ impl Window {
             }
         }
 
-        let receiver = load_tracks(tracks.iter().map(Track::file).collect());
+        let receiver = load_tracks(tracks.iter().map(Track::file).collect(), true);
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
             self,
@@ -433,6 +449,10 @@ impl Window {
                     let Ok([data]) = <[_; 1]>::try_from(data) else {
                         continue;
                     };
+                    // Still not there
+                    if data.is_missing() && track.missing() {
+                        continue;
+                    }
                     track.update(data);
 
                     let Some(player) = win.player() else {

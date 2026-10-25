@@ -214,7 +214,7 @@ impl Window {
         let stats = play_stats::track_stats(&uris);
         queue.shuffle(keep.as_ref(), &stats, play_stats::now(), &mut rand::rng());
         if keep.is_none() {
-            player.skip_to(0);
+            player.skip_to_first();
         }
         self.store_queue();
     }

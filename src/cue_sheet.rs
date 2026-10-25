@@ -287,13 +287,23 @@ pub fn track_location(sheet: &Path, number: u32) -> PathBuf {
 
 // The sheet and the number of a track of a sheet, if the path is one
 pub fn parse_location(path: &Path) -> Option<(&Path, u32)> {
+    track_parts(path).filter(|(sheet, _)| sheet.is_file())
+}
+
+// The sheet and the number a path would have as the track of a sheet that
+// isn't there: a ".cue" file, or an audio file with a sheet in its tags,
+// rather than a folder, which has a name without an extension
+pub fn missing_location_parts(path: &Path) -> Option<(&Path, u32)> {
+    track_parts(path).filter(|(sheet, _)| sheet.extension().is_some())
+}
+
+fn track_parts(path: &Path) -> Option<(&Path, u32)> {
     let digits = path.file_name()?.to_str()?.strip_prefix("track")?;
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     let number = digits.parse().ok()?;
-    let sheet = path.parent()?;
-    sheet.is_file().then_some((sheet, number))
+    Some((path.parent()?, number))
 }
 
 // The file of a track: its sheet for a track of a sheet

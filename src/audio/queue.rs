@@ -301,17 +301,25 @@ impl Queue {
         self.track_at(pos)
     }
 
+    // The track before the current one that can play, skipping those whose
+    // files weren't found
     pub fn previous_track(&self) -> Option<Track> {
-        if let Some(current_pos) = self.imp().current_pos.get()
-            && current_pos > 0
-        {
-            let prev = current_pos - 1;
-            self.imp().current_pos.replace(Some(prev));
-            self.notify_current();
-            return self.track_at(current_pos - 1);
-        }
+        let current_pos = self.imp().current_pos.get()?;
+        let prev = (0..current_pos).rev().find(|&pos| self.playable(pos))?;
+        self.imp().current_pos.replace(Some(prev));
+        self.notify_current();
+        self.track_at(prev)
+    }
 
-        None
+    // Whether the track at a position can play: it's there, and its file
+    // was found
+    fn playable(&self, pos: u32) -> bool {
+        self.track_at(pos).is_some_and(|track| !track.missing())
+    }
+
+    // The first track from a position on that can play
+    pub fn playable_from(&self, pos: u32) -> Option<u32> {
+        (pos..self.imp().store.n_items()).find(|&pos| self.playable(pos))
     }
 
     pub fn next_track(&self) -> Option<Track> {
@@ -344,24 +352,20 @@ impl Queue {
     }
 
     // The position after the current track, or the first one if there
-    // is no current track
+    // is no current track, skipping the tracks whose files weren't found
     fn next_pos(&self, repeat_mode: RepeatMode) -> Option<u32> {
         let n_tracks = self.imp().store.n_items();
-        if n_tracks == 0 {
-            return None;
-        }
-
         let Some(current) = self.current_track_index() else {
-            return Some(0);
+            return self.playable_from(0);
         };
 
         match repeat_mode {
-            RepeatMode::Consecutive if current < n_tracks - 1 => Some(current + 1),
-            RepeatMode::Consecutive if current == n_tracks - 1 => None,
-            RepeatMode::RepeatOne => Some(current),
-            RepeatMode::RepeatAll if current < n_tracks - 1 => Some(current + 1),
-            RepeatMode::RepeatAll if current == n_tracks - 1 => Some(0),
-            _ => None,
+            RepeatMode::Consecutive => self.playable_from(current + 1),
+            RepeatMode::RepeatOne => Some(current).filter(|&pos| self.playable(pos)),
+            // Round to the start, and to the current track itself
+            RepeatMode::RepeatAll => (current + 1..n_tracks)
+                .chain(0..=current)
+                .find(|&pos| self.playable(pos)),
         }
     }
 
@@ -372,24 +376,16 @@ impl Queue {
         }
     }
 
+    // Whether no track before the current one can play
     pub fn is_first_track(&self) -> bool {
-        if let Some(current_pos) = self.imp().current_pos.get() {
-            return current_pos == 0;
-        }
-
-        false
+        self.current_track_index()
+            .is_some_and(|current| !(0..current).any(|pos| self.playable(pos)))
     }
 
+    // Whether no track after the current one can play
     pub fn is_last_track(&self) -> bool {
-        let n_items = self.imp().store.n_items();
-
-        if let Some(current_pos) = self.imp().current_pos.get()
-            && n_items > 0
-        {
-            return current_pos == n_items - 1;
-        }
-
-        false
+        self.current_track_index()
+            .is_some_and(|current| self.playable_from(current + 1).is_none())
     }
 
     pub fn unselect_all_tracks(&self) {
@@ -693,6 +689,99 @@ mod tests {
         queue.restore_order(&saved);
         assert!(is_permutation(&order(&queue, &t), 4));
         assert_eq!(queue.current(), Some(t[1].clone()));
+    }
+
+    // A track whose file wasn't found when its playlist loaded
+    fn missing_track(name: &str) -> Track {
+        let file = gtk::gio::File::for_path(format!("/gone/{name}.flac"));
+        Track::new(TrackData::missing(file))
+    }
+
+    // Playing tracks at 0 and 2, and missing ones at 1 and 3
+    fn queue_with_missing_tracks() -> (Queue, Vec<Track>) {
+        let queue = Queue::default();
+        let tracks = vec![
+            Track::new(TrackData::default()),
+            missing_track("b"),
+            Track::new(TrackData::default()),
+            missing_track("d"),
+        ];
+        queue.add_tracks(&tracks);
+        (queue, tracks)
+    }
+
+    #[test]
+    fn next_track_skips_missing_tracks() {
+        let (queue, t) = queue_with_missing_tracks();
+        queue.set_current_track(Some(t[0].clone()));
+        assert_eq!(queue.peek_next_track(), Some(t[2].clone()));
+
+        queue.set_current_track(Some(t[2].clone()));
+        assert_eq!(queue.peek_next_track(), None);
+        queue.set_repeat_mode(RepeatMode::RepeatAll);
+        assert_eq!(queue.peek_next_track(), Some(t[0].clone()));
+        queue.set_repeat_mode(RepeatMode::RepeatOne);
+        assert_eq!(queue.peek_next_track(), Some(t[2].clone()));
+
+        // Without a current track, the first one that can play
+        let queue = Queue::default();
+        queue.add_tracks(&[missing_track("a"), t[2].clone()]);
+        assert_eq!(queue.peek_next_track(), Some(t[2].clone()));
+    }
+
+    #[test]
+    fn a_queue_of_missing_tracks_has_nothing_to_play() {
+        for mode in [
+            RepeatMode::Consecutive,
+            RepeatMode::RepeatAll,
+            RepeatMode::RepeatOne,
+        ] {
+            let queue = Queue::default();
+            queue.add_tracks(&[missing_track("a"), missing_track("b")]);
+            queue.set_repeat_mode(mode);
+            assert_eq!(queue.peek_next_track(), None, "{mode}");
+            assert_eq!(queue.next_track(), None, "{mode}");
+            assert_eq!(queue.playable_from(0), None, "{mode}");
+        }
+    }
+
+    #[test]
+    fn previous_track_skips_missing_tracks() {
+        let (queue, t) = queue_with_missing_tracks();
+        queue.set_current_track(Some(t[2].clone()));
+        assert!(!queue.is_first_track());
+        assert!(queue.is_last_track());
+        assert_eq!(queue.previous_track(), Some(t[0].clone()));
+        assert_eq!(queue.current_track_index(), Some(0));
+        assert!(queue.is_first_track());
+        assert_eq!(queue.previous_track(), None);
+        assert_eq!(queue.current_track_index(), Some(0));
+    }
+
+    #[test]
+    fn missing_tracks_stay_in_the_playlist() {
+        let (queue, _) = queue_with_missing_tracks();
+        let uris: Vec<String> = queue.files().iter().map(|f| f.uri().to_string()).collect();
+        assert_eq!(uris[1], "file:///gone/b.flac");
+        assert_eq!(uris.len(), 4);
+        assert_eq!(queue.playable_from(1), Some(2));
+        assert_eq!(queue.playable_from(3), None);
+    }
+
+    #[test]
+    fn peek_next_track_is_where_next_track_goes_past_missing_tracks() {
+        for mode in [
+            RepeatMode::Consecutive,
+            RepeatMode::RepeatAll,
+            RepeatMode::RepeatOne,
+        ] {
+            let (queue, _) = queue_with_missing_tracks();
+            queue.set_repeat_mode(mode);
+            for _ in 0..5 {
+                let peeked = queue.peek_next_track();
+                assert_eq!(queue.next_track(), peeked, "{mode}");
+            }
+        }
     }
 
     #[test]

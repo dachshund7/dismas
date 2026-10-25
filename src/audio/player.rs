@@ -397,20 +397,32 @@ impl AudioPlayer {
 
     // Goes on after the queue finished: to the track after the last one,
     // if tracks were added or it repeats since, or else to the first one
+    // that can play
     fn start_over(&self) {
+        let first = self.queue.playable_from(0);
         if self.queue.peek_next_track().is_some() {
             self.skip_next();
-        } else if self.queue.current_track_index() != Some(0) {
-            self.skip_to(0);
+        } else if let Some(first) = first
+            && self.queue.current_track_index() != Some(first)
+        {
+            self.skip_to(first);
         } else {
             self.update_position(0, true);
+        }
+    }
+
+    // Goes to the first track that can play, if there is one
+    pub fn skip_to_first(&self) {
+        if let Some(first) = self.queue.playable_from(0) {
+            self.skip_to(first);
         }
     }
 
     // The track and position to go on from in a later session
     pub fn resume_point(&self) -> Option<(Track, u64)> {
         if self.finished.get() {
-            return Some((self.queue.track_at(0)?, 0));
+            let first = self.queue.playable_from(0)?;
+            return Some((self.queue.track_at(first)?, 0));
         }
         Some((self.state.track()?, self.state.position()))
     }
@@ -593,7 +605,7 @@ impl AudioPlayer {
             debug!("Playing next (skip-next): {}", next_track.uri());
             self.switch_to(next_track);
         } else {
-            self.skip_to(0);
+            self.skip_to_first();
             self.set_playback_state(PlaybackState::Stopped);
         }
     }
@@ -687,7 +699,7 @@ impl AudioPlayer {
         let position = if duration > 0 && position >= duration {
             // The queue finished in the last session, and starts over
             if self.queue.peek_next_track().is_none() {
-                self.skip_to(0);
+                self.skip_to_first();
             }
             0
         } else {

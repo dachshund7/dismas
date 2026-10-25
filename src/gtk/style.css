@@ -189,6 +189,12 @@ queuerow {
   border-radius: 9px;
 }
 
+/* A track whose file wasn't found when its playlist loaded */
+queuerow.missing label,
+queuerow.missing stack {
+  opacity: 0.55;
+}
+
 /* A track that was gone to, e.g. with "Go to Album", fades in and out
  * twice */
 queuerow.flash {

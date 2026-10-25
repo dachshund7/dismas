@@ -589,7 +589,7 @@ impl AlbumTracks {
                 let files: Vec<gio::File> = paths.into_iter().map(gio::File::for_path).collect();
                 this.imp().files.replace(files.clone());
 
-                let receiver = load_tracks(files);
+                let receiver = load_tracks(files, false);
                 while let Ok(data) = receiver.recv().await {
                     if this.imp().generation.get() != generation {
                         return;
