@@ -175,7 +175,9 @@ fn with_connection<T>(
 
 fn open() -> rusqlite::Result<Connection> {
     let dir = data_dir();
-    glib::mkdir_with_parents(&dir, 0o755);
+    // The history is the user's own, as the XDG spec asks of the folders
+    // an app makes
+    glib::mkdir_with_parents(&dir, 0o700);
 
     let mut conn = Connection::open(dir.join("plays.db"))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;

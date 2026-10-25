@@ -398,7 +398,7 @@ fn with_connection<T>(
 
 fn open() -> rusqlite::Result<Connection> {
     let dir = data_dir();
-    glib::mkdir_with_parents(&dir, 0o755);
+    glib::mkdir_with_parents(&dir, 0o700);
     open_or_recreate(&dir.join("library.db"))
 }
 
@@ -1022,7 +1022,7 @@ fn update_covers(
 
     debug!("Library: generating {} album covers", missing.len());
 
-    glib::mkdir_with_parents(&dir, 0o755);
+    glib::mkdir_with_parents(&dir, 0o700);
 
     let tx = conn.transaction()?;
     {

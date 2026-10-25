@@ -353,7 +353,7 @@ fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
     let mut dir = glib::user_cache_dir();
     dir.push("dismas");
     dir.push("covers");
-    glib::mkdir_with_parents(&dir, 0o755);
+    glib::mkdir_with_parents(&dir, 0o700);
 
     let png = match image.png_bytes() {
         Ok(png) => png,

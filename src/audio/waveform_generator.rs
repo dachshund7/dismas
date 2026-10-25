@@ -130,7 +130,7 @@ impl WaveformGenerator {
                 let mut cache = glib::user_cache_dir();
                 cache.push("dismas");
                 cache.push("waveforms");
-                glib::mkdir_with_parents(&cache, 0o755);
+                glib::mkdir_with_parents(&cache, 0o700);
 
                 cache.push(format!("{uuid}.json"));
 

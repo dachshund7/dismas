@@ -836,6 +836,12 @@ fn audio_files(files: Vec<gio::File>) -> Vec<gio::File> {
     let mut queue = Vec::new();
 
     for file in files {
+        // Tracks are read from their path, and asking GVFS about an http://
+        // URI, given on the command line, would fetch it
+        if file.path().is_none() {
+            debug!("Skipping '{}', which has no local path", file.uri());
+            continue;
+        }
         if let Ok(info) = file.query_info(
             "standard::name,standard::display-name,standard::type,standard::content-type",
             gio::FileQueryInfoFlags::NONE,

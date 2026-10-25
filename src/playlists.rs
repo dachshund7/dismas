@@ -324,7 +324,7 @@ fn write(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
 
 fn write_path(path: &Path, files: &[gio::File]) -> Result<(), glib::Error> {
     if let Some(dir) = path.parent() {
-        glib::mkdir_with_parents(dir, 0o755);
+        glib::mkdir_with_parents(dir, 0o700);
     }
     // Written to a temporary file first, so that a crash can't leave
     // half a playlist
