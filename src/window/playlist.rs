@@ -136,19 +136,8 @@ impl Window {
 
                     if let Some(player) = win.player() {
                         let queue = player.queue();
-
-                        let mut real_pos = None;
-                        for i in 0..queue.model().n_items() {
-                            if let Some(item) = queue.model().item(i) {
-                                let s = item.downcast::<Track>().unwrap();
-                                if s == track {
-                                    real_pos = Some(i);
-                                    break;
-                                }
-                            }
-                        }
-
-                        if let Some(real_pos) = real_pos {
+                        // Where it is in the queue, rather than in a search
+                        if let Some(real_pos) = queue.position(&track) {
                             if win.queue_selection() {
                                 win.toggle_queue_track(&track);
                                 return;
@@ -286,16 +275,12 @@ impl Window {
             let queue = player.queue();
             let n_tracks = queue.n_tracks();
             if let Some(current) = queue.current_track_index() {
-                let mut remaining_time = 0;
-                for pos in 0..n_tracks {
-                    let track = queue.track_at(pos).unwrap();
-                    if pos >= current {
-                        remaining_time += track.duration();
-                    }
-                }
-
-                let remaining_min = ((remaining_time - (remaining_time % 60)) / 60) as u32;
-                let remaining_hrs = (remaining_min - (remaining_min % 60)) / 60;
+                let remaining_time: u64 = (current..n_tracks)
+                    .filter_map(|pos| queue.track_at(pos))
+                    .map(|track| track.duration())
+                    .sum();
+                let remaining_min = u32::try_from(remaining_time / 60).unwrap_or(u32::MAX);
+                let remaining_hrs = remaining_min / 60;
 
                 let remaining_str = if remaining_hrs > 0 {
                     // Translators: the `{}` must be left unmodified, and

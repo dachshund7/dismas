@@ -116,8 +116,10 @@ impl Gapless {
     }
 }
 
-// The state lock of an element, held unless someone else holds it
-struct StateLock(gst::Element);
+// The state lock of an element, held unless someone else holds it. A
+// GRecMutex must be unlocked on the thread that locked it, so the guard
+// can't be sent to another thread
+struct StateLock(gst::Element, std::marker::PhantomData<*const ()>);
 
 impl StateLock {
     fn try_lock(element: &gst::Element) -> Option<Self> {
@@ -127,7 +129,7 @@ impl StateLock {
             gst::glib::ffi::g_rec_mutex_trylock(&raw mut (*element_ptr).state_lock)
                 != gst::glib::ffi::GFALSE
         };
-        locked.then(|| Self(element.clone()))
+        locked.then(|| Self(element.clone(), std::marker::PhantomData))
     }
 }
 
