@@ -203,6 +203,8 @@ All notable changes to this project will be documented in this file.
 - A playlist could be given a name a few characters too long to save:
   creating it failed, and renaming one to it worked but lost every change
   made to it afterwards
+- Amberol's settings were copied again over those of Dismas whenever its
+  data folder was missing, such as after clearing it
 
 ### Removed
 

@@ -12,6 +12,7 @@ use crate::{config::APPLICATION_ID, utils};
 
 const AMBEROL_DIR: &str = "amberol";
 const AMBEROL_SCHEMA: &str = "io.bassi.Amberol";
+const MIGRATED_KEY: &str = "amberol-migrated";
 
 // The files that Dismas keeps in its data directory; the directory itself
 // can exist before the first run, when the app is installed in ~/.local
@@ -19,41 +20,68 @@ const DATA_FILES: [&str; 4] = ["library.db", "library.db-wal", "queue.m3u8", "pl
 
 // On the first run, copies the library, the queue and the playlists of
 // Amberol, and the settings that were changed in it. Amberol's own copies
-// are left alone, and the caches are made again as they're needed
+// are left alone, and the caches are made again as they're needed. It's
+// recorded in the settings, which outlive the data folder: once Dismas has
+// settings of its own, Amberol's must not come back over them
 pub fn migrate_from_amberol() {
-    let data_dir = glib::user_data_dir().join("dismas");
-    if DATA_FILES.iter().any(|name| data_dir.join(name).exists()) {
+    let settings = utils::settings_manager();
+    if settings.boolean(MIGRATED_KEY) {
         return;
     }
 
-    let amberol_dir = glib::user_data_dir().join(AMBEROL_DIR);
-    if amberol_dir.is_dir() {
-        info!("Copying the data of Amberol from {}", amberol_dir.display());
-        if let Err(err) = copy_data(&amberol_dir, &data_dir) {
-            warn!("Unable to copy the data of Amberol: {err}");
+    let data_dir = glib::user_data_dir().join("dismas");
+    if !DATA_FILES.iter().any(|name| data_dir.join(name).exists()) {
+        let amberol_dir = glib::user_data_dir().join(AMBEROL_DIR);
+        if amberol_dir.is_dir() {
+            info!("Copying the data of Amberol from {}", amberol_dir.display());
+            if let Err(err) = copy_data(&amberol_dir, &data_dir) {
+                warn!("Unable to copy the data of Amberol: {err}");
+            }
         }
+        copy_settings();
     }
 
-    copy_settings();
+    if let Err(err) = settings.set_boolean(MIGRATED_KEY, true) {
+        warn!("Unable to store {MIGRATED_KEY}: {err}");
+    }
+    gio::Settings::sync();
 }
 
 fn copy_data(from: &Path, to: &Path) -> io::Result<()> {
-    fs::create_dir_all(to)?;
+    make_dir(to)?;
     for name in DATA_FILES {
         let source = from.join(name);
         if source.is_dir() {
-            fs::create_dir_all(to.join(name))?;
+            make_dir(&to.join(name))?;
             for entry in fs::read_dir(&source)? {
                 let entry = entry?;
                 if entry.file_type()?.is_file() {
-                    fs::copy(entry.path(), to.join(name).join(entry.file_name()))?;
+                    copy_file(&entry.path(), &to.join(name).join(entry.file_name()))?;
                 }
             }
         } else if source.is_file() {
-            fs::copy(&source, to.join(name))?;
+            copy_file(&source, &to.join(name))?;
         }
     }
     Ok(())
+}
+
+// The user's own, as the XDG spec asks of the folders an app makes
+fn make_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
+}
+
+// Copied under a temporary name, and renamed once it's complete, so that an
+// interrupted copy doesn't leave a truncated file to be taken for a whole one
+fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
+    let mut partial = to.as_os_str().to_owned();
+    partial.push(".partial");
+    fs::copy(from, &partial)?;
+    fs::rename(&partial, to)
 }
 
 // Amberol's schema is only there while Amberol is installed
@@ -114,6 +142,8 @@ mod tests {
         assert!(to.join("queue.m3u8").is_file());
         assert!(to.join("playlists").join("Carmen.m3u8").is_file());
         assert!(!to.join("amberol.gresource").exists());
+        // Nothing left under a temporary name
+        assert!(!to.join("queue.m3u8.partial").exists());
         // Files that weren't there aren't made up
         assert!(!to.join("library.db-wal").exists());
 
