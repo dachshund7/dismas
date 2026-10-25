@@ -56,7 +56,7 @@ pub use credits::{MusicBrainzIds, TrackCredits};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
-pub use search::{normalize_search_text, tag_search_text};
+pub use search::{normalize_search_text, search_key, tag_search_text};
 pub use tags::{ExtraComments, plain_commas, read_tagged_file, track_title};
 use tags::{track_album, track_artist};
 use work_hierarchy::{MovementName, WorkHierarchy, WorkLabels};
@@ -203,6 +203,17 @@ impl TrackData {
     // The album shown in place of the one the tags lack
     pub fn fallback_album(&self) -> Option<&str> {
         self.album.is_none().then_some(self.fallback_album.as_str())
+    }
+
+    // The title that searches look into: the one in the tags, or else the
+    // one from the file name, but not the number of a track of a CUE sheet
+    // without a title
+    fn searched_title(&self) -> Option<&str> {
+        match &self.title {
+            Some(title) => Some(title),
+            None if self.audio.is_none() => Some(&self.fallback_title),
+            None => None,
+        }
     }
 
     pub fn tag_text(&self) -> &str {
@@ -781,14 +792,12 @@ impl Track {
                 let data = self.imp().data.borrow();
                 // The album title is in the tags, without the names that
                 // would make it match tracks by other people
-                let key = [
-                    self.artist(),
-                    self.title(),
-                    data.tag_text().to_string(),
-                    data.fallback_album().unwrap_or_default().to_string(),
-                ]
-                .join(" ");
-                normalize_search_text(&key)
+                search_key(
+                    data.artist(),
+                    data.searched_title(),
+                    data.tag_text(),
+                    data.fallback_album(),
+                )
             })
             .clone()
     }
@@ -1546,6 +1555,22 @@ mod tests {
         let data = TrackData::missing(gtk::gio::File::for_path("/gone/Album/Album.cue/track03"));
         assert_eq!(data.shown_title(), "Track 3");
         assert_eq!(data.shown_album(), "Album");
+    }
+
+    #[test]
+    fn the_search_key_has_what_the_tags_and_names_say() {
+        // No artist tag: "Unknown artist" is shown, but not searched, as in
+        // the album grid
+        let file = gtk::gio::File::for_path("/music/Fado/03 Barco Negro.flac");
+        let track = Track::new(TrackData::missing(file));
+        assert_eq!(track.artist(), "Unknown artist");
+        let key = track.search_key();
+        assert!(key.contains("barco negro"), "{key}");
+        assert!(!key.contains("unknown"), "{key}");
+        assert_eq!(
+            key,
+            super::search_key(None, Some("Barco Negro"), "", Some("Fado"))
+        );
     }
 
     #[test]

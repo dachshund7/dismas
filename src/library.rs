@@ -34,8 +34,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     audio::{
-        CoverCache, ExtraComments, normalize_search_text, plain_commas, read_tagged_file,
-        tag_search_text, title_from_file_name, track_title,
+        CoverCache, ExtraComments, plain_commas, read_tagged_file, search_key, tag_search_text,
+        title_from_file_name, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
@@ -1285,20 +1285,18 @@ impl TrackTags {
         // in the grid as in the queue
         let folder_album = album.is_none().then(|| folder_album_title(path)).flatten();
 
-        // The same text as `Track::search_key()`, so that searching the
-        // albums matches the same tracks as searching the queue
+        // As `Track::search_key()` makes it, so that searching the albums
+        // matches the same tracks as searching the queue
         let title = track_title(tag);
-        let search = normalize_search_text(
-            &[
-                tag.get_strings(ItemKey::TrackArtist).join(", "),
-                title
-                    .clone()
-                    .or_else(|| file.map(title_from_file_name))
-                    .unwrap_or_default(),
-                tag_search_text(tag),
-                folder_album.clone().unwrap_or_default(),
-            ]
-            .join(" "),
+        let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");
+        let search = search_key(
+            Some(&artists),
+            title
+                .clone()
+                .or_else(|| file.map(title_from_file_name))
+                .as_deref(),
+            &tag_search_text(tag),
+            folder_album.as_deref(),
         );
 
         TrackTags {

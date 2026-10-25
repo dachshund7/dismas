@@ -34,6 +34,29 @@ pub fn normalize_search_text(s: &str) -> String {
     res
 }
 
+// The text that searching the queue and the album grid looks into for a
+// track, made the same way in both, so that they find the same tracks:
+// its artists, its title, or else the title its file name gives it, the
+// text of its tags (`tag_search_text()`), and the folder its album is
+// named after when it has no album tag. What the queue shows in place of
+// what's missing, like "Unknown artist" or "Track 3", isn't searched, as
+// the library can't keep it in the language of the moment
+pub fn search_key(
+    artists: Option<&str>,
+    title: Option<&str>,
+    tag_text: &str,
+    folder_album: Option<&str>,
+) -> String {
+    let text = [
+        artists.unwrap_or_default(),
+        title.unwrap_or_default(),
+        tag_text,
+        folder_album.unwrap_or_default(),
+    ]
+    .join(" ");
+    normalize_search_text(&text)
+}
+
 // The text of all the tags of a track, for searching the queue; this
 // leaves out the tags that only contain identifiers, numbers or technical
 // data, as they would make short searches, like "op 29", match by accident
