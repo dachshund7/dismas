@@ -29,14 +29,29 @@ fn freplace(input: String, args: &[&str]) -> String {
     output
 }
 
+// Replaces each "{key}" with its value, in a single pass, so that a value
+// with braces of its own, like the name of a playlist, stays as it is
 #[allow(dead_code)]
 fn kreplace(input: String, kwargs: &[(&str, &str)]) -> String {
-    let mut s = input;
-    for (k, v) in kwargs {
-        s = s.replace(&format!("{{{k}}}"), v);
+    let mut output = String::with_capacity(input.len());
+    let mut rest = input.as_str();
+    while let Some(start) = rest.find('{') {
+        output.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let value = after.find('}').and_then(|end| {
+            let (_, value) = kwargs.iter().find(|(key, _)| *key == &after[..end])?;
+            Some((value, end))
+        });
+        if let Some((value, end)) = value {
+            output.push_str(value);
+            rest = &after[end + 1..];
+        } else {
+            output.push('{');
+            rest = after;
+        }
     }
-
-    s
+    output.push_str(rest);
+    output
 }
 
 // Simple translations functions
@@ -174,6 +189,17 @@ mod tests {
 
         let out = i18n_k("multiple {one} and {one}", &[("one", "1"), ("two", "two")]);
         assert_eq!(out, "multiple 1 and 1");
+
+        // A value is never substituted in turn
+        let out = i18n_k(
+            "Close {playlist} of {n}",
+            &[("playlist", "My {n} list"), ("n", "3")],
+        );
+        assert_eq!(out, "Close My {n} list of 3");
+
+        // Braces that aren't a key stay
+        let out = i18n_k("{x} {one} {", &[("one", "1")]);
+        assert_eq!(out, "{x} 1 {");
 
         let out = ni18n_k(
             "singular {one} and {two}",
