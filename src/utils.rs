@@ -204,8 +204,8 @@ pub fn is_audio_path(path: &std::path::Path) -> bool {
     mime_type.starts_with("audio") && !mime_type.ends_with("x-mpegurl")
 }
 
+// The files of a folder and its subfolders, in no order
 fn load_files_from_folder_internal(
-    base: &gio::File,
     folder: &gio::File,
     recursive: bool,
     keep: &dyn Fn(&std::path::Path) -> bool,
@@ -226,26 +226,29 @@ fn load_files_from_folder_internal(
             continue;
         }
         if recursive && info.file_type() == gio::FileType::Directory {
-            let mut res = load_files_from_folder_internal(base, &child, recursive, keep);
+            let mut res = load_files_from_folder_internal(&child, recursive, keep);
             files.append(&mut res);
         } else if info.file_type() == gio::FileType::Regular {
             files.push(child.clone());
         }
     }
 
-    // gio::FileEnumerator has no guaranteed order, so we should
-    // rely on the basename being formatted in a way that gives us an
-    // implicit order; if anything, this will queue tracks in the same
-    // order in which they appear in the directory when browsing its
-    // contents
-    files.sort_by(|a, b| cmp_two_files(Some(base), a, b));
-
     files
 }
 
-pub fn cmp_two_files(base: Option<&gio::File>, a: &gio::File, b: &gio::File) -> Ordering {
-    cmp_file_names(&folder_sort_name(base, a), &folder_sort_name(base, b))
-        .then_with(|| cmp_file_names(&file_sort_name(a), &file_sort_name(b)))
+// What files are sorted by, in the order a file manager shows them: the
+// folder they're in, relative to the base folder, then their name
+fn file_sort_key(
+    base: Option<&gio::File>,
+    file: &gio::File,
+) -> (
+    (bool, glib::FilenameCollationKey),
+    (bool, glib::FilenameCollationKey),
+) {
+    (
+        file_name_key(&folder_sort_name(base, file)),
+        file_name_key(&file_sort_name(file)),
+    )
 }
 
 // The folder of the file, relative to the base folder if it's inside it,
@@ -269,18 +272,17 @@ fn file_sort_name(file: &gio::File) -> String {
 }
 
 pub fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
-    let sort_last_a = filename_a.starts_with(['.', '#']);
-    let sort_last_b = filename_b.starts_with(['.', '#']);
+    file_name_key(filename_a).cmp(&file_name_key(filename_b))
+}
 
-    if !sort_last_a && sort_last_b {
-        Ordering::Less
-    } else if sort_last_a && !sort_last_b {
-        Ordering::Greater
-    } else {
-        let key_a = glib::FilenameCollationKey::from(filename_a);
-        let key_b = glib::FilenameCollationKey::from(filename_b);
-        key_a.cmp(&key_b)
-    }
+// The key a name sorts by: the names starting with "." or "#" go last, and
+// the others in the order of file names in the locale, with numbers in
+// their order, e.g. "Disc 2" before "Disc 10"
+fn file_name_key(name: &str) -> (bool, glib::FilenameCollationKey) {
+    (
+        name.starts_with(['.', '#']),
+        glib::FilenameCollationKey::from(name),
+    )
 }
 
 pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::File> {
@@ -297,7 +299,12 @@ pub fn load_files_from_folder_filtered(
     use std::time::Instant;
 
     let now = Instant::now();
-    let res = load_files_from_folder_internal(folder, folder, recursive, keep);
+    let mut res = load_files_from_folder_internal(folder, recursive, keep);
+    // gio::FileEnumerator has no guaranteed order. The files are sorted
+    // once, with the keys made once for each file: a library of thousands
+    // of files was sorted again at each level of its folders, with the keys
+    // made again at each comparison
+    res.sort_by_cached_key(|file| file_sort_key(Some(folder), file));
     debug!(
         "Folder enumeration: {} us (recursive: {}), total files: {}",
         now.elapsed().as_micros(),
@@ -358,6 +365,51 @@ pub fn write_test_wav(path: &std::path::Path, seconds: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folders_are_listed_like_a_file_manager_shows_them() {
+        let root = std::env::temp_dir().join(format!("dismas-utils-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // The files right in the folder sort by its own name, "M"
+        let base = root.join("M");
+        for path in [
+            "b.flac",
+            "a.flac",
+            ".hidden.flac",
+            "Disc 10/x.flac",
+            "Disc 2/x.flac",
+            "Album/track10.flac",
+            "Album/track2.flac",
+            ".git/x.flac",
+        ] {
+            let path = base.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+
+        let files = load_files_from_folder(&gio::File::for_path(&base), true);
+        let names: Vec<String> = files
+            .iter()
+            .map(|file| {
+                let path = file.path().unwrap();
+                path.strip_prefix(&base).unwrap().display().to_string()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Album/track2.flac",
+                "Album/track10.flac",
+                "Disc 2/x.flac",
+                "Disc 10/x.flac",
+                "a.flac",
+                "b.flac",
+                ".hidden.flac",
+                ".git/x.flac",
+            ]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn keeps_short_playlist_names() {

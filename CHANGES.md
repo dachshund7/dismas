@@ -67,6 +67,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Looking for new and changed files in the music folders, at each start,
+  is much faster: listing a library of 23,000 files took 3.4 s, and now
+  takes 0.2 s
 - Background Playback is off by default, so closing the window quits
   unless it's turned on in Preferences; this also applies to anyone who
   never changed the setting
