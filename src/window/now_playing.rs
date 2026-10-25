@@ -190,7 +190,7 @@ impl Window {
         if let Some(elapsed) = elapsed {
             self.imp()
                 .elapsed_label
-                .set_text(&utils::format_time(elapsed as i64));
+                .set_text(&utils::format_duration(elapsed));
         } else {
             self.imp().elapsed_label.set_text("0:00");
         }
@@ -198,7 +198,7 @@ impl Window {
         if let Some(remaining) = remaining {
             self.imp()
                 .remaining_label
-                .set_text(&utils::format_remaining_time(remaining as i64));
+                .set_text(&utils::format_remaining_time(remaining));
         } else {
             self.imp().remaining_label.set_text("0:00");
         }

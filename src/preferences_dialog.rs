@@ -346,7 +346,7 @@ impl PreferencesDialog {
     }
 
     fn toast(&self, title: &str) {
-        self.add_toast(plain_toast(title));
+        self.add_toast(utils::plain_toast(title));
     }
 
     async fn add_folder(&self) {
@@ -584,7 +584,7 @@ impl PreferencesDialog {
                 ],
             ),
         };
-        let toast = plain_toast(&message);
+        let toast = utils::plain_toast(&message);
         toast.set_button_label(Some(&i18n("Undo")));
         toast.connect_button_clicked(clone!(
             #[weak(rename_to = dialog)]
@@ -601,12 +601,6 @@ impl PreferencesDialog {
         ));
         self.add_toast(toast);
     }
-}
-
-// A toast whose title is plain text: the titles of toasts are markup by
-// default, and the names of folders can have "&"
-fn plain_toast(title: &str) -> adw::Toast {
-    adw::Toast::builder().title(title).use_markup(false).build()
 }
 
 // The name of a folder, to show

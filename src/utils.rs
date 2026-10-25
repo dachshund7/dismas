@@ -166,15 +166,28 @@ pub fn settings_manager() -> gio::Settings {
     gio::Settings::new(app_id)
 }
 
-pub fn format_remaining_time(t: i64) -> String {
-    // We use an explicit LRM character so the MINUS SIGN character
-    // stays in front of the remaining time even in RTL locales, instead
-    // of getting flipped at the end of the text
-    format!("\u{200e}\u{2212}{}:{:02}", (t - (t % 60)) / 60, t % 60)
+// Formats seconds as m:ss, or h:mm:ss from an hour
+pub fn format_duration(seconds: u64) -> String {
+    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
 }
 
-pub fn format_time(t: i64) -> String {
-    format!("{}:{:02}", (t - (t % 60)) / 60, t % 60)
+// The time left, with a minus sign. An explicit LRM character keeps the
+// minus sign in front of the time in RTL locales, instead of getting flipped
+// at the end of the text
+pub fn format_remaining_time(seconds: u64) -> String {
+    format!("\u{200e}\u{2212}{}", format_duration(seconds))
+}
+
+// A toast whose title is plain text: the titles of toasts are markup by
+// default, and they can have the names of playlists and folders, which can
+// have "&"
+pub fn plain_toast(title: &str) -> adw::Toast {
+    adw::Toast::builder().title(title).use_markup(false).build()
 }
 
 // A hash in lowercase hex, as it names caches and albums, and has to stay
@@ -492,6 +505,16 @@ mod tests {
         assert!(used.exists());
         assert!(dir.join("folder").is_dir());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn formats_duration() {
+        assert_eq!(format_duration(0), "0:00");
+        assert_eq!(format_duration(59), "0:59");
+        assert_eq!(format_duration(15 * 60), "15:00");
+        assert_eq!(format_duration(3600), "1:00:00");
+        assert_eq!(format_duration(2 * 3600 - 1), "1:59:59");
+        assert_eq!(format_remaining_time(75), "\u{200e}\u{2212}1:15");
     }
 
     #[test]

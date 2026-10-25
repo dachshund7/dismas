@@ -73,6 +73,8 @@ All notable changes to this project will be documented in this file.
 - The waveforms kept in the cache take a tenth of the room, and the
   waveforms and covers in the cache that haven't been used for 90 days are
   removed
+- The time played and the time left of a track of an hour or more show
+  the hours, as 1:15:00 rather than 75:00
 - Background Playback is off by default, so closing the window quits
   unless it's turned on in Preferences; this also applies to anyone who
   never changed the setting
