@@ -551,6 +551,7 @@ dependencies = [
  "pretty_env_logger",
  "rand",
  "rusqlite",
+ "serde",
  "serde_json",
  "sha2",
  "x11rb",

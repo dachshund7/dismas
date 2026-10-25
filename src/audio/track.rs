@@ -33,6 +33,7 @@ use lofty::{
     wavpack::WavPackFile,
 };
 use log::{debug, warn};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -189,10 +190,11 @@ impl TrackCredits {
     // `tag`, so `extra` has the ones we need
     fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
         let mut credits = Self::from_tag_items(tag);
-        credits.composer_ids = extra
+        let hierarchy = extra
             .work_hierarchy
             .as_deref()
-            .and_then(work_hierarchy_composer_ids);
+            .and_then(WorkHierarchy::parse);
+        credits.composer_ids = hierarchy.as_ref().and_then(WorkHierarchy::composer_ids);
         // The hierarchy has the numbers of every level, so the movement
         // includes them where they belong, whatever the work and movement
         // tags say. A track of a whole part with a catalogue number of its
@@ -202,10 +204,7 @@ impl TrackCredits {
             title,
             movement,
             composers,
-        }) = extra
-            .work_hierarchy
-            .as_deref()
-            .and_then(work_hierarchy_labels)
+        }) = hierarchy.as_ref().and_then(WorkHierarchy::labels)
         {
             credits.work_title = (title != work).then_some(title);
             credits.work = Some(work);
@@ -875,146 +874,197 @@ struct WorkLabels {
     composers: Vec<String>,
 }
 
-// The work and the movement to display, from the JSON written by the
-// "Work Hierarchy" plugin of MusicBrainz Picard. The plugin picks the work
-// in each path (`work_index`): the top-level one, or a part of it with a
-// catalogue number of its own, like each Prelude and Fugue of The
-// Well-Tempered Clavier. The movement names the levels below it. Returns
-// `None` if the tags should be used instead: if the track performs parts of
-// different works, or a top-level work without parts, which may still be a
-// movement in the tags if MusicBrainz didn't link it to its parent work, or
-// if an older version of the plugin wrote the tag, without the work
-fn work_hierarchy_labels(json: &str) -> Option<WorkLabels> {
-    let hierarchy = match serde_json::from_str::<serde_json::Value>(json) {
-        Ok(h) => h,
-        Err(e) => {
-            warn!("Invalid WORK_HIERARCHY tag: {e}");
+// The JSON of the "WORK_HIERARCHY" tag, written by the "Work Hierarchy"
+// plugin of MusicBrainz Picard: a segment for each work the track performs,
+// each with the path from the top-level work down to it. The fields the
+// code below needs are optional, as tags from older versions of the plugin
+// lack some
+#[derive(Debug, Deserialize)]
+struct WorkHierarchy {
+    version: u64,
+    segments: Vec<HierarchySegment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HierarchySegment {
+    path: Vec<HierarchyWork>,
+    // The work of the path that the plugin picked; tags from older
+    // versions of the plugin don't have it
+    #[serde(default, deserialize_with = "lenient_number")]
+    work_index: Option<u64>,
+    // The name the recording's title gives the part of the work the track
+    // has, when it has only part of it
+    excerpt: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HierarchyWork {
+    id: Option<String>,
+    title: Option<String>,
+    name: Option<String>,
+    #[serde(default, deserialize_with = "lenient_number")]
+    number: Option<u64>,
+    numeral: Option<String>,
+    // `None` if the plugin didn't record them
+    composers: Option<Vec<HierarchyComposer>>,
+    // How MusicBrainz links the work to its parent, e.g. "act"
+    #[serde(default)]
+    part_attributes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HierarchyComposer {
+    id: Option<String>,
+    name: Option<String>,
+}
+
+// A number, or none if the field holds anything else, as one odd field
+// shouldn't make the whole tag unreadable
+fn lenient_number<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    Ok(serde_json::Value::deserialize(deserializer)?.as_u64())
+}
+
+impl HierarchyWork {
+    // Whether MusicBrainz links the work to its parent as an act
+    fn is_act(&self) -> bool {
+        self.part_attributes
+            .iter()
+            .any(|attribute| attribute == "act")
+    }
+}
+
+impl WorkHierarchy {
+    // The tag, if it's a version this reads
+    fn parse(json: &str) -> Option<Self> {
+        match serde_json::from_str::<Self>(json) {
+            Ok(hierarchy) => (hierarchy.version == 1).then_some(hierarchy),
+            Err(e) => {
+                warn!("Invalid WORK_HIERARCHY tag: {e}");
+                None
+            }
+        }
+    }
+
+    // The work and the movement to display. The plugin picks the work in
+    // each path (`work_index`): the top-level one, or a part of it with a
+    // catalogue number of its own, like each Prelude and Fugue of The
+    // Well-Tempered Clavier. The movement names the levels below it. Returns
+    // `None` if the tags should be used instead: if the track performs parts
+    // of different works, or a top-level work without parts, which may still
+    // be a movement in the tags if MusicBrainz didn't link it to its parent
+    // work, or if an older version of the plugin wrote the tag, without the
+    // work
+    fn labels(&self) -> Option<WorkLabels> {
+        let paths = self
+            .segments
+            .iter()
+            .map(|segment| {
+                let mut path = segment
+                    .path
+                    .iter()
+                    .map(|work| {
+                        Some(PathWork {
+                            id: work.id.as_deref()?,
+                            title: work.title.as_deref()?,
+                            name: work.name.as_deref()?,
+                            number: work.number.and_then(|n| u32::try_from(n).ok()),
+                            numeral: work.numeral.as_deref(),
+                            composers: work.composers.as_ref().map(|composers| {
+                                composers
+                                    .iter()
+                                    .filter_map(|composer| composer.name.as_deref())
+                                    .collect()
+                            }),
+                            excerpt: None,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                // An act of an opera, and the parts of an act, are numbered
+                // in their names, e.g. "Acte I" and "No. 2 « Sur la place »",
+                // as in the score. Their place in the work, which MusicBrainz
+                // counts with every dialogue and recitative, e.g. "25.
+                // Entr’acte", isn't a number anyone uses
+                for (i, work) in path.iter_mut().enumerate() {
+                    let parent = i.checked_sub(1).map(|parent| &segment.path[parent]);
+                    if segment.path[i].is_act() || parent.is_some_and(HierarchyWork::is_act) {
+                        work.number = None;
+                    }
+                }
+                path.last_mut()?.excerpt = segment.excerpt.as_deref();
+                let work_index = usize::try_from(segment.work_index?).ok()?;
+                Some((path, work_index))
+            })
+            .collect::<Option<Vec<_>>>()?;
+
+        let (first, depth) = paths.first()?;
+        let work = first.get(*depth)?;
+        // Parts of different works, e.g. the same movement in two catalogues
+        if paths
+            .iter()
+            .any(|(path, index)| index != depth || path.get(*depth).is_none_or(|w| w.id != work.id))
+        {
             return None;
         }
-    };
-    if hierarchy["version"].as_u64() != Some(1) {
-        return None;
+
+        let parts = paths
+            .iter()
+            .map(|(path, _)| &path[depth + 1..])
+            .filter(|parts| !parts.is_empty())
+            .collect::<Vec<_>>();
+        // A track of a whole part of a work, e.g. a Prelude and Fugue in one
+        // track, has no movement; a top-level work without parts is left to
+        // the tags
+        if parts.is_empty() && *depth == 0 {
+            return None;
+        }
+        // MusicBrainz often links the composer to a work but not to its parts
+        let composers = first[..=*depth]
+            .iter()
+            .rev()
+            .filter_map(|work| work.composers.as_ref())
+            .find(|composers| !composers.is_empty())
+            .map(|composers| composers.iter().map(ToString::to_string).collect())
+            .unwrap_or_default();
+        Some(WorkLabels {
+            work: work.name.to_string(),
+            title: work.title.to_string(),
+            movement: (!parts.is_empty()).then(|| movement_name(&parts)),
+            composers,
+        })
     }
 
-    let paths = hierarchy["segments"]
-        .as_array()?
-        .iter()
-        .map(|segment| {
-            let works = segment["path"].as_array()?;
-            let mut path = works
-                .iter()
-                .map(|work| {
-                    Some(PathWork {
-                        id: work["id"].as_str()?,
-                        title: work["title"].as_str()?,
-                        name: work["name"].as_str()?,
-                        number: work["number"].as_u64().and_then(|n| u32::try_from(n).ok()),
-                        numeral: work["numeral"].as_str(),
-                        composers: work["composers"].as_array().map(|composers| {
-                            composers
-                                .iter()
-                                .filter_map(|composer| composer["name"].as_str())
-                                .collect()
-                        }),
-                        excerpt: None,
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?;
-            // An act of an opera, and the parts of an act, are numbered in
-            // their names, e.g. "Acte I" and "No. 2 « Sur la place »", as
-            // in the score. Their place in the work, which MusicBrainz counts
-            // with every dialogue and recitative, e.g. "25. Entr’acte", isn't
-            // a number anyone uses
-            for (i, work) in path.iter_mut().enumerate() {
-                let parent = i.checked_sub(1).and_then(|parent| works.get(parent));
-                if is_act(&works[i]) || parent.is_some_and(is_act) {
-                    work.number = None;
+    // The ids of the composers of the works a track performs, the last in
+    // each path; `None` if the plugin that wrote the tag didn't record them.
+    // MusicBrainz often links the composer to a work but not to its parts,
+    // so a work without composers takes those of its nearest parent that has
+    // some, as the plugin does for the composer tags
+    fn composer_ids(&self) -> Option<Vec<String>> {
+        let mut ids: Vec<String> = Vec::new();
+        for segment in &self.segments {
+            let (last, parents) = segment.path.split_last()?;
+            let mut composers = last.composers.as_ref()?;
+            if composers.is_empty() {
+                // Parents that weren't looked up have no list
+                if let Some(parent) = parents
+                    .iter()
+                    .rev()
+                    .filter_map(|work| work.composers.as_ref())
+                    .find(|composers| !composers.is_empty())
+                {
+                    composers = parent;
                 }
             }
-            path.last_mut()?.excerpt = segment["excerpt"].as_str();
-            let work_index = usize::try_from(segment["work_index"].as_u64()?).ok()?;
-            Some((path, work_index))
-        })
-        .collect::<Option<Vec<_>>>()?;
-
-    let (first, depth) = paths.first()?;
-    let work = first.get(*depth)?;
-    // Parts of different works, e.g. the same movement in two catalogues
-    if paths
-        .iter()
-        .any(|(path, index)| index != depth || path.get(*depth).is_none_or(|w| w.id != work.id))
-    {
-        return None;
-    }
-
-    let parts = paths
-        .iter()
-        .map(|(path, _)| &path[depth + 1..])
-        .filter(|parts| !parts.is_empty())
-        .collect::<Vec<_>>();
-    // A track of a whole part of a work, e.g. a Prelude and Fugue in one
-    // track, has no movement; a top-level work without parts is left to the
-    // tags
-    if parts.is_empty() && *depth == 0 {
-        return None;
-    }
-    // MusicBrainz often links the composer to a work but not to its parts
-    let composers = first[..=*depth]
-        .iter()
-        .rev()
-        .filter_map(|work| work.composers.as_ref())
-        .find(|composers| !composers.is_empty())
-        .map(|composers| composers.iter().map(ToString::to_string).collect())
-        .unwrap_or_default();
-    Some(WorkLabels {
-        work: work.name.to_string(),
-        title: work.title.to_string(),
-        movement: (!parts.is_empty()).then(|| movement_name(&parts)),
-        composers,
-    })
-}
-
-// Whether MusicBrainz links a work to its parent as an act, which the
-// plugin writes as an attribute of the part
-fn is_act(work: &serde_json::Value) -> bool {
-    work["part_attributes"]
-        .as_array()
-        .is_some_and(|attributes| attributes.iter().any(|attribute| attribute == "act"))
-}
-
-// The ids of the composers of the works a track performs, the last in each
-// path of the "WORK_HIERARCHY" tag; `None` if the plugin that wrote it
-// didn't record them. MusicBrainz often links the composer to a work but
-// not to its parts, so a work without composers takes those of its
-// nearest parent that has some, as the plugin does for the composer tags
-fn work_hierarchy_composer_ids(json: &str) -> Option<Vec<String>> {
-    let hierarchy = serde_json::from_str::<serde_json::Value>(json).ok()?;
-    if hierarchy["version"].as_u64() != Some(1) {
-        return None;
-    }
-    let mut ids = Vec::new();
-    for segment in hierarchy["segments"].as_array()? {
-        let path = segment["path"].as_array()?;
-        let mut composers = path.last()?["composers"].as_array()?;
-        if composers.is_empty() {
-            // Parents that weren't looked up have no list
-            if let Some(parent) = path[..path.len() - 1]
-                .iter()
-                .rev()
-                .filter_map(|work| work["composers"].as_array())
-                .find(|c| !c.is_empty())
-            {
-                composers = parent;
+            for composer in composers {
+                let id = composer.id.as_deref().filter(|id| is_mbid(id))?;
+                if !ids.iter().any(|i| i == id) {
+                    ids.push(id.to_string());
+                }
             }
         }
-        for composer in composers {
-            let id = composer["id"].as_str().filter(|id| is_mbid(id))?;
-            if !ids.iter().any(|i| i == id) {
-                ids.push(id.to_string());
-            }
-        }
+        Some(ids)
     }
-    Some(ids)
 }
 
 // The name of a movement below the top-level work: the levels above it,
@@ -2551,10 +2601,18 @@ mod tests {
 
     use super::{
         Credit, ExtraComments, MovementName, MusicBrainzIds, Track, TrackCredits, TrackData,
-        WorkLabels, album_title_search_text, is_numbered, normalize_search_text, number_ranges,
-        sane_duration, tag_search_text, text_start, title_from_name, track_album, track_title,
-        work_hierarchy_composer_ids, work_hierarchy_labels,
+        WorkHierarchy, WorkLabels, album_title_search_text, is_numbered, normalize_search_text,
+        number_ranges, sane_duration, tag_search_text, text_start, title_from_name, track_album,
+        track_title,
     };
+
+    fn work_hierarchy_labels(json: &str) -> Option<WorkLabels> {
+        WorkHierarchy::parse(json)?.labels()
+    }
+
+    fn work_hierarchy_composer_ids(json: &str) -> Option<Vec<String>> {
+        WorkHierarchy::parse(json)?.composer_ids()
+    }
 
     #[test]
     fn file_names_lose_only_their_track_numbers() {
