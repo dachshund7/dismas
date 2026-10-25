@@ -183,6 +183,44 @@ pub fn hex(hash: &[u8]) -> String {
     hash.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+// Marks a file of a cache as used, so that `remove_old_files()` keeps it
+pub fn touch(path: &std::path::Path) {
+    let result = std::fs::File::options()
+        .append(true)
+        .open(path)
+        .and_then(|file| file.set_modified(std::time::SystemTime::now()));
+    if let Err(e) = result {
+        debug!("Unable to mark {path:?} as used: {e}");
+    }
+}
+
+// Removes the files of a cache folder that weren't changed or used for
+// `age`. The caches of waveforms and covers would otherwise only grow, with
+// a file for every track and album ever played; one that's needed again is
+// made again
+pub fn remove_old_files(dir: &std::path::Path, age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let old = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|since| since > age);
+        if metadata.is_file()
+            && old
+            && let Err(e) = std::fs::remove_file(entry.path())
+        {
+            warn!("Unable to remove {:?}: {e}", entry.path());
+        }
+    }
+}
+
 // Runs `f`, which reads a file that anyone could have crafted, and returns
 // `fallback()` if it panics. The tag reader can panic on a malformed file,
 // and without this one file would stop a whole load or scan, every time
@@ -426,6 +464,34 @@ mod tests {
         // No space before the ellipsis
         let name = format!("{} {}", "a".repeat(28), "b".repeat(10));
         assert_eq!(short_playlist_name(&name), format!("{}…", "a".repeat(28)));
+    }
+
+    #[test]
+    fn old_files_of_a_cache_are_removed() {
+        use std::time::{Duration, SystemTime};
+
+        let dir = std::env::temp_dir().join(format!("dismas-cache-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("folder")).unwrap();
+        let old = dir.join("old.peaks");
+        let used = dir.join("used.peaks");
+        std::fs::write(&old, "").unwrap();
+        std::fs::write(&used, "").unwrap();
+        let long_ago = SystemTime::now() - Duration::from_secs(100 * 24 * 60 * 60);
+        for path in [&old, &used] {
+            std::fs::File::options()
+                .append(true)
+                .open(path)
+                .unwrap()
+                .set_modified(long_ago)
+                .unwrap();
+        }
+        touch(&used);
+
+        remove_old_files(&dir, Duration::from_secs(90 * 24 * 60 * 60));
+        assert!(!old.exists());
+        assert!(used.exists());
+        assert!(dir.join("folder").is_dir());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

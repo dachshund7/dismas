@@ -117,6 +117,8 @@ mod imp {
 
             gtk::Window::set_default_icon_name(APPLICATION_ID);
 
+            std::thread::spawn(crate::audio::remove_old_cache_files);
+
             // Logging out ends Dismas this way, which quits, so that it
             // saves where playback was
             glib_unix::unix_signal_add_local_once(

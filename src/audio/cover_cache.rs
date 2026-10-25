@@ -347,12 +347,15 @@ fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
     }
 }
 
+// The folder of the covers saved for MPRIS
+pub fn cache_dir() -> PathBuf {
+    glib::user_cache_dir().join("dismas").join("covers")
+}
+
 // Saves the cover in the cache directory, for the MPRIS controller, which
 // can only pass the cover art to the desktop as a file
 fn cache_cover_art(uuid: &str, image: &CoverImage) -> Option<PathBuf> {
-    let mut dir = glib::user_cache_dir();
-    dir.push("dismas");
-    dir.push("covers");
+    let dir = cache_dir();
     glib::mkdir_with_parents(&dir, 0o700);
 
     let png = match image.png_bytes() {
@@ -380,6 +383,8 @@ fn write_cover_file(dir: &Path, uuid: &str, png: &[u8]) -> Result<PathBuf, glib:
     let name = format!("{uuid}-{}.png", &hash[..16]);
     let path = dir.join(&name);
     if path.exists() {
+        // Used, so it's kept when old caches are cleaned up
+        utils::touch(&path);
         return Ok(path);
     }
 

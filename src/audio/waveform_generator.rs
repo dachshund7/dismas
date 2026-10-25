@@ -13,6 +13,74 @@ use crate::{
     utils,
 };
 
+// The folder of the cached waveforms
+pub fn cache_dir() -> std::path::PathBuf {
+    glib::user_cache_dir().join("dismas").join("waveforms")
+}
+
+fn cache_path(uuid: &str) -> std::path::PathBuf {
+    cache_dir().join(format!("{uuid}.peaks"))
+}
+
+fn json_cache_path(uuid: &str) -> std::path::PathBuf {
+    cache_dir().join(format!("{uuid}.json"))
+}
+
+// The cached waveform starts with these, and the version of its format
+const PEAKS_MAGIC: &[u8; 4] = b"DSMW";
+const PEAKS_VERSION: u8 = 1;
+
+// The peaks of the two channels, from 0 to 1, each as a little-endian u16.
+// That's 4 bytes for each quarter of a second, rather than about 40 as
+// JSON; a u8 would leave a quiet track a few levels, as each channel is
+// scaled by its loudest peak to be drawn
+fn encode_peaks(peaks: &[(f64, f64)]) -> Vec<u8> {
+    let level = |peak: f64| (peak.clamp(0.0, 1.0) * f64::from(u16::MAX)).round() as u16;
+    let mut bytes = Vec::with_capacity(5 + peaks.len() * 4);
+    bytes.extend(PEAKS_MAGIC);
+    bytes.push(PEAKS_VERSION);
+    for &(left, right) in peaks {
+        bytes.extend(level(left).to_le_bytes());
+        bytes.extend(level(right).to_le_bytes());
+    }
+    bytes
+}
+
+fn decode_peaks(bytes: &[u8]) -> Option<Vec<(f64, f64)>> {
+    let pairs = bytes
+        .strip_prefix(PEAKS_MAGIC)?
+        .strip_prefix(&[PEAKS_VERSION])?;
+    let (pairs, rest) = pairs.as_chunks::<4>();
+    if !rest.is_empty() {
+        return None;
+    }
+    let peak = |low: u8, high: u8| f64::from(u16::from_le_bytes([low, high])) / f64::from(u16::MAX);
+    Some(
+        pairs
+            .iter()
+            .map(|&[a, b, c, d]| (peak(a, b), peak(c, d)))
+            .collect(),
+    )
+}
+
+fn save_peaks(path: &std::path::Path, peaks: &[(f64, f64)]) {
+    if let Some(dir) = path.parent() {
+        glib::mkdir_with_parents(dir, 0o700);
+    }
+    let path = path.to_path_buf();
+    gio::File::for_path(&path).replace_contents_async(
+        encode_peaks(peaks),
+        None,
+        false,
+        gio::FileCreateFlags::NONE,
+        gio::Cancellable::NONE,
+        move |res| match res {
+            Ok(_) => debug!("Waveform cached at: {path:?}"),
+            Err((_, e)) => warn!("Unable to cache the waveform at {path:?}: {e}"),
+        },
+    );
+}
+
 mod imp {
     use super::*;
 
@@ -120,62 +188,49 @@ impl WaveformGenerator {
             return;
         }
 
-        if let Some(peaks) = self.peaks() {
-            let Some(track) = self.imp().track.borrow().clone() else {
-                self.notify_has_peaks();
-                return;
-            };
-
-            if let Some(uuid) = track.uuid() {
-                let mut cache = glib::user_cache_dir();
-                cache.push("dismas");
-                cache.push("waveforms");
-                glib::mkdir_with_parents(&cache, 0o700);
-
-                cache.push(format!("{uuid}.json"));
-
-                let j = serde_json::to_string(&peaks).unwrap();
-                let file = gio::File::for_path(&cache);
-                file.replace_contents_async(
-                    j,
-                    None,
-                    false,
-                    gio::FileCreateFlags::NONE,
-                    gio::Cancellable::NONE,
-                    move |res| match res {
-                        Ok(_) => debug!("Waveform cached at: {cache:?}"),
-                        Err((_, e)) => warn!("Unable to cache the waveform at {cache:?}: {e}"),
-                    },
-                );
-            }
+        if let Some(peaks) = self.peaks()
+            && let Some(uuid) = self.imp().track.borrow().as_ref().and_then(Track::uuid)
+        {
+            save_peaks(&cache_path(&uuid), &peaks);
         }
 
         self.notify_has_peaks();
     }
 
-    async fn load_peaks_cache(&self, track: &Track, cache: impl AsRef<std::path::Path>) {
-        let file = gio::File::for_path(&cache);
-        let contents = file.load_contents_future().await;
+    async fn load_peaks_cache(&self, track: &Track, uuid: String) {
+        let path = cache_path(&uuid);
+        let contents = gio::File::for_path(&path).load_contents_future().await;
+        let peaks = if let Ok((bytes, _)) = contents {
+            decode_peaks(&bytes)
+        } else {
+            // Cached by an older version, as JSON, which is converted
+            let json = gio::File::for_path(json_cache_path(&uuid))
+                .load_contents_future()
+                .await;
+            let peaks = json
+                .ok()
+                .and_then(|(bytes, _)| serde_json::from_slice::<Vec<(f64, f64)>>(&bytes).ok());
+            if let Some(peaks) = &peaks {
+                save_peaks(&path, peaks);
+                let json = json_cache_path(&uuid);
+                gio::spawn_blocking(move || std::fs::remove_file(json));
+            }
+            peaks
+        };
 
         // Another track might have been set while we were loading
         if self.imp().track.borrow().as_ref() != Some(track) {
             return;
         }
 
-        if let Ok((bytes, _tag)) = contents {
-            match serde_json::from_slice(&bytes[..]) {
-                Ok(p) => {
-                    debug!("Loaded cached waveform file");
-                    self.imp().peaks.replace(Some(p));
-                    self.notify_has_peaks();
-                }
-                Err(err) => {
-                    debug!("Could not parse cached waveform file: {err}");
-                    self.generate_peaks();
-                }
-            }
+        if let Some(peaks) = peaks {
+            debug!("Loaded cached waveform file");
+            // Used, so it's kept when old caches are cleaned up
+            gio::spawn_blocking(move || utils::touch(&path));
+            self.imp().peaks.replace(Some(peaks));
+            self.notify_has_peaks();
         } else {
-            debug!("Could not read cached waveform file");
+            debug!("No cached waveform");
             self.generate_peaks();
         }
     }
@@ -198,16 +253,11 @@ impl WaveformGenerator {
         };
 
         if let Some(uuid) = track.uuid() {
-            let mut cache = glib::user_cache_dir();
-            cache.push("dismas");
-            cache.push("waveforms");
-            cache.push(format!("{uuid}.json"));
-
             let ctx = glib::MainContext::default();
             ctx.spawn_local(clone!(
                 #[weak(rename_to = this)]
                 self,
-                async move { this.load_peaks_cache(&track, &cache).await }
+                async move { this.load_peaks_cache(&track, uuid).await }
             ));
         } else {
             // Without a name for its cache, there's no waveform to show;
@@ -390,5 +440,39 @@ impl WaveformGenerator {
                 self.clear_peaks();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peaks_round_trip() {
+        let peaks = vec![(0.0, 1.0), (0.5, 0.25), (0.012_345, 0.987_654)];
+        let decoded = decode_peaks(&encode_peaks(&peaks)).unwrap();
+        assert_eq!(decoded.len(), peaks.len());
+        for ((a, b), (c, d)) in peaks.iter().zip(&decoded) {
+            assert!(
+                (a - c).abs() < 1e-4 && (b - d).abs() < 1e-4,
+                "{peaks:?} {decoded:?}"
+            );
+        }
+        // Peaks over full scale, from floating-point audio, are capped
+        assert_eq!(
+            decode_peaks(&encode_peaks(&[(1.5, -0.1)])),
+            Some(vec![(1.0, 0.0)])
+        );
+    }
+
+    #[test]
+    fn other_files_are_not_peaks() {
+        assert_eq!(decode_peaks(b"[[0.1,0.2]]"), None);
+        assert_eq!(decode_peaks(b"DSMW\x02"), None);
+        // Cut off in the middle of a pair
+        let mut bytes = encode_peaks(&[(0.5, 0.5)]);
+        bytes.pop();
+        assert_eq!(decode_peaks(&bytes), None);
+        assert_eq!(decode_peaks(&encode_peaks(&[])), Some(Vec::new()));
     }
 }

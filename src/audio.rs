@@ -77,3 +77,14 @@ pub use track::{
     track_title,
 };
 pub use waveform_generator::WaveformGenerator;
+
+// How long the files of the caches of covers and waveforms are kept when
+// they aren't used
+const CACHE_AGE: std::time::Duration = std::time::Duration::from_secs(90 * 24 * 60 * 60);
+
+// Removes the cached covers and waveforms that weren't used for a while;
+// this reads folders, so it must not be called on the main thread
+pub fn remove_old_cache_files() {
+    crate::utils::remove_old_files(&cover_cache::cache_dir(), CACHE_AGE);
+    crate::utils::remove_old_files(&waveform_generator::cache_dir(), CACHE_AGE);
+}

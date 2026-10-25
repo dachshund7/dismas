@@ -70,6 +70,9 @@ All notable changes to this project will be documented in this file.
 - Looking for new and changed files in the music folders, at each start,
   is much faster: listing a library of 23,000 files took 3.4 s, and now
   takes 0.2 s
+- The waveforms kept in the cache take a tenth of the room, and the
+  waveforms and covers in the cache that haven't been used for 90 days are
+  removed
 - Background Playback is off by default, so closing the window quits
   unless it's turned on in Preferences; this also applies to anyone who
   never changed the setting
