@@ -14,7 +14,8 @@
         "--socket=wayland",
         "--socket=pulseaudio",
         "--talk-name=org.kde.StatusNotifierWatcher",
-        "--filesystem=xdg-music:ro"
+        "--filesystem=xdg-music:ro",
+        "--filesystem=~/Music:ro"
     ],
     "build-options" : {
         "append-path" : "/usr/lib/sdk/rust-stable/bin",
