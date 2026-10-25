@@ -817,16 +817,24 @@ fn scan_with(
                     .min()
                     .unwrap_or(source.created);
 
-                let tracks = if source.audio.is_empty() {
-                    read_tags(&source.path)
-                } else {
-                    claims
-                        .sheets
-                        .get(&source.path)
-                        .map_or_else(Vec::new, |sheet| {
-                            read_sheet_tags(sheet, claims.tracks_of(&source.path))
-                        })
+                // A file that makes the tag reader panic is kept as a track
+                // without tags, which is in no album, so that the scan goes
+                // on, and the file isn't read again until it changes
+                let read = || {
+                    if source.audio.is_empty() {
+                        read_tags(&source.path)
+                    } else {
+                        claims
+                            .sheets
+                            .get(&source.path)
+                            .map_or_else(Vec::new, |sheet| {
+                                read_sheet_tags(sheet, claims.tracks_of(&source.path))
+                            })
+                    }
                 };
+                let tracks = utils::guarded(source.path.display(), read, || {
+                    vec![(source.path.clone(), TrackTags::default())]
+                });
                 for (path, tags) in tracks {
                     // A changed track might have new cover art; new tracks
                     // don't make the cover of their album stale, so that the
@@ -992,8 +1000,12 @@ fn update_covers(
             tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
         for (id, first_track) in missing {
             let path = dir.join(thumbnail_name(&id));
-            let cover =
-                create_thumbnail(&first_track, &path).then(|| path.to_string_lossy().to_string());
+            let made = utils::guarded(
+                first_track.display(),
+                || create_thumbnail(&first_track, &path),
+                || false,
+            );
+            let cover = made.then(|| path.to_string_lossy().to_string());
             upsert.execute(params![id, cover])?;
         }
         tx.execute(

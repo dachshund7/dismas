@@ -492,7 +492,10 @@ impl Claims {
             if !is_cue_path(path) || claims.sheets.contains_key(path) {
                 continue;
             }
-            let Some(sheet) = SplitSheet::read(path) else {
+            // A sheet that makes the reader panic is left out, rather than
+            // keeping the others from splitting their files
+            let Some(sheet) = utils::guarded(path.display(), || SplitSheet::read(path), || None)
+            else {
                 continue;
             };
             for audio in sheet.audio_files() {

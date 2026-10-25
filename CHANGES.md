@@ -192,6 +192,9 @@ All notable changes to this project will be documented in this file.
   off in the middle of a page, crashed Dismas when it became the playing
   track or when it was seeked, and at every start if it was the track to
   resume
+- A file that the tag reader couldn't cope with stopped every scan of the
+  music folders at the same place, so the album grid never got the files
+  after it, never forgot removed ones, and never updated its covers
 
 ### Removed
 

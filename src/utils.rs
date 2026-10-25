@@ -183,6 +183,20 @@ pub fn hex(hash: &[u8]) -> String {
     hash.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+// Runs `f`, which reads a file that anyone could have crafted, and returns
+// `fallback()` if it panics. The tag reader can panic on a malformed file,
+// and without this one file would stop a whole load or scan, every time
+pub fn guarded<T>(
+    what: impl std::fmt::Display,
+    f: impl FnOnce() -> T,
+    fallback: impl FnOnce() -> T,
+) -> T {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| {
+        warn!("Skipping {what}, which couldn't be read");
+        fallback()
+    })
+}
+
 // Whether a file is an audio track, guessing from its name only, which is
 // much faster than looking at its contents when scanning a whole library
 pub fn is_audio_path(path: &std::path::Path) -> bool {
@@ -360,6 +374,12 @@ mod tests {
         // No space before the ellipsis
         let name = format!("{} {}", "a".repeat(28), "b".repeat(10));
         assert_eq!(short_playlist_name(&name), format!("{}…", "a".repeat(28)));
+    }
+
+    #[test]
+    fn guarded_falls_back_after_a_panic() {
+        assert_eq!(guarded("a file", || 1, || 0), 1);
+        assert_eq!(guarded("a file", || panic!("malformed"), || 0), 0);
     }
 
     #[test]
