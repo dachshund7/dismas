@@ -73,6 +73,13 @@ impl Shared {
     }
 }
 
+// A number of seconds as an MPRIS time, which counts microseconds in an
+// i64: `Time::from_secs` panics past about 292,000 years
+fn time(seconds: u64) -> Time {
+    let seconds = i64::try_from(seconds).unwrap_or(i64::MAX);
+    Time::from_micros(seconds.saturating_mul(1_000_000))
+}
+
 #[derive(Debug)]
 pub struct MprisController {
     shared: Rc<Shared>,
@@ -159,7 +166,7 @@ impl MprisController {
         metadata.set_title(Some(track.title()));
         metadata.set_album(Some(track.album()));
 
-        let length = Time::from_secs(track.duration() as i64);
+        let length = time(track.duration());
         metadata.set_length(Some(length));
 
         // MPRIS should really support passing a bytes buffer for the cover
@@ -224,7 +231,7 @@ impl Controller for MprisController {
     }
 
     fn set_position(&self, position: u64, notify: bool) {
-        let pos = Time::from_secs(position as i64);
+        let pos = time(position);
         self.shared.position.set(pos);
         if let Some(player) = self.shared.player.get() {
             player.set_position(pos);
@@ -396,4 +403,15 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
             }
         }
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn large_times_saturate() {
+        assert_eq!(time(90), Time::from_secs(90));
+        assert_eq!(time(u64::MAX), Time::from_micros(i64::MAX));
+    }
 }

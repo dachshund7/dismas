@@ -188,6 +188,10 @@ All notable changes to this project will be documented in this file.
 - A program asking over MPRIS for a seek longer than a few centuries, as
   `playerctl position 99999999999+` does, left Dismas unable to go on to
   the next track or take playback commands until it was restarted
+- A file whose header gave an impossible length, such as an Ogg file cut
+  off in the middle of a page, crashed Dismas when it became the playing
+  track or when it was seeked, and at every start if it was the track to
+  resume
 
 ### Removed
 

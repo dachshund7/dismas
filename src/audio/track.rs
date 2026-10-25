@@ -1619,7 +1619,7 @@ impl TrackData {
             tag_text,
             cover,
             uuid,
-            duration: tagged_file.properties().duration().as_secs(),
+            duration: sane_duration(tagged_file.properties().duration()),
             details: read.details(replay_gain),
             file,
             audio: None,
@@ -1657,7 +1657,7 @@ impl TrackData {
             tag_text: tag_search_text(&tag),
             cover: Some(cue_file.cover.clone()),
             uuid,
-            duration: end.saturating_sub(track.start).as_secs(),
+            duration: sane_duration(end.saturating_sub(track.start)),
             details,
             file: gio::File::for_path(sheet.location(track)),
             audio: Some(CueAudio {
@@ -1708,6 +1708,22 @@ impl TrackData {
     // has its own
     pub fn gains(&self) -> Option<Gains> {
         self.audio.as_ref().map(|audio| audio.gains)
+    }
+}
+
+// The longest a track can be. A file can report a far longer one in its
+// header, e.g. an Ogg file cut off in the middle of a page, and the clock
+// times of GStreamer and MPRIS can't hold the longest; such a length counts
+// as unknown. Audiobooks in a single file run to some tens of hours
+const MAX_DURATION: Duration = Duration::from_secs(1000 * 60 * 60);
+
+// The length of a track in seconds, 0 if it's unknown
+fn sane_duration(duration: Duration) -> u64 {
+    if duration > MAX_DURATION {
+        warn!("Ignoring a length of {} s", duration.as_secs());
+        0
+    } else {
+        duration.as_secs()
     }
 }
 
@@ -2422,11 +2438,13 @@ mod tests {
     use gtk::gio::prelude::*;
     use lofty::tag::{ItemKey, Tag, TagType};
 
+    use std::time::Duration;
+
     use super::{
         Credit, ExtraComments, MovementName, MusicBrainzIds, Track, TrackCredits, TrackData,
         WorkLabels, album_title_search_text, is_numbered, normalize_search_text, number_ranges,
-        tag_search_text, title_from_name, track_album, track_title, work_hierarchy_composer_ids,
-        work_hierarchy_labels,
+        sane_duration, tag_search_text, title_from_name, track_album, track_title,
+        work_hierarchy_composer_ids, work_hierarchy_labels,
     };
 
     #[test]
@@ -3822,5 +3840,15 @@ mod tests {
         assert_eq!(tracks[0].fallback_album(), None);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn absurd_lengths_count_as_unknown() {
+        assert_eq!(sane_duration(Duration::from_secs(185)), 185);
+        // An audiobook in a single file
+        assert_eq!(sane_duration(Duration::from_secs(60 * 3600)), 60 * 3600);
+        // A granule position of -1 at the end of an Ogg file, at 44.1 kHz
+        assert_eq!(sane_duration(Duration::from_secs(u64::MAX / 44_100)), 0);
+        assert_eq!(sane_duration(Duration::MAX), 0);
     }
 }
