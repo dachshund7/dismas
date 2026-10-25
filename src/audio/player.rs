@@ -6,6 +6,7 @@ use std::{
     collections::HashSet,
     fmt::{self, Display, Formatter},
     rc::Rc,
+    time::Duration,
 };
 
 use async_channel::{Receiver, Sender};
@@ -27,6 +28,27 @@ use crate::{
 
 // One step of the volume, by the slider, the keyboard or the tray
 pub const VOLUME_STEP: f64 = 0.05;
+
+// How long a new volume waits to be saved, so that dragging the slider,
+// which changes it many times, saves it a few times
+const VOLUME_SAVE_DELAY: Duration = Duration::from_millis(500);
+
+// The volume waiting to be saved, and the timeout that saves it
+#[derive(Default)]
+struct PendingVolume {
+    volume: Cell<Option<f64>>,
+    source: RefCell<Option<glib::SourceId>>,
+}
+
+impl PendingVolume {
+    fn save(&self, settings: &gio::Settings) {
+        if let Some(volume) = self.volume.take()
+            && let Err(e) = settings.set_double("volume", volume)
+        {
+            error!("Unable to save the volume: {e}");
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum PlaybackAction {
@@ -162,6 +184,7 @@ pub struct AudioPlayer {
     // The tracks that failed to play one after the other, to stop rather
     // than go round a queue none of whose tracks plays
     failed: RefCell<HashSet<Track>>,
+    pending_volume: Rc<PendingVolume>,
 }
 
 impl fmt::Debug for AudioPlayer {
@@ -228,6 +251,7 @@ impl AudioPlayer {
             finished: Cell::new(false),
             listens: RefCell::default(),
             failed: RefCell::default(),
+            pending_volume: Rc::default(),
         });
 
         res.clone().setup_channel();
@@ -787,12 +811,39 @@ impl AudioPlayer {
         }
     }
 
+    // Shows the volume the backend reports, and saves it once it stops
+    // changing: each change of a setting writes the whole database of dconf
     fn update_volume(&self, volume: f64) {
         debug!("Updating volume to: {volume}");
         self.state.set_volume(volume);
-        if let Err(e) = self.settings.set_double("volume", volume.clamp(0.0, 1.0)) {
-            error!("Unable to save the volume: {e}");
+
+        let pending = &self.pending_volume;
+        pending.volume.set(Some(volume.clamp(0.0, 1.0)));
+        if pending.source.borrow().is_some() {
+            return;
         }
+        let source = glib::timeout_add_local_once(
+            VOLUME_SAVE_DELAY,
+            clone!(
+                #[weak]
+                pending,
+                #[strong(rename_to = settings)]
+                self.settings,
+                move || {
+                    pending.source.take();
+                    pending.save(&settings);
+                }
+            ),
+        );
+        pending.source.replace(Some(source));
+    }
+
+    // Saves the volume right away, when quitting
+    pub fn save_volume(&self) {
+        if let Some(source) = self.pending_volume.source.take() {
+            source.remove();
+        }
+        self.pending_volume.save(&self.settings);
     }
 
     pub fn set_volume(&self, volume: f64) {
