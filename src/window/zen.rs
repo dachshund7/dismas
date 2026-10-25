@@ -10,9 +10,11 @@ use super::*;
 // How long the window is left alone before the controls fade out
 const ZEN_DELAY: Duration = Duration::from_secs(3);
 
-// The controls fade out slowly, and come back quickly when they're wanted
+// The controls fade out slowly, as the cover grows into their room, and
+// come back quickly when they're wanted, as it shrinks back: fast at first,
+// without jumping, then settling
 const FADE_OUT_MS: u32 = 600;
-const FADE_IN_MS: u32 = 200;
+const FADE_IN_MS: u32 = 300;
 
 impl Window {
     // Zen mode: with the playlist hidden, the controls of the player fade out
@@ -228,7 +230,7 @@ impl Window {
         let (duration, easing) = if zen {
             (FADE_OUT_MS, adw::Easing::EaseInOutCubic)
         } else {
-            (FADE_IN_MS, adw::Easing::EaseOutCubic)
+            (FADE_IN_MS, adw::Easing::Ease)
         };
         let animation = adw::TimedAnimation::builder()
             .widget(&*imp.main_box)

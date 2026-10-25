@@ -22,8 +22,9 @@ const COVER_WIDTH: &str = "cover-width";
 const CONTROLS: &str = "player-controls";
 
 // The space between the cover and the track details in zen mode, where the
-// seek bar no longer is between them
+// seek bar no longer is between them, and around them
 const ZEN_SPACING: i32 = 18;
+const ZEN_MARGIN: i32 = 32;
 
 mod imp {
     use super::*;
@@ -76,96 +77,116 @@ mod imp {
             (min, nat, -1, -1)
         }
 
+        // In zen mode, the cover and the track details go from where they
+        // are with the controls to where they are without them, growing the
+        // cover into the room the controls leave
         fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
             let children = self.measure_children(gtk::Orientation::Vertical, width);
-            let spacings = spacings(&children);
-            let (others_min, others_nat) = children
-                .iter()
-                .filter(|(widget, _, _)| !widget.is::<TrackCover>())
-                .fold((0, 0), |(min, nat), (_, m, n)| (min + m, nat + n));
-
-            // The natural height of the cover is the one with the large
-            // cover, and the minimum one is without the cover
-            let room = height - spacings - others_min;
-            let cover_height = children
-                .iter()
-                .find_map(|(widget, min, nat)| {
-                    widget.downcast_ref::<TrackCover>()?;
-                    let medium = nat - LARGE_SIZE + MEDIUM_SIZE;
-                    Some(if *nat <= room {
-                        *nat
-                    } else if medium <= room {
-                        medium
-                    } else {
-                        *min
-                    })
-                })
-                .unwrap_or(0);
-
-            // The rest of the player has its natural height if it fits
-            let natural = cover_height + others_nat <= height - spacings;
-
-            // The room left past the natural height of the large cover makes
-            // it larger, as far as the width allows, and the waveform under
-            // it as wide, so that their edges still line up
-            let grow = children
-                .iter()
-                .find_map(|(widget, _, nat)| {
-                    widget.downcast_ref::<TrackCover>()?;
-                    if !natural || cover_height != *nat {
-                        return Some(0);
-                    }
-                    let (_, nat_width, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
-                    let free = height - spacings - others_nat - nat;
-                    Some(free.min(width - nat_width).max(0))
-                })
-                .unwrap_or(0);
-
-            let child_height = |widget: &gtk::Widget, min: i32, nat: i32| {
-                if widget.is::<TrackCover>() {
-                    cover_height + grow
-                } else if natural {
-                    nat
-                } else {
-                    min
-                }
-            };
-
-            let total = spacings
-                + children
-                    .iter()
-                    .map(|(widget, min, nat)| child_height(widget, *min, *nat))
-                    .sum::<i32>();
-
-            // In zen mode, the children that stay move from their places to
-            // the middle of the parent, the toolbar view, as its header bar
-            // fades out with the controls: what's above the box in it is the
-            // header bar. They keep their sizes, so the window keeps its own
+            let shown = shown_layout(&children, width, height);
             let zen = self.zen_progress.get();
-            let stays = |widget: &gtk::Widget| !widget.has_css_class(CONTROLS);
-            let staying: Vec<i32> = children
-                .iter()
-                .filter(|(widget, _, _)| stays(widget))
-                .map(|(widget, min, nat)| child_height(widget, *min, *nat))
-                .collect();
-            let staying_total =
-                staying.iter().sum::<i32>() + ZEN_SPACING * (staying.len() as i32 - 1).max(0);
-            let above = self
-                .obj()
-                .parent()
-                .map_or(0, |parent| (parent.height() - height).max(0));
-            let mut zen_y = (height + above - staying_total) / 2 - above;
+            let zen_layout = (zen > 0.0).then(|| self.zen_layout(&children, &shown, width, height));
 
-            let mut y = ((height - total) / 2).max(0);
-            for (widget, min, nat) in &children {
-                let h = child_height(widget, *min, *nat);
-                let shown_y = if zen > 0.0 && stays(widget) {
-                    let shown = f64::from(y) + f64::from(zen_y - y) * zen;
-                    zen_y += h + ZEN_SPACING;
-                    shown.round() as i32
+            let mix =
+                |from: i32, to: i32| (f64::from(from) + f64::from(to - from) * zen).round() as i32;
+            for (i, (widget, _, _)) in children.iter().enumerate() {
+                let (x, mut y, w, mut h) = shown[i];
+                if let Some((zen_y, zen_h)) = zen_layout.as_ref().and_then(|layout| layout[i]) {
+                    y = mix(y, zen_y);
+                    h = mix(h, zen_h);
+                }
+                let transform =
+                    gsk::Transform::new().translate(&graphene::Point::new(x as f32, y as f32));
+                widget.allocate(w, h, -1, Some(transform));
+            }
+        }
+
+        // The controls fade out under the cover and the track details, which
+        // grow and move over the room they leave
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let obj = self.obj();
+            for controls in [true, false] {
+                let mut child = obj.first_child();
+                while let Some(widget) = child {
+                    if widget.has_css_class(CONTROLS) == controls {
+                        obj.snapshot_child(&widget, snapshot);
+                    }
+                    child = widget.next_sibling();
+                }
+            }
+        }
+    }
+
+    // Where the children go with the controls, and their sizes: x, y, width
+    // and height
+    fn shown_layout(
+        children: &[(gtk::Widget, i32, i32)],
+        width: i32,
+        height: i32,
+    ) -> Vec<(i32, i32, i32, i32)> {
+        let spacings = spacings(children);
+        let (others_min, others_nat) = children
+            .iter()
+            .filter(|(widget, _, _)| !widget.is::<TrackCover>())
+            .fold((0, 0), |(min, nat), (_, m, n)| (min + m, nat + n));
+
+        // The natural height of the cover is the one with the large
+        // cover, and the minimum one is without the cover
+        let room = height - spacings - others_min;
+        let cover_height = children
+            .iter()
+            .find_map(|(widget, min, nat)| {
+                widget.downcast_ref::<TrackCover>()?;
+                let medium = nat - LARGE_SIZE + MEDIUM_SIZE;
+                Some(if *nat <= room {
+                    *nat
+                } else if medium <= room {
+                    medium
                 } else {
-                    y
-                };
+                    *min
+                })
+            })
+            .unwrap_or(0);
+
+        // The rest of the player has its natural height if it fits
+        let natural = cover_height + others_nat <= height - spacings;
+
+        // The room left past the natural height of the large cover makes
+        // it larger, as far as the width allows, and the waveform under
+        // it as wide, so that their edges still line up
+        let grow = children
+            .iter()
+            .find_map(|(widget, _, nat)| {
+                widget.downcast_ref::<TrackCover>()?;
+                if !natural || cover_height != *nat {
+                    return Some(0);
+                }
+                let (_, nat_width, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
+                let free = height - spacings - others_nat - nat;
+                Some(free.min(width - nat_width).max(0))
+            })
+            .unwrap_or(0);
+
+        let child_height = |widget: &gtk::Widget, min: i32, nat: i32| {
+            if widget.is::<TrackCover>() {
+                cover_height + grow
+            } else if natural {
+                nat
+            } else {
+                min
+            }
+        };
+
+        let total = spacings
+            + children
+                .iter()
+                .map(|(widget, min, nat)| child_height(widget, *min, *nat))
+                .sum::<i32>();
+
+        let mut y = ((height - total) / 2).max(0);
+        children
+            .iter()
+            .map(|(widget, min, nat)| {
+                let h = child_height(widget, *min, *nat);
                 let (x, w) = if widget.has_css_class(COVER_WIDTH) {
                     let (_, nat_width, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
                     let w = (nat_width + grow).min(width);
@@ -173,15 +194,62 @@ mod imp {
                 } else {
                     (0, width)
                 };
-                let transform = gsk::Transform::new()
-                    .translate(&graphene::Point::new(x as f32, shown_y as f32));
-                widget.allocate(w, h, -1, Some(transform));
+                let rect = (x, y, w, h);
                 y += h + SPACING;
-            }
-        }
+                rect
+            })
+            .collect()
     }
 
     impl PlayerBox {
+        // Where the children that stay in zen mode go, and how tall they are:
+        // in the middle of the parent, the toolbar view, as its header bar
+        // fades out with the controls (what's above the box in it is the
+        // header bar), with the cover as large as the room the track details
+        // leave, and as the width allows. A cover too small to show stays
+        // hidden. Only how the room is used changes, not the sizes the box
+        // asks for, so the window's size limits stay
+        fn zen_layout(
+            &self,
+            children: &[(gtk::Widget, i32, i32)],
+            shown: &[(i32, i32, i32, i32)],
+            width: i32,
+            height: i32,
+        ) -> Vec<Option<(i32, i32)>> {
+            let above = self
+                .obj()
+                .parent()
+                .map_or(0, |parent| (parent.height() - height).max(0));
+            let staying: Vec<usize> = (0..children.len())
+                .filter(|&i| !children[i].0.has_css_class(CONTROLS))
+                .collect();
+            let spacing = ZEN_SPACING * (staying.len() as i32 - 1).max(0);
+            let mut heights: Vec<i32> = staying.iter().map(|&i| shown[i].3).collect();
+
+            if let Some(k) = staying
+                .iter()
+                .position(|&i| children[i].0.is::<TrackCover>())
+                && heights[k] > 0
+            {
+                let (cover, _, nat_height) = &children[staying[k]];
+                let others: i32 = heights.iter().sum::<i32>() - heights[k];
+                let room = height + above - 2 * ZEN_MARGIN - spacing - others;
+                // The cover is a square, with room around it for its shadow
+                let (_, nat_width, _, _) = cover.measure(gtk::Orientation::Horizontal, -1);
+                let widest = width - 2 * ZEN_MARGIN - nat_width + nat_height;
+                heights[k] = room.min(widest).max(heights[k]);
+            }
+
+            let total = heights.iter().sum::<i32>() + spacing;
+            let mut y = (height + above - total) / 2 - above;
+            let mut layout = vec![None; children.len()];
+            for (k, &i) in staying.iter().enumerate() {
+                layout[i] = Some((y, heights[k]));
+                y += heights[k] + ZEN_SPACING;
+            }
+            layout
+        }
+
         // The children to lay out, with their minimum and natural sizes
         fn measure_children(
             &self,

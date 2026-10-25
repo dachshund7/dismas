@@ -46,10 +46,11 @@ mod imp {
         }
     }
 
-    // The cover takes the room that the rest of the player leaves, so that
-    // the player fits in short windows: it's large when it fits, as large
-    // as the room it gets, medium when that fits, and hidden otherwise. It is always a square, as the
-    // shadow and the rounded corners of the card are drawn around it
+    // The cover is as large as the room the player gives it, which is the
+    // large size or more when it fits, the medium one in short windows, and
+    // in between as it grows in zen mode; it's hidden in less room than the
+    // medium size. It is always a square, as the shadow and the rounded
+    // corners of the card are drawn around it
     impl WidgetImpl for TrackCover {
         fn request_mode(&self) -> gtk::SizeRequestMode {
             gtk::SizeRequestMode::ConstantSize
@@ -75,13 +76,7 @@ mod imp {
             let extra_height = (nat_height - LARGE_SIZE).max(0);
 
             let room = (width - extra_width).min(height - extra_height);
-            let size = if room >= LARGE_SIZE {
-                Some(room)
-            } else if room >= MEDIUM_SIZE {
-                Some(MEDIUM_SIZE)
-            } else {
-                None
-            };
+            let size = (room >= MEDIUM_SIZE).then_some(room);
 
             // Hiding the child doesn't queue a resize, unlike hiding the
             // widget, which can't be done while allocating it
