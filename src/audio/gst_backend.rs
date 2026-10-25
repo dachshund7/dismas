@@ -205,6 +205,34 @@ fn update_position(
     }
 }
 
+// A number of seconds as a clock time. Seek offsets come from other
+// programs over MPRIS, and lengths from the headers of files, so a value
+// too large for a clock time becomes the largest one rather than a panic
+fn seconds(seconds: u64) -> gst::ClockTime {
+    let nseconds = seconds
+        .saturating_mul(gst::ClockTime::SECOND.nseconds())
+        .min(gst::ClockTime::MAX.nseconds());
+    gst::ClockTime::from_nseconds(nseconds)
+}
+
+// Where a seek of `offset` seconds from `position` goes, in seconds from
+// the start of the track: back no further than the start, and forward no
+// further than the end. Without a known length, there's no seeking forward
+fn seek_destination(
+    position: u64,
+    duration: u64,
+    offset: u64,
+    direction: SeekDirection,
+) -> Option<u64> {
+    match direction {
+        SeekDirection::Backwards => Some(position.saturating_sub(offset)),
+        SeekDirection::Forward if duration > 0 => {
+            Some(position.saturating_add(offset).min(duration))
+        }
+        SeekDirection::Forward => None,
+    }
+}
+
 // Where a buffer is in its file
 fn stream_time(pad: &gst::Pad, buffer: &gst::BufferRef) -> Option<gst::ClockTime> {
     let event = pad.sticky_event::<gst::event::Segment>(0)?;
@@ -698,27 +726,12 @@ impl GstBackend {
         offset: u64,
         direction: SeekDirection,
     ) -> Option<u64> {
-        let offset = gst::ClockTime::from_seconds(offset);
-        let position = gst::ClockTime::from_seconds(position);
-        let duration = gst::ClockTime::from_seconds(duration);
-
-        let destination = match direction {
-            SeekDirection::Backwards if position >= offset => position.checked_sub(offset),
-            SeekDirection::Backwards if position < offset => Some(gst::ClockTime::from_seconds(0)),
-            SeekDirection::Forward if !duration.is_zero() && position + offset <= duration => {
-                position.checked_add(offset)
-            }
-            SeekDirection::Forward if !duration.is_zero() && position + offset > duration => {
-                Some(duration)
-            }
-            _ => None,
-        };
-
-        self.seek_to(destination?)
+        let destination = seek_destination(position, duration, offset, direction)?;
+        self.seek_to(seconds(destination))
     }
 
     pub fn seek_position(&self, position: u64) -> Option<u64> {
-        self.seek_to(gst::ClockTime::from_seconds(position))
+        self.seek_to(seconds(position))
     }
 
     pub fn seek_start(&self) -> Option<u64> {
@@ -739,7 +752,7 @@ impl GstBackend {
                     .playing()
                     .map_or(gst::ClockTime::ZERO, |playing| playing.start)
             };
-            self.gst_player.seek(start + destination);
+            self.gst_player.seek(start.saturating_add(destination));
             None
         }
     }
@@ -765,7 +778,7 @@ impl GstBackend {
         let position = self
             .start_position
             .get()
-            .map(|position| start + gst::ClockTime::from_seconds(position))
+            .map(|position| start.saturating_add(seconds(position)))
             .filter(|position| !position.is_zero());
         // GstPlay would drop the seek when it loads the file
         if loading && position.is_some() {
@@ -1015,6 +1028,36 @@ mod tests {
         });
         assert_eq!(buffers, vec![300; 5]);
         assert!(!ended);
+    }
+
+    #[test]
+    fn seeks_stay_within_the_track() {
+        use SeekDirection::{Backwards, Forward};
+
+        assert_eq!(seek_destination(30, 200, 10, Backwards), Some(20));
+        assert_eq!(seek_destination(5, 200, 10, Backwards), Some(0));
+        assert_eq!(seek_destination(30, 200, 10, Forward), Some(40));
+        assert_eq!(seek_destination(195, 200, 10, Forward), Some(200));
+        // A length that isn't known yet
+        assert_eq!(seek_destination(30, 0, 10, Forward), None);
+
+        // Offsets as large as an MPRIS client can send
+        assert_eq!(seek_destination(30, 200, u64::MAX, Backwards), Some(0));
+        assert_eq!(seek_destination(30, 200, u64::MAX, Forward), Some(200));
+        assert_eq!(
+            seek_destination(u64::MAX, u64::MAX, u64::MAX, Forward),
+            Some(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn large_seconds_saturate() {
+        assert_eq!(seconds(90), gst::ClockTime::from_seconds(90));
+        assert_eq!(seconds(u64::MAX), gst::ClockTime::MAX);
+        assert_eq!(
+            gst::ClockTime::from_seconds(60).saturating_add(seconds(u64::MAX)),
+            gst::ClockTime::MAX
+        );
     }
 
     #[test]

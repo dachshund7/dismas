@@ -185,6 +185,9 @@ All notable changes to this project will be documented in this file.
   of a Bach cantata, or Süßmayr in Mozart's Requiem
 - Two recordings of a work one after the other, or a work added twice,
   were shown under one header, and shuffled as one
+- A program asking over MPRIS for a seek longer than a few centuries, as
+  `playerctl position 99999999999+` does, left Dismas unable to go on to
+  the next track or take playback commands until it was restarted
 
 ### Removed
 
