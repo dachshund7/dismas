@@ -399,8 +399,38 @@ fn with_connection<T>(
 fn open() -> rusqlite::Result<Connection> {
     let dir = data_dir();
     glib::mkdir_with_parents(&dir, 0o755);
+    open_or_recreate(&dir.join("library.db"))
+}
 
-    let mut conn = Connection::open(dir.join("library.db"))?;
+// The database is only a cache of the tags, so a damaged one is made again,
+// rather than leaving the album grid empty for good; the files of the
+// covers are kept
+fn open_or_recreate(path: &Path) -> rusqlite::Result<Connection> {
+    match open_at(path) {
+        Err(e)
+            if matches!(
+                e.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+            ) =>
+        {
+            warn!("The library database is damaged, making it again: {e}");
+            for suffix in ["", "-wal", "-shm"] {
+                let mut file = path.as_os_str().to_owned();
+                file.push(suffix);
+                if let Err(e) = std::fs::remove_file(&file)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    warn!("Unable to remove {file:?}: {e}");
+                }
+            }
+            open_at(path)
+        }
+        result => result,
+    }
+}
+
+fn open_at(path: &Path) -> rusqlite::Result<Connection> {
+    let mut conn = Connection::open(path)?;
     // The scan writes while the UI reads
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -1313,6 +1343,23 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(super::SCHEMA).unwrap();
         conn
+    }
+
+    #[test]
+    fn a_damaged_database_is_made_again() {
+        let dir = test_dir("damaged");
+        let path = dir.join("library.db");
+        std::fs::write(&path, vec![0xa5; 8192]).unwrap();
+        assert!(super::open_at(&path).is_err());
+
+        let conn = super::open_or_recreate(&path).unwrap();
+        let tracks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tracks, 0);
+
+        drop(conn);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // E.g. names from old Latin-1 rips

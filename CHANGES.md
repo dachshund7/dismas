@@ -198,6 +198,8 @@ All notable changes to this project will be documented in this file.
 - A playlist file with a NUL byte in a line, such as one saved in UTF-16,
   crashed Dismas when it was opened, and at every start if it was the
   selected playlist
+- A damaged library database left the album grid empty for good; it's
+  made again
 
 ### Removed
 
