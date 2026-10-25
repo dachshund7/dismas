@@ -379,7 +379,8 @@ fn parse_m3u(text: &str, base: &gio::File) -> Vec<gio::File> {
         // read as UTF-8, or a file with a block of zeros
         .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.contains('\0'))
         .map(|line| {
-            if line.contains("://") {
+            // A path can have "://" in a file name too
+            if !line.starts_with('/') && line.contains("://") {
                 return gio::File::for_uri(line);
             }
             // Players on Windows, or set to be compatible with it, use
@@ -415,6 +416,14 @@ mod tests {
             "\u{feff}#EXTM3U\n#EXTINF:254,Artist - Title\n/music/a.opus\n\n  \n/music/b.flac\r\n";
         let files = parse_m3u(text, &gio::File::for_path("/playlists"));
         assert_eq!(paths(&files), ["/music/a.opus", "/music/b.flac"]);
+    }
+
+    #[test]
+    fn parse_takes_absolute_paths_as_paths() {
+        let text = "/music/Live at Home://Bootleg.flac\n";
+        let files = parse_m3u(text, &gio::File::for_path("/playlists"));
+        // GIO writes the double slash as one, which names the same file
+        assert_eq!(paths(&files), ["/music/Live at Home:/Bootleg.flac"]);
     }
 
     #[test]
