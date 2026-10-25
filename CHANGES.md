@@ -222,6 +222,10 @@ All notable changes to this project will be documented in this file.
 - Removing many selected tracks at once froze the window for a while,
   and removing the playing track with the ones after it loaded each of
   them into the player in turn
+- The parts of an opera's acts that the score doesn't number, such as
+  dialogues, recitatives and entr'actes, were numbered by their place in
+  the act, which read like the score's numbers, as in "25. Entr’acte"
+  right after "No. 11 Finale"; they're named without a number now
 
 ### Removed
 

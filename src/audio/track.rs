@@ -900,8 +900,8 @@ fn work_hierarchy_labels(json: &str) -> Option<WorkLabels> {
         .as_array()?
         .iter()
         .map(|segment| {
-            let mut path = segment["path"]
-                .as_array()?
+            let works = segment["path"].as_array()?;
+            let mut path = works
                 .iter()
                 .map(|work| {
                     Some(PathWork {
@@ -920,6 +920,17 @@ fn work_hierarchy_labels(json: &str) -> Option<WorkLabels> {
                     })
                 })
                 .collect::<Option<Vec<_>>>()?;
+            // An act of an opera, and the parts of an act, are numbered in
+            // their names, e.g. "Acte I" and "No. 2 « Sur la place »", as
+            // in the score. Their place in the work, which MusicBrainz counts
+            // with every dialogue and recitative, e.g. "25. Entr’acte", isn't
+            // a number anyone uses
+            for (i, work) in path.iter_mut().enumerate() {
+                let parent = i.checked_sub(1).and_then(|parent| works.get(parent));
+                if is_act(&works[i]) || parent.is_some_and(is_act) {
+                    work.number = None;
+                }
+            }
             path.last_mut()?.excerpt = segment["excerpt"].as_str();
             let work_index = usize::try_from(segment["work_index"].as_u64()?).ok()?;
             Some((path, work_index))
@@ -961,6 +972,14 @@ fn work_hierarchy_labels(json: &str) -> Option<WorkLabels> {
         movement: (!parts.is_empty()).then(|| movement_name(&parts)),
         composers,
     })
+}
+
+// Whether MusicBrainz links a work to its parent as an act, which the
+// plugin writes as an attribute of the part
+fn is_act(work: &serde_json::Value) -> bool {
+    work["part_attributes"]
+        .as_array()
+        .is_some_and(|attributes| attributes.iter().any(|attribute| attribute == "act"))
 }
 
 // The ids of the composers of the works a track performs, the last in each
@@ -2776,6 +2795,51 @@ mod tests {
             movement_of(&json).as_deref(),
             Some("Acte I: 8. Air « Prendre le dessin d’un bijou » (Gerald)")
         );
+    }
+
+    // A part of an act of an opera, as the plugin writes it: the act and
+    // the part both have the place MusicBrainz gives them
+    fn opera_part(name: &str, number: u32) -> serde_json::Value {
+        serde_json::json!({ "version": 1, "segments": [{
+            "path": [
+                { "id": "carmen", "title": "Carmen, WD 31", "name": "Carmen, WD 31",
+                  "number": null, "part_attributes": [] },
+                { "id": "act1", "title": "Carmen, WD 31: Acte I", "name": "Acte I",
+                  "number": 2, "part_attributes": ["act"] },
+                { "id": "part", "title": name, "name": name, "number": number,
+                  "part_attributes": ["number"] },
+            ],
+            "work_index": 0,
+            "attributes": [],
+        }]})
+    }
+
+    #[test]
+    fn the_parts_of_an_act_have_no_place_number() {
+        // Numbered in the score, and in their names
+        assert_eq!(
+            movement_of(&opera_part("No. 2 « Sur la place »", 1)).as_deref(),
+            Some("Acte I: No. 2 « Sur la place »")
+        );
+        // Not numbered in the score: their place in the act would look
+        // like a number of the score, e.g. "25. Entr’acte" after No. 11
+        assert_eq!(
+            movement_of(&opera_part("Entr’acte", 25)).as_deref(),
+            Some("Acte I: Entr’acte")
+        );
+        assert_eq!(
+            movement_of(&opera_part("Dialogue « Regardez donc cette petite »", 2)).as_deref(),
+            Some("Acte I: Dialogue « Regardez donc cette petite »")
+        );
+
+        // A track linked to the whole act is named after it, without its
+        // place in the opera
+        let mut whole_act = opera_part("", 0);
+        whole_act["segments"][0]["path"]
+            .as_array_mut()
+            .unwrap()
+            .pop();
+        assert_eq!(movement_of(&whole_act).as_deref(), Some("Acte I"));
     }
 
     #[test]
