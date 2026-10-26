@@ -199,7 +199,7 @@ impl Window {
         let items_changed_id = queue.model().connect_items_changed(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, _, _, _| win.update_queue_time()
+            move |_, _, _, _| win.update_queue_time_later()
         ));
         self.disconnect_on_close(queue.model(), items_changed_id);
 

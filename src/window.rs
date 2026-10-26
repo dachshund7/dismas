@@ -213,6 +213,7 @@ mod imp {
         // The length of the tracks after the current one, in seconds, so
         // that each position only adds what's left of the current track
         pub queue_time_after_current: Cell<u64>,
+        pub queue_time_idle: Cell<bool>,
         // The number of times tracks are being read for the queue
         pub loads: Cell<u32>,
         // Whether the sidebar was showing before the tracks of an album
@@ -517,6 +518,7 @@ mod imp {
                 pending_playlist: RefCell::default(),
                 queue_scroll_tick: RefCell::default(),
                 queue_time_after_current: Cell::new(0),
+                queue_time_idle: Cell::new(false),
                 loads: Cell::new(0),
                 hide_focus_after_transition: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),

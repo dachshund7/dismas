@@ -316,6 +316,23 @@ impl Window {
         self.player().queue().is_empty()
     }
 
+    // The same once the queue's tracks are done changing: a scan that
+    // retags many of them changes them one at a time, and adding up all the
+    // tracks after the current one at each would stall a long queue
+    pub(super) fn update_queue_time_later(&self) {
+        if self.imp().queue_time_idle.replace(true) {
+            return;
+        }
+        glib::idle_add_local_once(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move || {
+                win.imp().queue_time_idle.set(false);
+                win.update_queue_time();
+            }
+        ));
+    }
+
     // Adds up the tracks after the current one again, when the tracks or
     // their order change, or another track is current
     pub(super) fn update_queue_time(&self) {
