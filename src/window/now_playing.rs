@@ -42,7 +42,6 @@ impl Window {
         let player = self.player();
         let state = player.state();
         self.scroll_queue_to_track();
-        self.update_queue_time();
         self.update_title(state.track().as_ref());
         self.update_style(state.track().as_ref());
         self.sync_track_favorite();

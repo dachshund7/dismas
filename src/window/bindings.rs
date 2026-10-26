@@ -72,8 +72,10 @@ impl Window {
         );
         self.disconnect_on_close(state, notify_position_id);
 
-        // Update the UI
+        // Update the UI; the time left in the queue follows the queue's
+        // current track, which changes along with the track that plays
         self.update_track();
+        self.update_queue_time();
         let notify_track_id = state.connect_notify_local(
             Some("track"),
             clone!(

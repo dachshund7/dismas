@@ -200,11 +200,12 @@ impl Window {
             self,
             move |_, _, _, _| win.update_search_results()
         ));
-        queue.model().connect_items_changed(clone!(
+        let items_changed_id = queue.model().connect_items_changed(clone!(
             #[weak(rename_to = win)]
             self,
             move |_, _, _, _| win.update_search_results()
         ));
+        self.disconnect_on_close(queue.model(), items_changed_id);
         filter.connect_filtering_notify(clone!(
             #[weak(rename_to = win)]
             self,
