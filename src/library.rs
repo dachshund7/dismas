@@ -969,8 +969,10 @@ fn change_time(metadata: &std::fs::Metadata) -> i64 {
 // tracks changed; the thumbnails are in the cache directory, so they might
 // have been removed since the last scan. They're made from the tracks that
 // are there, so the albums of the `hidden` folders, which aren't, keep
-// theirs until they're back. Returns the number of albums whose thumbnail
-// was made again, or looked for
+// theirs until they're back. Returns the number of thumbnails made: one
+// made again can keep its name, which the grid can't tell otherwise. An
+// album whose cover can't be decoded is tried at every scan, and counts
+// for nothing, as its thumbnail stays as it was, missing
 fn update_covers(
     conn: &mut Connection,
     stale_albums: &HashSet<String>,
@@ -1034,7 +1036,7 @@ fn update_covers(
     }
 
     debug!("Library: generating {} album covers", missing.len());
-    let n_missing = missing.len();
+    let mut n_made = 0;
 
     glib::mkdir_with_parents(&dir, 0o700);
 
@@ -1048,6 +1050,7 @@ fn update_covers(
                 || create_thumbnail(&first_track, &dir, &id, size),
                 || None,
             );
+            n_made += usize::from(made.is_some());
             let cover = made.map(|path| path.to_string_lossy().to_string());
             upsert.execute(params![id, cover])?;
         }
@@ -1060,7 +1063,7 @@ fn update_covers(
     tx.commit()?;
 
     remove_unused_covers(conn, &dir)?;
-    Ok(n_missing)
+    Ok(n_made)
 }
 
 // The name of the thumbnail of an album: a JPEG, or a PNG for a cover with
