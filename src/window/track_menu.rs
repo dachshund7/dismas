@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
-use crate::utils::ATTRIBUTE_HOST_PATH;
 
 impl Window {
     // The menu of a track, at the given point of its row; a row of the
@@ -288,33 +287,23 @@ impl Window {
         }
     }
 
+    // The file's own path, even for one that came through the document
+    // portal: in the Flatpak, the launcher hands the open file to the
+    // portal, which works out its folder outside the sandbox, while the
+    // path outside the sandbox can't be opened inside it
     async fn open_track_directory(&self, track: &Track) {
         let file = track.audio_file();
+        if file.path().is_none() {
+            return;
+        }
 
-        match file
-            .query_info_future(
-                ATTRIBUTE_HOST_PATH,
-                gio::FileQueryInfoFlags::NONE,
-                glib::Priority::DEFAULT,
-            )
+        let launcher = gtk::FileLauncher::new(Some(&file));
+        if let Err(err) = launcher
+            .open_containing_folder_future(Some(self.upcast_ref::<gtk::Window>()))
             .await
         {
-            Err(err) => debug!("Unable to get host-path attribute: {err}"),
-            Ok(info) => {
-                let host_path = info
-                    .attribute_as_string(ATTRIBUTE_HOST_PATH)
-                    .and_then(|x| PathBuf::from_str(x.as_str()).ok());
-
-                if let Some(path) = host_path.or_else(|| file.path()) {
-                    let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(path)));
-                    if let Err(_e) = launcher
-                        .open_containing_folder_future(Some(self.upcast_ref::<gtk::Window>()))
-                        .await
-                    {
-                        self.add_toast(i18n("Unable to open folder"));
-                    }
-                }
-            }
+            debug!("Unable to open the folder of {}: {err}", file.uri());
+            self.add_toast(i18n("Unable to open folder"));
         }
     }
 }

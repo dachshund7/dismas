@@ -19,9 +19,7 @@ mod zen;
 use std::{
     cell::{Cell, RefCell},
     collections::HashSet,
-    path::PathBuf,
     rc::Rc,
-    str::FromStr,
     time::Instant,
 };
 
