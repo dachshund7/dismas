@@ -21,8 +21,10 @@ pub struct ExtraComments {
 
 // The name of the tag of the "Work Hierarchy" plugin; MusicBrainz Picard
 // writes the tags it has no standard field for as a Vorbis comment of that
-// name in capitals, a "TXXX" frame described by it in MP3 files, and a
-// "----:com.apple.iTunes:" atom named after it in MP4 files
+// name in capitals, an APE item of that name capitalized ("Work_Hierarchy")
+// in Monkey's Audio, WavPack and Musepack files, a "TXXX" frame described
+// by it in MP3, AIFF and WAV files, and a "----:com.apple.iTunes:" atom
+// named after it in MP4 files
 const WORK_HIERARCHY: &str = "work_hierarchy";
 
 impl ExtraComments {
@@ -34,17 +36,19 @@ impl ExtraComments {
         }
     }
 
-    // Monkey's Audio and WavPack files have their CUE sheet in an APE tag
+    // Monkey's Audio, WavPack and Musepack files have an APE tag, whose
+    // keys are compared ignoring case
     pub(super) fn from_ape(tag: Option<&ApeTag>) -> Self {
-        let cue_sheet =
-            tag.and_then(|tag| tag.get("Cuesheet"))
+        let get = |key| {
+            tag.and_then(|tag| tag.get(key))
                 .and_then(|item| match item.value() {
                     ItemValue::Text(text) => Some(text.clone()),
                     _ => None,
-                });
+                })
+        };
         ExtraComments {
-            cue_sheet,
-            ..Default::default()
+            work_hierarchy: get(WORK_HIERARCHY),
+            cue_sheet: get("Cuesheet"),
         }
     }
 
@@ -165,7 +169,16 @@ fn read_tagged_file(
         Some(FileType::WavPack) => read(probe, options, |f: &WavPackFile| {
             ExtraComments::from_ape(f.ape())
         }),
+        Some(FileType::Mpc) => read(probe, options, |f: &MpcFile| {
+            ExtraComments::from_ape(f.ape())
+        }),
         Some(FileType::Mpeg) => read(probe, options, |f: &MpegFile| {
+            ExtraComments::from_id3v2(f.id3v2())
+        }),
+        Some(FileType::Aiff) => read(probe, options, |f: &AiffFile| {
+            ExtraComments::from_id3v2(f.id3v2())
+        }),
+        Some(FileType::Wav) => read(probe, options, |f: &WavFile| {
             ExtraComments::from_id3v2(f.id3v2())
         }),
         Some(FileType::Mp4) => read(probe, options, |f: &Mp4File| {
@@ -263,5 +276,25 @@ mod tests {
             Some(Cow::Borrowed(_))
         ));
         assert!(merged_tag(None, &[]).is_none());
+    }
+
+    #[test]
+    fn work_hierarchy_is_read_from_wav_files() {
+        use lofty::{config::WriteOptions, tag::TagExt};
+
+        let dir = std::env::temp_dir().join(format!("dismas-tags-wav-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Track.wav");
+        crate::utils::write_test_wav(&path, 1);
+        // As MusicBrainz Picard writes it, in the file's ID3v2 chunk
+        let json = r#"{"version":1,"segments":[]}"#;
+        let mut id3v2 = Id3v2Tag::new();
+        let _ = id3v2.insert_user_text(WORK_HIERARCHY.to_string(), json.to_string());
+        id3v2.save_to_path(&path, WriteOptions::default()).unwrap();
+
+        let read = read_file_tags(&path, ParseOptions::new());
+        let _ = std::fs::remove_dir_all(&dir);
+        let (_, extra) = read.unwrap();
+        assert_eq!(extra.work_hierarchy.as_deref(), Some(json));
     }
 }

@@ -926,14 +926,23 @@ mod tests {
     }
 
     #[test]
-    fn work_hierarchy_is_read_from_mp3_and_mp4_files() {
+    fn work_hierarchy_is_read_from_ape_mp3_and_mp4_tags() {
         use lofty::{
+            ape::{ApeItem, ApeTag},
             id3::v2::Id3v2Tag,
             mp4::{Atom, AtomData, AtomIdent, Ilst},
+            tag::ItemValue,
         };
 
         let json = r#"{"version":1,"segments":[]}"#;
         // As MusicBrainz Picard writes the tags it has no field for
+        let mut ape = ApeTag::new();
+        for (key, value) in [("Work_Hierarchy", json), ("Cuesheet", "FILE")] {
+            ape.insert(ApeItem::new(key.to_string(), ItemValue::Text(value.to_string())).unwrap());
+        }
+        let extra = ExtraComments::from_ape(Some(&ape));
+        assert_eq!(extra.work_hierarchy.as_deref(), Some(json));
+        assert_eq!(extra.cue_sheet.as_deref(), Some("FILE"));
         let mut id3v2 = Id3v2Tag::new();
         let _ = id3v2.insert_user_text("work_hierarchy".to_string(), json.to_string());
         assert_eq!(
@@ -962,6 +971,7 @@ mod tests {
             None
         );
         assert_eq!(ExtraComments::from_mp4(None).work_hierarchy, None);
+        assert_eq!(ExtraComments::from_ape(None).work_hierarchy, None);
     }
 
     #[test]

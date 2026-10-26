@@ -64,8 +64,9 @@ All notable changes to this project will be documented in this file.
   an Undo
 - A Flatpak of each release, `dismas.flatpak`, on the release's page on
   GitHub
-- The tags of the Work Hierarchy plugin for Picard are read from MP3 and
-  M4A files too, not only from FLAC, Ogg and Opus files
+- The tags of the Work Hierarchy plugin for Picard are read from MP3, M4A,
+  AIFF, WAV, Monkey's Audio, WavPack and Musepack files too, not only from
+  FLAC, Ogg and Opus files
 
 ### Changed
 
