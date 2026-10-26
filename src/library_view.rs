@@ -158,6 +158,11 @@ mod imp {
         // The music folders that aren't there, as of the last reload, whose
         // albums are hidden
         pub hidden_folders: RefCell<Vec<std::path::PathBuf>>,
+        // The albums the grid shows, as they were read
+        pub shown_albums: RefCell<Vec<library::AlbumInfo>>,
+        // A scan changed tracks or made covers again since the albums were
+        // last shown
+        pub library_changed: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -1008,6 +1013,16 @@ impl LibraryView {
 
     fn show_albums(&self, albums: Vec<library::AlbumInfo>) {
         let imp = self.imp();
+
+        // After a scan that changed nothing, as at most starts, the albums
+        // read again are the same, and the grid stays as it is, rather
+        // than read the covers it shows again
+        let changed = imp.library_changed.take();
+        if !changed && *imp.shown_albums.borrow() == albums {
+            return;
+        }
+        imp.shown_albums.replace(albums.clone());
+
         let albums: Vec<Album> = albums.into_iter().map(Album::new).collect();
         debug!("Library: {} albums", albums.len());
 
@@ -1026,7 +1041,11 @@ impl LibraryView {
             model.splice(0, model.n_items(), &albums);
         }
 
-        imp.textures.borrow_mut().clear();
+        // A cover made again can keep its path; otherwise, the covers in
+        // the cache are still the ones of these albums
+        if changed {
+            imp.textures.borrow_mut().clear();
+        }
         self.update_stack();
 
         // The tracks might have changed since the last search
@@ -1137,6 +1156,9 @@ impl LibraryView {
                 // another one follows. The channel also closes if the scan
                 // panicked
                 counting.set(true);
+                if result.n_changed > 0 || result.covers_changed {
+                    this.imp().library_changed.set(true);
+                }
                 let uris: Vec<String> = result
                     .updated
                     .iter()

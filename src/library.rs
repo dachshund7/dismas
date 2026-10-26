@@ -88,9 +88,12 @@ pub struct ScanResult {
     pub updated: Vec<PathBuf>,
     // The number of tracks that are new, changed or gone
     pub n_changed: usize,
+    // Whether covers of the albums were made again, which can keep their
+    // names, as when a cover file next to the tracks changed
+    pub covers_changed: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AlbumInfo {
     pub id: String,
     pub title: String,
@@ -668,8 +671,9 @@ fn scan_internal(
     let roots = roots(folders);
     debug!("Library: reading {roots:?}");
     with_connection(|conn| {
-        let (result, stale_albums) = scan_with(conn, &roots, sender)?;
-        update_covers(conn, &stale_albums, &roots.unavailable, thumbnail_size)?;
+        let (mut result, stale_albums) = scan_with(conn, &roots, sender)?;
+        result.covers_changed =
+            update_covers(conn, &stale_albums, &roots.unavailable, thumbnail_size)? > 0;
         Ok(result)
     })
 }
@@ -932,7 +936,14 @@ fn scan_with(
         tx.commit()?;
     }
 
-    Ok((ScanResult { updated, n_changed }, stale_albums))
+    Ok((
+        ScanResult {
+            updated,
+            n_changed,
+            covers_changed: false,
+        },
+        stale_albums,
+    ))
 }
 
 // When the file last changed, in nanoseconds: unlike the modification
@@ -958,13 +969,14 @@ fn change_time(metadata: &std::fs::Metadata) -> i64 {
 // tracks changed; the thumbnails are in the cache directory, so they might
 // have been removed since the last scan. They're made from the tracks that
 // are there, so the albums of the `hidden` folders, which aren't, keep
-// theirs until they're back
+// theirs until they're back. Returns the number of albums whose thumbnail
+// was made again, or looked for
 fn update_covers(
     conn: &mut Connection,
     stale_albums: &HashSet<String>,
     hidden: &[PathBuf],
     size: u32,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<usize> {
     let dir = covers_dir();
     let mut missing = Vec::new();
     let mut cover_times = HashMap::new();
@@ -1020,6 +1032,7 @@ fn update_covers(
     }
 
     debug!("Library: generating {} album covers", missing.len());
+    let n_missing = missing.len();
 
     glib::mkdir_with_parents(&dir, 0o700);
 
@@ -1044,7 +1057,8 @@ fn update_covers(
     }
     tx.commit()?;
 
-    remove_unused_covers(conn, &dir)
+    remove_unused_covers(conn, &dir)?;
+    Ok(n_missing)
 }
 
 // The name of the thumbnail of an album: a JPEG, or a PNG for a cover with
