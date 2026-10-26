@@ -274,6 +274,9 @@ All notable changes to this project will be documented in this file.
 - The time left under the playlist pane's title counted all of the
   playing track, however much of it had played, and didn't change when
   tracks were moved or shuffled
+- `RUST_LOG` didn't change what Dismas logged, so the README's way of
+  getting a debug log didn't work, and a release build, like the
+  Flatpak's, couldn't give one
 
 ### Removed
 

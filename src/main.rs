@@ -96,11 +96,22 @@ fn data_paths(exe: Option<&Path>, exists: impl Fn(&Path) -> bool) -> DataPaths {
 }
 
 fn main() -> glib::ExitCode {
+    // RUST_LOG, as in RUST_LOG=dismas=debug, chooses what's logged, so a
+    // release build, like the Flatpak's, can give a debug log too; without
+    // it, development builds log debug messages and release builds from
+    // info up. The default isn't added to RUST_LOG, as its setting for
+    // dismas would take precedence over a general one like RUST_LOG=debug
     let mut builder = pretty_env_logger::formatted_builder();
-    if APPLICATION_ID.ends_with("Devel") {
-        builder.filter(Some("dismas"), LevelFilter::Debug);
-    } else {
-        builder.filter(Some("dismas"), LevelFilter::Info);
+    match env::var("RUST_LOG") {
+        Ok(filters) if !filters.is_empty() => {
+            builder.parse_filters(&filters);
+        }
+        _ if APPLICATION_ID.ends_with("Devel") => {
+            builder.filter(Some("dismas"), LevelFilter::Debug);
+        }
+        _ => {
+            builder.filter(Some("dismas"), LevelFilter::Info);
+        }
     }
     builder.init();
 

@@ -107,6 +107,10 @@ It needs, from your distribution:
 It shares its settings, library and playlists with any other Dismas you
 install for your account, as they're the same app.
 
+For a debug log, to add to a bug report, run it from a terminal with:
+
+    RUST_BACKTRACE=1 RUST_LOG=dismas=debug bin/dismas
+
 Source code, other ways to install it, and bug reports:
 https://github.com/dachshund7/dismas
 
