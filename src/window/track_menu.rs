@@ -35,6 +35,24 @@ impl Window {
         };
         section.append(Some(&label), Some("track.favorite"));
 
+        // While a search hides some of the tracks of the queue, the track
+        // can be shown among all of them, to add or move tracks around it
+        if in_queue && self.queue_filtering() {
+            let show = gio::SimpleAction::new("show-in-playlist", None);
+            show.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[strong]
+                track,
+                move |_, _| win.show_in_playlist(&track)
+            ));
+            actions.add_action(&show);
+            section.append(
+                Some(&i18n("Show in Playlist")),
+                Some("track.show-in-playlist"),
+            );
+        }
+
         // The album is looked up while the menu opens, and the item stays
         // off for the tracks that are not in the album grid; the tracks of
         // an album show all of them, scrolled to the track

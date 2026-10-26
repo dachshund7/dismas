@@ -399,23 +399,34 @@ impl Window {
             return;
         };
         let view = self.imp().playlist_view.queue_view();
-        let mut pos = crate::queue_row::track_position(&view, &track);
-        if pos.is_none() && self.queue_search() {
+        if crate::queue_row::track_position(&view, &track).is_none() && self.queue_search() {
             self.close_queue_search();
-            pos = crate::queue_row::track_position(&view, &track);
         }
-        let Some(pos) = pos else {
+        self.flash_queue_track(&track);
+    }
+
+    // Shows a track that a search found among all the tracks of the queue,
+    // closing the search, e.g. to add or move tracks around it
+    pub(super) fn show_in_playlist(&self, track: &Track) {
+        self.close_queue_search();
+        self.flash_queue_track(track);
+    }
+
+    // Scrolls the queue to a track, which flashes in the middle of the list
+    fn flash_queue_track(&self, track: &Track) {
+        let imp = self.imp();
+        let view = imp.playlist_view.queue_view();
+        let Some(pos) = crate::queue_row::track_position(&view, track) else {
             return;
         };
 
         self.show_playlist_view();
         self.set_playlist_visible(true);
         // A track change stops the glide, and scrolls to the new track
-        let imp = self.imp();
         if let Some(tick) = imp.queue_scroll_tick.take() {
             tick.remove();
         }
-        let tick = crate::queue_row::flash_track(&view, pos, &track);
+        let tick = crate::queue_row::flash_track(&view, pos, track);
         imp.queue_scroll_tick.replace(Some(tick));
     }
 

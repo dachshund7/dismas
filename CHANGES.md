@@ -67,6 +67,9 @@ All notable changes to this project will be documented in this file.
 - The tags of the Work Hierarchy plugin for Picard are read from MP3, M4A,
   AIFF, WAV, Monkey's Audio, WavPack and Musepack files too, not only from
   FLAC, Ogg and Opus files
+- Show in Playlist, in the menu of a track that a search of the playlist
+  pane found, closes the search and shows the track among all the tracks
+  of the playlist
 
 ### Changed
 
