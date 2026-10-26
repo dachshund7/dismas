@@ -1286,7 +1286,7 @@ impl TrackTags {
         // in the grid as in the queue
         let folder_album = album.is_none().then(|| folder_album_title(path)).flatten();
 
-        // As `Track::search_key()` makes it, so that searching the albums
+        // As `Track::with_search_key()` makes it, so that searching the albums
         // matches the same tracks as searching the queue
         let title = track_title(tag);
         let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");

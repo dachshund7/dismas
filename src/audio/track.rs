@@ -770,24 +770,34 @@ impl Track {
         }
     }
 
+    // Whether the text that searching the queue looks into has all the
+    // words, which are normalized like it. Searching tests every track of
+    // the queue at each keystroke, so the text isn't copied
+    pub fn matches_search(&self, words: &[String]) -> bool {
+        self.with_search_key(|key| words.iter().all(|word| key.contains(word.as_str())))
+    }
+
+    #[cfg(test)]
+    pub fn search_key(&self) -> String {
+        self.with_search_key(ToString::to_string)
+    }
+
     // The text that searching the queue looks into, normalized with
     // `normalize_search_text()`; computed once, until the tags change
-    pub fn search_key(&self) -> String {
-        self.imp()
-            .search_key
-            .borrow_mut()
-            .get_or_insert_with(|| {
-                let data = self.imp().data.borrow();
-                // The album title is in the tags, without the names that
-                // would make it match tracks by other people
-                search_key(
-                    data.artist(),
-                    data.searched_title(),
-                    data.tag_text(),
-                    data.fallback_album(),
-                )
-            })
-            .clone()
+    fn with_search_key<T>(&self, f: impl FnOnce(&str) -> T) -> T {
+        let mut key = self.imp().search_key.borrow_mut();
+        let key = key.get_or_insert_with(|| {
+            let data = self.imp().data.borrow();
+            // The album title is in the tags, without the names that
+            // would make it match tracks by other people
+            search_key(
+                data.artist(),
+                data.searched_title(),
+                data.tag_text(),
+                data.fallback_album(),
+            )
+        });
+        f(key)
     }
 
     pub fn file(&self) -> gio::File {

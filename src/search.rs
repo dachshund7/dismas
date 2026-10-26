@@ -79,8 +79,7 @@ mod imp {
             }
 
             let track = track.downcast_ref::<Track>().unwrap();
-            let key = track.search_key();
-            words.iter().all(|word| key.contains(word.as_str()))
+            track.matches_search(&words)
         }
     }
 }
