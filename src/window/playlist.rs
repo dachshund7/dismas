@@ -398,18 +398,27 @@ impl Window {
         }
     }
 
-    // Only the last track to go to is scrolled to, e.g. skipping several
     pub(super) fn scroll_queue_to_track(&self) {
-        let imp = self.imp();
-        if let Some(tick) = imp.queue_scroll_tick.take() {
-            tick.remove();
+        match self.player().queue().current() {
+            Some(track) => self.reveal_queue_track(&track),
+            None => self.set_queue_scroll(None),
         }
-        let Some(track) = self.player().queue().current() else {
-            return;
-        };
-        let view = imp.playlist_view.queue_view();
-        let tick = crate::queue_row::reveal_track(&view, &track);
-        imp.queue_scroll_tick.replace(Some(tick));
+    }
+
+    // Shows a track in the queue once it's laid out, keeping the rows
+    // around it in view
+    pub(super) fn reveal_queue_track(&self, track: &Track) {
+        let view = self.imp().playlist_view.queue_view();
+        self.set_queue_scroll(Some(crate::queue_row::reveal_track(&view, track)));
+    }
+
+    // Scrolling the queue takes the place of the scrolling before it, so
+    // that only the last place to go to is scrolled to, e.g. skipping
+    // several tracks, and two don't pull the list each their own way
+    fn set_queue_scroll(&self, tick: Option<gtk::TickCallbackId>) {
+        if let Some(old) = self.imp().queue_scroll_tick.replace(tick) {
+            old.remove();
+        }
     }
 
     // Closes the search of the queue, showing all its tracks again; the
@@ -499,11 +508,7 @@ impl Window {
         self.show_playlist_view();
         self.set_playlist_visible(true);
         // A track change stops the glide, and scrolls to the new track
-        if let Some(tick) = imp.queue_scroll_tick.take() {
-            tick.remove();
-        }
-        let tick = crate::queue_row::flash_track(&view, pos, track);
-        imp.queue_scroll_tick.replace(Some(tick));
+        self.set_queue_scroll(Some(crate::queue_row::flash_track(&view, pos, track)));
     }
 
     // Moves a track above or below another one, dropped on its row. In

@@ -248,10 +248,7 @@ impl Window {
                     // above the first of them would be out of its view; the
                     // list goes to the track that plays instead
                     if insert_before.is_some() || (close_search && !play) {
-                        crate::queue_row::reveal_track(
-                            &win.imp().playlist_view.queue_view(),
-                            &tracks[0],
-                        );
+                        win.reveal_queue_track(&tracks[0]);
                     }
 
                     // Store the current state of the queue; restoring
