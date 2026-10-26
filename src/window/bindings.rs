@@ -424,6 +424,16 @@ impl Window {
         self.action_set_enabled("queue.select", n_tracks > 0);
         let can_shuffle = n_tracks > 1 || (n_tracks > 0 && self.queue_shuffled());
         self.action_set_enabled("queue.shuffle", can_shuffle && !loading);
+        // Playing the tracks a search found needs some, and the search
+        // would only find some of those being read
+        let found = self.queue_filtering()
+            && self
+                .imp()
+                .queue_filtermodel
+                .borrow()
+                .as_ref()
+                .is_some_and(|model| model.n_items() > 0);
+        self.action_set_enabled("queue.play-results", found && !loading);
     }
 
     // The initial state of the playback actions

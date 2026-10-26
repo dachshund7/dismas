@@ -405,6 +405,10 @@ mod imp {
                 win.set_queue_search(true);
                 win.imp().playlist_view.queue_searchentry().grab_focus();
             });
+            klass.install_action("queue.play-results", None, move |win, _, _| {
+                debug!("Window::queue.play-results()");
+                win.play_search_results();
+            });
             klass.install_action("queue.remove-selected", None, move |win, _, _| {
                 debug!("Window::queue.remove-selected()");
                 win.remove_selected_tracks();

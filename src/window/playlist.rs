@@ -188,7 +188,18 @@ impl Window {
         ));
 
         imp.queue_filtermodel
-            .replace(Some(filter_model.upcast::<gio::ListModel>()));
+            .replace(Some(filter_model.clone().upcast::<gio::ListModel>()));
+        // Playing the tracks found needs a search that found some
+        filter_model.connect_items_changed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, _, _, _| win.update_queue_actions()
+        ));
+        filter.connect_filtering_notify(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| win.update_queue_actions()
+        ));
 
         imp.playlist_view
             .queue_searchentry()
@@ -384,6 +395,31 @@ impl Window {
     pub(super) fn close_queue_search(&self) {
         self.imp().playlist_view.queue_searchentry().set_text("");
         self.set_queue_search(false);
+    }
+
+    // Plays the tracks the search found, in their order, in place of
+    // those of the queue, with an Undo, like a smart playlist; the ones
+    // whose files are missing are left out, as they can't play
+    pub(super) fn play_search_results(&self) {
+        let imp = self.imp();
+        if !self.queue_filtering() || imp.loads.get() > 0 {
+            return;
+        }
+        // By position: the filter model's item type is GObject, which
+        // `iter::<Track>()` would refuse, though its items are tracks
+        let files: Vec<gio::File> = imp
+            .queue_filtermodel
+            .borrow()
+            .iter()
+            .flat_map(|model| (0..model.n_items()).filter_map(|pos| model.item(pos)))
+            .filter_map(|item| item.downcast::<Track>().ok())
+            .filter(|track| !track.missing())
+            .map(|track| track.file())
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+        self.play_in_place_of_queue(files);
     }
 
     // Whether the search of the queue hides some of its tracks

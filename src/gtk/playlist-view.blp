@@ -93,12 +93,25 @@ template $DismasPlaylistView: Widget {
         maximum-size: 400;
         hexpand: true;
 
-        child: SearchEntry queue_searchentry {
-          placeholder-text: _("Search tracks");
+        child: Box {
+          spacing: 6;
 
-          accessibility {
-            label: C_("a11y", "Search");
-            description: C_("a11y", "Type to search tracks");
+          SearchEntry queue_searchentry {
+            hexpand: true;
+            placeholder-text: _("Search tracks");
+
+            accessibility {
+              label: C_("a11y", "Search");
+              description: C_("a11y", "Type to search tracks");
+            }
+          }
+
+          // Plays the tracks the search found in place of the queue, as
+          // playback goes through all the tracks of the queue otherwise
+          Button {
+            icon-name: "media-playback-start-symbolic";
+            action-name: "queue.play-results";
+            tooltip-text: _("Play Matching Tracks");
           }
         };
       };
