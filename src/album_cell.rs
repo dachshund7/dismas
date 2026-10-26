@@ -5,7 +5,7 @@
 // and artist, in a box that highlights the album when it's selected in
 // selection mode, and tells screen readers whether it's selected
 
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, OnceCell, RefCell};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -22,6 +22,9 @@ mod imp {
         #[property(get, set = Self::set_selection_mode, explicit_notify)]
         pub selection_mode: Cell<bool>,
         pub picture: OnceCell<gtk::Picture>,
+        // The album the cell shows, and the item of the grid it's in
+        pub album: RefCell<Option<Album>>,
+        pub list_item: glib::WeakRef<gtk::ListItem>,
         pub title: gtk::Label,
         pub artist: gtk::Label,
     }
@@ -113,6 +116,21 @@ impl AlbumCell {
         imp.title.set_label(&album.title());
         imp.artist.set_label(&album.artist());
         self.picture().set_paintable(gtk::gdk::Paintable::NONE);
+        imp.album.replace(Some(album.clone()));
+    }
+
+    pub fn album(&self) -> Option<Album> {
+        self.imp().album.borrow().clone()
+    }
+
+    pub fn set_list_item(&self, item: &gtk::ListItem) {
+        self.imp().list_item.set(Some(item));
+    }
+
+    // The position in the grid of the album the cell shows
+    pub fn position(&self) -> Option<u32> {
+        let position = self.imp().list_item.upgrade()?.position();
+        (position != gtk::INVALID_LIST_POSITION).then_some(position)
     }
 
     // Selected albums are highlighted in selection mode, in place of a

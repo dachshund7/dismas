@@ -33,9 +33,10 @@ const MAX_COVER_SIZE: i32 = 240;
 const COVER_SPACING: i32 = 2 * (8 + 8);
 const GRID_PADDING: i32 = 12;
 
-// The number of covers kept in memory, enough for a few screenfuls of
-// the grid; keeping all of them would take hundreds of megabytes
-const MAX_CACHED_COVERS: usize = 100;
+// The number of covers kept in memory: the ones on screen, the ones read
+// ahead a screenful above and below them, and the last ones scrolled past;
+// keeping all of them would take hundreds of megabytes
+const MAX_CACHED_COVERS: usize = 150;
 
 // The pictures waiting for each cover to load, as album IDs and pictures,
 // keyed by the path of the cover
@@ -147,6 +148,8 @@ mod imp {
         pub search_words: RefCell<Vec<String>>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
+        // An idle callback will read ahead the covers around the screen
+        pub read_ahead_pending: Cell<bool>,
         // The music folders are being read
         #[property(get)]
         pub scanning: Cell<bool>,
@@ -497,6 +500,25 @@ impl LibraryView {
                 let cover = SquareBin::new(&overlay, MIN_COVER_SIZE, MAX_COVER_SIZE);
                 let content = AlbumCell::new(&cover, &picture);
 
+                // GridView keeps hundreds of cells bound around the visible
+                // ones, and binds many of them again at about every frame
+                // while the grid scrolls, as its anchor moves back and forth,
+                // but it hides the ones off screen. So a cell only shows its
+                // cover while it's mapped; the cache keeps the most recent
+                // ones for when they come back into view
+                picture.connect_map(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    content,
+                    move |picture| {
+                        if let Some(album) = content.album() {
+                            this.load_cover(&album, picture);
+                        }
+                    }
+                ));
+                picture.connect_unmap(|picture| picture.set_paintable(gdk::Paintable::NONE));
+
                 // Ctrl+click selects the album, and Shift+click in selection
                 // mode the albums from the last one clicked, like in the
                 // queue
@@ -525,6 +547,7 @@ impl LibraryView {
                 ));
                 content.add_controller(click);
                 this.setup_album_drag(&content, item, &picture);
+                content.set_list_item(item);
 
                 item.set_child(Some(&content));
 
@@ -547,7 +570,13 @@ impl LibraryView {
                 };
                 let cell = item.child().and_downcast::<AlbumCell>().unwrap();
                 cell.show_album(&album);
-                this.load_cover(&album, cell.picture());
+                // The picture's name is the album it shows, which a cover
+                // read in another thread is checked against
+                let picture = cell.picture();
+                picture.set_widget_name(&album.id());
+                if picture.is_mapped() {
+                    this.load_cover(&album, picture);
+                }
             }
         ));
 
@@ -638,11 +667,11 @@ impl LibraryView {
 
     // Sets the cover of the album on the picture, once it has been loaded
     // in a separate thread; grid cells are recycled when scrolling, so the
-    // picture might be showing another album by then
+    // picture might be showing another album by then, or be off screen
     fn load_cover(&self, album: &Album, picture: &gtk::Picture) {
         let imp = self.imp();
-        picture.set_widget_name(&album.id());
-
+        // An album coming into view moves the covers to read ahead
+        self.read_ahead();
         let Some(path) = album.cover_path() else {
             return;
         };
@@ -652,13 +681,96 @@ impl LibraryView {
             return;
         }
 
-        // Another picture is already waiting for the same cover
-        let mut pending = imp.pending_covers.borrow_mut();
-        if let Some(waiting) = pending.get_mut(&path) {
-            waiting.push((album.id(), picture.downgrade()));
+        // GridView maps the cells as it lays out the grid, and hides the
+        // ones off screen afterwards, as when the grid is shown: the cover
+        // is only read if the picture is still on screen once that's done
+        let id = album.id();
+        glib::idle_add_local_once(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            picture,
+            move || {
+                if picture.is_mapped() && picture.widget_name() == id {
+                    this.read_cover(path, Some((id, &picture)));
+                }
+            }
+        ));
+    }
+
+    // Reads ahead the covers of the albums a screenful above and below the
+    // ones on screen, into the cache: GridView only shows a cell once it's
+    // within a few pixels of the screen, which would leave the albums
+    // coming into view without their covers while they're read
+    fn read_ahead(&self) {
+        if self.imp().read_ahead_pending.replace(true) {
             return;
         }
-        pending.insert(path.clone(), vec![(album.id(), picture.downgrade())]);
+        glib::idle_add_local_once(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move || {
+                let imp = this.imp();
+                imp.read_ahead_pending.set(false);
+                let Some(model) = imp.grid_view.model() else {
+                    return;
+                };
+
+                // The cells on screen are the mapped ones
+                let mut shown: Option<(u32, u32)> = None;
+                let mut child = imp.grid_view.first_child();
+                while let Some(widget) = child {
+                    if widget.is_mapped()
+                        && let Some(position) = widget
+                            .first_child()
+                            .and_downcast::<AlbumCell>()
+                            .and_then(|cell| cell.position())
+                    {
+                        shown = Some(shown.map_or((position, position), |(first, last)| {
+                            (first.min(position), last.max(position))
+                        }));
+                    }
+                    child = widget.next_sibling();
+                }
+                let Some((first, last)) = shown else {
+                    return;
+                };
+
+                let screenful = last - first + 1;
+                let end = (last + screenful).min(model.n_items().saturating_sub(1));
+                for position in first.saturating_sub(screenful)..=end {
+                    if let Some(path) = model
+                        .item(position)
+                        .and_downcast::<Album>()
+                        .and_then(|album| album.cover_path())
+                    {
+                        this.read_cover(path, None);
+                    }
+                }
+            }
+        ));
+    }
+
+    // Reads the cover in a separate thread, into the cache, and for the
+    // picture showing the album with this ID, if there's one
+    fn read_cover(&self, path: String, picture: Option<(String, &gtk::Picture)>) {
+        let imp = self.imp();
+        if let Some(texture) = imp.textures.borrow_mut().get(&path) {
+            if let Some((_, picture)) = picture {
+                picture.set_paintable(Some(&texture));
+            }
+            return;
+        }
+
+        // Another picture, or reading ahead, is already waiting for the
+        // same cover
+        let waiting = picture.map(|(id, picture)| (id, picture.downgrade()));
+        let mut pending = imp.pending_covers.borrow_mut();
+        if let Some(others) = pending.get_mut(&path) {
+            others.extend(waiting);
+            return;
+        }
+        pending.insert(path.clone(), waiting.into_iter().collect());
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
@@ -681,6 +793,7 @@ impl LibraryView {
                 for (id, picture) in waiting.into_iter().flatten() {
                     if let Some(picture) = picture.upgrade()
                         && picture.widget_name() == id
+                        && picture.is_mapped()
                     {
                         picture.set_paintable(Some(&texture));
                     }

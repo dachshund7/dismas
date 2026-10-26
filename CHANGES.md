@@ -69,13 +69,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- The album grid takes much less processor time: its covers are saved as
-  JPEG, which is quicker to read than PNG and takes a fraction of the
-  room, and on screens without HiDPI scaling they're made as large as the
-  grid shows them, rather than twice as large, which takes a quarter of
-  the memory. They're made again once, after updating. The grid also stays
-  as it is after looking for changes in the music folders finds none, as
-  at most starts, rather than read all of its covers again
+- The album grid takes much less processor time and memory: it only reads
+  the covers of the albums on screen, where it read those of hundreds of
+  albums around them, again and again while scrolling. Its covers are
+  saved as JPEG, which is quicker to read than PNG and takes a fraction of
+  the room, and on screens without HiDPI scaling they're made as large as
+  the grid shows them, rather than twice as large. They're made again
+  once, after updating. The grid also stays as it is after looking for
+  changes in the music folders finds none, as at most starts, rather than
+  read all of its covers again
 - Show the Playing Track and Go to Album glide to the track, rather than
   jumping to it, and the rows of moved tracks slide into place more
   gently, starting slowly instead of at full speed
