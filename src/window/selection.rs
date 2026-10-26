@@ -5,28 +5,27 @@ use super::*;
 
 impl Window {
     pub(super) fn update_selected_count(&self) {
-        if let Some(player) = self.player() {
-            let queue = player.queue();
-            let n_selected = queue.n_selected_tracks();
+        let player = self.player();
+        let queue = player.queue();
+        let n_selected = queue.n_selected_tracks();
 
-            let selected_str = if n_selected == 0 {
-                i18n("No track selected")
-            } else {
-                ni18n_f(
-                    // Translators: The '{}' must be left unmodified, and
-                    // it is expanded to the number of tracks selected
-                    "{} track selected",
-                    "{} tracks selected",
-                    n_selected,
-                    &[&n_selected.to_string()],
-                )
-            };
+        let selected_str = if n_selected == 0 {
+            i18n("No track selected")
+        } else {
+            ni18n_f(
+                // Translators: The '{}' must be left unmodified, and
+                // it is expanded to the number of tracks selected
+                "{} track selected",
+                "{} tracks selected",
+                n_selected,
+                &[&n_selected.to_string()],
+            )
+        };
 
-            self.imp()
-                .playlist_view
-                .queue_selected_label()
-                .set_label(&selected_str);
-        }
+        self.imp()
+            .playlist_view
+            .queue_selected_label()
+            .set_label(&selected_str);
     }
 
     // Selects all the tracks in the queue, or the ones matching the
@@ -41,7 +40,8 @@ impl Window {
                     }
                 }
             }
-        } else if let Some(player) = self.player() {
+        } else {
+            let player = self.player();
             let queue = player.queue();
             for idx in 0..queue.n_tracks() {
                 queue.track_at(idx).unwrap().set_selected(true);
@@ -102,14 +102,13 @@ impl Window {
     }
 
     pub(super) fn remove_selected_tracks(&self) {
-        if let Some(player) = self.player() {
-            let queue = player.queue();
-            let tracks = queue.selected_tracks();
-            self.remove_tracks(&tracks);
+        let player = self.player();
+        let queue = player.queue();
+        let tracks = queue.selected_tracks();
+        self.remove_tracks(&tracks);
 
-            // Store the current state of the queue
-            self.store_queue();
-        }
+        // Store the current state of the queue
+        self.store_queue();
     }
 
     // Leaves selection mode in the grid, the tracks of an album and the

@@ -248,6 +248,9 @@ mod imp {
         // they aren't dropped
         pub pane_opened_for_drag: Cell<bool>,
 
+        // The application's player, see `Window::player()`
+        pub player: std::cell::OnceCell<Rc<AudioPlayer>>,
+
         // The toast about the last track that failed to play, which the
         // next one takes the place of
         pub failed_toast: glib::WeakRef<adw::Toast>,
@@ -270,21 +273,15 @@ mod imp {
 
             klass.install_action("win.play", None, move |win, _, _| {
                 debug!("Window::win.play()");
-                if let Some(p) = win.player() {
-                    p.toggle_play();
-                }
+                win.player().toggle_play();
             });
             klass.install_action("win.seek-backwards", None, move |win, _, _| {
                 debug!("Window::win.seek-backwards");
-                if let Some(p) = win.player() {
-                    p.seek_backwards();
-                }
+                win.player().seek_backwards();
             });
             klass.install_action("win.seek-forward", None, move |win, _, _| {
                 debug!("Window::win.seek-forward");
-                if let Some(p) = win.player() {
-                    p.seek_forward();
-                }
+                win.player().seek_forward();
             });
             klass.install_action("win.volume-up", None, move |win, _, _| {
                 debug!("Window::win.volume-up()");
@@ -296,21 +293,15 @@ mod imp {
             });
             klass.install_action("win.previous", None, move |win, _, _| {
                 debug!("Window::win.previous()");
-                if let Some(p) = win.player() {
-                    p.skip_previous();
-                }
+                win.player().skip_previous();
             });
             klass.install_action("win.next", None, move |win, _, _| {
                 debug!("Window::win.next()");
-                if let Some(p) = win.player() {
-                    p.skip_next();
-                }
+                win.player().skip_next();
             });
             klass.install_action("queue.repeat-mode", None, move |win, _, _| {
                 debug!("Window::queue.repeat()");
-                if let Some(p) = win.player() {
-                    p.toggle_repeat_mode();
-                }
+                win.player().toggle_repeat_mode();
             });
             klass.install_action("win.copy", None, move |win, _, _| {
                 debug!("Window::win.copy()");
@@ -531,6 +522,7 @@ mod imp {
                 provider: gtk::CssProvider::new(),
                 provider_css: RefCell::default(),
                 settings: utils::settings_manager(),
+                player: std::cell::OnceCell::new(),
                 failed_toast: glib::WeakRef::new(),
                 handlers: RefCell::default(),
             }
@@ -656,7 +648,7 @@ mod imp {
             if favorite == self.track_favorite.get() {
                 return;
             }
-            let Some(track) = obj.player().and_then(|p| p.state().track()) else {
+            let Some(track) = obj.player().state().track() else {
                 return;
             };
             play_stats::set_favorite(&track.uri(), favorite);
@@ -668,11 +660,8 @@ mod imp {
             let obj = self.obj();
 
             if selection != self.queue_selection.replace(selection) {
-                if !selection && let Some(player) = obj.player() {
-                    let queue = player.queue();
-                    queue.unselect_all_tracks();
-                }
                 if !selection {
+                    obj.player().queue().unselect_all_tracks();
                     self.queue_anchor.set(None);
                 }
 
@@ -802,9 +791,7 @@ mod imp {
         fn set_replaygain_mode(&self, replaygain: ReplayGainMode) {
             if replaygain != self.replaygain_mode.replace(replaygain) {
                 let obj = self.obj();
-                if let Some(p) = obj.player() {
-                    p.set_replaygain(replaygain);
-                }
+                obj.player().set_replaygain(replaygain);
                 if let Err(e) = self.settings.set_enum("replay-gain", replaygain.into()) {
                     log::warn!("Unable to store the ReplayGain mode: {e}");
                 }
@@ -840,10 +827,12 @@ glib::wrapper! {
 }
 
 impl Window {
-    pub fn new<P: IsA<gtk::Application>>(application: &P) -> Self {
+    pub fn new(application: &crate::application::Application) -> Self {
         let win = glib::Object::builder::<Window>()
             .property("application", application)
             .build();
+        // Before anything uses it
+        win.imp().player.set(application.player()).unwrap();
 
         win.setup_waveform();
         win.setup_actions();
@@ -887,16 +876,15 @@ impl Window {
             .is_some_and(|app| app.plays_in_background())
     }
 
-    fn player(&self) -> Option<Rc<AudioPlayer>> {
-        if let Some(app) = self.application() {
-            let player = app
-                .downcast::<crate::application::Application>()
-                .unwrap()
-                .player();
-            return Some(player);
-        }
-
-        None
+    // The application's player, which the window keeps from when it's
+    // made: the window lives as long as the application, as closing it
+    // either hides it or quits
+    fn player(&self) -> Rc<AudioPlayer> {
+        self.imp()
+            .player
+            .get()
+            .expect("the window has the player from when it's made")
+            .clone()
     }
 
     fn setup_actions(&self) {
@@ -1157,9 +1145,8 @@ impl Window {
             #[strong]
             track,
             move |_| {
-                if let Some(player) = win.player()
-                    && let Some(pos) = player.queue().position(&track)
-                {
+                let player = win.player();
+                if let Some(pos) = player.queue().position(&track) {
                     player.skip_to(pos);
                     player.play();
                 }

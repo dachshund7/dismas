@@ -226,9 +226,8 @@ impl Window {
                     win.add_toast(i18n("No tracks found"));
                 }
 
-                if tracks.is_empty() {
-                    // Nothing to add
-                } else if let Some(player) = win.player() {
+                if !tracks.is_empty() {
+                    let player = win.player();
                     let queue = player.queue();
                     let was_empty = queue.is_empty();
                     let first_added = queue.n_tracks();
@@ -415,9 +414,7 @@ impl Window {
     // tracks whose files weren't found are looked for again, as a scan
     // follows plugging in a drive
     pub(super) fn reload_changed_tracks(&self, uris: &[String]) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         let shown: Vec<Track> = player
             .queue()
             .model()
@@ -483,9 +480,7 @@ impl Window {
     fn show_updated_track(&self, track: &Track) {
         // The cover can have changed without its id, which is the album's
         self.imp().full_cover.take();
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         player.queue().track_changed(track);
         self.imp().album_tracks.track_changed(track);
         if player.state().track().as_ref() == Some(track) {
@@ -737,7 +732,7 @@ impl Window {
             FileDrop::Place(row, true) | FileDrop::AboveWork(row) => row.track(),
             FileDrop::Place(row, false) => {
                 let target = row.track()?;
-                self.player()?.queue().track_after(&target)
+                self.player().queue().track_after(&target)
             }
             FileDrop::End | FileDrop::Zones => None,
         }

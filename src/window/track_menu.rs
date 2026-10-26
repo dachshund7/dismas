@@ -140,10 +140,7 @@ impl Window {
             ));
             actions.add_action(&remove);
 
-            let several = selection
-                && self
-                    .player()
-                    .is_some_and(|p| p.queue().n_selected_tracks() > 1);
+            let several = selection && self.player().queue().n_selected_tracks() > 1;
             let label = if several {
                 i18n("Remove Selected Tracks")
             } else {
@@ -170,16 +167,15 @@ impl Window {
     }
 
     pub(super) fn copy_track(&self) {
-        if let Some(player) = self.player() {
-            let state = player.state();
-            if let Some(track) = state.track() {
-                self.clipboard().set_text(&track.copied_details());
-            }
+        let player = self.player();
+        let state = player.state();
+        if let Some(track) = state.track() {
+            self.clipboard().set_text(&track.copied_details());
         }
     }
 
     async fn playing_album(&self) -> Option<(String, gio::File)> {
-        let file = self.player()?.state().track()?.file();
+        let file = self.player().state().track()?.file();
         let album_id = track_album(&file).await?;
         Some((album_id, file))
     }
@@ -220,9 +216,7 @@ impl Window {
     }
 
     pub(super) fn show_track_info(&self) {
-        if let Some(player) = self.player()
-            && let Some(track) = player.state().track()
-        {
+        if let Some(track) = self.player().state().track() {
             self.show_track_info_for(&track);
         }
     }
@@ -289,9 +283,7 @@ impl Window {
     }
 
     pub(super) async fn open_playing_track_directory(&self) {
-        if let Some(player) = self.player()
-            && let Some(track) = player.state().track()
-        {
+        if let Some(track) = self.player().state().track() {
             self.open_track_directory(&track).await;
         }
     }

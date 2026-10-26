@@ -20,9 +20,7 @@ impl Window {
         };
         // What was heard of the track playing isn't saved until it ends,
         // so it's saved now, to be on the list
-        if let Some(player) = self.player() {
-            player.save_listen();
-        }
+        self.player().save_listen();
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]

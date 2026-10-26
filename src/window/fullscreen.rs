@@ -64,10 +64,10 @@ impl Window {
     // thread, once per cover; high contrast has the plain dark background
     pub(super) fn update_backdrop(&self) {
         let imp = self.imp();
-        let cover = self
-            .player()
-            .and_then(|player| player.state().cover())
-            .filter(|_| self.is_fullscreen() && !adw::StyleManager::default().is_high_contrast());
+        let cover =
+            self.player().state().cover().filter(|_| {
+                self.is_fullscreen() && !adw::StyleManager::default().is_high_contrast()
+            });
         let Some(cover) = cover else {
             imp.backdrop_source.take();
             imp.player_backdrop.set_texture(None);

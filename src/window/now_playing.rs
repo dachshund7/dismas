@@ -5,67 +5,63 @@ use super::*;
 
 impl Window {
     pub(super) fn update_play_button(&self) {
-        if let Some(player) = self.player() {
-            let state = player.state();
-            let play_button = self.imp().playback_control.play_button();
-            if state.playing() {
-                play_button.set_icon_name("media-playback-pause-symbolic");
-            } else {
-                play_button.set_icon_name("media-playback-start-symbolic");
-            }
+        let player = self.player();
+        let state = player.state();
+        let play_button = self.imp().playback_control.play_button();
+        if state.playing() {
+            play_button.set_icon_name("media-playback-pause-symbolic");
+        } else {
+            play_button.set_icon_name("media-playback-start-symbolic");
         }
     }
 
     pub(super) fn update_position_labels(&self) {
-        if let Some(player) = self.player() {
-            let state = player.state();
-            if state.track().is_some() {
-                let elapsed = state.position();
-                let duration = state.duration();
-                let remaining = duration.saturating_sub(elapsed);
-                self.set_track_time(Some(elapsed), Some(remaining));
+        let player = self.player();
+        let state = player.state();
+        if state.track().is_some() {
+            let elapsed = state.position();
+            let duration = state.duration();
+            let remaining = duration.saturating_sub(elapsed);
+            self.set_track_time(Some(elapsed), Some(remaining));
 
-                // The duration is 0 until it's known, and dividing by it
-                // would make the position NaN, which survives clamping
-                let position = if duration > 0 {
-                    elapsed as f64 / duration as f64
-                } else {
-                    0.0
-                };
-                self.set_track_position(position);
+            // The duration is 0 until it's known, and dividing by it
+            // would make the position NaN, which survives clamping
+            let position = if duration > 0 {
+                elapsed as f64 / duration as f64
             } else {
-                self.set_track_time(None, None);
-                self.set_track_position(0.0);
-            }
+                0.0
+            };
+            self.set_track_position(position);
+        } else {
+            self.set_track_time(None, None);
+            self.set_track_position(0.0);
         }
     }
 
     pub(super) fn update_track(&self) {
-        if let Some(player) = self.player() {
-            let state = player.state();
-            self.scroll_queue_to_track();
-            self.update_queue_time();
-            self.update_title(state.track().as_ref());
-            self.update_style(state.track().as_ref());
-        }
+        let player = self.player();
+        let state = player.state();
+        self.scroll_queue_to_track();
+        self.update_queue_time();
+        self.update_title(state.track().as_ref());
+        self.update_style(state.track().as_ref());
         self.sync_track_favorite();
     }
 
     pub(super) fn update_cover(&self) {
-        if let Some(player) = self.player() {
-            let state = player.state();
-            let track_cover = self.imp().track_cover.get();
-            if let Some(cover) = state.cover() {
-                track_cover.album_image().set_cover(Some(&cover));
-                track_cover.show_cover_image(true);
+        let player = self.player();
+        let state = player.state();
+        let track_cover = self.imp().track_cover.get();
+        if let Some(cover) = state.cover() {
+            track_cover.album_image().set_cover(Some(&cover));
+            track_cover.show_cover_image(true);
 
-                if let Some(track) = state.track() {
-                    self.load_full_cover(&track);
-                }
-            } else {
-                track_cover.album_image().set_cover(None::<&gdk::Texture>);
-                track_cover.show_cover_image(false);
+            if let Some(track) = state.track() {
+                self.load_full_cover(&track);
             }
+        } else {
+            track_cover.album_image().set_cover(None::<&gdk::Texture>);
+            track_cover.show_cover_image(false);
         }
         self.update_backdrop();
     }
@@ -105,9 +101,7 @@ impl Window {
                 };
 
                 // The track might have changed while we were loading
-                let Some(player) = win.player() else {
-                    return;
-                };
+                let player = win.player();
                 if player.state().track().map(|t| t.uri()) != Some(uri) {
                     return;
                 }

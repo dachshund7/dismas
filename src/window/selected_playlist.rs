@@ -157,9 +157,7 @@ impl Window {
 
     // Saves the tracks of the queue to the selected playlist
     pub(super) fn store_queue(&self) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         // A deleted playlist could still be playing, while the queue loads
         let name = self.selected_playlist();
         if !name.is_empty() && !playlists::exists(&name) {
@@ -186,9 +184,7 @@ impl Window {
     // stopped, comes first, to go on from there; otherwise the first of the
     // shuffled tracks is ready to play
     pub(super) fn shuffle_queue(&self) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         let queue = player.queue();
         // While tracks are read, the queue doesn't have them all yet
         let name = self.selected_playlist();
@@ -223,9 +219,7 @@ impl Window {
     // before they were shuffled; the tracks added since go at the end. The
     // current track stays, and playback goes on from it
     pub(super) fn unshuffle_queue(&self) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         let name = self.selected_playlist();
         if self.imp().loads.get() > 0 {
             return;
@@ -260,10 +254,7 @@ impl Window {
         self.save_resume_point();
         let selected = self.selected_playlist();
         let queue = playlists::load("")
-            .or_else(|| {
-                let player = self.player().filter(|_| selected.is_empty())?;
-                Some(player.queue().files())
-            })
+            .or_else(|| selected.is_empty().then(|| self.player().queue().files()))
             .unwrap_or_default();
         ReplacedQueue {
             selected,
@@ -294,9 +285,7 @@ impl Window {
         // place of the one put back. The pane stays meanwhile
         self.save_resume_point();
         imp.pending_playlist.replace(Some(selected.to_string()));
-        if let Some(player) = self.player() {
-            player.clear_queue();
-        }
+        self.player().clear_queue();
 
         // The order from before shuffling is kept first, so that a crash in
         // between can't lose it
@@ -363,9 +352,7 @@ impl Window {
         // would come after the switch. Its tracks played until now, while
         // those of the new one were read
         self.save_resume_point();
-        if let Some(player) = self.player() {
-            player.clear_queue();
-        }
+        self.player().clear_queue();
         self.set_selected_playlist(name);
     }
 
@@ -493,9 +480,10 @@ impl Window {
     // queue can be cleared without emptying it. The toast can open it
     fn save_queue_as_playlist(&self, name: &str) {
         // The queue in the player, while it's selected, or as last saved
-        let files = match self.player() {
-            Some(player) if self.selected_playlist().is_empty() => Some(player.queue().files()),
-            _ => playlists::load(""),
+        let files = if self.selected_playlist().is_empty() {
+            Some(self.player().queue().files())
+        } else {
+            playlists::load("")
         };
         let result = files
             .ok_or_else(|| glib::Error::new(gio::IOErrorEnum::Failed, "Unable to read the queue"))
@@ -531,13 +519,12 @@ impl Window {
             return;
         }
 
-        let unchanged = self.selected_playlist().is_empty()
-            && self.player().is_some_and(|player| {
-                let queue = player.queue().files();
-                playlists::load(name).is_some_and(|files| {
-                    files.len() == queue.len() && files.iter().zip(&queue).all(|(a, b)| a.equal(b))
-                })
-            });
+        let unchanged = self.selected_playlist().is_empty() && {
+            let queue = self.player().queue().files();
+            playlists::load(name).is_some_and(|files| {
+                files.len() == queue.len() && files.iter().zip(&queue).all(|(a, b)| a.equal(b))
+            })
+        };
         if unchanged {
             // The queue still has the same tracks, and keeps its point
             ResumePoints::update(&self.imp().settings, |points| points.copy("", name));

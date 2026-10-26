@@ -8,9 +8,7 @@ impl Window {
     // popover of the sleep timer button, and win.sleep-timer-cancel turns
     // it off
     pub(super) fn setup_sleep_timer(&self) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         let timer = player.sleep_timer();
         let settings = &self.imp().settings;
 
@@ -34,19 +32,15 @@ impl Window {
                     let spin = control.sleep_timer_minutes();
                     // Takes in minutes typed without pressing Enter
                     spin.update();
-                    if let Some(player) = win.player() {
-                        player
-                            .sleep_timer()
-                            .start(spin.value_as_int().max(1) as u32);
-                    }
+                    win.player()
+                        .sleep_timer()
+                        .start(spin.value_as_int().max(1) as u32);
                     control.close_sleep_timer();
                 })
                 .build(),
             gio::ActionEntry::builder("sleep-timer-cancel")
                 .activate(|win: &Window, _, _| {
-                    if let Some(player) = win.player() {
-                        player.sleep_timer().cancel();
-                    }
+                    win.player().sleep_timer().cancel();
                     win.imp().playback_control.close_sleep_timer();
                 })
                 .build(),
@@ -67,9 +61,7 @@ impl Window {
     }
 
     fn update_sleep_timer(&self) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         let timer = player.sleep_timer();
         let control = &self.imp().playback_control;
         if let Some(action) = self

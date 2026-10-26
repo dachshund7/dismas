@@ -5,23 +5,22 @@ use super::*;
 
 impl Window {
     pub(super) fn setup_waveform(&self) {
-        if let Some(player) = self.player() {
-            let peaks = player.waveform_generator().peaks();
-            self.imp().waveform_view.set_peaks(peaks);
+        let player = self.player();
+        let peaks = player.waveform_generator().peaks();
+        self.imp().waveform_view.set_peaks(peaks);
 
-            let notify_peaks_id = player.waveform_generator().connect_notify_local(
-                Some("has-peaks"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |generator, _| {
-                        let peaks = generator.peaks();
-                        win.imp().waveform_view.set_peaks(peaks);
-                    }
-                ),
-            );
-            self.disconnect_on_close(player.waveform_generator(), notify_peaks_id);
-        }
+        let notify_peaks_id = player.waveform_generator().connect_notify_local(
+            Some("has-peaks"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |generator, _| {
+                    let peaks = generator.peaks();
+                    win.imp().waveform_view.set_peaks(peaks);
+                }
+            ),
+        );
+        self.disconnect_on_close(player.waveform_generator(), notify_peaks_id);
     }
 
     // Keeps a handler connected to an object that outlives the window, to
@@ -40,199 +39,195 @@ impl Window {
     // Bind the PlayerState to the UI
     pub(super) fn bind_state(&self) {
         let imp = self.imp();
-        if let Some(player) = self.player() {
-            let state = player.state();
+        let player = self.player();
+        let state = player.state();
 
-            // Use the PlayerState:playing property to control the play/pause button
-            self.update_play_button();
-            let notify_playing_id = state.connect_notify_local(
-                Some("playing"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |_, _| {
-                        win.set_queue_selection(false);
-                        win.update_play_button();
-                    }
-                ),
-            );
-            self.disconnect_on_close(state, notify_playing_id);
-
-            // Update the position labels
-            self.update_position_labels();
-            let notify_position_id = state.connect_notify_local(
-                Some("position"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |_, _| {
-                        win.update_position_labels();
-                    }
-                ),
-            );
-            self.disconnect_on_close(state, notify_position_id);
-
-            // Update the UI
-            self.update_track();
-            let notify_track_id = state.connect_notify_local(
-                Some("track"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |_, _| {
-                        win.update_track();
-                    }
-                ),
-            );
-            self.disconnect_on_close(state, notify_track_id);
-
-            // Update the cover, if any is available
-            self.update_cover();
-            let notify_cover_id = state.connect_notify_local(
-                Some("cover"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |_, _| {
-                        win.update_cover();
-                    }
-                ),
-            );
-            self.disconnect_on_close(state, notify_cover_id);
-
-            // The player goes on to the next track, if it can be played
-            let track_failed_id = state.connect_track_failed(clone!(
+        // Use the PlayerState:playing property to control the play/pause button
+        self.update_play_button();
+        let notify_playing_id = state.connect_notify_local(
+            Some("playing"),
+            clone!(
                 #[weak(rename_to = win)]
                 self,
-                move |_, track| win.report_failed_track(track)
-            ));
-            self.disconnect_on_close(state, track_failed_id);
+                move |_, _| {
+                    win.set_queue_selection(false);
+                    win.update_play_button();
+                }
+            ),
+        );
+        self.disconnect_on_close(state, notify_playing_id);
 
-            // Bind the track properties to the UI
-            state
-                .bind_property("heading", &imp.track_details.get().title_label(), "label")
-                .sync_create()
-                .build();
-            state
-                .bind_property("artist", &imp.track_details.get().artist_label(), "label")
-                .sync_create()
-                .build();
-            state
-                .bind_property("album", &imp.track_details.get().album_label(), "label")
-                .sync_create()
-                .build();
-            state
-                .bind_property(
-                    "movement",
-                    &imp.track_details.get().movement_label(),
-                    "label",
-                )
-                .sync_create()
-                .build();
-            state
-                .bind_property(
-                    "movement",
-                    &imp.track_details.get().movement_label(),
-                    "visible",
-                )
-                .transform_to(|_, movement: Option<String>| Some(movement.is_some()))
-                .sync_create()
-                .build();
-            state
-                .bind_property("credits", &imp.track_details.get().credits_label(), "label")
-                .sync_create()
-                .build();
-            // Most tracks have no credits, so we hide the line instead of
-            // leaving an empty space
-            state
-                .bind_property(
-                    "credits",
-                    &imp.track_details.get().credits_label(),
-                    "visible",
-                )
-                .transform_to(|_, credits: Option<String>| {
-                    Some(credits.is_some_and(|c| !c.is_empty()))
-                })
-                .sync_create()
-                .build();
-            state
-                .bind_property(
-                    "volume",
-                    &imp.playback_control.get().volume_control(),
-                    "volume",
-                )
-                .sync_create()
-                .build();
-        }
+        // Update the position labels
+        self.update_position_labels();
+        let notify_position_id = state.connect_notify_local(
+            Some("position"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| {
+                    win.update_position_labels();
+                }
+            ),
+        );
+        self.disconnect_on_close(state, notify_position_id);
+
+        // Update the UI
+        self.update_track();
+        let notify_track_id = state.connect_notify_local(
+            Some("track"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| {
+                    win.update_track();
+                }
+            ),
+        );
+        self.disconnect_on_close(state, notify_track_id);
+
+        // Update the cover, if any is available
+        self.update_cover();
+        let notify_cover_id = state.connect_notify_local(
+            Some("cover"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| {
+                    win.update_cover();
+                }
+            ),
+        );
+        self.disconnect_on_close(state, notify_cover_id);
+
+        // The player goes on to the next track, if it can be played
+        let track_failed_id = state.connect_track_failed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, track| win.report_failed_track(track)
+        ));
+        self.disconnect_on_close(state, track_failed_id);
+
+        // Bind the track properties to the UI
+        state
+            .bind_property("heading", &imp.track_details.get().title_label(), "label")
+            .sync_create()
+            .build();
+        state
+            .bind_property("artist", &imp.track_details.get().artist_label(), "label")
+            .sync_create()
+            .build();
+        state
+            .bind_property("album", &imp.track_details.get().album_label(), "label")
+            .sync_create()
+            .build();
+        state
+            .bind_property(
+                "movement",
+                &imp.track_details.get().movement_label(),
+                "label",
+            )
+            .sync_create()
+            .build();
+        state
+            .bind_property(
+                "movement",
+                &imp.track_details.get().movement_label(),
+                "visible",
+            )
+            .transform_to(|_, movement: Option<String>| Some(movement.is_some()))
+            .sync_create()
+            .build();
+        state
+            .bind_property("credits", &imp.track_details.get().credits_label(), "label")
+            .sync_create()
+            .build();
+        // Most tracks have no credits, so we hide the line instead of
+        // leaving an empty space
+        state
+            .bind_property(
+                "credits",
+                &imp.track_details.get().credits_label(),
+                "visible",
+            )
+            .transform_to(|_, credits: Option<String>| Some(credits.is_some_and(|c| !c.is_empty())))
+            .sync_create()
+            .build();
+        state
+            .bind_property(
+                "volume",
+                &imp.playback_control.get().volume_control(),
+                "volume",
+            )
+            .sync_create()
+            .build();
     }
 
     // Bind the Queue to the UI
     pub(super) fn bind_queue(&self) {
-        if let Some(player) = self.player() {
-            let queue = player.queue();
+        let player = self.player();
+        let queue = player.queue();
 
-            let notify_ntracks_id = queue.connect_notify_local(
-                Some("n-tracks"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |queue, _| {
-                        debug!("queue.n_tracks() = {}", queue.n_tracks());
-                        if queue.is_empty() {
-                            win.set_initial_state();
-                            win.reset_queue();
-                        } else {
-                            win.update_library_for_queue();
+        let notify_ntracks_id = queue.connect_notify_local(
+            Some("n-tracks"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |queue, _| {
+                    debug!("queue.n_tracks() = {}", queue.n_tracks());
+                    if queue.is_empty() {
+                        win.set_initial_state();
+                        win.reset_queue();
+                    } else {
+                        win.update_library_for_queue();
 
-                            win.action_set_enabled("win.play", true);
-                            win.action_set_enabled("win.previous", true);
-                            win.action_set_enabled("win.next", queue.n_tracks() > 1);
-                            win.update_queue_actions();
-                        }
-
-                        win.update_queue_time();
+                        win.action_set_enabled("win.play", true);
+                        win.action_set_enabled("win.previous", true);
+                        win.action_set_enabled("win.next", queue.n_tracks() > 1);
+                        win.update_queue_actions();
                     }
-                ),
-            );
-            self.disconnect_on_close(queue, notify_ntracks_id);
 
-            let notify_repeat_mode_id = queue.connect_notify_local(
-                Some("repeat-mode"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |queue, _| {
-                        win.imp()
-                            .playback_control
-                            .set_repeat_mode(queue.repeat_mode());
-                    }
-                ),
-            );
-            self.disconnect_on_close(queue, notify_repeat_mode_id);
+                    win.update_queue_time();
+                }
+            ),
+        );
+        self.disconnect_on_close(queue, notify_ntracks_id);
 
-            let notify_current_id = queue.connect_notify_local(
-                Some("current"),
-                clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |queue, _| {
-                        if queue.is_last_track() {
-                            match queue.repeat_mode() {
-                                RepeatMode::Consecutive => {
-                                    win.action_set_enabled("win.next", false);
-                                }
-                                _ => {
-                                    win.action_set_enabled("win.next", true);
-                                }
+        let notify_repeat_mode_id = queue.connect_notify_local(
+            Some("repeat-mode"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |queue, _| {
+                    win.imp()
+                        .playback_control
+                        .set_repeat_mode(queue.repeat_mode());
+                }
+            ),
+        );
+        self.disconnect_on_close(queue, notify_repeat_mode_id);
+
+        let notify_current_id = queue.connect_notify_local(
+            Some("current"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |queue, _| {
+                    if queue.is_last_track() {
+                        match queue.repeat_mode() {
+                            RepeatMode::Consecutive => {
+                                win.action_set_enabled("win.next", false);
                             }
-                        } else {
-                            win.action_set_enabled("win.next", true);
+                            _ => {
+                                win.action_set_enabled("win.next", true);
+                            }
                         }
+                    } else {
+                        win.action_set_enabled("win.next", true);
                     }
-                ),
-            );
-            self.disconnect_on_close(queue, notify_current_id);
-        }
+                }
+            ),
+        );
+        self.disconnect_on_close(queue, notify_current_id);
     }
 
     pub(super) fn connect_signals(&self) {
@@ -309,9 +304,7 @@ impl Window {
                 self,
                 move |_, volume| {
                     debug!("Volume changed: {volume}");
-                    if let Some(p) = win.player() {
-                        p.set_volume(volume);
-                    }
+                    win.player().set_volume(volume);
                 }
             ));
 
@@ -348,10 +341,9 @@ impl Window {
                         "GSettings:enable-recoloring: {}",
                         settings.boolean("enable-recoloring")
                     );
-                    if let Some(player) = this.player() {
-                        let state = player.state();
-                        this.update_style(state.track().as_ref());
-                    }
+                    let player = this.player();
+                    let state = player.state();
+                    this.update_style(state.track().as_ref());
                 }
             ),
         );
@@ -363,10 +355,9 @@ impl Window {
             #[weak(rename_to = this)]
             self,
             move |_| {
-                if let Some(player) = this.player() {
-                    let state = player.state();
-                    this.update_style(state.track().as_ref());
-                }
+                let player = this.player();
+                let state = player.state();
+                this.update_style(state.track().as_ref());
                 this.update_backdrop();
             }
         ));
@@ -402,9 +393,7 @@ impl Window {
     // Seeks to a fraction of the track and plays it, if there is a track
     fn seek_to(&self, position: f64) -> bool {
         debug!("New position: {position}");
-        let Some(player) = self.player() else {
-            return false;
-        };
+        let player = self.player();
         if player.state().track().is_none() {
             return false;
         }
@@ -419,7 +408,7 @@ impl Window {
     // it doesn't have them all. A shuffled playlist can always be put back
     // in order, even with a single track left
     pub(super) fn update_queue_actions(&self) {
-        let n_tracks = self.player().map_or(0, |p| p.queue().n_tracks());
+        let n_tracks = self.player().queue().n_tracks();
         let loading = self.imp().loads.get() > 0;
         self.action_set_enabled("queue.clear", n_tracks > 0 && !loading);
         self.action_set_enabled("queue.select", n_tracks > 0);
@@ -429,28 +418,27 @@ impl Window {
 
     // The initial state of the playback actions
     pub(super) fn set_initial_state(&self) {
-        if let Some(player) = self.player() {
-            let queue = player.queue();
-            self.action_set_enabled("win.play", !queue.is_empty());
-            self.action_set_enabled("win.previous", !queue.is_empty());
-            self.action_set_enabled("win.next", !queue.is_last_track());
+        let player = self.player();
+        let queue = player.queue();
+        self.action_set_enabled("win.play", !queue.is_empty());
+        self.action_set_enabled("win.previous", !queue.is_empty());
+        self.action_set_enabled("win.next", !queue.is_last_track());
 
-            self.update_queue_actions();
-            self.action_set_enabled("win.replaygain", player.replaygain_available());
+        self.update_queue_actions();
+        self.action_set_enabled("win.replaygain", player.replaygain_available());
 
-            let replaygain = self.imp().settings.enum_("replay-gain").into();
-            self.set_replaygain_mode(replaygain);
+        let replaygain = self.imp().settings.enum_("replay-gain").into();
+        self.set_replaygain_mode(replaygain);
 
-            // Manually set player state, because set_replaygain
-            // only updates player state when the value changes.
-            player.set_replaygain(replaygain);
+        // Manually set player state, because set_replaygain
+        // only updates player state when the value changes.
+        player.set_replaygain(replaygain);
 
-            self.imp()
-                .playback_control
-                .set_repeat_mode(queue.repeat_mode());
-            self.sync_queue_shuffled();
+        self.imp()
+            .playback_control
+            .set_repeat_mode(queue.repeat_mode());
+        self.sync_queue_shuffled();
 
-            self.update_library_for_queue();
-        }
+        self.update_library_for_queue();
     }
 }

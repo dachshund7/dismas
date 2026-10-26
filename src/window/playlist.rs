@@ -109,98 +109,95 @@ impl Window {
                 )),
             )));
 
-        if let Some(player) = self.player() {
-            let queue = player.queue();
+        let player = self.player();
+        let queue = player.queue();
 
-            let filter = SearchFilter::new();
-            let filter_model =
-                gtk::FilterListModel::new(Some(queue.model().clone()), Some(filter.clone()));
-            // Search results keep the order of the queue
-            let sections = WorkSectionModel::new(&filter_model);
-            let selection = gtk::NoSelection::new(Some(sections));
-            imp.playlist_view
-                .queue_view()
-                .set_model(Some(selection.upcast_ref::<gtk::SelectionModel>()));
-            imp.playlist_view.queue_view().connect_activate(clone!(
+        let filter = SearchFilter::new();
+        let filter_model =
+            gtk::FilterListModel::new(Some(queue.model().clone()), Some(filter.clone()));
+        // Search results keep the order of the queue
+        let sections = WorkSectionModel::new(&filter_model);
+        let selection = gtk::NoSelection::new(Some(sections));
+        imp.playlist_view
+            .queue_view()
+            .set_model(Some(selection.upcast_ref::<gtk::SelectionModel>()));
+        imp.playlist_view.queue_view().connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[weak]
+            selection,
+            move |_, pos| {
+                let track = selection
+                    .upcast::<gio::ListModel>()
+                    .item(pos)
+                    .unwrap()
+                    .downcast::<Track>()
+                    .unwrap();
+
+                let player = win.player();
+                let queue = player.queue();
+                // Where it is in the queue, rather than in a search
+                if let Some(real_pos) = queue.position(&track) {
+                    if win.queue_selection() {
+                        win.toggle_queue_track(&track);
+                        return;
+                    }
+                    if let Some(reason) = track.missing_reason() {
+                        let title = track.title();
+                        win.add_toast(match reason {
+                            Missing::NotFound => i18n_k(
+                                // Translators: `{track}` must be left
+                                // unmodified; it is expanded to the
+                                // title of a track
+                                "“{track}” wasn't found",
+                                &[("track", &title)],
+                            ),
+                            Missing::Unreadable => i18n_k(
+                                // Translators: `{track}` must be left
+                                // unmodified; it is expanded to the
+                                // title of a track
+                                "Unable to play “{track}”",
+                                &[("track", &title)],
+                            ),
+                        });
+                        return;
+                    }
+                    if queue.current_track_index() != Some(real_pos) {
+                        player.skip_to(real_pos);
+                        player.play();
+                    } else if player.state().playing() {
+                        // Activating the playing track pauses it
+                        player.pause();
+                        return;
+                    } else {
+                        player.play();
+                    }
+                    // Playing a track brings up the player in place
+                    // of the album grid
+                    win.set_library_visible(false);
+                }
+            }
+        ));
+
+        imp.queue_filtermodel
+            .replace(Some(filter_model.upcast::<gio::ListModel>()));
+
+        imp.playlist_view
+            .queue_searchentry()
+            .bind_property("text", &filter, "search")
+            .sync_create()
+            .build();
+        imp.playlist_view
+            .queue_searchentry()
+            .connect_search_changed(clone!(
                 #[weak(rename_to = win)]
                 self,
-                #[weak]
-                selection,
-                move |_, pos| {
-                    let track = selection
-                        .upcast::<gio::ListModel>()
-                        .item(pos)
-                        .unwrap()
-                        .downcast::<Track>()
-                        .unwrap();
-
-                    if let Some(player) = win.player() {
-                        let queue = player.queue();
-                        // Where it is in the queue, rather than in a search
-                        if let Some(real_pos) = queue.position(&track) {
-                            if win.queue_selection() {
-                                win.toggle_queue_track(&track);
-                                return;
-                            }
-                            if let Some(reason) = track.missing_reason() {
-                                let title = track.title();
-                                win.add_toast(match reason {
-                                    Missing::NotFound => i18n_k(
-                                        // Translators: `{track}` must be left
-                                        // unmodified; it is expanded to the
-                                        // title of a track
-                                        "“{track}” wasn't found",
-                                        &[("track", &title)],
-                                    ),
-                                    Missing::Unreadable => i18n_k(
-                                        // Translators: `{track}` must be left
-                                        // unmodified; it is expanded to the
-                                        // title of a track
-                                        "Unable to play “{track}”",
-                                        &[("track", &title)],
-                                    ),
-                                });
-                                return;
-                            }
-                            if queue.current_track_index() != Some(real_pos) {
-                                player.skip_to(real_pos);
-                                player.play();
-                            } else if player.state().playing() {
-                                // Activating the playing track pauses it
-                                player.pause();
-                                return;
-                            } else {
-                                player.play();
-                            }
-                            // Playing a track brings up the player in place
-                            // of the album grid
-                            win.set_library_visible(false);
-                        }
+                move |_| {
+                    if let Some(adjustment) = win.imp().playlist_view.queue_view().vadjustment() {
+                        adjustment.set_value(0.0);
                     }
                 }
             ));
-
-            imp.queue_filtermodel
-                .replace(Some(filter_model.upcast::<gio::ListModel>()));
-
-            imp.playlist_view
-                .queue_searchentry()
-                .bind_property("text", &filter, "search")
-                .sync_create()
-                .build();
-            imp.playlist_view
-                .queue_searchentry()
-                .connect_search_changed(clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |_| {
-                        if let Some(adjustment) = win.imp().playlist_view.queue_view().vadjustment()
-                        {
-                            adjustment.set_value(0.0);
-                        }
-                    }
-                ));
-        }
 
         // Esc cancels dragging a track, or albums from the grid. The drag
         // doesn't always get the key itself (on X11 it reaches the window),
@@ -266,79 +263,76 @@ impl Window {
     // Empties the selected playlist, e.g. for tracks to play in place of
     // those of the queue; the order it had before it was shuffled goes too
     pub(super) fn clear_queue(&self) {
-        if let Some(p) = self.player() {
-            p.clear_queue();
+        self.player().clear_queue();
 
-            // So that the queue isn't restored at the next startup
-            self.store_queue();
-            playlists::drop_unshuffled(&self.selected_playlist());
-            self.sync_queue_shuffled();
-        }
+        // So that the queue isn't restored at the next startup
+        self.store_queue();
+        playlists::drop_unshuffled(&self.selected_playlist());
+        self.sync_queue_shuffled();
     }
 
     pub(super) fn queue_is_empty(&self) -> bool {
-        self.player().is_none_or(|p| p.queue().is_empty())
+        self.player().queue().is_empty()
     }
 
     pub(super) fn update_queue_time(&self) {
-        if let Some(player) = self.player() {
-            let queue = player.queue();
-            let n_tracks = queue.n_tracks();
-            if let Some(current) = queue.current_track_index() {
-                let remaining_time: u64 = (current..n_tracks)
-                    .filter_map(|pos| queue.track_at(pos))
-                    .map(|track| track.duration())
-                    .sum();
-                let remaining_min = u32::try_from(remaining_time / 60).unwrap_or(u32::MAX);
-                let remaining_hrs = remaining_min / 60;
+        let player = self.player();
+        let queue = player.queue();
+        let n_tracks = queue.n_tracks();
+        if let Some(current) = queue.current_track_index() {
+            let remaining_time: u64 = (current..n_tracks)
+                .filter_map(|pos| queue.track_at(pos))
+                .map(|track| track.duration())
+                .sum();
+            let remaining_min = u32::try_from(remaining_time / 60).unwrap_or(u32::MAX);
+            let remaining_hrs = remaining_min / 60;
 
-                let remaining_str = if remaining_hrs > 0 {
-                    // Translators: the `{}` must be left unmodified, and
-                    // it will be replaced by the number of minutes remaining
-                    // in the string "N hours M minutes remaining"
-                    let minutes = ni18n_f(
-                        "{} minute",
-                        "{} minutes",
-                        remaining_min % 60,
-                        &[&(remaining_min % 60).to_string()],
-                    );
+            let remaining_str = if remaining_hrs > 0 {
+                // Translators: the `{}` must be left unmodified, and
+                // it will be replaced by the number of minutes remaining
+                // in the string "N hours M minutes remaining"
+                let minutes = ni18n_f(
+                    "{} minute",
+                    "{} minutes",
+                    remaining_min % 60,
+                    &[&(remaining_min % 60).to_string()],
+                );
 
-                    // Translators: `{hours}` and `{minutes}` must be left
-                    // unmodified, and they will be replaced by number of
-                    // hours and by the translated number of minutes
-                    // remaining, respectively
-                    ni18n_k(
-                        "{hours} hour {minutes} remaining",
-                        "{hours} hours {minutes} remaining",
-                        remaining_hrs,
-                        &[("hours", &remaining_hrs.to_string()), ("minutes", &minutes)],
-                    )
-                } else {
-                    ni18n_f(
-                        // Translators: the '{}' must be left unmodified, and
-                        // it will be replaced by the number of minutes remaining
-                        // in the queue
-                        "{} minute remaining",
-                        "{} minutes remaining",
-                        remaining_min,
-                        &[&remaining_min.to_string()],
-                    )
-                };
-
-                self.imp()
-                    .playlist_view
-                    .queue_length_label()
-                    .set_label(&remaining_str);
-                self.imp()
-                    .playlist_view
-                    .queue_length_label()
-                    .set_visible(true);
+                // Translators: `{hours}` and `{minutes}` must be left
+                // unmodified, and they will be replaced by number of
+                // hours and by the translated number of minutes
+                // remaining, respectively
+                ni18n_k(
+                    "{hours} hour {minutes} remaining",
+                    "{hours} hours {minutes} remaining",
+                    remaining_hrs,
+                    &[("hours", &remaining_hrs.to_string()), ("minutes", &minutes)],
+                )
             } else {
-                self.imp()
-                    .playlist_view
-                    .queue_length_label()
-                    .set_visible(false);
-            }
+                ni18n_f(
+                    // Translators: the '{}' must be left unmodified, and
+                    // it will be replaced by the number of minutes remaining
+                    // in the queue
+                    "{} minute remaining",
+                    "{} minutes remaining",
+                    remaining_min,
+                    &[&remaining_min.to_string()],
+                )
+            };
+
+            self.imp()
+                .playlist_view
+                .queue_length_label()
+                .set_label(&remaining_str);
+            self.imp()
+                .playlist_view
+                .queue_length_label()
+                .set_visible(true);
+        } else {
+            self.imp()
+                .playlist_view
+                .queue_length_label()
+                .set_visible(false);
         }
     }
 
@@ -348,7 +342,7 @@ impl Window {
         if let Some(tick) = imp.queue_scroll_tick.take() {
             tick.remove();
         }
-        let Some(track) = self.player().and_then(|p| p.queue().current()) else {
+        let Some(track) = self.player().queue().current() else {
             return;
         };
         let view = imp.playlist_view.queue_view();
@@ -360,7 +354,7 @@ impl Window {
     // where it flashes, like going to the album of a track; a search that
     // hides it is cleared
     pub(super) fn show_playing_track(&self) {
-        let Some(track) = self.player().and_then(|p| p.state().track()) else {
+        let Some(track) = self.player().state().track() else {
             return;
         };
         let view = self.imp().playlist_view.queue_view();
@@ -389,9 +383,7 @@ impl Window {
     // selection mode, dragging a selected track moves all the selected
     // ones, together and in the order they had
     fn move_queue_track(&self, track: &Track, target: &Track, above: bool) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         let queue = player.queue();
         let tracks = if self.queue_selection() && track.selected() {
             queue.selected_tracks()
@@ -468,9 +460,7 @@ impl Window {
     // places. Rows of tracks that were out of view come from above or
     // below it, as far as their tracks moved
     fn slide_queue_rows(&self, shown: &[(Track, f64)], old_order: &[Track]) {
-        let Some(player) = self.player() else {
-            return;
-        };
+        let player = self.player();
         let queue = player.queue();
         let view = self.imp().playlist_view.queue_view();
         let view_height = f64::from(view.height());
@@ -503,9 +493,7 @@ impl Window {
 
     // Removes tracks from the queue, in a single change
     pub fn remove_tracks(&self, tracks: &[Track]) {
-        if let Some(p) = self.player() {
-            p.remove_tracks(tracks);
-        }
+        self.player().remove_tracks(tracks);
         self.update_selected_count();
         self.update_queue_time();
     }
