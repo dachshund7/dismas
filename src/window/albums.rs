@@ -115,7 +115,14 @@ impl Window {
             self,
             async move {
                 if let Some(files) = album_files(drag.albums).await {
-                    win.load_into_queue(files, QueueMode::Add, None, None, None, before);
+                    win.load_into_queue(
+                        files,
+                        QueueMode::Add,
+                        LoadOptions {
+                            insert_before: before,
+                            ..Default::default()
+                        },
+                    );
                 }
             }
         ));

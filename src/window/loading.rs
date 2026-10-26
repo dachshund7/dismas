@@ -69,7 +69,14 @@ impl Window {
             // The saved queue is empty after clearing the queue
             Some(files) if !files.is_empty() => {
                 let resume = ResumePoint::load(&self.imp().settings, &name);
-                self.load_into_queue(files, QueueMode::Restore, None, resume, None, None);
+                self.load_into_queue(
+                    files,
+                    QueueMode::Restore,
+                    LoadOptions {
+                        resume,
+                        ..Default::default()
+                    },
+                );
             }
             // Unreadable: adding tracks would replace the ones in its file.
             // The queue is always there, so this doesn't loop
@@ -83,7 +90,7 @@ impl Window {
 
     // Adds the files to the end of the queue
     pub(super) fn queue_tracks(&self, queue: Vec<gio::File>, mode: QueueMode) {
-        self.load_into_queue(queue, mode, None, None, None, None);
+        self.load_into_queue(queue, mode, LoadOptions::default());
     }
 
     // Puts the tracks of a playlist in the queue, in place of those of the
@@ -93,10 +100,11 @@ impl Window {
         self.load_into_queue(
             queue,
             QueueMode::Restore,
-            Some(name.to_string()),
-            resume,
-            None,
-            None,
+            LoadOptions {
+                switch_to: Some(name.to_string()),
+                resume,
+                ..Default::default()
+            },
         );
     }
 
@@ -137,23 +145,20 @@ impl Window {
         }
     }
 
-    // Reads the tracks and adds them to the queue; with `switch_to`, they
-    // replace the tracks of the selected playlist with those of the one
-    // named. Only this load does that, as files can be dropped meanwhile,
-    // and their tracks go to the playlist that is selected when they're read.
-    // With `resume`, playback is paused where it was, in the empty queue.
-    // With `replaced`, the tracks took the place of those, and the toast
-    // can put them back. With `insert_before`, they go before that track,
-    // or at the end if it was removed meanwhile
+    // Reads the tracks and adds them to the queue, as `mode` and `options`
+    // say
     pub(super) fn load_into_queue(
         &self,
         queue: Vec<gio::File>,
         mode: QueueMode,
-        switch_to: Option<String>,
-        resume: Option<ResumePoint>,
-        replaced: Option<ReplacedQueue>,
-        insert_before: Option<Track>,
+        options: LoadOptions,
     ) {
+        let LoadOptions {
+            switch_to,
+            resume,
+            replaced,
+            insert_before,
+        } = options;
         let play = matches!(mode, QueueMode::Play(_));
         // The file to start playing from; its place among the tracks read
         // can differ, as a file before it can fail to be read
@@ -333,7 +338,14 @@ impl Window {
             self,
             async move {
                 match gio::spawn_blocking(move || audio_files(files)).await {
-                    Ok(queue) => win.load_into_queue(queue, mode, None, None, None, before),
+                    Ok(queue) => win.load_into_queue(
+                        queue,
+                        mode,
+                        LoadOptions {
+                            insert_before: before,
+                            ..Default::default()
+                        },
+                    ),
                     Err(_) => win.end_startup(),
                 }
             }
@@ -367,7 +379,14 @@ impl Window {
         self.select_queue_to_play();
         self.clear_queue();
         self.show_playlist_view();
-        self.load_into_queue(files, QueueMode::Play(0), None, None, Some(replaced), None);
+        self.load_into_queue(
+            files,
+            QueueMode::Play(0),
+            LoadOptions {
+                replaced: Some(replaced),
+                ..Default::default()
+            },
+        );
     }
 
     fn add_replaced_toast(&self, n_tracks: usize, replaced: ReplacedQueue) {

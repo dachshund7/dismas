@@ -82,6 +82,22 @@ enum QueueMode {
     Quiet,
 }
 
+// What else happens to the tracks `load_into_queue()` reads
+#[derive(Default)]
+struct LoadOptions {
+    // They take the place of the tracks of the selected playlist, as those
+    // of the playlist named. Only this load does that, as files can be
+    // dropped meanwhile, and their tracks go to the playlist that is
+    // selected when they're read
+    switch_to: Option<String>,
+    // Playback is paused where it was, in the empty queue
+    resume: Option<ResumePoint>,
+    // The tracks took the place of these, which the toast can put back
+    replaced: Option<ReplacedQueue>,
+    // They go before this track, or at the end if it was removed meanwhile
+    insert_before: Option<Track>,
+}
+
 mod imp {
     use adw::prelude::AdwApplicationWindowExt;
 
