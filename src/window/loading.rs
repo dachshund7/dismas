@@ -491,7 +491,8 @@ impl Window {
     // track if it could. A track whose file is gone is greyed out from then
     // on, as it would be after the playlist opens again. Looking for the
     // file is done in another thread, as a network drive that's gone can
-    // keep it waiting
+    // keep it waiting. Several tracks can fail one after the other, so the
+    // toast takes the place of the one about the track before
     pub(super) fn report_failed_track(&self, track: &Track) {
         let title = track.title();
         let path = track.file().path();
@@ -507,25 +508,32 @@ impl Window {
                 .await
                 .unwrap_or(false);
 
-                if gone {
+                let message = if gone {
                     if !track.missing() {
                         track.mark_missing();
                         win.show_updated_track(&track);
                     }
-                    win.add_toast(i18n_k(
+                    i18n_k(
                         // Translators: `{track}` must be left unmodified; it
                         // is expanded to the title of a track
                         "“{track}” wasn't found",
                         &[("track", &title)],
-                    ));
+                    )
                 } else {
-                    win.add_toast(i18n_k(
+                    i18n_k(
                         // Translators: `{track}` must be left unmodified; it
                         // is expanded to the title of a track
                         "Unable to play “{track}”",
                         &[("track", &title)],
-                    ));
+                    )
+                };
+                let imp = win.imp();
+                if let Some(toast) = imp.failed_toast.upgrade() {
+                    toast.dismiss();
                 }
+                let toast = utils::plain_toast(&message);
+                imp.failed_toast.set(Some(&toast));
+                imp.toast_overlay.add_toast(toast);
             }
         ));
     }

@@ -71,9 +71,9 @@ pub enum PlaybackAction {
     TrackAdvanced(u64, String),
     // The backend loaded the tracks it was given
     TrackLoaded,
-    // The track of a generation failed to play; whether it was the track
-    // handed over without a gap, before it started
-    TrackFailed(u64, bool),
+    // The track of a generation failed to play; the URI of the track
+    // handed over without a gap if it was that one, before it started
+    TrackFailed(u64, Option<String>),
     SleepTimerExpired,
 
     Raise,
@@ -166,6 +166,43 @@ pub enum SeekDirection {
     Backwards,
 }
 
+// How many tracks can fail to play one after the other before playback
+// stops at the last of them. When the audio output is broken, rather than
+// the tracks, every track fails, and going on would run through the whole
+// playlist, leaving its resume point at the end
+const MAX_FAILURES_IN_A_ROW: usize = 3;
+
+// What the player does after a track failed to play
+#[derive(Debug, PartialEq)]
+enum AfterFailure {
+    // Go on to the next track
+    Next,
+    // Stay at the failed track, which Play tries again
+    Stop,
+    // Pause at the next track, as the sleep timer waited for the end of
+    // this one
+    EndForTimer,
+}
+
+// After `failures` tracks failed in a row, this one included: whether a
+// next track that didn't fail yet comes, whether the player was playing,
+// rather than getting a paused track ready, and whether the sleep timer
+// waits for the end of the track
+fn after_failure(
+    failures: usize,
+    next: bool,
+    playing: bool,
+    finishing_track: bool,
+) -> AfterFailure {
+    if finishing_track {
+        AfterFailure::EndForTimer
+    } else if next && playing && failures < MAX_FAILURES_IN_A_ROW {
+        AfterFailure::Next
+    } else {
+        AfterFailure::Stop
+    }
+}
+
 pub struct AudioPlayer {
     app_sender: Sender<ApplicationAction>,
     receiver: RefCell<Option<Receiver<PlaybackAction>>>,
@@ -182,7 +219,8 @@ pub struct AudioPlayer {
     // How long the current track has been heard, for the smart playlists
     listens: RefCell<ListenTracker>,
     // The tracks that failed to play one after the other, to stop rather
-    // than go round a queue none of whose tracks plays
+    // than go round a queue none of whose tracks plays, or go on through
+    // one whose every track fails
     failed: RefCell<HashSet<Track>>,
     pending_volume: Rc<PendingVolume>,
 }
@@ -478,11 +516,9 @@ impl AudioPlayer {
     }
 
     // Skips a track that can't be played, e.g. its file is gone or there's
-    // no decoder for it, after the window says so. It stops at the track
-    // when nothing comes after it, when the player was paused, as when a
-    // paused track is made ready to play, or when it would come back to a
-    // track that failed since the last one played
-    fn track_failed(&self, generation: u64, handed: bool) {
+    // no decoder for it, after the window says so; `after_failure()` says
+    // when it stops at the track instead
+    fn track_failed(&self, generation: u64, handed: Option<String>) {
         // The player loaded another track since
         if generation != self.backend.generation() {
             return;
@@ -490,13 +526,21 @@ impl AudioPlayer {
 
         // The track handed over without a gap failed, rather than the one
         // shown, which ended. It's loaded like any next track, so that the
-        // backend has it if playback stops there
-        if handed && let Some(next_track) = self.queue.next_track() {
-            if let Some(current_track) = self.state.track() {
-                current_track.set_playing(false);
+        // backend has it if playback stops there. If the queue changed
+        // since it was handed over, it's no longer the next track, and the
+        // shown one ended as when the handed track starts
+        if let Some(id) = handed {
+            if !self.queue.peek_next_track().is_some_and(|t| t.uri() == id) {
+                self.play_next();
+                return;
             }
-            self.backend.set_track(Some(&TrackSource::of(&next_track)));
-            self.show_track(next_track);
+            if let Some(next_track) = self.queue.next_track() {
+                if let Some(current_track) = self.state.track() {
+                    current_track.set_playing(false);
+                }
+                self.backend.set_track(Some(&TrackSource::of(&next_track)));
+                self.show_track(next_track);
+            }
         }
 
         let Some(track) = self.state.track() else {
@@ -505,20 +549,25 @@ impl AudioPlayer {
         warn!("Unable to play {}", track.uri());
         self.state.emit_track_failed(&track);
 
-        let next_track = {
+        let (failures, next) = {
             let mut failed = self.failed.borrow_mut();
             failed.insert(track);
-            self.queue
+            let next = self
+                .queue
                 .peek_next_track()
-                .filter(|next_track| !failed.contains(next_track))
+                .is_some_and(|next_track| !failed.contains(&next_track));
+            (failed.len(), next)
         };
-        if self.sleep_timer.finishing_track() {
+        match after_failure(
+            failures,
+            next,
+            self.state.playing(),
+            self.sleep_timer.finishing_track(),
+        ) {
+            AfterFailure::Next => self.play_next_track(Queue::next_track),
             // As at the end of the track, which the sleep timer waited for
-            self.play_next();
-        } else if next_track.is_some() && self.state.playing() {
-            self.play_next_track(Queue::next_track);
-        } else {
-            self.set_playback_state(PlaybackState::Stopped);
+            AfterFailure::EndForTimer => self.play_next(),
+            AfterFailure::Stop => self.set_playback_state(PlaybackState::Stopped),
         }
     }
 
@@ -952,6 +1001,27 @@ mod tests {
             assert_eq!(RepeatMode::from(i32::from(mode)), mode);
         }
         assert_eq!(RepeatMode::from(7), RepeatMode::Consecutive);
+    }
+
+    #[test]
+    fn failures_go_on_to_the_next_track_a_few_times() {
+        use AfterFailure::{EndForTimer, Next, Stop};
+
+        assert_eq!(after_failure(1, true, true, false), Next);
+        assert_eq!(after_failure(2, true, true, false), Next);
+        // A broken audio output fails every track; playback stops near
+        // where it was
+        assert_eq!(
+            after_failure(MAX_FAILURES_IN_A_ROW, true, true, false),
+            Stop
+        );
+        // Nothing follows, or only tracks that failed already
+        assert_eq!(after_failure(1, false, true, false), Stop);
+        // A paused track that was being got ready
+        assert_eq!(after_failure(1, true, false, false), Stop);
+        // The sleep timer waited for the end of the track
+        assert_eq!(after_failure(1, true, true, true), EndForTimer);
+        assert_eq!(after_failure(1, false, false, true), EndForTimer);
     }
 
     #[test]

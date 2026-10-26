@@ -232,6 +232,10 @@ mod imp {
         // they aren't dropped
         pub pane_opened_for_drag: Cell<bool>,
 
+        // The toast about the last track that failed to play, which the
+        // next one takes the place of
+        pub failed_toast: glib::WeakRef<adw::Toast>,
+
         // The handlers connected to objects that outlive the window, the
         // player's and the style manager, which are disconnected when it
         // closes: one reaching the closed window would find its widgets gone
@@ -511,6 +515,7 @@ mod imp {
                 provider: gtk::CssProvider::new(),
                 provider_css: RefCell::default(),
                 settings: utils::settings_manager(),
+                failed_toast: glib::WeakRef::new(),
                 handlers: RefCell::default(),
             }
         }

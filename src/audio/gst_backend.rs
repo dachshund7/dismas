@@ -216,7 +216,11 @@ fn report_error(sender: &Sender<PlaybackAction>, gapless: &Mutex<Gapless>) {
         return;
     }
     // The track handed over to playbin failed before it started
-    let handed = gapless.handed.is_some() && !gapless.started;
+    let handed = gapless
+        .handed
+        .as_ref()
+        .filter(|_| !gapless.started)
+        .map(|handed| handed.id.clone());
     let action = PlaybackAction::TrackFailed(gapless.generation, handed);
     drop(gapless);
     if let Err(e) = sender.try_send(action) {
@@ -1081,7 +1085,7 @@ mod tests {
         report_error(&sender, &gapless);
         assert!(matches!(
             receiver.try_recv(),
-            Ok(PlaybackAction::TrackFailed(4, false))
+            Ok(PlaybackAction::TrackFailed(4, None))
         ));
 
         // The next track, handed over to playbin, failed before it started
@@ -1089,7 +1093,15 @@ mod tests {
         report_error(&sender, &gapless);
         assert!(matches!(
             receiver.try_recv(),
-            Ok(PlaybackAction::TrackFailed(4, true))
+            Ok(PlaybackAction::TrackFailed(4, Some(ref id))) if id == "track02"
+        ));
+
+        // Once it started, it's the track playing
+        gapless.lock().unwrap().started = true;
+        report_error(&sender, &gapless);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::TrackFailed(4, None))
         ));
 
         // While a track loads, the error is the previous track's
