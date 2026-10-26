@@ -107,6 +107,22 @@ The releases after 2026.10 on GitHub come with a Flatpak, `dismas.flatpak`.
 Install it with `flatpak install --user dismas.flatpak`, which installs the
 GNOME runtime it needs from Flathub too. Dismas isn't on Flathub itself.
 
+They also come with a prebuilt tarball, `dismas-<version>-x86_64.tar.xz`,
+for those who'd rather not use Flatpak, on distributions with GNOME 49's
+libraries or newer. Unpack it anywhere, and run `bin/dismas` in its folder.
+`./install.sh` adds it to your menu, and `./install.sh --uninstall` takes it
+out again. It needs, from your distribution:
+
+- glibc 2.39 or later
+- GTK 4.20 or later and libadwaita 1.8 or later
+- GStreamer 1.20 or later, with the base, good and bad plugins
+- the glycin loaders and `bwrap`, to read the covers
+- SQLite, libseccomp and fontconfig
+
+It's the same app as Dismas built from source, with the same settings,
+library and playlists, and `install.sh` doesn't replace a build from source
+installed in `~/.local`.
+
 Otherwise, you need to build Dismas from source. You'll need Meson, Ninja,
 Rust, `blueprint-compiler`, gettext, and the development files for gtk4 ≥
 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20 (including plugins-bad), SQLite,

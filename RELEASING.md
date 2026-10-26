@@ -56,8 +56,11 @@ Checklist for a release.
 - [ ] Update the [metainfo](./data/io.github.dachshund7.Dismas.metainfo.xml.in.in)
   - [ ] New `<release>` element
   - [ ] *Optional*: new screenshots
+- [ ] Run the Release workflow by hand on the branch to release, and try the
+  Flatpak and the tarball from the run's artifacts
 - [ ] `git commit -m 'Release Dismas $VERSION'`
 - [ ] `git tag -s $VERSION` (use the change log entry)
 - [ ] `git push origin HEAD && git push origin $VERSION`
 - [ ] Publish a release for the tag on GitHub; the Release workflow then
-  builds the Flatpak and attaches it to the release as `dismas.flatpak`
+  builds the Flatpak and the prebuilt tarball, and attaches them to the
+  release as `dismas.flatpak` and `dismas-$VERSION-x86_64.tar.xz`

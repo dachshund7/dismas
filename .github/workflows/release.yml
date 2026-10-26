@@ -3,9 +3,10 @@
 
 name: Release
 
-# A Flatpak of the regular profile, attached to each release published on
-# GitHub as dismas.flatpak. Run by hand, it builds the bundle without
-# attaching it anywhere, in the artifacts of the run, to try the build
+# A Flatpak of the regular profile, dismas.flatpak, and a prebuilt tarball
+# for distributions without Flatpak, dismas-<version>-x86_64.tar.xz,
+# attached to each release published on GitHub. Run by hand, it builds both
+# without attaching them anywhere, in the artifacts of the run, to try them
 # before a release
 on:
   release:
@@ -55,4 +56,43 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dismas.flatpak
+          fail_on_unmatched_files: true
+
+  # The binary links the system's libraries, so it's built on Fedora, as in
+  # ci.yml; make-tarball.sh fails if it needs a newer glibc than the
+  # distributions with GNOME 49's libraries have
+  tarball:
+    runs-on: ubuntu-latest
+    # Attaching the tarball to the release writes to the repository
+    permissions:
+      contents: write
+    container: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: >
+          dnf install -y --setopt=install_weak_deps=False
+          gcc meson ninja-build rust cargo
+          gtk4-devel libadwaita-devel
+          gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-bad-free-devel
+          blueprint-compiler gettext glib2-devel sqlite-devel libseccomp-devel fontconfig-devel
+          binutils xz tar
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the tarball
+        run: build-aux/make-tarball.sh _build-tarball dist
+
+      - name: Upload the tarball
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dismas-tarball
+          path: dist/*.tar.xz
+          if-no-files-found: error
+
+      - name: Attach the tarball to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/*.tar.xz
           fail_on_unmatched_files: true
