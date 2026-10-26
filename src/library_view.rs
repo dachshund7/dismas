@@ -38,9 +38,9 @@ const GRID_PADDING: i32 = 12;
 // keeping all of them would take hundreds of megabytes
 const MAX_CACHED_COVERS: usize = 150;
 
-// The pictures waiting for each cover to load, as album IDs and pictures,
-// keyed by the path of the cover
-type PendingCovers = HashMap<String, Vec<(String, glib::WeakRef<gtk::Picture>)>>;
+// The cells waiting for each cover to load, with the ID of the album each
+// showed then, keyed by the path of the cover
+type PendingCovers = HashMap<String, Vec<(String, glib::WeakRef<AlbumCell>)>>;
 
 // The size of the cover on the copy of an album that follows the pointer
 // while it's dragged
@@ -584,11 +584,7 @@ impl LibraryView {
                 };
                 let cell = item.child().and_downcast::<AlbumCell>().unwrap();
                 cell.show_album(&album);
-                // The picture's name is the album it shows, which a cover
-                // read in another thread is checked against
-                let picture = cell.picture();
-                picture.set_widget_name(&album.id());
-                if picture.is_mapped() {
+                if cell.picture().is_mapped() {
                     this.show_cover(&cell);
                 }
             }
@@ -692,7 +688,7 @@ impl LibraryView {
             let texture = self.imp().textures.borrow_mut().get(&path);
             match texture {
                 Some(texture) => cell.picture().set_paintable(Some(&texture)),
-                None => self.read_cover(path, Some((album.id(), cell.picture()))),
+                None => self.read_cover(path, Some((album.id(), cell))),
             }
         }
         if let Some(position) = cell.position() {
@@ -734,19 +730,20 @@ impl LibraryView {
     }
 
     // Reads the cover in a separate thread, into the cache, and for the
-    // picture showing the album with this ID, if there's one
-    fn read_cover(&self, path: String, picture: Option<(String, &gtk::Picture)>) {
+    // cell showing the album with this ID, if there's one; the cell can
+    // show another album by the time it's read
+    fn read_cover(&self, path: String, cell: Option<(String, &AlbumCell)>) {
         let imp = self.imp();
         if let Some(texture) = imp.textures.borrow_mut().get(&path) {
-            if let Some((_, picture)) = picture {
-                picture.set_paintable(Some(&texture));
+            if let Some((_, cell)) = cell {
+                cell.picture().set_paintable(Some(&texture));
             }
             return;
         }
 
-        // Another picture, or reading ahead, is already waiting for the
-        // same cover
-        let waiting = picture.map(|(id, picture)| (id, picture.downgrade()));
+        // Another cell, or reading ahead, is already waiting for the same
+        // cover
+        let waiting = cell.map(|(id, cell)| (id, cell.downgrade()));
         let mut pending = imp.pending_covers.borrow_mut();
         if let Some(others) = pending.get_mut(&path) {
             others.extend(waiting);
@@ -772,12 +769,12 @@ impl LibraryView {
                     return;
                 };
 
-                for (id, picture) in waiting.into_iter().flatten() {
-                    if let Some(picture) = picture.upgrade()
-                        && picture.widget_name() == id
-                        && picture.is_mapped()
+                for (id, cell) in waiting.into_iter().flatten() {
+                    if let Some(cell) = cell.upgrade()
+                        && cell.album().is_some_and(|album| album.id() == id)
+                        && cell.picture().is_mapped()
                     {
-                        picture.set_paintable(Some(&texture));
+                        cell.picture().set_paintable(Some(&texture));
                     }
                 }
                 imp.textures.borrow_mut().insert(path, texture);
