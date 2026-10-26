@@ -149,8 +149,9 @@ impl Window {
         // color invalid without one, rather than keep the system's
         let accent = palette.as_ref().and(track).and_then(Track::cover_accent);
 
+        let mut css = String::new();
         if let Some(palette) = &palette {
-            let mut css = String::from(":root {");
+            css.push_str(":root {");
             for (i, color) in palette.iter().enumerate() {
                 css.push_str(&format!("--background-color-{i}: {color};"));
             }
@@ -161,9 +162,13 @@ impl Window {
                 css.push_str(&format!("--cover-accent: {accent};"));
             }
             css.push('}');
+        }
+        // Loading a stylesheet restyles the whole window, so the colors of
+        // the next track of the same album, which are the same, aren't
+        // loaded again
+        if *imp.provider_css.borrow() != css {
             imp.provider.load_from_string(&css);
-        } else {
-            imp.provider.load_from_string("");
+            imp.provider_css.replace(css);
         }
 
         set_css_class(&*imp.toast_overlay, "main-window", palette.is_some());

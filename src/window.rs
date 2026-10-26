@@ -140,6 +140,8 @@ mod imp {
         pub narrow_breakpoint: TemplateChild<adw::Breakpoint>,
 
         pub provider: gtk::CssProvider,
+        // The colors of the cover the provider has, as CSS
+        pub provider_css: RefCell<String>,
         pub settings: gio::Settings,
 
         #[property(get, set = Self::set_queue_shuffled, explicit_notify)]
@@ -507,6 +509,7 @@ mod imp {
                 page_before_fullscreen: RefCell::default(),
                 pane_before_fullscreen: Cell::new(false),
                 provider: gtk::CssProvider::new(),
+                provider_css: RefCell::default(),
                 settings: utils::settings_manager(),
                 handlers: RefCell::default(),
             }
