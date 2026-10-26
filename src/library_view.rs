@@ -163,6 +163,9 @@ mod imp {
         // A scan changed tracks or made covers again since the albums were
         // last shown
         pub library_changed: Cell<bool>,
+        // What the albums are sorted by, read from the settings once for
+        // all the comparisons of a sort
+        pub sort_order: Cell<Option<(AlbumSort, bool)>>,
     }
 
     #[glib::object_subclass]
@@ -349,7 +352,7 @@ impl LibraryView {
             move |a, b| {
                 let a = a.downcast_ref::<Album>().unwrap();
                 let b = b.downcast_ref::<Album>().unwrap();
-                let (sort, descending) = this.sort_order();
+                let (sort, descending) = this.cached_sort_order();
                 a.compare(b, sort, descending).into()
             }
         ));
@@ -384,6 +387,17 @@ impl LibraryView {
             AlbumSort::from_nick(&settings.string("album-sort")),
             settings.string("album-sort-order") == "descending",
         )
+    }
+
+    // The sort order, as of the last time the settings changed; sorting
+    // compares the albums thousands of times
+    fn cached_sort_order(&self) -> (AlbumSort, bool) {
+        let cached = &self.imp().sort_order;
+        cached.get().unwrap_or_else(|| {
+            let order = self.sort_order();
+            cached.set(Some(order));
+            order
+        })
     }
 
     fn setup_actions(&self) {
@@ -436,6 +450,7 @@ impl LibraryView {
     }
 
     fn resort(&self) {
+        self.imp().sort_order.set(None);
         if let Some(sorter) = self.imp().sorter.borrow().as_ref() {
             sorter.changed(gtk::SorterChange::Different);
         }
