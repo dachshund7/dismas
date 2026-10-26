@@ -1101,7 +1101,8 @@ impl LibraryView {
         );
 
         let (sender, receiver) = async_channel::unbounded();
-        std::thread::spawn(move || library::scan(&folders, &sender));
+        let thumbnail_size = thumbnail_size();
+        std::thread::spawn(move || library::scan(&folders, thumbnail_size, &sender));
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
@@ -1155,6 +1156,24 @@ impl LibraryView {
             }
         ));
     }
+}
+
+// The width the covers of the grid are made at: the largest the grid shows
+// them, in the pixels of the monitor with the largest scale. A cover twice
+// as large as it's shown takes four times the memory, and the time to read
+fn thumbnail_size() -> u32 {
+    let scale = gdk::Display::default()
+        .and_then(|display| {
+            display
+                .monitors()
+                .iter::<gdk::Monitor>()
+                .flatten()
+                .map(|monitor| monitor.scale_factor())
+                .max()
+        })
+        .unwrap_or(1)
+        .clamp(1, 2);
+    (MAX_COVER_SIZE * scale) as u32
 }
 
 // The copy of an album that follows the pointer while it's dragged: its

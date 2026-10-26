@@ -15,13 +15,19 @@ use std::{io::Cursor, path::Path, time::Duration};
 
 use color_thief::{ColorFormat, get_palette};
 use gtk::{gdk, gdk::prelude::TextureExt, glib};
-use image::{ImageBuffer, ImageFormat, Pixel, Rgb, Rgba, imageops::FilterType};
+use image::{
+    ImageBuffer, ImageFormat, Pixel, Rgb, Rgba, codecs::jpeg::JpegEncoder, imageops::FilterType,
+};
 use log::warn;
 
 // Larger images are refused rather than decoded; covers are usually no
 // more than a few thousand pixels wide
 const MAX_DIMENSIONS: (u32, u32) = (8192, 8192);
 const TIMEOUT: Duration = Duration::from_secs(10);
+
+// The quality of the covers saved as JPEG, high enough that the grid's
+// covers show no artifacts
+const JPEG_QUALITY: u8 = 90;
 
 // The blurred copy of the cover behind the player in fullscreen is made
 // small, and scaled up to fill the screen, which smooths it further; how
@@ -233,6 +239,30 @@ impl CoverImage {
     // leave a partial cover behind
     pub fn save_png(&self, path: &Path) -> Result<(), String> {
         let data = self.png_bytes()?;
+        glib::file_set_contents(path, &data).map_err(|e| e.to_string())
+    }
+
+    pub fn has_alpha(&self) -> bool {
+        self.has_alpha
+    }
+
+    // Saves the cover as JPEG, like `save_png`. A photo takes a fraction of
+    // the room it takes as PNG, and of the time to read; JPEG has no
+    // transparency, so a cover with some can't be saved this way
+    pub fn save_jpeg(&self, path: &Path) -> Result<(), String> {
+        if self.has_alpha {
+            return Err("JPEG can't keep the transparency of the cover".to_string());
+        }
+
+        let mut data = Vec::new();
+        JpegEncoder::new_with_quality(&mut data, JPEG_QUALITY)
+            .encode(
+                &self.pixels,
+                self.width,
+                self.height,
+                image::ExtendedColorType::Rgb8,
+            )
+            .map_err(|e| e.to_string())?;
         glib::file_set_contents(path, &data).map_err(|e| e.to_string())
     }
 
@@ -537,6 +567,46 @@ mod tests {
 
         let texture = cover.into_texture();
         assert_eq!((texture.width(), texture.height()), (384, 192));
+    }
+
+    // The grid's covers are JPEG files, read by GTK; a cover with
+    // transparency can't be one
+    #[test]
+    fn covers_are_saved_as_jpeg() {
+        let (width, height) = (240, 160);
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|i| [(i % 256) as u8, 128, 64])
+            .collect();
+        let image = CoverImage {
+            width,
+            height,
+            has_alpha: false,
+            pixels: pixels.clone(),
+        };
+
+        let dir = glib::mkdtemp("dismas-cover-XXXXXX").unwrap();
+        let path = dir.join("cover.jpg");
+        image.save_jpeg(&path).unwrap();
+        let texture = gdk::Texture::from_filename(&path);
+        let data = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(&data[..3], &[0xff, 0xd8, 0xff]);
+        let texture = texture.unwrap();
+        assert_eq!((texture.width(), texture.height()), (240, 160));
+
+        let transparent = CoverImage {
+            width,
+            height,
+            has_alpha: true,
+            pixels: pixels
+                .chunks(3)
+                .flat_map(|p| [p[0], p[1], p[2], 255])
+                .collect(),
+        };
+        assert!(transparent.save_jpeg(&path).is_err());
+        assert!(!path.exists());
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     // A cover half black and half white, read back from its texture

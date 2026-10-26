@@ -69,6 +69,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The album grid takes much less memory and processor time: its covers are
+  made as large as the grid shows them, rather than twice as large, and
+  saved as JPEG, which is quicker to read than PNG and takes a fraction of
+  the room. They're made again once, after updating
 - Show the Playing Track and Go to Album glide to the track, rather than
   jumping to it, and the rows of moved tracks slide into place more
   gently, starting slowly instead of at full speed

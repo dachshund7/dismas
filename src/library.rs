@@ -75,9 +75,6 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         path TEXT
     );";
 
-// The size of the covers in the grid, twice the largest one for HiDPI
-const THUMBNAIL_SIZE: u32 = 480;
-
 pub enum ScanEvent {
     // The number of files read so far, out of the files that changed
     Progress(usize, usize),
@@ -649,11 +646,12 @@ pub fn track_album(path: &Path) -> Option<String> {
     }
 }
 
-// Updates the database with the tracks in the music folders; this blocks,
-// so it should be called from a separate thread
-pub fn scan(folders: &[MusicFolder], sender: &Sender<ScanEvent>) {
+// Updates the database with the tracks in the music folders, and makes the
+// covers of the albums for the grid `thumbnail_size` pixels wide; this
+// blocks, so it should be called from a separate thread
+pub fn scan(folders: &[MusicFolder], thumbnail_size: u32, sender: &Sender<ScanEvent>) {
     let now = Instant::now();
-    let result = scan_internal(folders, sender).unwrap_or_else(|e| {
+    let result = scan_internal(folders, thumbnail_size, sender).unwrap_or_else(|e| {
         warn!("Unable to scan the library: {e}");
         ScanResult::default()
     });
@@ -664,13 +662,14 @@ pub fn scan(folders: &[MusicFolder], sender: &Sender<ScanEvent>) {
 
 fn scan_internal(
     folders: &[MusicFolder],
+    thumbnail_size: u32,
     sender: &Sender<ScanEvent>,
 ) -> rusqlite::Result<ScanResult> {
     let roots = roots(folders);
     debug!("Library: reading {roots:?}");
     with_connection(|conn| {
         let (result, stale_albums) = scan_with(conn, &roots, sender)?;
-        update_covers(conn, &stale_albums, &roots.unavailable)?;
+        update_covers(conn, &stale_albums, &roots.unavailable, thumbnail_size)?;
         Ok(result)
     })
 }
@@ -964,6 +963,7 @@ fn update_covers(
     conn: &mut Connection,
     stale_albums: &HashSet<String>,
     hidden: &[PathBuf],
+    size: u32,
 ) -> rusqlite::Result<()> {
     let dir = covers_dir();
     let mut missing = Vec::new();
@@ -986,11 +986,11 @@ fn update_covers(
         })?;
         for row in rows {
             let (id, first_track, has_row, cover) = row?;
-            // Thumbnails of another size have another name, and are made
-            // again
+            // Thumbnails of another size or format have another name, and
+            // are made again
             let outdated = cover
                 .as_deref()
-                .is_some_and(|p| Path::new(p) != dir.join(thumbnail_name(&id)));
+                .is_some_and(|p| !is_thumbnail(Path::new(p), &dir, &id, size));
             // Albums without cover art have no thumbnail, so we only check
             // that the thumbnails we created are still there
             let made = cover.map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
@@ -1028,13 +1028,12 @@ fn update_covers(
         let mut upsert =
             tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
         for (id, first_track) in missing {
-            let path = dir.join(thumbnail_name(&id));
             let made = utils::guarded(
                 first_track.display(),
-                || create_thumbnail(&first_track, &path),
-                || false,
+                || create_thumbnail(&first_track, &dir, &id, size),
+                || None,
             );
-            let cover = made.then(|| path.to_string_lossy().to_string());
+            let cover = made.map(|path| path.to_string_lossy().to_string());
             upsert.execute(params![id, cover])?;
         }
         tx.execute(
@@ -1048,8 +1047,23 @@ fn update_covers(
     remove_unused_covers(conn, &dir)
 }
 
-fn thumbnail_name(album_id: &str) -> String {
-    format!("{album_id}-{THUMBNAIL_SIZE}.png")
+// The name of the thumbnail of an album: a JPEG, or a PNG for a cover with
+// transparency, which JPEG can't keep. Thumbnails used to be PNG files
+// named like the JPEGs, which these names tell apart from the PNG files made
+// for transparency, so that the old ones are made again as JPEG
+fn thumbnail_name(album_id: &str, size: u32, transparent: bool) -> String {
+    if transparent {
+        format!("{album_id}-{size}-alpha.png")
+    } else {
+        format!("{album_id}-{size}.jpg")
+    }
+}
+
+// Whether the file is the album's thumbnail at this size, in either format
+fn is_thumbnail(path: &Path, dir: &Path, album_id: &str, size: u32) -> bool {
+    [false, true]
+        .into_iter()
+        .any(|transparent| path == dir.join(thumbnail_name(album_id, size, transparent)))
 }
 
 // Removes the thumbnails of the albums that are gone, or whose id changed,
@@ -1065,7 +1079,9 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "png")
+        if path
+            .extension()
+            .is_some_and(|ext| ext == "png" || ext == "jpg")
             && !used.contains(path.to_string_lossy().as_ref())
         {
             debug!("Removing unused album cover {path:?}");
@@ -1087,28 +1103,30 @@ fn cover_file_time(dir: &Path) -> Option<std::time::SystemTime> {
         .max()
 }
 
-fn create_thumbnail(track: &Path, dest: &Path) -> bool {
-    let Some(track) = cue_sheet::audio_path(track) else {
-        return false;
-    };
+// Makes the thumbnail of an album in `dir`, from the cover of its first
+// track, and returns its path
+fn create_thumbnail(track: &Path, dir: &Path, album_id: &str, size: u32) -> Option<PathBuf> {
+    let track = cue_sheet::audio_path(track)?;
     let track = track.as_path();
-    let Some((tagged_file, _)) = read_file_tags(track, ParseOptions::new()) else {
-        return false;
-    };
+    let (tagged_file, _) = read_file_tags(track, ParseOptions::new())?;
     // A file without tags can still have a cover file next to it
     let empty = Tag::new(tagged_file.primary_tag_type());
     let tag = file_tag(&tagged_file);
     let tag = tag.as_deref().unwrap_or(&empty);
 
-    let Some(image) = CoverCache::load_cover(tag, track.parent(), THUMBNAIL_SIZE) else {
-        return false;
+    let image = CoverCache::load_cover(tag, track.parent(), size)?;
+    let dest = dir.join(thumbnail_name(album_id, size, image.has_alpha()));
+    let saved = if image.has_alpha() {
+        image.save_png(&dest)
+    } else {
+        image.save_jpeg(&dest)
     };
 
-    match image.save_png(dest) {
-        Ok(_) => true,
+    match saved {
+        Ok(_) => Some(dest),
         Err(e) => {
             warn!("Unable to save album cover {dest:?}: {e}");
-            false
+            None
         }
     }
 }
@@ -1288,7 +1306,9 @@ impl TrackTags {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{MusicFolder, Roots, is_mbid, path_bytes, path_from_bytes};
+    use super::{
+        MusicFolder, Roots, is_mbid, is_thumbnail, path_bytes, path_from_bytes, thumbnail_name,
+    };
 
     fn roots_of(paths: &[&Path]) -> Roots {
         let folders: Vec<MusicFolder> = paths
@@ -1496,6 +1516,33 @@ mod tests {
         assert!(!is_mbid(""));
         assert!(!is_mbid("../../Pictures/photo"));
         assert!(!is_mbid("/home/user/Pictures/photo"));
+    }
+
+    // The grid's covers were PNG files of 480 pixels; made for another
+    // size, or in the old format, they're made again
+    #[test]
+    fn thumbnails_are_named_by_size_and_format() {
+        let dir = Path::new("/cache/album-covers");
+        assert_eq!(thumbnail_name("album", 240, false), "album-240.jpg");
+        assert_eq!(thumbnail_name("album", 480, true), "album-480-alpha.png");
+
+        assert!(is_thumbnail(&dir.join("album-240.jpg"), dir, "album", 240));
+        assert!(is_thumbnail(
+            &dir.join("album-240-alpha.png"),
+            dir,
+            "album",
+            240
+        ));
+        assert!(!is_thumbnail(&dir.join("album-480.png"), dir, "album", 480));
+        assert!(!is_thumbnail(&dir.join("album-480.png"), dir, "album", 240));
+        assert!(!is_thumbnail(&dir.join("album-480.jpg"), dir, "album", 240));
+        assert!(!is_thumbnail(&dir.join("other-240.jpg"), dir, "album", 240));
+        assert!(!is_thumbnail(
+            Path::new("/elsewhere/album-240.jpg"),
+            dir,
+            "album",
+            240
+        ));
     }
 
     // A track in the database, with paths relative to a folder
