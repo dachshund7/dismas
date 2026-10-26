@@ -156,7 +156,10 @@ mod imp {
         // The words of the search the matches are for
         pub search_words: RefCell<Vec<String>>,
         // The albums the search matches are added, played, dragged and
-        // shown with all their tracks, rather than those that match it
+        // shown with all their tracks, rather than those that match it;
+        // the toggle next to the search and the banner of the album's
+        // tracks are bound to it
+        #[property(get, set = Self::set_whole_albums, explicit_notify)]
         pub whole_albums: Cell<bool>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
@@ -214,6 +217,16 @@ mod imp {
                 self.selection_anchor.set(None);
             }
             self.obj().notify_selection_mode();
+        }
+
+        // The covers no longer say how many of their tracks the search
+        // matches while the whole albums are taken
+        fn set_whole_albums(&self, whole_albums: bool) {
+            if self.whole_albums.replace(whole_albums) == whole_albums {
+                return;
+            }
+            self.obj().update_match_counts();
+            self.obj().notify_whole_albums();
         }
     }
 
@@ -815,10 +828,8 @@ impl LibraryView {
             self,
             move |_| {
                 // The selection was made among the albums of the previous
-                // search, so it would be confusing to keep it, and so would
-                // taking whole albums, which that search was found to need
+                // search, so it would be confusing to keep it
                 this.set_selection_mode(false);
-                this.set_whole_albums(false);
                 this.update_search();
             }
         ));
@@ -838,12 +849,6 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             move |_| this.select_all()
-        ));
-
-        imp.whole_albums_button.connect_toggled(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |button| this.set_whole_albums(button.is_active())
         ));
 
         imp.add_albums_button.connect_clicked(clone!(
@@ -899,8 +904,17 @@ impl LibraryView {
     }
 
     fn set_search_matches(&self, words: Vec<String>, matches: Option<HashMap<String, (u32, u32)>>) {
-        self.imp().search_words.replace(words);
-        self.imp().search_matches.replace(matches);
+        let imp = self.imp();
+        // A new search starts again from the tracks that match it, as the
+        // albums it finds might not need whole albums. That's once its
+        // matches are in, as Whole Albums can still be pressed for the
+        // search before while they're read
+        let new_search = *imp.search_words.borrow() != words;
+        imp.search_words.replace(words);
+        imp.search_matches.replace(matches);
+        if new_search {
+            self.set_whole_albums(false);
+        }
         self.update_match_counts();
         self.update_whole_albums_button();
         if let Some(filter) = self.imp().filter.borrow().as_ref() {
@@ -943,17 +957,12 @@ impl LibraryView {
             .as_ref()
             .is_some_and(|matches| matches.values().any(|(matching, total)| matching < total));
         imp.whole_albums_revealer.set_reveal_child(partial);
-        imp.whole_albums_button.set_active(imp.whole_albums.get());
     }
 
-    // Takes the whole albums the search matches, or only their tracks
-    // that match it; a new search goes back to the tracks
-    fn set_whole_albums(&self, whole_albums: bool) {
-        if self.imp().whole_albums.replace(whole_albums) == whole_albums {
-            return;
-        }
-        self.update_match_counts();
-        self.update_whole_albums_button();
+    // The words of the search, which the tracks of an album it found
+    // match
+    pub fn search_words(&self) -> Vec<String> {
+        self.imp().search_words.borrow().clone()
     }
 
     // The words that the tracks taken from an album have to match, to be

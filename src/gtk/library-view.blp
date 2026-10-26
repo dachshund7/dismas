@@ -69,6 +69,7 @@ template $DismasLibraryView: Widget {
 
             child: ToggleButton whole_albums_button {
               margin-start: 6;
+              active: bind template.whole-albums bidirectional;
               label: _("Whole Albums");
               tooltip-text: _("Add, Play and Show the Whole Albums");
             };

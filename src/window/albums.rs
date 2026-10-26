@@ -77,7 +77,7 @@ impl Window {
 
     // Adds the tracks of the albums selected in the grid to the queue,
     // or plays them in its place; for the albums selected in a search, only
-    // the tracks that match it
+    // the tracks that match it, unless the whole albums are taken
     fn queue_selected_albums(&self, play: bool) {
         let library_view = self.imp().library_view.get();
         let albums = library_view.selected_albums();
@@ -158,11 +158,18 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, album| {
-                win.show_album_tracks(album, &win.imp().library_view.track_words(), None);
+                win.show_album_tracks(album, &win.imp().library_view.search_words(), None);
             }
         ));
 
+        // Whole Albums is one setting, which the album's tracks follow, and
+        // which their banner switches too
         let album_tracks = self.imp().album_tracks.get();
+        library_view
+            .bind_property("whole-albums", &album_tracks, "whole-albums")
+            .bidirectional()
+            .sync_create()
+            .build();
         album_tracks.connect_menu_requested(clone!(
             #[weak(rename_to = win)]
             self,
@@ -243,9 +250,9 @@ impl Window {
     }
 }
 
-// The files of the tracks of albums, with the words of the search each was
-// selected in, as only the tracks that match it are added; reading them
-// from the library takes a while, so it's done in a separate thread
+// The files of the tracks of albums, each with the words its tracks have
+// to match: those of the search, or none for the whole album; reading
+// them from the library takes a while, so it's done in a separate thread
 async fn album_files(albums: Vec<(String, Vec<String>)>) -> Option<Vec<gio::File>> {
     let paths = gio::spawn_blocking(move || {
         albums
