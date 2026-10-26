@@ -354,6 +354,8 @@ impl Window {
         self.save_resume_point();
         self.player().clear_queue();
         self.set_selected_playlist(name);
+        // The tracks of the new one aren't what was searched for
+        self.close_queue_search();
     }
 
     pub(super) fn show_new_playlist_dialog(&self) {

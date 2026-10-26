@@ -236,6 +236,8 @@ mod imp {
         pub page_before_fullscreen: RefCell<Option<String>>,
         pub pane_before_fullscreen: Cell<bool>,
 
+        // The search of the queue, and the tracks it lets through
+        pub queue_filter: SearchFilter,
         pub queue_filtermodel: RefCell<Option<gio::ListModel>>,
         // The rows of the queue, to slide them to their new places when
         // tracks are moved
@@ -491,6 +493,7 @@ mod imp {
                 queue_selection: Cell::new(false),
                 queue_anchor: glib::WeakRef::new(),
                 queue_search: Cell::new(false),
+                queue_filter: SearchFilter::new(),
                 queue_filtermodel: RefCell::default(),
                 queue_rows: RefCell::default(),
                 file_drop_row: glib::WeakRef::new(),

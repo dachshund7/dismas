@@ -232,11 +232,22 @@ impl Window {
                     let was_empty = queue.is_empty();
                     let first_added = queue.n_tracks();
 
+                    // Tracks added while a search hides some would rarely
+                    // match it, and go unseen, so it's closed and the list
+                    // shows where they went; not for tracks added from the
+                    // command line, which leave the pane as it is
+                    let close_search = !matches!(mode, QueueMode::Quiet | QueueMode::Restore)
+                        && win.queue_filtering();
+                    if close_search {
+                        win.close_queue_search();
+                    }
+
                     // Bulk add to avoid hammering the UI with list model updates
                     queue.insert_tracks(&tracks, insert_before.as_ref());
                     // The list keeps the rows it shows in place, so tracks put
-                    // above the first of them would be out of its view
-                    if insert_before.is_some() {
+                    // above the first of them would be out of its view; the
+                    // list goes to the track that plays instead
+                    if insert_before.is_some() || (close_search && !play) {
                         crate::queue_row::reveal_track(
                             &win.imp().playlist_view.queue_view(),
                             &tracks[0],

@@ -24,7 +24,9 @@ mod imp {
     pub struct SearchFilter {
         #[property(get, set = Self::set_search, explicit_notify, nullable)]
         pub search: RefCell<Option<String>>,
-        // The normalized words of the search
+        // The normalized words of the search; without any, every track
+        // matches, and the search doesn't filter the queue
+        #[property(name = "filtering", get = Self::filtering, type = bool)]
         pub words: RefCell<Vec<String>>,
     }
 
@@ -54,12 +56,20 @@ mod imp {
                 })
                 .unwrap_or_default();
 
+            let was_filtering = self.filtering();
             self.search.replace(search);
             self.words.replace(words);
 
             let obj = self.obj();
             obj.changed(gtk::FilterChange::Different);
             obj.notify_search();
+            if self.filtering() != was_filtering {
+                obj.notify_filtering();
+            }
+        }
+
+        fn filtering(&self) -> bool {
+            !self.words.borrow().is_empty()
         }
     }
 

@@ -159,6 +159,11 @@ All notable changes to this project will be documented in this file.
   Adagio", rather than after the whole movement, which the tracks shared;
   a number of an opera keeps its act and its number, as in "Acte I: 8. Air
   « Prendre le dessin d’un bijou » (Gerald)"
+- While a search of the playlist pane hides some of the tracks, the tracks
+  can't be dragged to another place, and tracks dropped on the pane go to
+  the end of the playlist, as two tracks next to each other in the search
+  results can be far apart in the playlist. Adding tracks or switching
+  playlists closes the search, so the tracks that came in are shown
 - Update dependencies
 
 ### Fixed

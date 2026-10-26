@@ -66,7 +66,15 @@ impl Window {
                     .sync_create()
                     .build();
 
-                row.set_reorderable(true);
+                // While a search hides tracks, the rows around a place in
+                // the list aren't the tracks around it in the queue, so the
+                // tracks can't be moved, and dropped ones go at the end
+                win.imp()
+                    .queue_filter
+                    .bind_property("filtering", &row, "reorderable")
+                    .invert_boolean()
+                    .sync_create()
+                    .build();
                 row.connect_move_requested(clone!(
                     #[weak]
                     win,
@@ -112,7 +120,7 @@ impl Window {
         let player = self.player();
         let queue = player.queue();
 
-        let filter = SearchFilter::new();
+        let filter = imp.queue_filter.clone();
         let filter_model =
             gtk::FilterListModel::new(Some(queue.model().clone()), Some(filter.clone()));
         // Search results keep the order of the queue
@@ -371,6 +379,18 @@ impl Window {
         imp.queue_scroll_tick.replace(Some(tick));
     }
 
+    // Closes the search of the queue, showing all its tracks again; the
+    // text goes right away, so that the list has them all at once
+    pub(super) fn close_queue_search(&self) {
+        self.imp().playlist_view.queue_searchentry().set_text("");
+        self.set_queue_search(false);
+    }
+
+    // Whether the search of the queue hides some of its tracks
+    pub(super) fn queue_filtering(&self) -> bool {
+        self.imp().queue_filter.filtering()
+    }
+
     // Shows the playing track in the queue, in the middle of the list,
     // where it flashes, like going to the album of a track; a search that
     // hides it is cleared
@@ -381,8 +401,7 @@ impl Window {
         let view = self.imp().playlist_view.queue_view();
         let mut pos = crate::queue_row::track_position(&view, &track);
         if pos.is_none() && self.queue_search() {
-            self.imp().playlist_view.queue_searchentry().set_text("");
-            self.set_queue_search(false);
+            self.close_queue_search();
             pos = crate::queue_row::track_position(&view, &track);
         }
         let Some(pos) = pos else {
