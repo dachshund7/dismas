@@ -263,21 +263,11 @@ impl Window {
                         });
                         // A track whose file isn't there can't play, so it
                         // goes on from the start of the next one that can
-                        let playable = |pos| queue.track_at(pos).is_some_and(|t| !t.missing());
-                        match resume_at {
-                            Some((pos, position)) if playable(pos) => {
-                                player.skip_to(pos);
+                        let (pos, position) = resume_at.unwrap_or_default();
+                        if let Some(first) = queue.playable_from(pos) {
+                            player.skip_to(first);
+                            if first == pos && resume_at.is_some() {
                                 player.resume_at(position.into());
-                            }
-                            Some((pos, _)) => {
-                                if let Some(pos) = queue.playable_from(pos) {
-                                    player.skip_to(pos);
-                                }
-                            }
-                            None => {
-                                if let Some(pos) = queue.playable_from(0) {
-                                    player.skip_to(pos);
-                                }
                             }
                         }
                     }

@@ -347,8 +347,8 @@ impl Queue {
         self.track_at(prev)
     }
 
-    // Whether the track at a position can play: it's there, and its file
-    // was found
+    // Whether the track at a position can play: it's there, and isn't a
+    // placeholder for a file that gave no track
     fn playable(&self, pos: u32) -> bool {
         self.track_at(pos).is_some_and(|track| !track.missing())
     }
