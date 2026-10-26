@@ -704,13 +704,20 @@ impl LibraryView {
     // one at this position, which has just come on screen, into the cache:
     // GridView only shows a cell once it's within a few pixels of the
     // screen, which would leave the albums coming into view without their
-    // covers while they're read
+    // covers while they're read. Those on screen and a screenful on each
+    // side have to fit in the cache, or the covers read ahead would push
+    // out the ones on screen: while the grid opens, GTK maps a few hundred
+    // cells before it hides those off screen, and a large screen can show
+    // as many
     fn read_ahead(&self, position: u32) {
         let imp = self.imp();
         let Some(model) = imp.grid_view.model() else {
             return;
         };
-        let screenful = imp.mapped_cells.get().max(1);
+        let screenful = imp
+            .mapped_cells
+            .get()
+            .clamp(1, (MAX_CACHED_COVERS / 3) as u32);
         let end = position
             .saturating_add(screenful)
             .min(model.n_items().saturating_sub(1));
