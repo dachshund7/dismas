@@ -110,6 +110,10 @@ mod imp {
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
+        pub whole_albums_revealer: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub whole_albums_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         pub scan_progress: TemplateChild<gtk::ProgressBar>,
@@ -131,9 +135,9 @@ mod imp {
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
         pub selection_mode: Cell<bool>,
-        // The selected albums, with the words of the search each was
-        // selected in, so that only the tracks that matched it are added
-        pub selected: RefCell<HashMap<String, Vec<String>>>,
+        // The ids of the selected albums; a new search clears them, so
+        // they're all among the albums it shows
+        pub selected: RefCell<HashSet<String>>,
         // The last album selected or unselected with a click, where
         // Shift+click starts selecting from
         pub selection_anchor: glib::WeakRef<Album>,
@@ -151,6 +155,9 @@ mod imp {
         pub search_matches: RefCell<Option<HashMap<String, (u32, u32)>>>,
         // The words of the search the matches are for
         pub search_words: RefCell<Vec<String>>,
+        // The albums the search matches are added, played, dragged and
+        // shown with all their tracks, rather than those that match it
+        pub whole_albums: Cell<bool>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
         // The cells of the grid that are mapped, which are about the ones
@@ -619,7 +626,7 @@ impl LibraryView {
                 let albums = if selection {
                     this.selected_albums()
                 } else {
-                    vec![(album.id(), this.search_words())]
+                    vec![(album.id(), this.track_words())]
                 };
                 let drag = AlbumDrag { albums, selection };
                 Some(gdk::ContentProvider::for_value(&drag.to_value()))
@@ -808,8 +815,10 @@ impl LibraryView {
             self,
             move |_| {
                 // The selection was made among the albums of the previous
-                // search, so it would be confusing to keep it
+                // search, so it would be confusing to keep it, and so would
+                // taking whole albums, which that search was found to need
                 this.set_selection_mode(false);
+                this.set_whole_albums(false);
                 this.update_search();
             }
         ));
@@ -829,6 +838,12 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             move |_| this.select_all()
+        ));
+
+        imp.whole_albums_button.connect_toggled(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |button| this.set_whole_albums(button.is_active())
         ));
 
         imp.add_albums_button.connect_clicked(clone!(
@@ -884,34 +899,73 @@ impl LibraryView {
     }
 
     fn set_search_matches(&self, words: Vec<String>, matches: Option<HashMap<String, (u32, u32)>>) {
-        // The covers of the albums the search matches only partly say how
-        // many of their tracks it does
-        if let Some(model) = self.imp().model.borrow().as_ref() {
-            for album in model.iter::<Album>().flatten() {
-                let (matching, total) = matches
-                    .as_ref()
-                    .and_then(|matches| matches.get(&album.id()).copied())
-                    .filter(|(matching, total)| matching < total)
-                    .unwrap_or_default();
-                if album.matching_tracks() != matching {
-                    album.set_matching_tracks(matching);
-                }
-                if album.track_count() != total {
-                    album.set_track_count(total);
-                }
-            }
-        }
-
         self.imp().search_words.replace(words);
         self.imp().search_matches.replace(matches);
+        self.update_match_counts();
+        self.update_whole_albums_button();
         if let Some(filter) = self.imp().filter.borrow().as_ref() {
             filter.changed(gtk::FilterChange::Different);
         }
     }
 
-    // The normalized words of the search the grid is filtered by, if any
-    pub fn search_words(&self) -> Vec<String> {
-        self.imp().search_words.borrow().clone()
+    // The covers of the albums the search matches only partly say how many
+    // of their tracks it does, unless the whole albums are taken
+    fn update_match_counts(&self) {
+        let imp = self.imp();
+        let matches = imp.search_matches.borrow();
+        let whole_albums = imp.whole_albums.get();
+        let Some(model) = imp.model.borrow().clone() else {
+            return;
+        };
+        for album in model.iter::<Album>().flatten() {
+            let (matching, total) = matches
+                .as_ref()
+                .filter(|_| !whole_albums)
+                .and_then(|matches| matches.get(&album.id()).copied())
+                .filter(|(matching, total)| matching < total)
+                .unwrap_or_default();
+            if album.matching_tracks() != matching {
+                album.set_matching_tracks(matching);
+            }
+            if album.track_count() != total {
+                album.set_track_count(total);
+            }
+        }
+    }
+
+    // Whole Albums is only offered while the search matches only some of
+    // the tracks of albums
+    fn update_whole_albums_button(&self) {
+        let imp = self.imp();
+        let partial = imp
+            .search_matches
+            .borrow()
+            .as_ref()
+            .is_some_and(|matches| matches.values().any(|(matching, total)| matching < total));
+        imp.whole_albums_revealer.set_reveal_child(partial);
+        imp.whole_albums_button.set_active(imp.whole_albums.get());
+    }
+
+    // Takes the whole albums the search matches, or only their tracks
+    // that match it; a new search goes back to the tracks
+    fn set_whole_albums(&self, whole_albums: bool) {
+        if self.imp().whole_albums.replace(whole_albums) == whole_albums {
+            return;
+        }
+        self.update_match_counts();
+        self.update_whole_albums_button();
+    }
+
+    // The words that the tracks taken from an album have to match, to be
+    // added, played, dragged or shown: those of the search, or none when
+    // the whole albums are taken
+    pub fn track_words(&self) -> Vec<String> {
+        let imp = self.imp();
+        if imp.whole_albums.get() {
+            Vec::new()
+        } else {
+            imp.search_words.borrow().clone()
+        }
     }
 
     // The album with an id, if it's in the grid
@@ -959,13 +1013,13 @@ impl LibraryView {
 
     fn set_album_selected(&self, album: &Album, selected: bool) {
         album.set_selected(selected);
-        let mut map = self.imp().selected.borrow_mut();
+        let mut ids = self.imp().selected.borrow_mut();
         if selected {
-            map.insert(album.id(), self.search_words());
+            ids.insert(album.id());
         } else {
-            map.remove(&album.id());
+            ids.remove(&album.id());
         }
-        drop(map);
+        drop(ids);
         self.update_selection();
     }
 
@@ -1034,12 +1088,12 @@ impl LibraryView {
         self.update_selection();
     }
 
-    // The selected albums, in the order of the grid, with the words of
-    // the search each was selected in; a new search clears the selection,
-    // so the selected albums are all shown
+    // The selected albums, in the order of the grid, with the words their
+    // tracks have to match to be taken
     pub fn selected_albums(&self) -> Vec<(String, Vec<String>)> {
         let imp = self.imp();
         let selected = imp.selected.borrow();
+        let words = self.track_words();
         let Some(model) = imp.grid_view.model() else {
             return Vec::new();
         };
@@ -1047,10 +1101,9 @@ impl LibraryView {
         // `iter::<Album>()` would panic
         (0..model.n_items())
             .filter_map(|i| model.item(i).and_downcast::<Album>())
-            .filter_map(|album| {
-                let id = album.id();
-                selected.get(&id).map(|words| (id, words.clone()))
-            })
+            .map(|album| album.id())
+            .filter(|id| selected.contains(id))
+            .map(|id| (id, words.clone()))
             .collect()
     }
 
@@ -1137,9 +1190,9 @@ impl LibraryView {
         {
             let mut selected = imp.selected.borrow_mut();
             let ids: HashSet<String> = albums.iter().map(Album::id).collect();
-            selected.retain(|id, _| ids.contains(id));
+            selected.retain(|id| ids.contains(id));
             for album in &albums {
-                album.set_selected(selected.contains_key(&album.id()));
+                album.set_selected(selected.contains(&album.id()));
             }
         }
         self.update_selection();

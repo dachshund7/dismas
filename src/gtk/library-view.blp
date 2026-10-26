@@ -55,8 +55,24 @@ template $DismasLibraryView: Widget {
         maximum-size: 400;
         hexpand: true;
 
-        child: SearchEntry search_entry {
-          placeholder-text: _("Search albums");
+        child: Box {
+          SearchEntry search_entry {
+            hexpand: true;
+            placeholder-text: _("Search albums");
+          }
+
+          // While the search matches only some of the tracks of albums,
+          // takes the whole albums instead; it slides in, as the entry
+          // gives it room
+          Revealer whole_albums_revealer {
+            transition-type: slide_left;
+
+            child: ToggleButton whole_albums_button {
+              margin-start: 6;
+              label: _("Whole Albums");
+              tooltip-text: _("Add, Play and Show the Whole Albums");
+            };
+          }
         };
       };
     }

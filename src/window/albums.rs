@@ -158,7 +158,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, album| {
-                win.show_album_tracks(album, &win.imp().library_view.search_words(), None);
+                win.show_album_tracks(album, &win.imp().library_view.track_words(), None);
             }
         ));
 
