@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.11] - 2026-11-01
+
+### Added
+
 - Gapless playback: tracks play back to back, such as movements that run
   into each other
 - CUE sheets split audio files into their tracks, from a `.cue` file next
@@ -182,6 +192,7 @@ All notable changes to this project will be documented in this file.
 - A search of the playlist pane that finds nothing says so, rather than
   leaving the pane empty
 - Update dependencies
+- Update the Cornish translation
 
 ### Fixed
 
@@ -277,6 +288,27 @@ All notable changes to this project will be documented in this file.
 - `RUST_LOG` didn't change what Dismas logged, so the README's way of
   getting a debug log didn't work, and a release build, like the
   Flatpak's, couldn't give one
+- Any program on the session bus could make Dismas read, overwrite or
+  delete `.m3u8` files outside its playlists folder, through a playlist
+  name such as `../x`
+- Where an administrator had locked Dismas's settings with dconf, Dismas
+  crashed when the window closed, when quitting, when switching playlists,
+  when changing ReplayGain, or when the portal turned down Background
+  Playback
+- Other users of the computer could read the folders Dismas made for its
+  data and its cache; the folders it makes now are private
+- Playing an album from one of its tracks played the track after it when
+  a file before it in the album couldn't be read
+- Tracks in a folder whose name ends with a colon, such as "Live at
+  Home:", were lost from playlists
+- Ctrl+A in the album grid's search selected the albums rather than the
+  text, so typing a new search added its words to the old ones
+- Exporting a playlist to a slow device, such as a phone, froze the window
+  until it was written
+- A playlist name with braces in it, such as "My {n} list", came out
+  changed in the messages that named it
+- Searching the queue for "unknown" found the tracks without an artist
+  tag, by the "Unknown artist" shown in its place
 - With PulseAudio, a track paused before it had started playing, such as
   by a Pause from the desktop's media controls just after startup, or by a
   quick Play and Pause, stayed silent when played a few seconds later, or
@@ -287,8 +319,6 @@ All notable changes to this project will be documented in this file.
 - After hiding the playlist pane on the album page, typing didn't always
   search the albums, and Esc didn't always clear their search; the cursor
   goes to the album search now
-
-### Removed
 
 ## [2026.10] - 2026-10-20
 
@@ -315,8 +345,6 @@ The first release of Dismas, a fork of Amberol's development version after
   music, including the tags of the Work Hierarchy plugin for Picard
 - Show the name of each work above its movements in the queue, with a line
   between works
-- Read the credits in the descriptions of YouTube downloads, which yt-dlp
-  stores as `SYNOPSIS`
 - A sleep timer, which can let the last track finish
 - A track menu, and a track information dialog (Ctrl+I) with every tag,
   links to MusicBrainz, and the format and ReplayGain of the file
@@ -399,7 +427,6 @@ The first release of Dismas, a fork of Amberol's development version after
 - Close the main menu with F10
 - Keep the playlist pane hidden after narrowing and widening the window
 - Scroll to the playing track at its place in the searched queue
-- Scroll long lists without stalling, especially on X11
 
 ### Removed
 

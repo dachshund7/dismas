@@ -10,15 +10,26 @@
       Dismas is a music player for your local music. It is a fork of Amberol,
       by Emmanuele Bassi, that adds a library and playlists.
     </p>
+    <p>
+      Like Amberol, it only reads your music: it never changes your files, and
+      it doesn't need the network. Everything it shows comes from the tags and
+      the covers of your tracks.
+    </p>
     <p>Features:</p>
     <ul>
       <li>an album grid of your music folders, with search and sorting</li>
+      <li>search by any tag, such as the conductor, the orchestra or the label</li>
       <li>playlists, with M3U import and export</li>
+      <li>playlists that resume where they were</li>
+      <li>smart playlists of the tracks played recently or the most, and favorites</li>
       <li>a queue you can search and reorder</li>
+      <li>gapless playback</li>
+      <li>CUE sheets, which split an album ripped to a single file into its tracks</li>
       <li>work, movement and performer details for classical music</li>
+      <li>a shuffle that goes by what you've heard, and repeat</li>
       <li>a sleep timer</li>
-      <li>UI recoloring using the album art</li>
-      <li>shuffle and repeat</li>
+      <li>colors that match the cover art</li>
+      <li>a tray icon while playing in the background</li>
       <li>MPRIS integration</li>
     </ul>
   </description>
@@ -29,15 +40,23 @@
   <screenshots>
     <screenshot type="default">
       <caption>The player, with the queue</caption>
-      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas2.jpg</image>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas1.png</image>
     </screenshot>
     <screenshot>
       <caption>The album grid</caption>
-      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas3.jpg</image>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas4.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The work and the performers of a track</caption>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas5.png</image>
     </screenshot>
     <screenshot>
       <caption>A narrow window</caption>
-      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas6.jpg</image>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas3.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The playlists and the smart playlists</caption>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas2.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">@APPLICATION_ID@.desktop</launchable>
@@ -66,6 +85,25 @@
   </kudos>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="2026.11" date="2026-11-01">
+      <description>
+        <p>Gapless playback, CUE sheets, smart playlists and favorites.</p>
+        <ul>
+          <li>Play tracks back to back, without a gap</li>
+          <li>Split albums ripped to a single file into their tracks by their CUE sheets</li>
+          <li>Play the tracks you played recently, the most, or not lately, and mark favorites</li>
+          <li>Resume each playlist where it was</li>
+          <li>Keep the tracks of a playlist whose files are missing, greyed out, until they're back</li>
+          <li>Read the Work Hierarchy plugin's tags from MP3, M4A and other formats too</li>
+          <li>Add music folders, such as one on a second drive, and leave out folders in them</li>
+          <li>Shuffle by what you've heard, keeping the movements of a work together</li>
+          <li>Play in fullscreen, or with Zen Mode, which fades out the controls</li>
+          <li>Control playback from a tray icon while playing in the background</li>
+          <li>Play only the tracks that a search of the queue found</li>
+          <li>A new icon: the Katholische Hofkirche in Dresden</li>
+        </ul>
+      </description>
+    </release>
     <release version="2026.10" date="2026-10-20">
       <description>
         <p>The first release of Dismas, a fork of Amberol.</p>
