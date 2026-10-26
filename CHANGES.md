@@ -249,6 +249,9 @@ All notable changes to this project will be documented in this file.
   dialogues, recitatives and entr'actes, were numbered by their place in
   the act, which read like the score's numbers, as in "25. Entr’acte"
   right after "No. 11 Finale"; they're named without a number now
+- The time left under the playlist pane's title counted all of the
+  playing track, however much of it had played, and didn't change when
+  tracks were moved or shuffled
 
 ### Removed
 

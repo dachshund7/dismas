@@ -275,16 +275,37 @@ impl Window {
         self.player().queue().is_empty()
     }
 
+    // Adds up the tracks after the current one again, when the tracks or
+    // their order change, or another track is current
     pub(super) fn update_queue_time(&self) {
         let player = self.player();
         let queue = player.queue();
-        let n_tracks = queue.n_tracks();
-        if let Some(current) = queue.current_track_index() {
-            let remaining_time: u64 = (current..n_tracks)
+        let after_current: u64 = queue.current_track_index().map_or(0, |current| {
+            (current + 1..queue.n_tracks())
                 .filter_map(|pos| queue.track_at(pos))
                 .map(|track| track.duration())
-                .sum();
-            let remaining_min = u32::try_from(remaining_time / 60).unwrap_or(u32::MAX);
+                .sum()
+        });
+        self.imp().queue_time_after_current.set(after_current);
+        self.show_queue_time();
+    }
+
+    // Shows the time left in the queue, counting only what's left of the
+    // current track, so it's called at each position too
+    pub(super) fn show_queue_time(&self) {
+        let player = self.player();
+        let queue = player.queue();
+        if let Some(current) = queue.current() {
+            let state = player.state();
+            let elapsed = if state.track().as_ref() == Some(&current) {
+                state.position()
+            } else {
+                0
+            };
+            let remaining_time = self.imp().queue_time_after_current.get()
+                + current.duration().saturating_sub(elapsed);
+            // Rounded up, so the last minute isn't "0 minutes remaining"
+            let remaining_min = u32::try_from(remaining_time.div_ceil(60)).unwrap_or(u32::MAX);
             let remaining_hrs = remaining_min / 60;
 
             let remaining_str = if remaining_hrs > 0 {
@@ -495,6 +516,5 @@ impl Window {
     pub fn remove_tracks(&self, tracks: &[Track]) {
         self.player().remove_tracks(tracks);
         self.update_selected_count();
-        self.update_queue_time();
     }
 }

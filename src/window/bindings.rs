@@ -66,6 +66,7 @@ impl Window {
                 self,
                 move |_, _| {
                     win.update_position_labels();
+                    win.show_queue_time();
                 }
             ),
         );
@@ -185,12 +186,20 @@ impl Window {
                         win.action_set_enabled("win.next", queue.n_tracks() > 1);
                         win.update_queue_actions();
                     }
-
-                    win.update_queue_time();
                 }
             ),
         );
         self.disconnect_on_close(queue, notify_ntracks_id);
+
+        // Moving and shuffling tracks change the time left too, as do new
+        // tags; the current track can move along with them, which notifies
+        // `current` once the tracks are in their places
+        let items_changed_id = queue.model().connect_items_changed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, _, _, _| win.update_queue_time()
+        ));
+        self.disconnect_on_close(queue.model(), items_changed_id);
 
         let notify_repeat_mode_id = queue.connect_notify_local(
             Some("repeat-mode"),
@@ -212,6 +221,7 @@ impl Window {
                 #[weak(rename_to = win)]
                 self,
                 move |queue, _| {
+                    win.update_queue_time();
                     if queue.is_last_track() {
                         match queue.repeat_mode() {
                             RepeatMode::Consecutive => {
