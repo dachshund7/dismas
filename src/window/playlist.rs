@@ -423,39 +423,42 @@ impl Window {
     // those of the queue, with an Undo, like a smart playlist; the ones
     // whose files are missing are left out, as they can't play
     pub(super) fn play_search_results(&self) {
-        let imp = self.imp();
-        if !self.queue_filtering() || imp.loads.get() > 0 {
+        let Some(results) = self.queue_search_results() else {
+            return;
+        };
+        if self.imp().loads.get() > 0 {
             return;
         }
-        // By position: the filter model's item type is GObject, which
-        // `iter::<Track>()` would refuse, though its items are tracks
-        let files: Vec<gio::File> = imp
-            .queue_filtermodel
-            .borrow()
-            .iter()
-            .flat_map(|model| (0..model.n_items()).filter_map(|pos| model.item(pos)))
-            .filter_map(|item| item.downcast::<Track>().ok())
-            .filter(|track| !track.missing())
-            .map(|track| track.file())
-            .collect();
+        let files: Vec<gio::File> = playable(&results).map(|track| track.file()).collect();
         if files.is_empty() {
             return;
         }
         self.play_in_place_of_queue(files);
     }
 
+    // Whether the search found tracks that can play, for its Play button
+    pub(super) fn can_play_search_results(&self) -> bool {
+        self.queue_search_results()
+            .is_some_and(|results| playable(&results).next().is_some())
+    }
+
+    // The tracks the search found, in their order, while it hides some of
+    // the queue's
+    fn queue_search_results(&self) -> Option<gio::ListModel> {
+        if !self.queue_filtering() {
+            return None;
+        }
+        self.imp().queue_filtermodel.borrow().clone()
+    }
+
     fn update_search_results(&self) {
         self.update_queue_actions();
         // While the queue is emptied to be replaced, the search finds
         // nothing in it, which isn't worth saying
-        let found_nothing = self.queue_filtering()
-            && !self.queue_is_empty()
+        let found_nothing = !self.queue_is_empty()
             && self
-                .imp()
-                .queue_filtermodel
-                .borrow()
-                .as_ref()
-                .is_some_and(|model| model.n_items() == 0);
+                .queue_search_results()
+                .is_some_and(|results| results.n_items() == 0);
         self.imp().playlist_view.set_no_results(found_nothing);
     }
 
@@ -620,4 +623,14 @@ impl Window {
         self.player().remove_tracks(tracks);
         self.update_selected_count();
     }
+}
+
+// The tracks of a list of results that can play, leaving out those whose
+// files are missing. By position: the filter model's item type is
+// GObject, which `iter::<Track>()` would refuse, though its items are
+// tracks
+fn playable(results: &gio::ListModel) -> impl Iterator<Item = Track> + '_ {
+    (0..results.n_items())
+        .filter_map(|pos| results.item(pos).and_downcast::<Track>())
+        .filter(|track| !track.missing())
 }
