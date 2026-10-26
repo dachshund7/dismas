@@ -8,7 +8,7 @@ use gtk::gdk;
 use gtk::glib;
 use gtk::graphene;
 use gtk::gsk;
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, OnceCell, RefCell};
 
 const SPACING: f32 = 32.0;
 
@@ -26,6 +26,8 @@ mod imp {
         pub(super) scrolled: Cell<bool>,
 
         pub(super) animation: OnceCell<adw::TimedAnimation>,
+        // The wait before the label starts scrolling
+        pub(super) start_source: RefCell<Option<glib::SourceId>>,
 
         #[property(
             get = |imp: &Self| imp.child.label(),
@@ -87,6 +89,9 @@ mod imp {
         }
 
         fn dispose(&self) {
+            if let Some(source) = self.start_source.take() {
+                source.remove();
+            }
             self.child.unparent();
         }
     }
@@ -209,16 +214,22 @@ mod imp {
 
     impl Marquee {
         fn set_label(&self, value: Option<glib::GString>) {
-            if let Some(value) = value {
-                self.child.set_label(&value);
-            } else {
-                self.child.set_label("");
+            // The same text again, like the album of the next track of an
+            // album, stays as it is: scrolling through it again would redraw
+            // the window at every frame for several seconds
+            let value = value.as_deref().unwrap_or("");
+            if self.child.label() == value {
+                return;
             }
+            self.child.set_label(value);
 
-            // A new label scrolls through once again; resetting the
-            // animation doesn't count as it being done
+            // A new label scrolls through once again, after the whole wait;
+            // resetting the animation doesn't count as it being done
             let animation = self.animation.get().unwrap();
             animation.reset();
+            if let Some(source) = self.start_source.take() {
+                source.remove();
+            }
             self.scrolled.set(false);
             self.set_rotation_progress(0.0);
             if !self.label_fits.get() {
@@ -249,20 +260,27 @@ mod imp {
             width / gtk::pango::SCALE
         }
 
+        // Starts scrolling the label after a wait, once; it's called at
+        // each allocation, so a wait that's already going on is kept
         fn start_animation(&self) {
             let animation = self.animation.get().unwrap();
-            if self.scrolled.get() || animation.state() == adw::AnimationState::Playing {
+            if self.scrolled.get()
+                || animation.state() == adw::AnimationState::Playing
+                || self.start_source.borrow().is_some()
+            {
                 return;
             }
 
             let widget = self.obj();
-            glib::timeout_add_local_once(
+            let source = glib::timeout_add_local_once(
                 std::time::Duration::from_millis(1500),
                 clone!(
                     #[weak]
                     widget,
                     move || {
                         let imp = widget.imp();
+                        // It ran, so there's nothing left to remove
+                        imp.start_source.take();
                         let animation = imp.animation.get().unwrap();
                         if !imp.scrolled.get()
                             && !imp.label_fits.get()
@@ -273,6 +291,7 @@ mod imp {
                     },
                 ),
             );
+            self.start_source.replace(Some(source));
         }
 
         fn stop_animation(&self) {

@@ -160,6 +160,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A long album or artist name in the player scrolled through again at each
+  track of the same album, keeping the processor busy for several seconds
+  each time
 - For a file without its format's main tag, such as an MP3 file with ID3v1
   and APE tags but no ID3v2 tag, the album grid and its covers only read
   the first tag, where the queue filled in from the others
