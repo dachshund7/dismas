@@ -46,6 +46,8 @@ mod imp {
         pub queue_searchbar: TemplateChild<gtk::SearchBar>,
         #[template_child]
         pub queue_searchentry: TemplateChild<gtk::SearchEntry>,
+        #[template_child]
+        pub queue_no_results: TemplateChild<adw::StatusPage>,
 
         // While a track is dragged near an edge of the queue, the pixels to
         // scroll it by on each frame
@@ -317,5 +319,10 @@ impl PlaylistView {
 
     pub fn set_search(&self, search: bool) {
         self.imp().queue_searchbar.set_search_mode(search);
+    }
+
+    // Says that the search found nothing, in place of an empty list
+    pub fn set_no_results(&self, no_results: bool) {
+        self.imp().queue_no_results.set_visible(no_results);
     }
 }

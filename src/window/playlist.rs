@@ -189,16 +189,26 @@ impl Window {
 
         imp.queue_filtermodel
             .replace(Some(filter_model.clone().upcast::<gio::ListModel>()));
-        // Playing the tracks found needs a search that found some
+        // What the search found decides whether its tracks can be played,
+        // and whether the pane says it found nothing. The queue's own
+        // changes count too: tracks added that the search hides don't
+        // change what it found, but the queue isn't empty any more. The
+        // filter model takes the queue's changes first, as it connected
+        // to them first
         filter_model.connect_items_changed(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, _, _, _| win.update_queue_actions()
+            move |_, _, _, _| win.update_search_results()
+        ));
+        queue.model().connect_items_changed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, _, _, _| win.update_search_results()
         ));
         filter.connect_filtering_notify(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_| win.update_queue_actions()
+            move |_| win.update_search_results()
         ));
 
         imp.playlist_view
@@ -420,6 +430,21 @@ impl Window {
             return;
         }
         self.play_in_place_of_queue(files);
+    }
+
+    fn update_search_results(&self) {
+        self.update_queue_actions();
+        // While the queue is emptied to be replaced, the search finds
+        // nothing in it, which isn't worth saying
+        let found_nothing = self.queue_filtering()
+            && !self.queue_is_empty()
+            && self
+                .imp()
+                .queue_filtermodel
+                .borrow()
+                .as_ref()
+                .is_some_and(|model| model.n_items() == 0);
+        self.imp().playlist_view.set_no_results(found_nothing);
     }
 
     // Whether the search of the queue hides some of its tracks

@@ -129,6 +129,20 @@ template $DismasPlaylistView: Widget {
         ]
       }
 
+      // Over the empty list, while the search hides every track; it
+      // doesn't take the pointer, so tracks are dropped on the list
+      [overlay]
+      Adw.StatusPage queue_no_results {
+        visible: false;
+        can-target: false;
+        icon-name: "edit-find-symbolic";
+        title: _("No Matching Tracks");
+
+        styles [
+          "compact",
+        ]
+      }
+
       ScrolledWindow queue_scrolled {
         hscrollbar-policy: never;
         vscrollbar-policy: automatic;

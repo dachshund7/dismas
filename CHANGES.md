@@ -170,6 +170,8 @@ All notable changes to this project will be documented in this file.
   the end of the playlist, as two tracks next to each other in the search
   results can be far apart in the playlist. Adding tracks or switching
   playlists closes the search, so the tracks that came in are shown
+- A search of the playlist pane that finds nothing says so, rather than
+  leaving the pane empty
 - Update dependencies
 
 ### Fixed
