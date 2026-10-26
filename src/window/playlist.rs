@@ -142,14 +142,24 @@ impl Window {
                                 win.toggle_queue_track(&track);
                                 return;
                             }
-                            if track.missing() {
-                                win.add_toast(i18n_k(
-                                    // Translators: `{track}` must be left
-                                    // unmodified; it is expanded to the
-                                    // title of a track
-                                    "“{track}” wasn't found",
-                                    &[("track", &track.title())],
-                                ));
+                            if let Some(reason) = track.missing_reason() {
+                                let title = track.title();
+                                win.add_toast(match reason {
+                                    Missing::NotFound => i18n_k(
+                                        // Translators: `{track}` must be left
+                                        // unmodified; it is expanded to the
+                                        // title of a track
+                                        "“{track}” wasn't found",
+                                        &[("track", &title)],
+                                    ),
+                                    Missing::Unreadable => i18n_k(
+                                        // Translators: `{track}` must be left
+                                        // unmodified; it is expanded to the
+                                        // title of a track
+                                        "Unable to play “{track}”",
+                                        &[("track", &title)],
+                                    ),
+                                });
                                 return;
                             }
                             if queue.current_track_index() != Some(real_pos) {

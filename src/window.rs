@@ -34,7 +34,7 @@ use sidebar::SizeLimits;
 
 use crate::{
     album_tracks::AlbumTracks,
-    audio::{AudioPlayer, CoverCache, RepeatMode, ReplayGainMode, Track, load_tracks},
+    audio::{AudioPlayer, CoverCache, Missing, RepeatMode, ReplayGainMode, Track, load_tracks},
     config::APPLICATION_ID,
     cover_backdrop::CoverBackdrop,
     drag_overlay::DragOverlay,

@@ -457,7 +457,7 @@ fn restored_order(current: &[String], saved: &[String]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::track::TrackData;
+    use crate::audio::track::{Missing, TrackData};
     use std::{cell::RefCell, rc::Rc};
 
     fn queue_of(n: usize) -> (Queue, Vec<Track>) {
@@ -781,7 +781,7 @@ mod tests {
     // A track whose file wasn't found when its playlist loaded
     fn missing_track(name: &str) -> Track {
         let file = gtk::gio::File::for_path(format!("/gone/{name}.flac"));
-        Track::new(TrackData::missing(file))
+        Track::new(TrackData::missing(file, Missing::NotFound))
     }
 
     // Playing tracks at 0 and 2, and missing ones at 1 and 3

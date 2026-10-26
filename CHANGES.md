@@ -239,9 +239,9 @@ All notable changes to this project will be documented in this file.
   nothing heard; Dismas says so and goes on to the next track, and greys
   out a track whose file is gone, as when its playlist opens without it
 - The tracks of a playlist that weren't found when it opened, such as
-  those on a drive that wasn't plugged in, were dropped from it for good
-  at the next change to it; they stay in their places, greyed out, and
-  playback skips them until their files are back
+  those on a drive that wasn't plugged in, or that couldn't be read, were
+  dropped from it for good at the next change to it; they stay in their
+  places, greyed out, and playback skips them until their files are back
 - Removing many selected tracks at once froze the window for a while,
   and removing the playing track with the ones after it loaded each of
   them into the player in turn

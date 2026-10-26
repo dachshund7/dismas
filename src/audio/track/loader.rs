@@ -203,6 +203,24 @@ impl FileCache {
     }
 }
 
+// The track that keeps the place of a file of a playlist that gave none:
+// it isn't there, or it is but couldn't be read, e.g. it's damaged or it
+// can't be opened. An audio file that a CUE sheet among the files splits
+// has its tracks there, and needs none
+fn placeholder(uri: &str, files: &FileCache) -> Option<TrackData> {
+    let file = gio::File::for_uri(uri);
+    let path = file.path()?;
+    if files.claims.sheet_of(&path).is_some() {
+        return None;
+    }
+    let reason = if cue_sheet::location_exists(&path) {
+        Missing::Unreadable
+    } else {
+        Missing::NotFound
+    };
+    Some(TrackData::missing(file, reason))
+}
+
 // Decoding a cover mostly waits for its sandboxed loader, so a few at a
 // time go faster, even on fewer cores
 const MAX_LOADING_THREADS: usize = 4;
@@ -211,8 +229,8 @@ const MAX_LOADING_THREADS: usize = 4;
 // are read in a few threads. They are sent in the order of the files, all
 // the tracks of a file at once, which can be none; the threads stop once
 // the receiver is dropped. With `placeholders`, for the tracks of a
-// playlist, a file that isn't there is a track that `TrackData::missing()`
-// makes, so that saving the playlist doesn't lose it
+// playlist, a file that gives no track is one that `placeholder()` makes,
+// so that saving the playlist doesn't lose it
 pub fn load_tracks(
     files: Vec<gio::File>,
     placeholders: bool,
@@ -244,14 +262,11 @@ pub fn load_tracks(
                     // A file whose tags make the reader panic is skipped,
                     // rather than leaving the tracks after it unread
                     let mut data = utils::guarded(uri, || TrackData::read(uri, &cache), Vec::new);
-                    if data.is_empty() && placeholders {
-                        let file = gio::File::for_uri(uri);
-                        if file
-                            .path()
-                            .is_some_and(|path| !cue_sheet::location_exists(&path))
-                        {
-                            data.push(TrackData::missing(file));
-                        }
+                    if data.is_empty()
+                        && placeholders
+                        && let Some(placeholder) = placeholder(uri, &cache)
+                    {
+                        data.push(placeholder);
                     }
                     if read_sender.send((index, data)).is_err() {
                         break;
@@ -412,7 +427,7 @@ impl TrackData {
             details: read.details(replay_gain),
             file,
             audio: None,
-            missing: false,
+            missing: None,
             artist,
             title,
             fallback_title,
@@ -456,7 +471,7 @@ impl TrackData {
                 end: track.end,
                 gains: Gains::from_tag(&tag),
             }),
-            missing: false,
+            missing: None,
             artist,
             title,
             // Translators: the title of a track of a CUE sheet that has
@@ -476,6 +491,58 @@ impl TrackData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // What `load_tracks` reads from the files, in their order
+    fn load(files: &[&Path], placeholders: bool) -> Vec<Vec<TrackData>> {
+        let files = files.iter().map(gio::File::for_path).collect();
+        let receiver = load_tracks(files, placeholders);
+        std::iter::from_fn(|| receiver.recv_blocking().ok()).collect()
+    }
+
+    #[test]
+    fn files_of_a_playlist_that_give_no_tracks_keep_their_places() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-placeholders-XXXXXX")).unwrap();
+        let damaged = dir.join("Damaged.flac");
+        std::fs::write(&damaged, "not audio").unwrap();
+        let gone = dir.join("Gone.flac");
+        let wav = dir.join("Album.wav");
+        crate::utils::write_test_wav(&wav, 4);
+        let cue = dir.join("Album.cue");
+        std::fs::write(
+            &cue,
+            "FILE \"Album.wav\" WAVE\n\
+             TRACK 01 AUDIO\nINDEX 01 00:00:00\n\
+             TRACK 02 AUDIO\nINDEX 01 00:02:00\n",
+        )
+        .unwrap();
+
+        let read = load(&[&damaged, &gone, &cue, &wav, &cue.join("track07")], true);
+        let reasons: Vec<Vec<Option<Missing>>> = read
+            .iter()
+            .map(|tracks| tracks.iter().map(TrackData::missing_reason).collect())
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                vec![Some(Missing::Unreadable)],
+                vec![Some(Missing::NotFound)],
+                // The sheet has the tracks of the file it splits, which has
+                // none, and keeps no place of its own
+                vec![None, None],
+                vec![],
+                // A track the sheet doesn't have
+                vec![Some(Missing::Unreadable)],
+            ]
+        );
+        assert_eq!(read[0][0].shown_title(), "Damaged");
+
+        // Files that are added to a playlist, rather than its own, are left
+        // out
+        let read = load(&[&damaged, &gone], false);
+        assert!(read.iter().all(Vec::is_empty));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn absurd_lengths_count_as_unknown() {

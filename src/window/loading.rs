@@ -240,8 +240,7 @@ impl Window {
                     }
 
                     // Store the current state of the queue; restoring
-                    // doesn't change it, and saving it would drop the
-                    // tracks whose files are there but couldn't be read
+                    // doesn't change it
                     if mode != QueueMode::Restore {
                         win.store_queue();
                     }
@@ -459,8 +458,8 @@ impl Window {
                     let Ok([data]) = <[_; 1]>::try_from(data) else {
                         continue;
                     };
-                    // Still not there
-                    if data.is_missing() && track.missing() {
+                    // Still not there, or still unreadable
+                    if data.is_missing() && data.missing_reason() == track.missing_reason() {
                         continue;
                     }
                     track.update(data);

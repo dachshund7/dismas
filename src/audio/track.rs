@@ -83,8 +83,19 @@ pub struct TrackData {
     file: gio::File,
     // The part of an audio file that a track of a CUE sheet plays
     audio: Option<CueAudio>,
-    // Whether the file wasn't found, see `TrackData::missing()`
-    missing: bool,
+    // Why the track has none of its file's tags, if it's a track of a
+    // playlist whose file gave none, see `TrackData::missing()`
+    missing: Option<Missing>,
+}
+
+// Why a track of a playlist has none of its file's tags
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Missing {
+    // The file isn't there, e.g. on a drive that isn't plugged in
+    NotFound,
+    // The file is there, but no track could be read from it, e.g. it can't
+    // be opened or it's damaged
+    Unreadable,
 }
 
 #[derive(Debug, Clone)]
@@ -299,11 +310,11 @@ impl TrackData {
     }
 
     // A track of a playlist whose file isn't there, e.g. on a drive that
-    // isn't plugged in, with no tags but its name: it keeps its place in the
-    // playlist, which would lose it the next time it's saved, and playback
-    // skips it. The tracks of CUE sheets are named like the sheet names
-    // tracks without a title
-    pub fn missing(file: gio::File) -> Self {
+    // isn't plugged in, or gave no track, with no tags but its name: it
+    // keeps its place in the playlist, which would lose it the next time
+    // it's saved, and playback skips it. The tracks of CUE sheets are named
+    // like the sheet names tracks without a title
+    pub fn missing(file: gio::File, reason: Missing) -> Self {
         let path = file.path().unwrap_or_default();
         let (fallback_title, fallback_album) =
             if let Some((sheet, number)) = cue_sheet::missing_location_parts(&path) {
@@ -333,11 +344,15 @@ impl TrackData {
             details: FileDetails::default(),
             file,
             audio: None,
-            missing: true,
+            missing: Some(reason),
         }
     }
 
     pub fn is_missing(&self) -> bool {
+        self.missing.is_some()
+    }
+
+    pub fn missing_reason(&self) -> Option<Missing> {
         self.missing
     }
 
@@ -387,7 +402,7 @@ impl Default for TrackData {
             details: FileDetails::default(),
             file: gio::File::for_path("/does-not-exist"),
             audio: None,
-            missing: false,
+            missing: None,
         }
     }
 }
@@ -503,8 +518,10 @@ mod imp {
         }
 
         fn row_subtitle(&self) -> String {
-            if self.missing() {
-                return i18n("File not found");
+            match self.data.borrow().missing_reason() {
+                Some(Missing::NotFound) => return i18n("File not found"),
+                Some(Missing::Unreadable) => return i18n("Unable to read the file"),
+                None => {}
             }
             match (self.movement_levels(), self.movement()) {
                 (Some((levels, _)), _) => levels,
@@ -642,11 +659,16 @@ impl Track {
         self.notify_missing();
     }
 
+    // Why the track has none of its file's tags, if it's a placeholder
+    pub fn missing_reason(&self) -> Option<Missing> {
+        self.imp().data.borrow().missing_reason()
+    }
+
     // Makes the track one whose file wasn't found, like those of a
     // playlist that opens without their files, once its file turns out to
     // be gone, e.g. when it fails to play
     pub fn mark_missing(&self) {
-        self.update(TrackData::missing(self.file()));
+        self.update(TrackData::missing(self.file(), Missing::NotFound));
     }
 
     // The title, artist and album in the tags, without the ones shown in
@@ -829,7 +851,8 @@ mod tests {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        MusicBrainzIds, Track, TrackCredits, TrackData, credits::Credit, track_album, track_title,
+        Missing, MusicBrainzIds, Track, TrackCredits, TrackData, credits::Credit, track_album,
+        track_title,
     };
 
     #[test]
@@ -1538,7 +1561,10 @@ mod tests {
 
     #[test]
     fn missing_files_are_named_after_their_paths() {
-        let data = TrackData::missing(gtk::gio::File::for_path("/gone/Album/01 - Intro.flac"));
+        let data = TrackData::missing(
+            gtk::gio::File::for_path("/gone/Album/01 - Intro.flac"),
+            Missing::NotFound,
+        );
         assert!(data.is_missing());
         assert_eq!(data.shown_title(), "Intro");
         assert_eq!(data.shown_album(), "Album");
@@ -1546,7 +1572,10 @@ mod tests {
         assert_eq!(data.uri(), "file:///gone/Album/01%20-%20Intro.flac");
 
         // A track of a CUE sheet that isn't there either
-        let data = TrackData::missing(gtk::gio::File::for_path("/gone/Album/Album.cue/track03"));
+        let data = TrackData::missing(
+            gtk::gio::File::for_path("/gone/Album/Album.cue/track03"),
+            Missing::NotFound,
+        );
         assert_eq!(data.shown_title(), "Track 3");
         assert_eq!(data.shown_album(), "Album");
     }
@@ -1556,7 +1585,7 @@ mod tests {
         // No artist tag: "Unknown artist" is shown, but not searched, as in
         // the album grid
         let file = gtk::gio::File::for_path("/music/Fado/03 Barco Negro.flac");
-        let track = Track::new(TrackData::missing(file));
+        let track = Track::new(TrackData::missing(file, Missing::Unreadable));
         assert_eq!(track.artist(), "Unknown artist");
         let key = track.search_key();
         assert!(key.contains("barco negro"), "{key}");
@@ -1570,8 +1599,8 @@ mod tests {
     #[test]
     fn a_track_whose_file_is_gone_is_marked_missing() {
         let file = gtk::gio::File::for_path("/gone/Album/02 Second.flac");
-        let mut data = TrackData::missing(file.clone());
-        data.missing = false;
+        let mut data = TrackData::missing(file.clone(), Missing::Unreadable);
+        data.missing = None;
         let track = Track::new(data);
         assert!(!track.missing());
 
