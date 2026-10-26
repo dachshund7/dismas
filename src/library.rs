@@ -998,11 +998,13 @@ fn update_covers(
         })?;
         for row in rows {
             let (id, first_track, has_row, cover) = row?;
-            // Thumbnails of another size or format have another name, and
-            // are made again
-            let outdated = cover
-                .as_deref()
-                .is_some_and(|p| !is_thumbnail(Path::new(p), &dir, &id, size));
+            // Thumbnails smaller than the grid shows them, or in the format
+            // of older versions, are made again. A larger one, made while a
+            // monitor with a larger scale was connected, is kept, as the
+            // monitors can change from one start to the next
+            let outdated = cover.as_deref().is_some_and(|p| {
+                thumbnail_size(Path::new(p), &dir, &id).is_none_or(|made| made < size)
+            });
             // Albums without cover art have no thumbnail, so we only check
             // that the thumbnails we created are still there
             let made = cover.map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
@@ -1073,15 +1075,29 @@ fn thumbnail_name(album_id: &str, size: u32, transparent: bool) -> String {
     }
 }
 
-// Whether the file is the album's thumbnail at this size, in either format
-fn is_thumbnail(path: &Path, dir: &Path, album_id: &str, size: u32) -> bool {
-    [false, true]
-        .into_iter()
-        .any(|transparent| path == dir.join(thumbnail_name(album_id, size, transparent)))
+// The size of the album's thumbnail, in either format, if the file is one
+// that `thumbnail_name()` names
+fn thumbnail_size(path: &Path, dir: &Path, album_id: &str) -> Option<u32> {
+    if path.parent()? != dir {
+        return None;
+    }
+    let size = path
+        .file_name()?
+        .to_str()?
+        .strip_prefix(album_id)?
+        .strip_prefix('-')
+        .and_then(|rest| {
+            rest.strip_suffix(".jpg")
+                .or_else(|| rest.strip_suffix("-alpha.png"))
+        })?;
+    if size.is_empty() || !size.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    size.parse().ok()
 }
 
 // Removes the thumbnails of the albums that are gone, or whose id changed,
-// and those of another size
+// and those that were made again at another size or in another format
 fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     let used = conn
         .prepare("SELECT path FROM covers WHERE path IS NOT NULL")?
@@ -1321,7 +1337,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        MusicFolder, Roots, is_mbid, is_thumbnail, path_bytes, path_from_bytes, thumbnail_name,
+        MusicFolder, Roots, is_mbid, path_bytes, path_from_bytes, thumbnail_name, thumbnail_size,
     };
 
     fn roots_of(paths: &[&Path]) -> Roots {
@@ -1540,23 +1556,18 @@ mod tests {
         assert_eq!(thumbnail_name("album", 240, false), "album-240.jpg");
         assert_eq!(thumbnail_name("album", 480, true), "album-480-alpha.png");
 
-        assert!(is_thumbnail(&dir.join("album-240.jpg"), dir, "album", 240));
-        assert!(is_thumbnail(
-            &dir.join("album-240-alpha.png"),
-            dir,
-            "album",
-            240
-        ));
-        assert!(!is_thumbnail(&dir.join("album-480.png"), dir, "album", 480));
-        assert!(!is_thumbnail(&dir.join("album-480.png"), dir, "album", 240));
-        assert!(!is_thumbnail(&dir.join("album-480.jpg"), dir, "album", 240));
-        assert!(!is_thumbnail(&dir.join("other-240.jpg"), dir, "album", 240));
-        assert!(!is_thumbnail(
-            Path::new("/elsewhere/album-240.jpg"),
-            dir,
-            "album",
-            240
-        ));
+        let size = |name: &str| thumbnail_size(&dir.join(name), dir, "album");
+        assert_eq!(size("album-240.jpg"), Some(240));
+        assert_eq!(size("album-480-alpha.png"), Some(480));
+        // The PNG files of older versions
+        assert_eq!(size("album-480.png"), None);
+        assert_eq!(size("other-240.jpg"), None);
+        assert_eq!(size("album-other-240.jpg"), None);
+        assert_eq!(size("album-.jpg"), None);
+        assert_eq!(
+            thumbnail_size(Path::new("/elsewhere/album-240.jpg"), dir, "album"),
+            None
+        );
     }
 
     // A track in the database, with paths relative to a folder
