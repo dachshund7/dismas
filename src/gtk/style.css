@@ -235,6 +235,20 @@ queuerow.drop-above.first {
   box-shadow: inset 0 2px var(--accent-bg-color);
 }
 
+/* The bar over an album's tracks that a search filters, in the colors of
+ * libadwaita's banner in a sidebar, as a banner can't hold a toggle */
+.album-filter-bar {
+  --banner-color: #7d7d83;
+  background-color: color-mix(in srgb, var(--banner-color) 30%, var(--sidebar-bg-color));
+  color: var(--sidebar-fg-color);
+  padding: 6px;
+}
+
+.album-filter-bar:backdrop {
+  background-color: color-mix(in srgb, var(--banner-color) 15%, var(--sidebar-bg-color));
+  transition: background-color 200ms ease-out;
+}
+
 /* Files dragged over the pane go where the line shows, or at the end
  * where the pane has the outline of the theme's drop targets */
 .playlist-pane.drop-at-end {

@@ -47,11 +47,11 @@ All notable changes to this project will be documented in this file.
   which removes all the selected tracks when the track is one of them;
   Go to Album is in the playlist pane, and in an album's tracks while a
   search leaves some of them out
-- While a search of the album grid matches only some of an album's
-  tracks, its cover and its track list say how many. Whole Albums, next to
-  the search or on the banner of the album's tracks, makes adding,
-  playing, dragging and opening the albums the search found take all
-  their tracks, rather than only those that match
+- While a search of the album grid matches only some of an album's tracks,
+  its cover and its track list say how many. Whole Albums, next to the
+  search or over the album's tracks, makes adding, playing, dragging and
+  opening the albums the search found take all their tracks, rather than
+  only those that match
 - Recently Played, Most Played and Not Heard Lately, on the Playlists
   page, play the last 100 tracks heard, in the order they were heard, the
   ones played the most in the last 6 months, or the ones played the most

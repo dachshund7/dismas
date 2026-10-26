@@ -34,7 +34,9 @@ mod imp {
         #[template_child]
         pub album_artist: TemplateChild<gtk::Label>,
         #[template_child]
-        pub banner: TemplateChild<adw::Banner>,
+        pub filter_bar: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub filter_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub tracks_view: TemplateChild<gtk::ListView>,
         #[template_child]
@@ -67,7 +69,7 @@ mod imp {
         pub left_out: Cell<Option<(u32, u32)>>,
         // All the tracks are showing, though the search leaves some out:
         // the album grid's Whole Albums, which the window binds this to,
-        // and which the banner switches
+        // and which the toggle on the bar over the tracks switches
         #[property(get, set = Self::set_whole_albums, explicit_notify)]
         pub whole_albums: Cell<bool>,
         // Bumped for each album, to stop loading the tracks of the
@@ -316,13 +318,6 @@ impl AlbumTracks {
             move |_| this.select_all()
         ));
 
-        // Whole Albums, or Matching Tracks once all the tracks are showing
-        imp.banner.connect_button_clicked(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |_| this.set_whole_albums(!this.whole_albums())
-        ));
-
         // Clicking a track plays the album from there, or selects it
         imp.tracks_view.connect_activate(clone!(
             #[weak(rename_to = this)]
@@ -511,38 +506,24 @@ impl AlbumTracks {
         imp.left_out.get().is_some() && !imp.whole_albums.get()
     }
 
-    // Says how many of the tracks the search leaves out, with a button to
-    // take the whole albums, or to go back to the ones that match it
-    fn update_banner(&self) {
+    // Says how many of the tracks the search matches while it leaves out
+    // some, with or without Whole Albums, whose toggle shows which
+    fn update_filter_bar(&self) {
         let imp = self.imp();
         let Some((matching, total)) = imp.left_out.get() else {
-            imp.banner.set_revealed(false);
+            imp.filter_bar.set_reveal_child(false);
             return;
         };
-
-        if imp.whole_albums.get() {
-            imp.banner.set_title(&ni18n_f(
-                // Translators: The '{}' must be left unmodified, and it is
-                // expanded to the number of tracks of the album
-                "Showing {} track",
-                "Showing all {} tracks",
-                total,
-                &[&total.to_string()],
-            ));
-            imp.banner.set_button_label(Some(&i18n("Matching Tracks")));
-        } else {
-            imp.banner.set_title(&ni18n_f(
-                // Translators: The first '{}' is the number of tracks of the
-                // album that match the search, and the second the number of
-                // all of them; both must be left unmodified
-                "The search matches {} of {} track",
-                "The search matches {} of {} tracks",
-                total,
-                &[&matching.to_string(), &total.to_string()],
-            ));
-            imp.banner.set_button_label(Some(&i18n("Whole Albums")));
-        }
-        imp.banner.set_revealed(true);
+        imp.filter_label.set_label(&ni18n_f(
+            // Translators: The first '{}' is the number of tracks of the
+            // album that match the search, and the second the number of
+            // all of them; both must be left unmodified
+            "The search matches {} of {} track",
+            "The search matches {} of {} tracks",
+            total,
+            &[&matching.to_string(), &total.to_string()],
+        ));
+        imp.filter_bar.set_reveal_child(true);
     }
 
     // Reads the tracks of the album that match the search, or all of them
@@ -577,7 +558,7 @@ impl AlbumTracks {
             async move {
                 // With a search, the tracks that match it are counted, to
                 // tell whether it leaves some out, also with Whole Albums,
-                // so that the banner can go back to them
+                // so that the bar over them stays
                 let (paths, counts) = gio::spawn_blocking(move || {
                     let all = library::album_tracks(&album_id, &[]);
                     if search_words.is_empty() {
@@ -596,7 +577,7 @@ impl AlbumTracks {
                     .filter(|(matching, total)| matching < total)
                     .map(|(matching, total)| (matching as u32, total as u32));
                 this.imp().left_out.set(left_out);
-                this.update_banner();
+                this.update_filter_bar();
                 let files: Vec<gio::File> = paths.into_iter().map(gio::File::for_path).collect();
                 this.imp().files.replace(files.clone());
 
