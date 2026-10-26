@@ -145,17 +145,19 @@ pub fn continues_work(previous: &Track, track: &Track) -> bool {
 // followed by the name of the work and its composer for the movements of
 // a work; a click on the name calls `on_work_clicked` with the positions of the first
 // movement and past the last one, and whether Ctrl was held. In lists
-// whose tracks can be moved, a track dropped on the header of a work at
-// the top of the list calls `on_drop_before_work` with the track and the
-// position of the first movement; elsewhere, tracks go before a work by
-// being dropped below the row above its header
+// whose tracks can be moved, `drop_before_work` says whether they can be
+// now, as the rows do, and a track dropped on the header of a work at the
+// top of the list is given to it with the position of the first movement;
+// elsewhere, tracks go before a work by being dropped below the row above
+// its header
 pub fn work_header_factory(
     on_work_clicked: impl Fn(u32, u32, bool) + 'static,
-    on_drop_before_work: Option<impl Fn(&Track, u32) + 'static>,
+    drop_before_work: Option<(impl Fn() -> bool + 'static, impl Fn(&Track, u32) + 'static)>,
 ) -> gtk::ListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     let on_work_clicked = Rc::new(on_work_clicked);
-    let on_drop_before_work = on_drop_before_work.map(Rc::new);
+    let drop_before_work =
+        drop_before_work.map(|(can_move, on_drop)| (Rc::new(can_move), Rc::new(on_drop)));
 
     factory.connect_setup(move |_, item| {
         let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
@@ -220,17 +222,19 @@ pub fn work_header_factory(
         content.append(&separator);
         content.append(&title);
 
-        if let Some(on_drop_before_work) = &on_drop_before_work {
+        if let Some((can_move, on_drop)) = &drop_before_work {
             let drop_target = gtk::DropTarget::new(Track::static_type(), gdk::DragAction::MOVE);
             drop_target.connect_motion(glib::clone!(
                 #[weak]
                 header,
                 #[weak]
                 content,
+                #[strong]
+                can_move,
                 #[upgrade_or]
                 gdk::DragAction::empty(),
                 move |_, _, _| {
-                    if header.start() > 0 {
+                    if header.start() > 0 || !can_move() {
                         return gdk::DragAction::empty();
                     }
                     content.add_css_class("drop-above");
@@ -248,7 +252,9 @@ pub fn work_header_factory(
                 #[weak]
                 content,
                 #[strong]
-                on_drop_before_work,
+                can_move,
+                #[strong]
+                on_drop,
                 #[upgrade_or]
                 false,
                 move |_, value, _, _| {
@@ -256,10 +262,10 @@ pub fn work_header_factory(
                     let Ok(track) = value.get::<Track>() else {
                         return false;
                     };
-                    if header.start() > 0 {
+                    if header.start() > 0 || !can_move() {
                         return false;
                     }
-                    on_drop_before_work(&track, header.start());
+                    on_drop(&track, header.start());
                     true
                 }
             ));

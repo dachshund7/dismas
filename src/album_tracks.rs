@@ -269,7 +269,7 @@ impl AlbumTracks {
                     self,
                     move |start, end, ctrl| this.toggle_work(start, end, ctrl)
                 ),
-                None::<fn(&Track, u32)>,
+                None::<(fn() -> bool, fn(&Track, u32))>,
             )));
 
         imp.tracks.replace(Some(tracks));

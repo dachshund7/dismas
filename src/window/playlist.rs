@@ -99,21 +99,32 @@ impl Window {
                     self,
                     move |start, end, ctrl| win.toggle_queue_work(start, end, ctrl)
                 ),
-                Some(clone!(
-                    #[weak(rename_to = win)]
-                    self,
-                    move |track: &Track, position| {
-                        let target = win
-                            .imp()
-                            .playlist_view
-                            .queue_view()
-                            .model()
-                            .and_then(|model| model.item(position))
-                            .and_downcast::<Track>();
-                        if let Some(target) = target {
-                            win.move_queue_track(track, &target, true);
+                // While a search hides tracks, they can't be moved, as with
+                // the rows
+                Some((
+                    clone!(
+                        #[weak(rename_to = win)]
+                        self,
+                        #[upgrade_or]
+                        false,
+                        move || !win.queue_filtering()
+                    ),
+                    clone!(
+                        #[weak(rename_to = win)]
+                        self,
+                        move |track: &Track, position| {
+                            let target = win
+                                .imp()
+                                .playlist_view
+                                .queue_view()
+                                .model()
+                                .and_then(|model| model.item(position))
+                                .and_downcast::<Track>();
+                            if let Some(target) = target {
+                                win.move_queue_track(track, &target, true);
+                            }
                         }
-                    }
+                    ),
                 )),
             )));
 
