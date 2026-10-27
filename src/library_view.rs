@@ -1034,10 +1034,13 @@ impl LibraryView {
                             .collect();
                         store.splice(0, store.n_items(), &items);
                         // From the top, with All Composers, rather than
-                        // where it was left, at the composer picked
-                        this.imp()
-                            .composer_list
-                            .scroll_to(0, gtk::ListScrollFlags::NONE, None);
+                        // where it was left, at the composer picked. The
+                        // search can have found none, if it was typed in
+                        // while they were read
+                        let list = &this.imp().composer_list;
+                        if list.model().is_some_and(|model| model.n_items() > 0) {
+                            list.scroll_to(0, gtk::ListScrollFlags::NONE, None);
+                        }
                     }
                 ));
             }
