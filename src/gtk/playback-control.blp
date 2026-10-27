@@ -207,6 +207,34 @@ Popover sleep_timer_popover {
     }
 
     Box {
+      orientation: vertical;
+
+      Button {
+        label: _("Stop _After This Track");
+        use-underline: true;
+        action-name: "win.sleep-timer-stop-after-track";
+
+        styles [
+          "flat",
+        ]
+      }
+
+      // Only while a movement of a work plays
+      Button stop_after_work_button {
+        label: _("Stop After This _Work");
+        use-underline: true;
+        action-name: "win.sleep-timer-stop-after-work";
+        visible: false;
+
+        styles [
+          "flat",
+        ]
+      }
+    }
+
+    Separator {}
+
+    Box {
       spacing: 6;
       halign: center;
 

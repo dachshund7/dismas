@@ -30,9 +30,14 @@ mod imp {
         // when the timer runs out, instead of right away
         #[property(get, set)]
         pub finish_track: Cell<bool>,
-        // Whether the timer ran out and the track is playing to its end
+        // Whether the timer ran out and the track is playing to its end,
+        // or the music was asked to stop at the end of the track
         #[property(get)]
         pub finishing_track: Cell<bool>,
+        // Whether the music was asked to stop at the end of the work that
+        // is playing, which goes on while its movements follow each other
+        #[property(get)]
+        pub finishing_work: Cell<bool>,
 
         pub deadline: Cell<Option<Instant>>,
         pub source: RefCell<Option<glib::SourceId>>,
@@ -77,6 +82,7 @@ impl SleepTimer {
             Instant::now() + Duration::from_secs(u64::from(minutes) * 60),
         ));
         self.set_finishing_track(false);
+        self.set_finishing_work(false);
         self.set_active(true);
         self.update_remaining();
 
@@ -99,7 +105,20 @@ impl SleepTimer {
         self.imp().deadline.set(None);
         self.set_remaining(0);
         self.set_finishing_track(false);
+        self.set_finishing_work(false);
         self.set_active(false);
+    }
+
+    // Stops the music at the end of the track that is playing, or at the
+    // end of its work, without counting down; the player works out where
+    // the work ends, as the tracks after it can change meanwhile
+    pub fn stop_at_end(&self, work: bool) {
+        self.stop_countdown();
+        self.imp().deadline.set(None);
+        self.set_remaining(0);
+        self.set_finishing_track(!work);
+        self.set_finishing_work(work);
+        self.set_active(true);
     }
 
     // Waits for the end of the track instead of stopping the music now
@@ -156,5 +175,39 @@ impl SleepTimer {
         if self.imp().finishing_track.replace(finishing_track) != finishing_track {
             self.notify_finishing_track();
         }
+    }
+
+    fn set_finishing_work(&self, finishing_work: bool) {
+        if self.imp().finishing_work.replace(finishing_work) != finishing_work {
+            self.notify_finishing_work();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stopping_at_the_end_of_the_track_or_the_work() {
+        let (sender, _receiver) = async_channel::unbounded();
+        let timer = SleepTimer::new(sender);
+
+        timer.stop_at_end(true);
+        assert!(timer.active());
+        assert!(timer.finishing_work());
+        assert!(!timer.finishing_track());
+        assert_eq!(timer.remaining(), 0);
+
+        // One or the other
+        timer.stop_at_end(false);
+        assert!(timer.finishing_track());
+        assert!(!timer.finishing_work());
+
+        timer.stop_at_end(true);
+        timer.cancel();
+        assert!(!timer.active());
+        assert!(!timer.finishing_work());
+        assert!(!timer.finishing_track());
     }
 }

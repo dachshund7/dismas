@@ -20,6 +20,10 @@ All notable changes to this project will be documented in this file.
 - The Add buttons of an album's tracks and of the albums selected in the
   grid have a menu next to them, with Play Next and the other playlists to
   add to
+- Stop After This Track and Stop After This Work, in the popover of the
+  sleep timer, stop the music at the end of the playing track, or at the
+  end of the work it's a movement of, letting its movements play through
+  without a gap
 
 ### Changed
 

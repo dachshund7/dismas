@@ -41,6 +41,8 @@ mod imp {
         #[template_child]
         pub sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
         #[template_child]
+        pub stop_after_work_button: TemplateChild<gtk::Button>,
+        #[template_child]
         pub favorite_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub track_info_button: TemplateChild<gtk::Button>,
@@ -160,6 +162,11 @@ impl PlaybackControl {
     pub fn has_open_menu(&self) -> bool {
         let imp = self.imp();
         imp.sleep_timer_button.is_active() || imp.more_button.is_active()
+    }
+
+    // Stopping after the work is offered while a movement plays
+    pub fn set_stop_after_work_visible(&self, visible: bool) {
+        self.imp().stop_after_work_button.set_visible(visible);
     }
 
     pub fn close_sleep_timer(&self) {

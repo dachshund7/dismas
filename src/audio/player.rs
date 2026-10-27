@@ -24,6 +24,7 @@ use crate::{
     },
     play_stats::{self, ListenTracker},
     utils,
+    work_sections::continues_work,
 };
 
 // One step of the volume, by the slider, the keyboard or the tray
@@ -329,18 +330,40 @@ impl AudioPlayer {
             self,
             move |_| this.update_next_track()
         ));
+        self.sleep_timer.connect_finishing_work_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.update_next_track()
+        ));
     }
 
-    // The music stops at the end of the track for the sleep timer
+    // The music stops at the end of the track for the sleep timer, so the
+    // next one isn't handed over
     fn update_next_track(&self) {
         let next_track = self.queue.peek_next_track();
         for c in &self.controllers {
             c.set_can_go_next(next_track.is_some());
         }
 
-        let next_track = next_track.filter(|_| !self.sleep_timer.finishing_track());
+        let next_track = next_track.filter(|_| !self.stops_at_track_end());
         self.backend
             .set_next(next_track.map(|t| TrackSource::of(&t)).as_ref());
+    }
+
+    // Whether the music stops at the end of the current track, for the
+    // sleep timer: it waits for the end of the track, or for the end of the
+    // work, and the next track doesn't continue it. Repeating the track
+    // doesn't continue it either. The tracks are the queue's, as it goes
+    // on to the next one before the state shows it
+    fn stops_at_track_end(&self) -> bool {
+        let timer = &self.sleep_timer;
+        timer.finishing_track()
+            || (timer.finishing_work()
+                && !self
+                    .queue
+                    .current()
+                    .zip(self.queue.peek_next_track())
+                    .is_some_and(|(current, next)| continues_work(&current, &next)))
     }
 
     fn setup_channel(self: Rc<Self>) {
@@ -437,7 +460,7 @@ impl AudioPlayer {
 
     // Called at the end of a track
     fn play_next(&self) {
-        if self.sleep_timer.finishing_track() {
+        if self.stops_at_track_end() {
             // Go on to the next track without playing it, so playing
             // again starts there
             self.sleep_timer.cancel();
@@ -500,7 +523,7 @@ impl AudioPlayer {
         // timer ran out: go on as at the end of the track, loading the
         // track that comes next
         let follows = self.queue.peek_next_track().is_some_and(|t| t.uri() == uri);
-        if !follows || self.sleep_timer.finishing_track() {
+        if !follows || self.stops_at_track_end() {
             self.play_next();
             return;
         }
@@ -562,7 +585,7 @@ impl AudioPlayer {
             failures,
             next,
             self.state.playing(),
-            self.sleep_timer.finishing_track(),
+            self.stops_at_track_end(),
         ) {
             AfterFailure::Next => self.play_next_track(Queue::next_track),
             // As at the end of the track, which the sleep timer waited for

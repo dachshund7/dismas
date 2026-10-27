@@ -5,7 +5,9 @@ use super::*;
 
 impl Window {
     // win.sleep-timer-start starts the timer for the minutes picked in the
-    // popover of the sleep timer button, and win.sleep-timer-cancel turns
+    // popover of the sleep timer button, win.sleep-timer-stop-after-track
+    // and win.sleep-timer-stop-after-work stop the music at the end of the
+    // track or the work that is playing, and win.sleep-timer-cancel turns
     // it off
     pub(super) fn setup_sleep_timer(&self) {
         let player = self.player();
@@ -38,6 +40,18 @@ impl Window {
                     control.close_sleep_timer();
                 })
                 .build(),
+            gio::ActionEntry::builder("sleep-timer-stop-after-track")
+                .activate(|win: &Window, _, _| {
+                    win.player().sleep_timer().stop_at_end(false);
+                    win.imp().playback_control.close_sleep_timer();
+                })
+                .build(),
+            gio::ActionEntry::builder("sleep-timer-stop-after-work")
+                .activate(|win: &Window, _, _| {
+                    win.player().sleep_timer().stop_at_end(true);
+                    win.imp().playback_control.close_sleep_timer();
+                })
+                .build(),
             gio::ActionEntry::builder("sleep-timer-cancel")
                 .activate(|win: &Window, _, _| {
                     win.player().sleep_timer().cancel();
@@ -46,7 +60,21 @@ impl Window {
                 .build(),
         ]);
 
-        for property in ["active", "remaining", "finishing-track"] {
+        // What can stop is worked out when the popover opens
+        self.imp()
+            .playback_control
+            .sleep_timer_button()
+            .connect_active_notify(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |button| {
+                    if button.is_active() {
+                        win.update_stop_after();
+                    }
+                }
+            ));
+
+        for property in ["active", "remaining", "finishing-track", "finishing-work"] {
             let id = timer.connect_notify_local(
                 Some(property),
                 clone!(
@@ -74,11 +102,29 @@ impl Window {
         if !timer.active() {
             // The timer ran out, or was turned off
             control.set_sleep_timer(None);
+        } else if timer.finishing_work() {
+            control.set_sleep_timer(Some(&i18n("Stopping After This Work")));
         } else if timer.finishing_track() {
             control.set_sleep_timer(Some(&i18n("Stopping After This Track")));
         } else {
             let remaining = utils::format_duration(timer.remaining());
             control.set_sleep_timer(Some(&i18n_k("Stopping in {time}", &[("time", &remaining)])));
         }
+    }
+
+    // The music can stop after the track that is playing, and after its
+    // work while it's a movement of one
+    fn update_stop_after(&self) {
+        let track = self.player().state().track();
+        if let Some(action) = self
+            .lookup_action("sleep-timer-stop-after-track")
+            .and_downcast::<gio::SimpleAction>()
+        {
+            action.set_enabled(track.is_some());
+        }
+        let movement = track.is_some_and(|track| track.movement_work().is_some());
+        self.imp()
+            .playback_control
+            .set_stop_after_work_visible(movement);
     }
 }

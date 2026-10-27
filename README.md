@@ -91,9 +91,10 @@ What Dismas adds
 - **CUE sheets:** an album ripped to a single file is split into its tracks
   by its CUE sheet, a `.cue` file next to it or a `CUESHEET` tag, in the
   album grid, the queue and playlists. Each track gets its own ReplayGain.
-- **Sleep timer:** stops the music after a set number of minutes. It can stop
-  right away, or let the track that's playing when time runs out finish
-  first.
+- **Sleep timer:** stops the music after a set number of minutes. It can
+  stop right away, or let the track that's playing when time runs out finish
+  first. It can also stop the music at the end of the playing track, or at
+  the end of the work that's playing, once its last movement ends.
 - **Tray icon:** while Background Playback is on (it's off until turned on in
   Preferences), Dismas shows an icon in the tray. Click it to show or close
   the window, middle-click it to play or pause, scroll over it to change the
