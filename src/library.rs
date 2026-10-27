@@ -10,6 +10,7 @@
 //! back from the database once it's done.
 
 mod album;
+mod watch;
 
 use std::{
     cell::RefCell,
@@ -30,6 +31,7 @@ use lofty::{
 use log::{debug, warn};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
+pub use watch::FolderWatch;
 
 use crate::{
     audio::{
@@ -91,6 +93,11 @@ pub struct ScanResult {
     // Whether covers of the albums were made again, which can keep their
     // names, as when a cover file next to the tracks changed
     pub covers_changed: bool,
+    // The folders to watch for files that come, go or change, see
+    // `folders_to_watch()`, and whether a music folder that's there can't
+    // be watched, so that it's read again when the albums are shown
+    pub watched: Vec<PathBuf>,
+    pub unwatched: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -654,11 +661,13 @@ pub fn track_album(path: &Path) -> Option<String> {
 // blocks, so it should be called from a separate thread
 pub fn scan(folders: &[MusicFolder], thumbnail_size: u32, sender: &Sender<ScanEvent>) {
     let now = Instant::now();
-    let result = scan_internal(folders, thumbnail_size, sender).unwrap_or_else(|e| {
+    let mut result = scan_internal(folders, thumbnail_size, sender).unwrap_or_else(|e| {
         warn!("Unable to scan the library: {e}");
         ScanResult::default()
     });
     debug!("Library scan: {} ms", now.elapsed().as_millis());
+    // Even when the database couldn't be read, the folders are watched
+    (result.watched, result.unwatched) = folders_to_watch(folders, &roots(folders));
 
     let _ = sender.try_send(ScanEvent::Finished(result));
 }
@@ -676,6 +685,57 @@ fn scan_internal(
             update_covers(conn, &stale_albums, &roots.unavailable, thumbnail_size)? > 0;
         Ok(result)
     })
+}
+
+// The folders of the library to watch for files that come, go or change:
+// those in the music folders on this computer's disks, with the folders in
+// them, but not those that are hidden or left out, or behind symbolic
+// links, which the scan doesn't read either. Changes in a folder on a
+// network share can be made from other computers, which aren't told
+// about, and the folders that came through the document portal aren't
+// watched either; returns whether a music folder that's there is one of
+// them. This blocks
+fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> (Vec<PathBuf>, bool) {
+    let mut watched = Vec::new();
+    let mut unwatched = false;
+    for root in &roots.available {
+        let portal = folders
+            .iter()
+            .any(|folder| folder.path == *root && folder.host.is_some());
+        if portal || is_remote(root) {
+            debug!("Library: not watching {root:?}");
+            unwatched = true;
+            continue;
+        }
+        add_folders(root, &roots.excluded, &mut watched);
+    }
+    (watched, unwatched)
+}
+
+fn is_remote(path: &Path) -> bool {
+    gio::File::for_path(path)
+        .query_filesystem_info(
+            gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE,
+            None::<&gio::Cancellable>,
+        )
+        .is_ok_and(|info| info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE))
+}
+
+// A folder, and the folders in it that the scan reads
+fn add_folders(folder: &Path, excluded: &[PathBuf], folders: &mut Vec<PathBuf>) {
+    folders.push(folder.to_path_buf());
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|t| t.is_dir())
+            && is_library_entry(&path)
+            && !excluded.contains(&path)
+        {
+            add_folders(&path, excluded, folders);
+        }
+    }
 }
 
 // When the file of tracks last changed, and its size: with the audio
@@ -940,7 +1000,7 @@ fn scan_with(
         ScanResult {
             updated,
             n_changed,
-            covers_changed: false,
+            ..ScanResult::default()
         },
         stale_albums,
     ))
@@ -2000,5 +2060,54 @@ mod tests {
             ids(&[PathBuf::from("/m/A"), PathBuf::from("/m/Bb/")]),
             vec!["b"]
         );
+    }
+
+    #[test]
+    fn the_folders_the_scan_reads_are_watched() {
+        let music = test_dir("watch");
+        for folder in [
+            "Bach/Partitas/CD1",
+            "Bach/Partitas/CD2",
+            "Audiobooks/A",
+            ".Trash-1000/x",
+        ] {
+            std::fs::create_dir_all(music.join(folder)).unwrap();
+        }
+        std::fs::write(music.join("Bach/Partitas/CD1/01.opus"), b"").unwrap();
+        let elsewhere = test_dir("watch-elsewhere");
+        std::os::unix::fs::symlink(&elsewhere, music.join("Linked")).unwrap();
+
+        let mut folder = MusicFolder::new(music.clone());
+        folder.excluded.push(PathBuf::from("Audiobooks"));
+        let folders = [folder];
+        let (mut watched, unwatched) = super::folders_to_watch(&folders, &super::roots(&folders));
+        watched.sort();
+        let relative: Vec<&Path> = watched
+            .iter()
+            .map(|path| path.strip_prefix(&music).unwrap())
+            .collect();
+        assert_eq!(
+            relative,
+            [
+                Path::new(""),
+                Path::new("Bach"),
+                Path::new("Bach/Partitas"),
+                Path::new("Bach/Partitas/CD1"),
+                Path::new("Bach/Partitas/CD2"),
+            ]
+        );
+        assert!(!unwatched);
+
+        // A folder that came through the document portal isn't watched
+        let folders = [MusicFolder {
+            host: Some(PathBuf::from("/media/music")),
+            ..MusicFolder::new(music.clone())
+        }];
+        let (watched, unwatched) = super::folders_to_watch(&folders, &super::roots(&folders));
+        assert!(watched.is_empty());
+        assert!(unwatched);
+
+        std::fs::remove_dir_all(music).unwrap();
+        std::fs::remove_dir_all(elsewhere).unwrap();
     }
 }

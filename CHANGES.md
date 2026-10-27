@@ -24,8 +24,16 @@ All notable changes to this project will be documented in this file.
   sleep timer, stop the music at the end of the playing track, or at the
   end of the work it's a movement of, letting its movements play through
   without a gap
+- New, changed and removed tracks in the music folders show in the album
+  grid by themselves, a couple of seconds after their files stop changing,
+  and so do the albums on a drive once it's plugged in. Folders on network
+  shares, and in the Flatpak those added through the document portal, are
+  read again whenever the album grid is shown instead
 
 ### Changed
+
+- Scan the Music Folders moved from the main menu to Preferences, as Scan
+  Now, as the music folders are watched
 
 ### Fixed
 

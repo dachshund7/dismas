@@ -172,6 +172,12 @@ mod imp {
         // The folders changed while they were being read, so they're read
         // again once it's done; two scans would write at once
         pub rescan_pending: Cell<bool>,
+        // Watches the folders of the library, to read them again when
+        // their files change
+        pub watch: OnceCell<Rc<library::FolderWatch>>,
+        // A music folder that's there can't be watched, so it's read again
+        // when the albums are shown
+        pub unwatched: Cell<bool>,
         // Bumped for each reload of the albums
         pub reload_generation: Cell<u32>,
         // The music folders that aren't there, as of the last reload, whose
@@ -246,6 +252,7 @@ mod imp {
             let obj = self.obj();
             obj.setup_grid();
             obj.setup_actions();
+            obj.setup_watch();
             obj.connect_signals();
             // It names the selected playlist
             crate::utils::wrap_tooltip(&*self.add_albums_button);
@@ -1310,6 +1317,26 @@ impl LibraryView {
     // for it, to tell them what it found. During a scan, another one follows
     // it, as the folders might have changed since it started; the user can't
     // ask for one then, as the action is off
+    // Files that come, go or change in the music folders are read once
+    // they stop changing, as at startup
+    fn setup_watch(&self) {
+        let watch = library::FolderWatch::new(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move || this.start_scan(false)
+        ));
+        self.imp().watch.set(watch).unwrap();
+    }
+
+    // A music folder that can't be watched is read again when the albums
+    // are shown, unless it's being read already
+    pub fn scan_unwatched(&self) {
+        let imp = self.imp();
+        if imp.unwatched.get() && !imp.scanning.get() {
+            self.start_scan(false);
+        }
+    }
+
     pub fn start_scan(&self, requested: bool) {
         let imp = self.imp();
         if imp.scanning.get() {
@@ -1361,6 +1388,7 @@ impl LibraryView {
             self,
             async move {
                 let mut result = ScanResult::default();
+                let mut finished = false;
                 while let Ok(event) = receiver.recv().await {
                     let imp = this.imp();
                     match event {
@@ -1378,8 +1406,9 @@ impl LibraryView {
                             imp.scan_progress.set_text(Some(&text));
                             imp.update_progress.set_fraction(fraction);
                         }
-                        ScanEvent::Finished(finished) => {
-                            result = finished;
+                        ScanEvent::Finished(scanned) => {
+                            result = scanned;
+                            finished = true;
                             break;
                         }
                     }
@@ -1398,6 +1427,21 @@ impl LibraryView {
                     .map(|path| gio::File::for_path(path).uri().to_string())
                     .collect();
                 let n_changed = u32::try_from(result.n_changed).unwrap_or(u32::MAX);
+
+                // The folders the scan read are watched from now on. Files
+                // that came into a new one before it was watched are read
+                // by another scan. A scan that panicked doesn't say
+                if finished {
+                    let imp = this.imp();
+                    imp.unwatched.set(result.unwatched);
+                    if imp
+                        .watch
+                        .get()
+                        .is_some_and(|watch| watch.set_folders(&result.watched))
+                    {
+                        imp.rescan_pending.set(true);
+                    }
+                }
 
                 // The next scan goes on without stopping the spinner
                 if this.imp().rescan_pending.take() {

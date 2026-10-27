@@ -785,6 +785,10 @@ mod imp {
             if playlists && playlists_changed {
                 obj.update_playlists_page();
             }
+            // The music folders that can't be watched are read again
+            if library && library_changed {
+                self.library_view.scan_unwatched();
+            }
             self.update_content_page();
             // Typing searches the albums right away, and asking for the
             // albums again goes back to their search
@@ -954,8 +958,8 @@ impl Window {
         ));
         self.add_action(&selected);
 
-        // In the main menu of every page, as new music can be added while
-        // the player is showing; it's off while the folder is being read
+        // Scan Now, in Preferences, for changes the watch on the music
+        // folders didn't see; it's off while the folders are being read
         let rescan = gio::SimpleAction::new("rescan-library", None);
         rescan.connect_activate(clone!(
             #[weak(rename_to = win)]

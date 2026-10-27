@@ -44,7 +44,9 @@ What Dismas adds
   folders, like one on a second drive, can be added in Preferences, where
   each folder can also leave out folders inside it, such as audiobooks or
   podcasts. While a folder isn't there, as when its drive isn't plugged in,
-  its albums are hidden, and they come back without being read again.
+  its albums are hidden, and they come back without being read again. New,
+  changed and removed tracks show up by themselves, a couple of seconds
+  after their files stop changing.
 - **Search by any tag:** searching the albums or the queue looks in every
   tag of the tracks, not just the title, artist and album. Find a recording
   by its conductor, soloist, orchestra, ensemble, composer, work or label,
@@ -363,8 +365,9 @@ Dismas installed without Flatpak can:
   elsewhere, like one on a second drive, need to be added in Preferences,
   which gives Dismas access to them through the document portal. If that
   access is taken back, the folder shows as unavailable until it's added
-  again. Symbolic links in the Music folder that point outside it don't work
-  in the sandbox.
+  again. Such a folder isn't watched for changes, so it's read again each
+  time the album grid is shown. Symbolic links in the Music folder that
+  point outside it don't work in the sandbox.
 - Files opened or dropped from outside the music folders reach Dismas one at
   a time, through the document portal, without the files next to them. A
   `.cue` sheet then can't reach its audio file, and cover files next to the

@@ -21,6 +21,15 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
         start-icon-name: "list-add-symbolic";
         use-underline: true;
       }
+
+      // The folders are watched, but changes in some can't be seen, such
+      // as those made on another computer to a network share
+      Adw.ButtonRow {
+        title: _("_Scan Now");
+        start-icon-name: "view-refresh-symbolic";
+        use-underline: true;
+        action-name: "win.rescan-library";
+      }
     }
 
     Adw.PreferencesGroup {
