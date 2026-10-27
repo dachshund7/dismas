@@ -68,6 +68,9 @@ jobs:
       contents: write
     container: fedora:latest
     steps:
+      # desktop-file-utils has update-desktop-database, which Meson looks for
+      # at setup (gnome.post_install in meson.build), even though it doesn't
+      # run it for an install into a staging folder
       - name: Install dependencies
         run: >
           dnf install -y --setopt=install_weak_deps=False
@@ -75,7 +78,7 @@ jobs:
           gtk4-devel libadwaita-devel
           gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-bad-free-devel
           blueprint-compiler gettext glib2-devel sqlite-devel libseccomp-devel fontconfig-devel
-          binutils xz tar
+          desktop-file-utils binutils xz tar
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

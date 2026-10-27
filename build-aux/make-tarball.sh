@@ -44,6 +44,9 @@ trap restore_config EXIT
 # Kept out of git, as Meson does for a build folder it makes itself
 mkdir -p "$build"
 [ -f "$build/.gitignore" ] || echo '*' >"$build/.gitignore"
+# Made absolute, as meson install reads a relative --destdir from inside the
+# build folder rather than from here
+build=$(cd "$build" && pwd -P)
 
 if [ -f "$build/meson-info/meson-info.json" ]; then
     meson setup --reconfigure "$build" "$src" --prefix=/usr/local -Dprofile=default
