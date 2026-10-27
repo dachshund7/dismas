@@ -31,6 +31,9 @@ All notable changes to this project will be documented in this file.
   read again whenever the album grid is shown instead
 - Keep a Play History, in Preferences, to stop adding the tracks played
   to the history, and Clear History, to delete it; the favorites are kept
+- Random Album, on the Playlists page, plays an album picked at random in
+  place of the queue, with an Undo; an album not heard lately is more
+  likely, and choosing it again plays another
 
 ### Changed
 

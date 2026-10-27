@@ -95,6 +95,9 @@ struct LoadOptions {
     replaced: Option<ReplacedQueue>,
     // Where they go in the queue
     place: Place,
+    // What the toast of tracks that replaced those of the queue says,
+    // rather than how many there are
+    announce: Option<String>,
 }
 
 // Where tracks go in the queue, worked out once they're read, as the
@@ -229,6 +232,9 @@ mod imp {
         pub queue_time_idle: Cell<bool>,
         // The number of times tracks are being read for the queue
         pub loads: Cell<u32>,
+        // The album Random Album played last, which it doesn't play again
+        // right away
+        pub last_random_album: RefCell<Option<String>>,
         // Whether the sidebar was showing before the tracks of an album
         pub sidebar_was_visible: Cell<bool>,
         // Whether the sidebar was showing before the split view collapsed
@@ -527,6 +533,7 @@ mod imp {
                 queue_time_after_current: Cell::new(0),
                 queue_time_idle: Cell::new(false),
                 loads: Cell::new(0),
+                last_random_album: RefCell::default(),
                 hide_focus_after_transition: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),
                 sidebar_visible_uncollapsed: Cell::new(true),

@@ -104,18 +104,39 @@ fn units(entries: &[Entry], now: i64) -> Vec<Unit> {
         }
     }
 
-    // A work was heard when its last movement heard was, and it was played
-    // as often as its movement played the most
     for unit in &mut units {
         let stats = entries[unit.tracks.clone()]
             .iter()
             .filter_map(|entry| entry.stats);
-        let last_heard = stats.clone().map(|stats| stats.last_heard).max();
-        let plays = stats.map(|stats| stats.plays).max().unwrap_or(0);
-        let age = last_heard.map(|last_heard| now.saturating_sub(last_heard));
-        unit.weight = freshness(age) * favorite(plays);
+        unit.weight = weight(stats, now);
     }
     units
+}
+
+// How likely tracks heard together are to come early, like the movements
+// of a work, or the tracks of an album: they were heard when the last of
+// them heard was, and played as often as the one played the most. The
+// stats are those of the tracks that were heard
+pub fn weight(stats: impl Iterator<Item = TrackStats> + Clone, now: i64) -> f64 {
+    let last_heard = stats.clone().map(|stats| stats.last_heard).max();
+    let plays = stats.map(|stats| stats.plays).max().unwrap_or(0);
+    let age = last_heard.map(|last_heard| now.saturating_sub(last_heard));
+    freshness(age) * favorite(plays)
+}
+
+// The position of one of the weights, picked at random, each the more
+// likely the more weight it has: the one whose key, as in
+// `shuffled_order()`, would come first
+pub fn weighted_pick(weights: &[f64], rng: &mut (impl Rng + ?Sized)) -> Option<usize> {
+    weights
+        .iter()
+        .map(|weight| {
+            let u: f64 = rng.random();
+            (1.0 - u).ln() / weight
+        })
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(pos, _)| pos)
 }
 
 // From a tenth, for a track heard just now, to 1, for a track not heard
@@ -554,5 +575,32 @@ mod tests {
         let order = shuffled_order(&entries, None, NOW, &mut seeded(1));
         assert!(is_permutation(&order, 10));
         assert_ne!(order, (0..10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_pick_is_as_likely_as_its_weight() {
+        let mut rng = seeded(7);
+        let mut picked = [0; 2];
+        for _ in 0..11_000 {
+            picked[weighted_pick(&[1.0, 0.1], &mut rng).unwrap()] += 1;
+        }
+        // About ten to one
+        assert!((9_500..=10_500).contains(&picked[0]), "{picked:?}");
+        assert_eq!(weighted_pick(&[], &mut rng), None);
+    }
+
+    #[test]
+    fn an_album_heard_just_now_weighs_a_tenth() {
+        let heard = TrackStats {
+            plays: 0,
+            last_heard: NOW,
+        };
+        let weeks_ago = TrackStats {
+            plays: 0,
+            last_heard: NOW - 60 * DAY,
+        };
+        assert!((weight([heard, weeks_ago].into_iter(), NOW) - FLOOR).abs() < 1e-9);
+        assert!((weight([weeks_ago].into_iter(), NOW) - 1.0).abs() < 1e-2);
+        assert!((weight(std::iter::empty(), NOW) - 1.0).abs() < 1e-9);
     }
 }

@@ -128,6 +128,20 @@ template $DismasPlaylistsPage: Widget {
                 icon-name: "media-playback-start-symbolic";
               }
             }
+
+            // Not a playlist, but it plays in place of the queue like them
+            Adw.ActionRow {
+              title: _("Random Album");
+              subtitle: _("An album picked at random, more likely one not heard lately");
+              activatable: true;
+              action-name: "win.play-smart-playlist";
+              action-target: "'random-album'";
+
+              [suffix]
+              Image {
+                icon-name: "media-playback-start-symbolic";
+              }
+            }
           }
         };
       };

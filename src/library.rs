@@ -612,6 +612,45 @@ fn query_search_albums(
 
 // The files of the tracks of an album, in order; with search words, only
 // the tracks that contain every word, as in `search_albums()`
+// The albums of the grid, by their ids, with the paths of their tracks in
+// their order, without the tracks in the hidden folders
+pub fn album_track_paths(hidden: &[PathBuf]) -> Vec<(String, Vec<PathBuf>)> {
+    match with_connection(|conn| query_album_track_paths(conn, hidden)) {
+        Ok(albums) => albums,
+        Err(e) => {
+            warn!("Unable to load the tracks of the albums: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn query_album_track_paths(
+    conn: &Connection,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<Vec<(String, Vec<PathBuf>)>> {
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT album_id, path FROM tracks
+         WHERE album_id IS NOT NULL{hidden_sql}
+         ORDER BY album_id, COALESCE(disc, 0), COALESCE(track, 0), path"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            path_from_bytes(row.get::<_, Vec<u8>>(1)?),
+        ))
+    })?;
+    let mut albums: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    for row in rows {
+        let (id, path) = row?;
+        match albums.last_mut() {
+            Some((last, paths)) if *last == id => paths.push(path),
+            _ => albums.push((id, vec![path])),
+        }
+    }
+    Ok(albums)
+}
+
 pub fn album_tracks(album_id: &str, words: &[String]) -> Vec<PathBuf> {
     let query = |conn: &Connection| -> rusqlite::Result<Vec<PathBuf>> {
         let conditions: String = words.iter().map(|_| " AND instr(search, ?) > 0").collect();
@@ -2109,5 +2148,36 @@ mod tests {
 
         std::fs::remove_dir_all(music).unwrap();
         std::fs::remove_dir_all(elsewhere).unwrap();
+    }
+
+    #[test]
+    fn the_tracks_of_each_album_are_in_their_order() {
+        let conn = test_db();
+        for (path, album, disc, track) in [
+            ("/m/B/2-01.flac", "b", 2, 1),
+            ("/m/A/02.flac", "a", 1, 2),
+            ("/m/B/1-01.flac", "b", 1, 1),
+            ("/m/A/01.flac", "a", 1, 1),
+            ("/m/Gone/01.flac", "c", 1, 1),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, disc, track)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4)",
+                rusqlite::params![path.as_bytes(), album, disc, track],
+            )
+            .unwrap();
+        }
+        let albums = super::query_album_track_paths(&conn, &[PathBuf::from("/m/Gone")]).unwrap();
+        let paths = |paths: &[&str]| paths.iter().map(PathBuf::from).collect::<Vec<_>>();
+        assert_eq!(
+            albums,
+            [
+                ("a".to_string(), paths(&["/m/A/01.flac", "/m/A/02.flac"])),
+                (
+                    "b".to_string(),
+                    paths(&["/m/B/1-01.flac", "/m/B/2-01.flac"])
+                ),
+            ]
+        );
     }
 }

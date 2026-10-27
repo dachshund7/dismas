@@ -1,15 +1,22 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::{collections::HashMap, path::PathBuf};
+
 use adw::prelude::*;
 
 use super::*;
+use crate::{audio::shuffle, library::MusicFolder};
 
 impl Window {
     // Plays the tracks of a smart playlist in place of the queue, like
     // dropped files, with an Undo. They're read from the play stats, or
     // the favorites, each time, so it's never the selected playlist
     pub(super) fn play_smart_playlist(&self, name: &str) {
+        if name == "random-album" {
+            self.play_random_album();
+            return;
+        }
         let (query, empty): (fn() -> Vec<String>, _) = match name {
             "favorites" => (play_stats::favorites, i18n("No favorite tracks yet")),
             "recently-played" => (play_stats::recently_played, i18n("No tracks played yet")),
@@ -37,6 +44,38 @@ impl Window {
                 }
                 let files = uris.iter().map(|uri| gio::File::for_uri(uri)).collect();
                 win.play_in_place_of_queue(files);
+            }
+        ));
+    }
+
+    // Plays an album of the grid picked at random in place of the queue,
+    // with an Undo; one not heard lately is more likely, as with the tracks
+    // the shuffle puts first, and the one it played last isn't picked
+    // again, so choosing it again plays another
+    fn play_random_album(&self) {
+        // What was heard of the track playing counts, as for the lists
+        self.player().save_listen();
+        let folders = library::music_folders(&self.imp().settings);
+        let last = self.imp().last_random_album.borrow().clone();
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                let picked = gio::spawn_blocking(move || pick_album(&folders, last.as_deref()))
+                    .await
+                    .ok()
+                    .flatten();
+                let Some((album, paths)) = picked else {
+                    win.add_toast(i18n("No albums found"));
+                    return;
+                };
+                win.imp().last_random_album.replace(Some(album.id));
+                let files = paths.into_iter().map(gio::File::for_path).collect();
+                // Translators: `{album}` must be left unmodified; it is
+                // expanded to the title of an album
+                let message = i18n_k("Playing “{album}”", &[("album", &album.title)]);
+                win.play_announced_in_place_of_queue(files, Some(message));
             }
         ));
     }
@@ -89,4 +128,45 @@ impl Window {
             }
         }
     }
+}
+
+// An album of the grid, without the one played `last` unless it's the only
+// one, picked at random by what was heard of its tracks, with the paths of
+// its tracks; this blocks
+fn pick_album(
+    folders: &[MusicFolder],
+    last: Option<&str>,
+) -> Option<(library::AlbumInfo, Vec<PathBuf>)> {
+    let roots = library::roots(folders);
+    let hidden = [roots.unavailable, roots.excluded].concat();
+    let mut tracks: HashMap<String, Vec<PathBuf>> =
+        library::album_track_paths(&hidden).into_iter().collect();
+    let mut albums: Vec<(library::AlbumInfo, Vec<PathBuf>)> = library::albums(&hidden)
+        .into_iter()
+        .filter_map(|album| {
+            let paths = tracks.remove(&album.id)?;
+            Some((album, paths))
+        })
+        .collect();
+    if albums.len() > 1 {
+        albums.retain(|(album, _)| Some(album.id.as_str()) != last);
+    }
+
+    let uris: Vec<Vec<String>> = albums
+        .iter()
+        .map(|(_, paths)| {
+            paths
+                .iter()
+                .map(|path| gio::File::for_path(path).uri().to_string())
+                .collect()
+        })
+        .collect();
+    let stats = play_stats::track_stats(&uris.concat());
+    let now = play_stats::now();
+    let weights: Vec<f64> = uris
+        .iter()
+        .map(|uris| shuffle::weight(uris.iter().filter_map(|uri| stats.get(uri).copied()), now))
+        .collect();
+    let pos = shuffle::weighted_pick(&weights, &mut rand::rng())?;
+    Some(albums.swap_remove(pos))
 }

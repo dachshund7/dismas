@@ -70,11 +70,12 @@ What Dismas adds
   the music to another device.
 - **Smart playlists and favorites:** mark tracks as favorites with the heart
   next to the sleep timer, or with Ctrl+D. On the Playlists page, Favorites
-  plays them in the order you marked them, Recently Played plays the last 100
-  tracks you heard, Most Played plays the tracks you played the most in the
-  last 6 months, and Not Heard Lately plays the tracks you played the most
-  but haven't heard in the last 2 months. They play in place of the queue,
-  with an Undo.
+  plays them in the order you marked them, Recently Played plays the last
+  100 tracks you heard, Most Played plays the tracks you played the most in
+  the last 6 months, and Not Heard Lately plays the tracks you played the
+  most but haven't heard in the last 2 months. Random Album plays an album
+  picked at random, more likely one you haven't heard lately. They play in
+  place of the queue, with an Undo.
 - **Queue editing and drag and drop:** drag tracks by their handle to
   reorder them, and select ranges with Shift+click. Play Next, in the menu
   of a track, puts it after the playing track, or after the last movement

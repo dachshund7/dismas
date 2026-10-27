@@ -158,6 +158,7 @@ impl Window {
             resume,
             replaced,
             place,
+            announce,
         } = options;
         let play = matches!(mode, QueueMode::Play(_));
         // The file to start playing from; its place among the tracks read
@@ -221,7 +222,7 @@ impl Window {
                 // Replacing tells about it even without tracks, as the
                 // queue was emptied already
                 if let Some(replaced) = replaced {
-                    win.add_replaced_toast(tracks.len(), replaced);
+                    win.add_replaced_toast(tracks.len(), replaced, announce);
                 } else if tracks.is_empty() {
                     win.add_toast(i18n("No tracks found"));
                 }
@@ -406,6 +407,16 @@ impl Window {
     // Plays the tracks in place of those of the queue, selecting it if a
     // saved playlist was; the toast's Undo puts them back
     pub(super) fn play_in_place_of_queue(&self, files: Vec<gio::File>) {
+        self.play_announced_in_place_of_queue(files, None);
+    }
+
+    // The same, with a toast that says `announce`, if any, rather than how
+    // many tracks there are
+    pub(super) fn play_announced_in_place_of_queue(
+        &self,
+        files: Vec<gio::File>,
+        announce: Option<String>,
+    ) {
         let replaced = self.replaced_queue();
         self.select_queue_to_play();
         self.clear_queue();
@@ -415,14 +426,22 @@ impl Window {
             QueueMode::Play(0),
             LoadOptions {
                 replaced: Some(replaced),
+                announce,
                 ..Default::default()
             },
         );
     }
 
-    fn add_replaced_toast(&self, n_tracks: usize, replaced: ReplacedQueue) {
+    fn add_replaced_toast(
+        &self,
+        n_tracks: usize,
+        replaced: ReplacedQueue,
+        announce: Option<String>,
+    ) {
         let msg = if n_tracks == 0 {
             i18n("No tracks found")
+        } else if let Some(announce) = announce {
+            announce
         } else {
             ni18n_f(
                 // Translators: the `{}` must be left unmodified; it will be
