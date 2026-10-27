@@ -89,11 +89,14 @@ What Dismas adds
 - **Classical music:** the queue and the album view show the name of each
   work above its movements, and the player and the queue show the composers
   and the performers, naming an orchestra or a choir and its soloists rather
-  than every player. Track Information shows the work, the performers and the
-  production credits. Dismas reads the tags written by the [Work
-  Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for Picard,
-  in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio, WavPack and
-  Musepack files.
+  than every player. Track Information shows the work, the performers and
+  the production credits. Dismas reads the tags written by the [Work
+  Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for
+  Picard, in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio, WavPack
+  and Musepack files. MusicBrainz names some composers in the script of
+  their language, such as Валентин Сильвестров; to have their names in Latin
+  letters, turn on "Translate artist names" and "Use artist sort name for
+  translation" in Picard's Metadata options before tagging.
 - **CUE sheets:** an album ripped to a single file is split into its tracks
   by its CUE sheet, a `.cue` file next to it or a `CUESHEET` tag, in the
   album grid, the queue and playlists. Each track gets its own ReplayGain.
