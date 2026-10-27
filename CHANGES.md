@@ -17,6 +17,9 @@ All notable changes to this project will be documented in this file.
 - The albums in the grid have a menu, with a right click or a long press:
   Play, Play Next, Add to the selected playlist, and Add to Playlist. On an
   album selected in selection mode, it takes all the selected ones
+- The Add buttons of an album's tracks and of the albums selected in the
+  grid have a menu next to them, with Play Next and the other playlists to
+  add to
 
 ### Changed
 

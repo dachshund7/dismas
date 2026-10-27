@@ -138,7 +138,10 @@ impl Window {
             move |_, _| win.queue_albums(albums(&win), true)
         ));
         actions.add_action(&play);
-        self.add_adding_actions(&actions, move |win| Some(Tracks::Albums(albums(win))));
+        let enabled = self.imp().loads.get() == 0;
+        self.add_adding_actions(&actions, enabled, move |win| {
+            Some(Tracks::Albums(albums(win)))
+        });
 
         let section = gio::Menu::new();
         section.append(Some(&i18n("Play")), Some("album.play"));
@@ -216,6 +219,25 @@ impl Window {
                 }
             }
         ));
+
+        // The menus of the Add buttons, which are only on while tracks
+        // can be added
+        let actions = gio::SimpleActionGroup::new();
+        self.add_adding_actions(&actions, true, |win| {
+            let library_view = win.imp().library_view.get();
+            let albums = library_view.selected_albums();
+            library_view.set_selection_mode(false);
+            (!albums.is_empty()).then_some(Tracks::Albums(albums))
+        });
+        library_view.insert_action_group("albums", Some(&actions));
+        let actions = gio::SimpleActionGroup::new();
+        self.add_adding_actions(&actions, true, |win| {
+            let files = win.imp().album_tracks.files();
+            (!files.is_empty()).then_some(Tracks::ShownAlbum(files))
+        });
+        self.imp()
+            .album_tracks
+            .insert_action_group("album-tracks", Some(&actions));
 
         library_view.connect_album_menu_requested(clone!(
             #[weak(rename_to = win)]

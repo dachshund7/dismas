@@ -90,9 +90,14 @@ impl Window {
         let menu = gio::Menu::new();
         menu.append_section(None, &playlists);
         menu.append_section(None, &manage);
-        self.imp()
-            .playlist_view
-            .set_playlists_menu(menu.upcast_ref());
+        let imp = self.imp();
+        imp.playlist_view.set_playlists_menu(menu.upcast_ref());
+
+        // The other playlists the Add buttons can add to
+        imp.album_tracks
+            .set_add_menu(self.add_button_menu("album-tracks").upcast_ref());
+        imp.library_view
+            .set_add_menu(self.add_button_menu("albums").upcast_ref());
     }
 
     // The label of the buttons that add tracks to the selected playlist

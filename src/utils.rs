@@ -68,7 +68,7 @@ pub fn setup_primary_menu_button(button: &gtk::MenuButton) {
 
 // Sets the label of a button that names the selected playlist, which can
 // have a long name
-pub fn set_playlist_button_label(button: &gtk::Button, label: &str) {
+pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
     button.set_label(label);
     // The full label, when it doesn't fit
     button.set_tooltip_text(Some(label));

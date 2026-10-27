@@ -130,7 +130,7 @@ mod imp {
         #[template_child]
         pub play_albums_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub add_albums_button: TemplateChild<gtk::Button>,
+        pub add_albums_button: TemplateChild<adw::SplitButton>,
 
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
@@ -1172,6 +1172,12 @@ impl LibraryView {
             .filter(|id| selected.contains(id))
             .map(|id| (id, words.clone()))
             .collect()
+    }
+
+    // The menu next to the button that adds the albums, with the other ways
+    // to add them
+    pub fn set_add_menu(&self, menu: &gio::MenuModel) {
+        self.imp().add_albums_button.set_menu_model(Some(menu));
     }
 
     // The label of the button that adds the albums to the selected playlist

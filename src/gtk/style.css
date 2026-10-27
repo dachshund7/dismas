@@ -641,3 +641,35 @@ gridview.album-grid > child:hover > .album-cell.selected-item {
     background-color: rgb(0 0 0 / 50%);
   }
 }
+
+/* The Add button of an album's tracks, between pill buttons; libadwaita
+   has no pill split buttons */
+splitbutton.pill {
+  border-radius: 9999px;
+}
+
+splitbutton.pill > button {
+  padding: 10px 20px 10px 28px;
+}
+
+splitbutton.pill > menubutton > button {
+  padding: 10px 14px 10px 10px;
+}
+
+splitbutton.pill > button:dir(ltr),
+splitbutton.pill > menubutton > button:dir(rtl) {
+  border-radius: 9999px 0 0 9999px;
+}
+
+splitbutton.pill > button:dir(rtl),
+splitbutton.pill > menubutton > button:dir(ltr) {
+  border-radius: 0 9999px 9999px 0;
+}
+
+splitbutton.pill > button:dir(rtl) {
+  padding: 10px 28px 10px 20px;
+}
+
+splitbutton.pill > menubutton > button:dir(rtl) {
+  padding: 10px 10px 10px 14px;
+}

@@ -273,16 +273,29 @@ impl Window {
         menu
     }
 
+    // The menu of an Add button, with the other ways to add the tracks
+    pub(super) fn add_button_menu(&self, prefix: &str) -> gio::Menu {
+        let play_next = gio::Menu::new();
+        play_next.append(
+            Some(&i18n("Play Next")),
+            Some(&format!("{prefix}.play-next")),
+        );
+        let menu = gio::Menu::new();
+        menu.append_section(None, &play_next);
+        menu.append_section(Some(&i18n("Add to Playlist")), &self.add_to_menu(prefix));
+        menu
+    }
+
     // The actions of Play Next and of the items of `add_to_menu()`, for the
-    // tracks `source` gives when one is activated; they're off while tracks
-    // are read
+    // tracks `source` gives when one is activated. The actions of a menu
+    // made while tracks are read are off; they do nothing then anyway
     pub(super) fn add_adding_actions(
         &self,
         group: &gio::SimpleActionGroup,
+        enabled: bool,
         source: impl Fn(&Self) -> Option<Tracks> + 'static,
     ) {
         let source = Rc::new(source);
-        let enabled = self.imp().loads.get() == 0;
 
         let play_next = gio::SimpleAction::new("play-next", None);
         play_next.connect_activate(clone!(

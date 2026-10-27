@@ -34,7 +34,8 @@ impl Window {
             (false, true) => Tracks::ShownAlbum(album_tracks.files()),
             (false, false) => Tracks::ShownAlbum(vec![track.file()]),
         };
-        self.add_adding_actions(&actions, move |_| Some(tracks.clone()));
+        let enabled = self.imp().loads.get() == 0;
+        self.add_adding_actions(&actions, enabled, move |_| Some(tracks.clone()));
 
         let section = gio::Menu::new();
         // The playing track is where it would go

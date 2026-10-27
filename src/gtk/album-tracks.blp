@@ -129,8 +129,9 @@ template $DismasAlbumTracks: Widget {
         ]
       }
 
-      Button add_button {
+      Adw.SplitButton add_button {
         label: _("Add to Queue");
+        dropdown-tooltip: _("Play Next or Add to Another Playlist");
 
         styles [
           "pill",

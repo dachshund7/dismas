@@ -42,7 +42,7 @@ mod imp {
         #[template_child]
         pub play_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub add_button: TemplateChild<gtk::Button>,
+        pub add_button: TemplateChild<adw::SplitButton>,
         #[template_child]
         pub select_all_button: TemplateChild<gtk::Button>,
         #[template_child]
@@ -462,6 +462,12 @@ impl AlbumTracks {
     }
 
     // The label of the button that adds the tracks to the selected playlist
+    // The menu next to the button that adds the tracks, with the other
+    // ways to add them
+    pub fn set_add_menu(&self, menu: &gio::MenuModel) {
+        self.imp().add_button.set_menu_model(Some(menu));
+    }
+
     pub fn set_add_label(&self, label: &str) {
         utils::set_playlist_button_label(&self.imp().add_button, label);
     }
