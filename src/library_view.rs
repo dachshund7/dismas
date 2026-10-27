@@ -1034,6 +1034,14 @@ impl LibraryView {
         let composer = item.borrow::<Option<library::ComposerInfo>>().clone();
         self.imp().composer_popover.popdown();
         self.set_composer(composer);
+        // The popover gives the focus back to its button as it closes. The
+        // search takes it, as the composer's albums are searched further
+        // there, and Esc in it shows all the albums again
+        glib::idle_add_local_once(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move || this.focus_search()
+        ));
     }
 
     // Shows only the albums of a composer, or all of them
