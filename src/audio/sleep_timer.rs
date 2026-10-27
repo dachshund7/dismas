@@ -126,6 +126,16 @@ impl SleepTimer {
         self.set_finishing_track(true);
     }
 
+    // There's no track playing any more, as the queue was emptied or
+    // another playlist was selected. Waiting for the end of the track or
+    // the work is over, so the timer turns off; a countdown goes on, as it
+    // doesn't depend on a track
+    pub fn track_gone(&self) {
+        if self.finishing_track() || self.finishing_work() {
+            self.cancel();
+        }
+    }
+
     fn tick(&self) -> glib::ControlFlow {
         if self.update_remaining() > 0 {
             return glib::ControlFlow::Continue;
@@ -209,5 +219,30 @@ mod tests {
         assert!(!timer.active());
         assert!(!timer.finishing_work());
         assert!(!timer.finishing_track());
+    }
+
+    #[test]
+    fn waiting_for_the_end_stops_once_the_track_is_gone() {
+        let (sender, _receiver) = async_channel::unbounded();
+        let timer = SleepTimer::new(sender);
+
+        for work in [false, true] {
+            timer.stop_at_end(work);
+            timer.track_gone();
+            assert!(!timer.active());
+        }
+
+        // The track the timer ran out during, with Finish Last Track
+        timer.start(10);
+        timer.wait_for_track_end();
+        timer.track_gone();
+        assert!(!timer.active());
+
+        // A countdown isn't about a track
+        timer.start(10);
+        timer.track_gone();
+        assert!(timer.active());
+        assert!(timer.remaining() > 0);
+        timer.cancel();
     }
 }

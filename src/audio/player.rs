@@ -829,6 +829,8 @@ impl AudioPlayer {
         self.end_listen();
         self.listens.borrow_mut().clear();
         self.failed.borrow_mut().clear();
+        // Stopping after this track or work was about the track that's gone
+        self.sleep_timer.track_gone();
         self.state.set_current_track(None);
         for c in &self.controllers {
             c.clear_track();
