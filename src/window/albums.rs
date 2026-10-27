@@ -6,17 +6,12 @@ use super::{adding::Tracks, *};
 impl Window {
     // Shows the tracks of an album in the sidebar, in place of the
     // queue, so that it can be played or added to the queue
-    fn show_album_tracks(
-        &self,
-        album: &Album,
-        search_words: &[String],
-        reveal: Option<&gio::File>,
-    ) {
+    fn show_album_tracks(&self, album: &Album, filter: &TrackFilter, reveal: Option<&gio::File>) {
         let imp = self.imp();
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
             imp.sidebar_was_visible.set(self.playlist_visible());
         }
-        imp.album_tracks.show_album(album, search_words, reveal);
+        imp.album_tracks.show_album(album, filter, reveal);
         imp.sidebar_stack.set_visible_child_name("album");
         self.set_playlist_visible(true);
     }
@@ -34,7 +29,7 @@ impl Window {
         let Some(album) = album else {
             return;
         };
-        self.show_album_tracks(&album, &[], Some(track));
+        self.show_album_tracks(&album, &TrackFilter::default(), Some(track));
     }
 
     // Goes back from the tracks of an album to the queue, closing the
@@ -86,7 +81,7 @@ impl Window {
     }
 
     // Adds the tracks of albums to the queue, or plays them in its place
-    fn queue_albums(&self, albums: Vec<(String, Vec<String>)>, play: bool) {
+    fn queue_albums(&self, albums: Vec<(String, TrackFilter)>, play: bool) {
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
             self,
@@ -122,7 +117,7 @@ impl Window {
                 library_view.set_selection_mode(false);
                 albums
             } else {
-                vec![(album_id.clone(), library_view.track_words())]
+                vec![(album_id.clone(), library_view.track_filter())]
             }
         };
         let albums = Rc::new(albums);
@@ -249,7 +244,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, album| {
-                win.show_album_tracks(album, &win.imp().library_view.search_words(), None);
+                win.show_album_tracks(album, &win.imp().library_view.search_filter(), None);
             }
         ));
 
@@ -327,12 +322,17 @@ impl Window {
         // The search entry takes Esc, so the window doesn't get it. With
         // text, Esc clears the search and leaves selection mode, as the
         // tracks selected in the queue would otherwise stay selected; in an
-        // empty search, it does what it does elsewhere in the window
+        // empty search, it shows the albums of all the composers again, or
+        // does what it does elsewhere in the window
         library_view.search_entry().connect_stop_search(clone!(
             #[weak(rename_to = win)]
             self,
             move |entry| {
-                if entry.text().is_empty() {
+                let library_view = win.imp().library_view.get();
+                if entry.text().is_empty() && library_view.has_composer() {
+                    win.exit_selection_mode();
+                    library_view.set_composer(None);
+                } else if entry.text().is_empty() {
                     win.escape();
                 } else {
                     win.exit_selection_mode();
@@ -347,14 +347,15 @@ impl Window {
     }
 }
 
-// The files of the tracks of albums, each with the words its tracks have
-// to match: those of the search, or none for the whole album; reading
+// The files of the tracks of albums, each with what its tracks have to
+// match: the search and the composer picked, or nothing for the whole
+// album; reading
 // them from the library takes a while, so it's done in a separate thread
-pub(super) async fn album_files(albums: Vec<(String, Vec<String>)>) -> Option<Vec<gio::File>> {
+pub(super) async fn album_files(albums: Vec<(String, TrackFilter)>) -> Option<Vec<gio::File>> {
     let paths = gio::spawn_blocking(move || {
         albums
             .iter()
-            .flat_map(|(id, words)| library::album_tracks(id, words))
+            .flat_map(|(id, filter)| library::album_tracks(id, filter))
             .collect::<Vec<_>>()
     })
     .await

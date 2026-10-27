@@ -34,6 +34,11 @@ All notable changes to this project will be documented in this file.
 - Random Album, on the Playlists page, plays an album picked at random in
   place of the queue, with an Undo; an album not heard lately is more
   likely, and choosing it again plays another
+- Composers, the button next to the album search, lists the composers of
+  the albums by their last names, with the number of their albums; picking
+  one shows only their albums, taking only the tracks that are theirs, as
+  a search does, and it combines with the search. The music folders are
+  read again once, after updating, to find the composers
 
 ### Changed
 

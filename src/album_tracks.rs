@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 use crate::{
     audio::{Track, load_tracks},
     i18n::{i18n, ni18n_f},
-    library::{self, Album},
+    library::{self, Album, TrackFilter},
     queue_row::QueueRow,
     utils,
     work_sections::{WorkSectionModel, work_header_factory},
@@ -60,10 +60,10 @@ mod imp {
 
         pub tracks: RefCell<Option<gio::ListStore>>,
         pub files: RefCell<Vec<gio::File>>,
-        // The album that is showing, and the words of the search it was
-        // shown for
+        // The album that is showing, and the search and the composer it
+        // was shown for
         pub album: RefCell<Option<Album>>,
-        pub search_words: RefCell<Vec<String>>,
+        pub filter: RefCell<TrackFilter>,
         // While the search leaves out some of the tracks, the number of
         // the tracks that match it and the number of all of them
         pub left_out: Cell<Option<(u32, u32)>>,
@@ -120,7 +120,7 @@ mod imp {
                 return;
             }
             self.obj().notify_whole_albums();
-            if !self.search_words.borrow().is_empty() {
+            if !self.filter.borrow().is_empty() {
                 self.obj().load(None);
             }
         }
@@ -482,17 +482,17 @@ impl AlbumTracks {
         self.update_selection();
     }
 
-    // Shows the tracks of an album that contain every search word, or all
-    // of them without any; the track of `reveal`, if any, is scrolled to
+    // Shows the tracks of an album that the filter matches, or all of them
+    // with an empty one; the track of `reveal`, if any, is scrolled to
     // and flashes once it's read
-    pub fn show_album(&self, album: &Album, search_words: &[String], reveal: Option<&gio::File>) {
+    pub fn show_album(&self, album: &Album, filter: &TrackFilter, reveal: Option<&gio::File>) {
         let imp = self.imp();
         imp.album_title.set_label(&album.title());
         imp.album_title.set_tooltip_text(Some(&album.title()));
         imp.album_artist.set_label(&album.artist());
 
         imp.album.replace(Some(album.clone()));
-        imp.search_words.replace(search_words.to_vec());
+        imp.filter.replace(filter.clone());
         self.load(reveal);
     }
 
@@ -555,7 +555,7 @@ impl AlbumTracks {
         imp.generation.set(generation);
         let album_id = album.id();
         let whole_albums = imp.whole_albums.get();
-        let search_words = imp.search_words.borrow().clone();
+        let filter = imp.filter.borrow().clone();
         let reveal = reveal.cloned();
         let mut revealed = false;
         glib::spawn_future_local(clone!(
@@ -566,11 +566,11 @@ impl AlbumTracks {
                 // tell whether it leaves some out, also with Whole Albums,
                 // so that the bar over them stays
                 let (paths, counts) = gio::spawn_blocking(move || {
-                    let all = library::album_tracks(&album_id, &[]);
-                    if search_words.is_empty() {
+                    let all = library::album_tracks(&album_id, &TrackFilter::default());
+                    if filter.is_empty() {
                         return (all, None);
                     }
-                    let matching = library::album_tracks(&album_id, &search_words);
+                    let matching = library::album_tracks(&album_id, &filter);
                     let counts = (matching.len(), all.len());
                     (if whole_albums { all } else { matching }, Some(counts))
                 })

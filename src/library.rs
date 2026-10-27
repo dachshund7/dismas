@@ -35,8 +35,8 @@ pub use watch::FolderWatch;
 
 use crate::{
     audio::{
-        CoverCache, ExtraComments, file_tag, plain_commas, read_file_tags, search_key,
-        tag_search_text, title_from_file_name, track_title,
+        CoverCache, ExtraComments, file_tag, normalize_search_text, plain_commas, read_file_tags,
+        search_key, tag_search_text, title_from_file_name, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
@@ -45,7 +45,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 13;
+const SCHEMA_VERSION: i32 = 14;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -68,7 +68,8 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         disc INTEGER,
         track INTEGER,
         title TEXT,
-        search TEXT
+        search TEXT,
+        composers TEXT
     );
     CREATE INDEX tracks_album ON tracks (album_id);
     CREATE INDEX tracks_file ON tracks (file);
@@ -128,6 +129,8 @@ struct TrackTags {
     title: Option<String>,
     // The text that searching looks into, as in the queue
     search: Option<String>,
+    // The composers, see `composer_entries()`
+    composers: Option<String>,
 }
 
 // A folder whose albums are in the grid: the path that's read, and the
@@ -568,12 +571,43 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
     Ok(albums.into_iter().map(|(_, info)| info).collect())
 }
 
-// The albums with a track that contains every word, which must be
-// normalized with `normalize_search_text()`, like in the queue, with the
-// number of their tracks that do and the number of all their tracks; the
-// tracks in the `hidden` folders are left out, as in `albums()`
-pub fn search_albums(words: &[String], hidden: &[PathBuf]) -> HashMap<String, (u32, u32)> {
-    match with_connection(|conn| query_search_albums(conn, words, hidden)) {
+// What the tracks taken from albums match: every word of a search, normalized
+// with `normalize_search_text()`, in any of their tags, and a composer, by
+// its key (`composer_key()`). An empty one matches every track
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TrackFilter {
+    pub words: Vec<String>,
+    pub composer: Option<String>,
+}
+
+impl TrackFilter {
+    pub fn is_empty(&self) -> bool {
+        self.words.is_empty() && self.composer.is_none()
+    }
+
+    // The SQL conditions on a track, each after " AND ", and their values;
+    // a track without search text or composers matches nothing
+    fn conditions(&self) -> (String, Vec<String>) {
+        let mut sql = String::new();
+        let mut values = Vec::new();
+        for word in &self.words {
+            sql.push_str(" AND instr(search, ?) > 0");
+            values.push(word.clone());
+        }
+        if let Some(key) = &self.composer {
+            sql.push_str(" AND instr(composers, ?) > 0");
+            values.push(format!("\n{key}\t"));
+        }
+        (sql, values)
+    }
+}
+
+// The albums with a track that the filter matches, like searching the
+// queue, with the number of their tracks that it does and the number of all
+// their tracks; the tracks in the `hidden` folders are left out, as in
+// `albums()`
+pub fn search_albums(filter: &TrackFilter, hidden: &[PathBuf]) -> HashMap<String, (u32, u32)> {
+    match with_connection(|conn| query_search_albums(conn, filter, hidden)) {
         Ok(albums) => albums,
         Err(e) => {
             warn!("Unable to search the albums: {e}");
@@ -584,13 +618,13 @@ pub fn search_albums(words: &[String], hidden: &[PathBuf]) -> HashMap<String, (u
 
 fn query_search_albums(
     conn: &Connection,
-    words: &[String],
+    filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<HashMap<String, (u32, u32)>> {
     use rusqlite::types::Value;
 
-    // A track without search text matches nothing
-    let conditions = vec!["instr(search, ?) > 0"; words.len()].join(" AND ");
+    let (conditions, values) = filter.conditions();
+    let conditions = format!("1{conditions}");
     let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, SUM(CASE WHEN {conditions} THEN 1 ELSE 0 END) AS matching,
@@ -600,9 +634,9 @@ fn query_search_albums(
          GROUP BY album_id
          HAVING matching > 0"
     ))?;
-    let params = words
-        .iter()
-        .map(|word| Value::Text(word.clone()))
+    let params = values
+        .into_iter()
+        .map(Value::Text)
         .chain(hidden_params.into_iter().map(Value::Blob));
     stmt.query_map(rusqlite::params_from_iter(params), |row| {
         Ok((row.get(0)?, (row.get(1)?, row.get(2)?)))
@@ -610,8 +644,6 @@ fn query_search_albums(
     .collect()
 }
 
-// The files of the tracks of an album, in order; with search words, only
-// the tracks that contain every word, as in `search_albums()`
 // The albums of the grid, by their ids, with the paths of their tracks in
 // their order, without the tracks in the hidden folders
 pub fn album_track_paths(hidden: &[PathBuf]) -> Vec<(String, Vec<PathBuf>)> {
@@ -651,15 +683,101 @@ fn query_album_track_paths(
     Ok(albums)
 }
 
-pub fn album_tracks(album_id: &str, words: &[String]) -> Vec<PathBuf> {
+// A composer of the tracks of the albums of the grid
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComposerInfo {
+    // See `composer_key()`
+    pub key: String,
+    // The name its tracks give it the most, and the name it's sorted by
+    pub name: String,
+    pub sort: String,
+    // The number of albums with a track by the composer
+    pub albums: u32,
+}
+
+// The composers of the tracks of the albums of the grid, by their sort
+// names, without the tracks in the `hidden` folders
+pub fn composers(hidden: &[PathBuf]) -> Vec<ComposerInfo> {
+    match with_connection(|conn| query_composers(conn, hidden)) {
+        Ok(composers) => composers,
+        Err(e) => {
+            warn!("Unable to list the composers: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn query_composers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<ComposerInfo>> {
+    // The albums of a composer, and how often each of its names is given
+    #[derive(Default)]
+    struct Seen {
+        albums: HashSet<String>,
+        names: HashMap<String, usize>,
+        sorts: HashMap<String, usize>,
+    }
+
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT album_id, composers FROM tracks
+         WHERE album_id IS NOT NULL AND composers IS NOT NULL{hidden_sql}"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut seen: HashMap<String, Seen> = HashMap::new();
+    for row in rows {
+        let (album, entries) = row?;
+        for line in entries.lines() {
+            let mut fields = line.split('\t');
+            let (Some(key), Some(name), Some(sort)) = (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            let composer = seen.entry(key.to_string()).or_default();
+            if !composer.albums.contains(&album) {
+                composer.albums.insert(album.clone());
+            }
+            *composer.names.entry(name.to_string()).or_default() += 1;
+            *composer.sorts.entry(sort.to_string()).or_default() += 1;
+        }
+    }
+
+    // The most common, and of those the first in alphabetical order
+    let most = |counts: HashMap<String, usize>| {
+        counts
+            .into_iter()
+            .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+            .map(|(name, _)| name)
+            .unwrap_or_default()
+    };
+    let mut composers: Vec<(glib::CollationKey, ComposerInfo)> = seen
+        .into_iter()
+        .map(|(key, seen)| {
+            let sort = most(seen.sorts);
+            let info = ComposerInfo {
+                key,
+                name: most(seen.names),
+                albums: seen.albums.len() as u32,
+                sort: sort.clone(),
+            };
+            (glib::CollationKey::from(sort.as_str()), info)
+        })
+        .collect();
+    composers.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
+    Ok(composers.into_iter().map(|(_, info)| info).collect())
+}
+
+// The files of the tracks of an album, in order; with a filter, only the
+// tracks it matches, as in `search_albums()`
+pub fn album_tracks(album_id: &str, filter: &TrackFilter) -> Vec<PathBuf> {
     let query = |conn: &Connection| -> rusqlite::Result<Vec<PathBuf>> {
-        let conditions: String = words.iter().map(|_| " AND instr(search, ?) > 0").collect();
+        let (conditions, values) = filter.conditions();
         let mut stmt = conn.prepare(&format!(
             "SELECT path FROM tracks
              WHERE album_id = ?{conditions}
              ORDER BY COALESCE(disc, 0), COALESCE(track, 0), path"
         ))?;
-        let params = std::iter::once(album_id).chain(words.iter().map(String::as_str));
+        let params = std::iter::once(album_id).chain(values.iter().map(String::as_str));
         stmt.query_map(rusqlite::params_from_iter(params), |row| {
             row.get::<_, Vec<u8>>(0).map(path_from_bytes)
         })?
@@ -928,8 +1046,9 @@ fn scan_with(
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO tracks
                  (path, file, mtime, ctime, size, album_id, album, album_artist, artist,
-                  artist_sort, year, disc, track, title, search, added)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                  artist_sort, year, disc, track, title, search, added, composers)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                         ?17)",
             )?;
             for source in chunk {
                 let key = path_bytes(&source.path);
@@ -991,6 +1110,7 @@ fn scan_with(
                         tags.title,
                         tags.search,
                         added,
+                        tags.composers,
                     ])?;
                     n_changed += 1;
                     if was_known {
@@ -1294,7 +1414,12 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
 
     // A file without tags is in the album of its folder too
     let empty = Tag::new(tagged_file.primary_tag_type());
-    let tags = TrackTags::from_tag(tag.as_deref().unwrap_or(&empty), path, Some(path));
+    let tags = TrackTags::from_tag(
+        tag.as_deref().unwrap_or(&empty),
+        path,
+        Some(path),
+        &extra.composer_sort,
+    );
     vec![(path.to_path_buf(), tags)]
 }
 
@@ -1320,7 +1445,7 @@ fn read_sheet_tags(
 fn cue_track_tags(sheet: &SplitSheet, album_tag: &Tag, track: &CueTrack) -> (PathBuf, TrackTags) {
     let tag = cue_sheet::track_tag(album_tag, &sheet.sheet, track);
     // The album is in the folder of the sheet
-    let tags = TrackTags::from_tag(&tag, &sheet.path, None);
+    let tags = TrackTags::from_tag(&tag, &sheet.path, None, &[]);
     (sheet.location(track), tags)
 }
 
@@ -1359,8 +1484,9 @@ pub fn folder_album_title(path: &Path) -> Option<String> {
 impl TrackTags {
     // The title of a track without one is the name of its `file`, which
     // is searched like the queue searches it; the tracks of CUE sheets
-    // have none
-    fn from_tag(tag: &Tag, path: &Path, file: Option<&Path>) -> Self {
+    // have none. The sort names of the composers that lofty doesn't read
+    // are in `composer_sort`
+    fn from_tag(tag: &Tag, path: &Path, file: Option<&Path>, composer_sort: &[String]) -> Self {
         let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
 
         let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
@@ -1418,6 +1544,13 @@ impl TrackTags {
             folder_album.as_deref(),
         );
 
+        let names = split_names(tag.get_strings(ItemKey::Composer));
+        let sorts = if composer_sort.is_empty() {
+            split_names(tag.get_strings(ItemKey::ComposerSortOrder))
+        } else {
+            split_names(composer_sort.iter().map(String::as_str))
+        };
+
         TrackTags {
             album_id: Some(album_id),
             album: album.or(folder_album),
@@ -1430,8 +1563,76 @@ impl TrackTags {
             track: tag.track(),
             title,
             search: Some(search),
+            composers: composer_entries(&names, &sorts),
         }
     }
+}
+
+// The names in the values of a tag, which can also be separated by
+// semicolons, without repeats
+fn split_names<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
+    values
+        .flat_map(|value| value.split(';'))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unique()
+        .map(ToString::to_string)
+        .collect()
+}
+
+// The composers of a track, as the library keeps them: a line for each,
+// with its key, which tells composers apart ignoring case and accents, its
+// name and the name it's sorted by, separated by tabs, between line
+// breaks, so that a filter finds a composer by "\n{key}\t" (`TrackFilter`).
+// The sort names go with the names in their order, when there are as many;
+// otherwise each is worked out from its name
+fn composer_entries(names: &[String], sorts: &[String]) -> Option<String> {
+    if names.is_empty() {
+        return None;
+    }
+    let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
+    let mut entries = String::from("\n");
+    for (i, name) in names.iter().enumerate() {
+        let sort = sorts
+            .get(i)
+            .filter(|_| sorts.len() == names.len())
+            .cloned()
+            .unwrap_or_else(|| sort_name(name));
+        entries.push_str(&format!(
+            "{}\t{}\t{}\n",
+            composer_key(name),
+            clean(name),
+            clean(&sort)
+        ));
+    }
+    Some(entries)
+}
+
+// What tells a composer apart: the name, ignoring case and accents, and
+// how it's spaced
+pub fn composer_key(name: &str) -> String {
+    normalize_search_text(name)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+// The name a composer without a sort name is sorted by: the last name
+// first, as in "Beethoven, Ludwig van", keeping a number or "Jr." after
+// it, as in "Strauss, Johann II"
+fn sort_name(name: &str) -> String {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let suffix = words.len() > 2
+        && matches!(
+            words.last().copied(),
+            Some("I" | "II" | "III" | "IV" | "Jr." | "Jr" | "Sr." | "Sr")
+        );
+    let (rest, last) = match words.len() {
+        0 | 1 => return name.trim().to_string(),
+        n if suffix => ([&words[..n - 2], &words[n - 1..]].concat(), words[n - 2]),
+        n => (words[..n - 1].to_vec(), words[n - 1]),
+    };
+    format!("{last}, {}", rest.join(" "))
 }
 
 #[cfg(test)]
@@ -1499,21 +1700,21 @@ mod tests {
 
         let path = Path::new("/music/Some Folder/01 - Intro.flac");
         let mut tag = Tag::new(TagType::VorbisComments);
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path));
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &[]);
         assert_eq!(tags.album.as_deref(), Some("Some Folder"));
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(search.contains("some folder"));
 
         tag.insert_text(ItemKey::AlbumTitle, "Album".to_string());
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path));
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &[]);
         assert_eq!(tags.title, None);
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(!search.contains("some folder"));
 
         tag.insert_text(ItemKey::TrackTitle, "Overture".to_string());
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path));
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &[]);
         let search = tags.search.unwrap();
         assert!(search.contains("overture"));
         assert!(!search.contains("intro"));
@@ -1613,11 +1814,17 @@ mod tests {
         let search = |words: &[&str]| {
             let words: Vec<String> = words.iter().map(ToString::to_string).collect();
             let hidden = [PathBuf::from("/music/unmounted")];
-            let mut albums: Vec<(String, (u32, u32))> =
-                super::query_search_albums(&conn, &words, &hidden)
-                    .unwrap()
-                    .into_iter()
-                    .collect();
+            let mut albums: Vec<(String, (u32, u32))> = super::query_search_albums(
+                &conn,
+                &super::TrackFilter {
+                    words,
+                    composer: None,
+                },
+                &hidden,
+            )
+            .unwrap()
+            .into_iter()
+            .collect();
             albums.sort();
             albums
         };
@@ -2179,5 +2386,106 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn composers_without_a_sort_name_are_sorted_by_their_last_name() {
+        use super::sort_name;
+        assert_eq!(sort_name("Johann Sebastian Bach"), "Bach, Johann Sebastian");
+        assert_eq!(sort_name("Ludwig van Beethoven"), "Beethoven, Ludwig van");
+        assert_eq!(sort_name("Johann Strauss II"), "Strauss, Johann II");
+        assert_eq!(sort_name("Pérotin"), "Pérotin");
+    }
+
+    #[test]
+    fn the_composers_of_a_track_keep_their_sort_names() {
+        use super::composer_entries;
+        let names = |names: &[&str]| names.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(composer_entries(&[], &[]), None);
+        assert_eq!(
+            composer_entries(
+                &names(&["Antonín Dvořák", "Josef Suk"]),
+                &names(&["Dvořák, Antonín", "Suk, Josef"])
+            )
+            .as_deref(),
+            Some(
+                "\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\njosef suk\tJosef Suk\tSuk, Josef\n"
+            )
+        );
+        // Without as many sort names, they're worked out
+        assert_eq!(
+            composer_entries(
+                &names(&["Antonín Dvořák", "Josef Suk"]),
+                &names(&["Suk, Josef"])
+            )
+            .as_deref(),
+            Some(
+                "\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\njosef suk\tJosef Suk\tSuk, Josef\n"
+            )
+        );
+    }
+
+    #[test]
+    fn composers_are_listed_with_their_albums_and_found_by_their_key() {
+        let conn = test_db();
+        let bach = "\njohann sebastian bach\tJohann Sebastian Bach\tBach, Johann Sebastian\n";
+        let cpe =
+            "\ncarl philipp emanuel bach\tCarl Philipp Emanuel Bach\tBach, Carl Philipp Emanuel\n";
+        let both = format!("{bach}{}", &cpe[1..]);
+        for (path, album, composers, search) in [
+            ("/m/A/01.opus", "a", Some(bach), "bwv 1001"),
+            ("/m/A/02.opus", "a", Some(bach), "bwv 1002"),
+            ("/m/B/01.opus", "b", Some(cpe), "wq 182"),
+            ("/m/B/02.opus", "b", Some(both.as_str()), "bwv 1037"),
+            ("/m/C/01.opus", "c", None, "anon"),
+            ("/m/Gone/01.opus", "d", Some(bach), "bwv 988"),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, composers, search)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4)",
+                rusqlite::params![path.as_bytes(), album, composers, search],
+            )
+            .unwrap();
+        }
+        let hidden = [PathBuf::from("/m/Gone")];
+
+        let composers = super::query_composers(&conn, &hidden).unwrap();
+        let listed: Vec<(&str, u32)> = composers
+            .iter()
+            .map(|composer| (composer.sort.as_str(), composer.albums))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("Bach, Carl Philipp Emanuel", 1),
+                ("Bach, Johann Sebastian", 2)
+            ]
+        );
+
+        // Only Johann Sebastian's, not his son's, though the names share a
+        // word, with the tracks that are his
+        let filter = super::TrackFilter {
+            words: Vec::new(),
+            composer: Some("johann sebastian bach".to_string()),
+        };
+        let mut albums: Vec<(String, (u32, u32))> =
+            super::query_search_albums(&conn, &filter, &hidden)
+                .unwrap()
+                .into_iter()
+                .collect();
+        albums.sort();
+        assert_eq!(
+            albums,
+            [("a".to_string(), (2, 2)), ("b".to_string(), (1, 2))]
+        );
+
+        // and with the words of a search too
+        let filter = super::TrackFilter {
+            words: vec!["1002".to_string()],
+            ..filter
+        };
+        let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
+        assert_eq!(albums.get("a"), Some(&(1, 2)));
+        assert_eq!(albums.len(), 1);
     }
 }

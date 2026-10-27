@@ -17,7 +17,7 @@ use crate::{
     album_cell::AlbumCell,
     audio::normalize_search_text,
     i18n::{i18n, i18n_f, i18n_k, ni18n_f},
-    library::{self, Album, AlbumSort, ScanEvent, ScanResult},
+    library::{self, Album, AlbumSort, ScanEvent, ScanResult, TrackFilter},
     square_bin::SquareBin,
     utils,
 };
@@ -52,7 +52,7 @@ const DRAG_COVER_SIZE: i32 = 64;
 #[derive(Clone, Debug, glib::Boxed)]
 #[boxed_type(name = "DismasAlbumDrag")]
 pub struct AlbumDrag {
-    pub albums: Vec<(String, Vec<String>)>,
+    pub albums: Vec<(String, TrackFilter)>,
     pub selection: bool,
 }
 
@@ -110,6 +110,16 @@ mod imp {
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
+        pub composer_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub composer_popover: TemplateChild<gtk::Popover>,
+        #[template_child]
+        pub composer_search: TemplateChild<gtk::SearchEntry>,
+        #[template_child]
+        pub composer_list: TemplateChild<gtk::ListView>,
+        #[template_child]
+        pub composer_banner: TemplateChild<adw::Banner>,
+        #[template_child]
         pub whole_albums_revealer: TemplateChild<gtk::Revealer>,
         #[template_child]
         pub whole_albums_button: TemplateChild<gtk::ToggleButton>,
@@ -153,8 +163,11 @@ mod imp {
         // The albums matching the search, if there is one, with the
         // number of their tracks that match it and the number of all of them
         pub search_matches: RefCell<Option<HashMap<String, (u32, u32)>>>,
-        // The words of the search the matches are for
-        pub search_words: RefCell<Vec<String>>,
+        // The words of the search and the composer the matches are for
+        pub search_filter: RefCell<TrackFilter>,
+        // The composer whose albums the grid shows, picked from the list
+        // next to the search
+        pub composer: RefCell<Option<library::ComposerInfo>>,
         // The albums the search matches are added, played, dragged and
         // shown with all their tracks, rather than those that match it;
         // the toggle next to the search and the banner of the album's
@@ -253,6 +266,7 @@ mod imp {
             obj.setup_grid();
             obj.setup_actions();
             obj.setup_watch();
+            obj.setup_composers();
             obj.connect_signals();
             // It names the selected playlist
             crate::utils::wrap_tooltip(&*self.add_albums_button);
@@ -712,7 +726,7 @@ impl LibraryView {
                 let albums = if selection {
                     this.selected_albums()
                 } else {
-                    vec![(album.id(), this.track_words())]
+                    vec![(album.id(), this.track_filter())]
                 };
                 let drag = AlbumDrag { albums, selection };
                 Some(gdk::ContentProvider::for_value(&drag.to_value()))
@@ -931,17 +945,152 @@ impl LibraryView {
         self.update_selection();
     }
 
-    // Looks for the albums with a track that contains every word of the
-    // search, in any of its tags, like searching the queue
-    fn update_search(&self) {
-        let text = self.imp().search_entry.text();
-        let words: Vec<String> = normalize_search_text(&text)
-            .split_whitespace()
-            .map(ToString::to_string)
-            .collect();
+    // The list of composers next to the search: choosing one shows only
+    // their albums, with the tracks that are theirs, like a search, and a
+    // banner over them, whose button shows all the albums again. It's read
+    // each time it opens, as the albums can change
+    fn setup_composers(&self) {
+        let imp = self.imp();
+        // Each item is a composer, or None for all of them
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let filter = gtk::CustomFilter::new(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[upgrade_or]
+            false,
+            move |item| {
+                let text = normalize_search_text(&this.imp().composer_search.text());
+                let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
+                let composer = item.borrow::<Option<library::ComposerInfo>>();
+                match composer.as_ref() {
+                    // "All Composers" isn't something to search for
+                    None => text.trim().is_empty(),
+                    Some(composer) => {
+                        let names =
+                            normalize_search_text(&format!("{} {}", composer.name, composer.sort));
+                        text.split_whitespace().all(|word| names.contains(word))
+                    }
+                }
+            }
+        ));
+        let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
+        imp.composer_list
+            .set_model(Some(&gtk::NoSelection::new(Some(filtered.clone()))));
+        imp.composer_list.set_factory(Some(&composer_factory()));
 
-        if words.is_empty() {
-            self.set_search_matches(Vec::new(), None);
+        imp.composer_search.connect_search_changed(clone!(
+            #[weak]
+            filter,
+            move |_| filter.changed(gtk::FilterChange::Different)
+        ));
+        // Enter takes the first one found
+        imp.composer_search.connect_activate(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            filtered,
+            move |_| this.pick_composer(&filtered, 0)
+        ));
+        imp.composer_list.connect_activate(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            filtered,
+            move |_, pos| this.pick_composer(&filtered, pos)
+        ));
+
+        imp.composer_popover.connect_show(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            store,
+            move |_| {
+                let imp = this.imp();
+                imp.composer_search.set_text("");
+                imp.composer_search.grab_focus();
+                let hidden = imp.hidden_folders.borrow().clone();
+                glib::spawn_future_local(clone!(
+                    #[weak]
+                    store,
+                    async move {
+                        let composers = gio::spawn_blocking(move || library::composers(&hidden))
+                            .await
+                            .unwrap_or_default();
+                        let items: Vec<glib::BoxedAnyObject> = std::iter::once(None)
+                            .chain(composers.into_iter().map(Some))
+                            .map(glib::BoxedAnyObject::new)
+                            .collect();
+                        store.splice(0, store.n_items(), &items);
+                    }
+                ));
+            }
+        ));
+
+        imp.composer_banner.connect_button_clicked(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.set_composer(None)
+        ));
+    }
+
+    fn pick_composer(&self, list: &gtk::FilterListModel, pos: u32) {
+        let Some(item) = list.item(pos).and_downcast::<glib::BoxedAnyObject>() else {
+            return;
+        };
+        let composer = item.borrow::<Option<library::ComposerInfo>>().clone();
+        self.imp().composer_popover.popdown();
+        self.set_composer(composer);
+    }
+
+    // Shows only the albums of a composer, or all of them
+    pub fn set_composer(&self, composer: Option<library::ComposerInfo>) {
+        self.imp().composer.replace(composer);
+        self.update_composer();
+        self.update_search();
+    }
+
+    // Whether only the albums of a composer are shown
+    pub fn has_composer(&self) -> bool {
+        self.imp().composer.borrow().is_some()
+    }
+
+    fn update_composer(&self) {
+        let imp = self.imp();
+        let composer = imp.composer.borrow();
+        if let Some(composer) = composer.as_ref() {
+            imp.composer_banner.set_title(&i18n_k(
+                // Translators: `{composer}` must be left unmodified; it is
+                // expanded to the name of a composer
+                "Music by {composer}",
+                &[("composer", &composer.name)],
+            ));
+            imp.composer_banner.set_revealed(true);
+            imp.composer_button.add_css_class("filtering");
+        } else {
+            imp.composer_banner.set_revealed(false);
+            imp.composer_button.remove_css_class("filtering");
+        }
+    }
+
+    // What the search and the composer picked ask for
+    fn wanted_filter(&self) -> TrackFilter {
+        let imp = self.imp();
+        TrackFilter {
+            words: normalize_search_text(&imp.search_entry.text())
+                .split_whitespace()
+                .map(ToString::to_string)
+                .collect(),
+            composer: imp.composer.borrow().as_ref().map(|c| c.key.clone()),
+        }
+    }
+
+    // Looks for the albums with a track that contains every word of the
+    // search, in any of its tags, like searching the queue, and that's by
+    // the composer picked, if any
+    fn update_search(&self) {
+        let filter = self.wanted_filter();
+        if filter.is_empty() {
+            self.set_search_matches(TrackFilter::default(), None);
             return;
         }
 
@@ -950,9 +1099,9 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let Ok((words, matches)) = gio::spawn_blocking(move || {
-                    let matches = library::search_albums(&words, &hidden);
-                    (words, matches)
+                let Ok((filter, matches)) = gio::spawn_blocking(move || {
+                    let matches = library::search_albums(&filter, &hidden);
+                    (filter, matches)
                 })
                 .await
                 else {
@@ -960,22 +1109,26 @@ impl LibraryView {
                 };
 
                 // Results for an older search arriving late
-                if this.imp().search_entry.text() != text {
+                if this.wanted_filter() != filter {
                     return;
                 }
-                this.set_search_matches(words, Some(matches));
+                this.set_search_matches(filter, Some(matches));
             }
         ));
     }
 
-    fn set_search_matches(&self, words: Vec<String>, matches: Option<HashMap<String, (u32, u32)>>) {
+    fn set_search_matches(
+        &self,
+        filter: TrackFilter,
+        matches: Option<HashMap<String, (u32, u32)>>,
+    ) {
         let imp = self.imp();
         // A new search starts again from the tracks that match it, as the
         // albums it finds might not need whole albums. That's once its
         // matches are in, as Whole Albums can still be pressed for the
         // search before while they're read
-        let new_search = *imp.search_words.borrow() != words;
-        imp.search_words.replace(words);
+        let new_search = *imp.search_filter.borrow() != filter;
+        imp.search_filter.replace(filter);
         imp.search_matches.replace(matches);
         if new_search {
             self.set_whole_albums(false);
@@ -1024,21 +1177,21 @@ impl LibraryView {
         imp.whole_albums_revealer.set_reveal_child(partial);
     }
 
-    // The words of the search, which the tracks of an album it found
-    // match
-    pub fn search_words(&self) -> Vec<String> {
-        self.imp().search_words.borrow().clone()
+    // What the tracks of an album the search found match: its words and
+    // the composer picked
+    pub fn search_filter(&self) -> TrackFilter {
+        self.imp().search_filter.borrow().clone()
     }
 
-    // The words that the tracks taken from an album have to match, to be
-    // added, played, dragged or shown: those of the search, or none when
-    // the whole albums are taken
-    pub fn track_words(&self) -> Vec<String> {
+    // What the tracks taken from an album have to match, to be added,
+    // played, dragged or shown: the search and the composer picked, or
+    // nothing when the whole albums are taken
+    pub fn track_filter(&self) -> TrackFilter {
         let imp = self.imp();
         if imp.whole_albums.get() {
-            Vec::new()
+            TrackFilter::default()
         } else {
-            imp.search_words.borrow().clone()
+            imp.search_filter.borrow().clone()
         }
     }
 
@@ -1065,7 +1218,9 @@ impl LibraryView {
             .is_some_and(|m| !m.contains_key(album_id));
         if hidden {
             imp.search_entry.set_text("");
-            self.set_search_matches(Vec::new(), None);
+            imp.composer.replace(None);
+            self.update_composer();
+            self.set_search_matches(TrackFilter::default(), None);
         }
 
         let model = imp.grid_view.model()?;
@@ -1162,12 +1317,12 @@ impl LibraryView {
         self.update_selection();
     }
 
-    // The selected albums, in the order of the grid, with the words their
+    // The selected albums, in the order of the grid, with what their
     // tracks have to match to be taken
-    pub fn selected_albums(&self) -> Vec<(String, Vec<String>)> {
+    pub fn selected_albums(&self) -> Vec<(String, TrackFilter)> {
         let imp = self.imp();
         let selected = imp.selected.borrow();
-        let words = self.track_words();
+        let filter = self.track_filter();
         let Some(model) = imp.grid_view.model() else {
             return Vec::new();
         };
@@ -1177,7 +1332,7 @@ impl LibraryView {
             .filter_map(|i| model.item(i).and_downcast::<Album>())
             .map(|album| album.id())
             .filter(|id| selected.contains(id))
-            .map(|id| (id, words.clone()))
+            .map(|id| (id, filter.clone()))
             .collect()
     }
 
@@ -1455,6 +1610,52 @@ impl LibraryView {
             }
         ));
     }
+}
+
+// The rows of the list of composers: the name they're sorted by, and the
+// number of their albums
+fn composer_factory() -> gtk::SignalListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let name = gtk::Label::builder()
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        let count = gtk::Label::builder()
+            .css_classes(["dim-label", "numeric"])
+            .build();
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        row.append(&name);
+        row.append(&count);
+        item.set_child(Some(&row));
+    });
+    factory.connect_bind(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let Some(row) = item.child() else {
+            return;
+        };
+        let (Some(name), Some(count)) = (
+            row.first_child().and_downcast::<gtk::Label>(),
+            row.last_child().and_downcast::<gtk::Label>(),
+        ) else {
+            return;
+        };
+        let Some(composer) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
+            return;
+        };
+        if let Some(composer) = composer.borrow::<Option<library::ComposerInfo>>().as_ref() {
+            name.set_label(&composer.sort);
+            name.set_tooltip_text(Some(&composer.name));
+            count.set_label(&composer.albums.to_string());
+        } else {
+            name.set_label(&i18n("All Composers"));
+            name.set_tooltip_text(None);
+            count.set_label("");
+        }
+    });
+    factory
 }
 
 // The width the covers of the grid are made at: the largest the grid shows

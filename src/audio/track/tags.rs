@@ -17,6 +17,10 @@ pub struct ExtraComments {
     pub(super) work_hierarchy: Option<String>,
     // A CUE sheet that splits the file into tracks
     pub cue_sheet: Option<String>,
+    // The names of the composers to sort them by, e.g. "Bach, Johann
+    // Sebastian", which lofty doesn't read from Vorbis comments and APE
+    // tags; it does from ID3v2 and MP4 tags
+    pub composer_sort: Vec<String>,
 }
 
 // The name of the tag of the "Work Hierarchy" plugin; MusicBrainz Picard
@@ -33,6 +37,9 @@ impl ExtraComments {
         ExtraComments {
             work_hierarchy: get("WORK_HIERARCHY"),
             cue_sheet: get("CUESHEET"),
+            composer_sort: comments
+                .map(|c| c.get_all("COMPOSERSORT").map(ToString::to_string).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -49,6 +56,10 @@ impl ExtraComments {
         ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
             cue_sheet: get("Cuesheet"),
+            // Several values are separated by nul characters
+            composer_sort: get("ComposerSort")
+                .map(|text| text.split('\0').map(ToString::to_string).collect())
+                .unwrap_or_default(),
         }
     }
 

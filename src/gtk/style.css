@@ -78,10 +78,12 @@ playbackcontrol {
   padding-bottom: 12px;
 }
 
-/* The sleep timer button is filled while the timer is on, and the shuffle
- * button while the playlist is shuffled, as the grey of a checked button
+/* The sleep timer button is filled while the timer is on, the shuffle
+ * button while the playlist is shuffled, and the composers button while
+ * the grid shows the albums of one, as the grey of a checked button
  * hardly differs from the one of the others, and a colored icon alone
  * would hardly show */
+libraryview menubutton.filtering > button,
 playbackcontrol menubutton.sleep-timer-on > button,
 playbackcontrol button.stop-after:checked,
 playbackcontrol button.shuffle:checked {
@@ -89,12 +91,15 @@ playbackcontrol button.shuffle:checked {
   color: var(--accent-fg-color);
 }
 
+libraryview menubutton.filtering > button:hover,
 playbackcontrol menubutton.sleep-timer-on > button:hover,
 playbackcontrol button.stop-after:checked:hover,
 playbackcontrol button.shuffle:checked:hover {
   background-image: image(color-mix(in srgb, currentColor 10%, transparent));
 }
 
+libraryview menubutton.filtering > button:active,
+libraryview menubutton.filtering > button:checked,
 playbackcontrol menubutton.sleep-timer-on > button:active,
 playbackcontrol menubutton.sleep-timer-on > button:checked,
 playbackcontrol button.stop-after:checked:active,

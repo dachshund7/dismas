@@ -54,9 +54,11 @@ What Dismas adds
   and combine them: "Karajan Brahms" finds the tracks with both. Case and
   accents don't matter, so "dvorak" finds Dvořák. Searching the albums shows
   each album with only the tracks that match, and adding or playing it takes
-  only those, unless Whole Albums, next to the search, is on. The button next
-  to the queue's search plays only the tracks it found, in place of the
-  queue, with an Undo.
+  only those, unless Whole Albums, next to the search, is on. The button
+  next to the queue's search plays only the tracks it found, in place of the
+  queue, with an Undo. The Composers button next to the album search lists
+  the composers of your albums, by their last names; pick one to see only
+  their albums, with only the tracks that are theirs.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
   the Playlists page. Add to Playlist, in the menu of a track, adds it to

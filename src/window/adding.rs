@@ -11,8 +11,8 @@ pub(super) enum Tracks {
     // Tracks of the album shown in the pane, which shows the queue again
     // when they go to it, as with their Add button
     ShownAlbum(Vec<gio::File>),
-    // Albums of the grid, each with the words its tracks have to match
-    Albums(Vec<(String, Vec<String>)>),
+    // Albums of the grid, each with what its tracks have to match
+    Albums(Vec<(String, TrackFilter)>),
 }
 
 impl Tracks {

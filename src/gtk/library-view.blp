@@ -61,6 +61,40 @@ template $DismasLibraryView: Widget {
             placeholder-text: _("Search albums");
           }
 
+          // The composers of the albums, to show only the albums of one;
+          // it's highlighted while it does
+          MenuButton composer_button {
+            margin-start: 6;
+            icon-name: "avatar-default-symbolic";
+            tooltip-text: _("Composers");
+
+            popover: Popover composer_popover {
+              child: Box {
+                orientation: vertical;
+                spacing: 6;
+
+                SearchEntry composer_search {
+                  placeholder-text: _("Search composers");
+                }
+
+                ScrolledWindow {
+                  hscrollbar-policy: never;
+                  propagate-natural-height: true;
+                  min-content-width: 260;
+                  max-content-height: 400;
+
+                  child: ListView composer_list {
+                    single-click-activate: true;
+
+                    styles [
+                      "navigation-sidebar",
+                    ]
+                  };
+                }
+              };
+            };
+          }
+
           // While the search matches only some of the tracks of albums,
           // takes the whole albums instead; it slides in, as the entry
           // gives it room
@@ -76,6 +110,12 @@ template $DismasLibraryView: Widget {
           }
         };
       };
+    }
+
+    // While the albums of a composer are shown
+    [top]
+    Adw.Banner composer_banner {
+      button-label: _("Show All");
     }
 
     content: Stack albums_stack {
