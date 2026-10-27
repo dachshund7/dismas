@@ -1626,7 +1626,8 @@ fn composer_factory() -> gtk::SignalListItemFactory {
         let count = gtk::Label::builder()
             .css_classes(["dim-label", "numeric"])
             .build();
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        // The scrollbar is drawn over the right edge of the list
+        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
         row.append(&name);
         row.append(&count);
         item.set_child(Some(&row));
