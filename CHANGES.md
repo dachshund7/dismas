@@ -78,6 +78,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- A new icon: the Katholische Hofkirche in Dresden, the church of the
+  Catholic court that Zelenka wrote his church music for, in place of
+  Charles Bridge in Prague
 - The album grid takes much less processor time and memory: it only reads
   the covers of the albums on screen, where it read those of hundreds of
   albums around them, again and again while scrolling. Its covers are
