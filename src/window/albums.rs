@@ -5,13 +5,20 @@ use super::{adding::Tracks, *};
 
 impl Window {
     // Shows the tracks of an album in the sidebar, in place of the
-    // queue, so that it can be played or added to the queue
-    fn show_album_tracks(&self, album: &Album, filter: &TrackFilter, reveal: Option<&gio::File>) {
+    // queue, so that it can be played or added to the queue; with a
+    // filter, only those it matches, see `AlbumTracks::show_album()`
+    fn show_album_tracks(
+        &self,
+        album: &Album,
+        filter: &TrackFilter,
+        composer: Option<&str>,
+        reveal: Option<&gio::File>,
+    ) {
         let imp = self.imp();
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
             imp.sidebar_was_visible.set(self.playlist_visible());
         }
-        imp.album_tracks.show_album(album, filter, reveal);
+        imp.album_tracks.show_album(album, filter, composer, reveal);
         imp.sidebar_stack.set_visible_child_name("album");
         self.set_playlist_visible(true);
     }
@@ -29,7 +36,7 @@ impl Window {
         let Some(album) = album else {
             return;
         };
-        self.show_album_tracks(&album, &TrackFilter::default(), Some(track));
+        self.show_album_tracks(&album, &TrackFilter::default(), None, Some(track));
     }
 
     // Goes back from the tracks of an album to the queue, closing the
@@ -244,7 +251,14 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, album| {
-                win.show_album_tracks(album, &win.imp().library_view.search_filter(), None);
+                let library_view = win.imp().library_view.get();
+                let composer = library_view.search_composer_name();
+                win.show_album_tracks(
+                    album,
+                    &library_view.search_filter(),
+                    composer.as_deref(),
+                    None,
+                );
             }
         ));
 

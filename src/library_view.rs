@@ -1218,6 +1218,18 @@ impl LibraryView {
         self.imp().search_filter.borrow().clone()
     }
 
+    // The name of the composer in `search_filter()`, if any. The one picked
+    // can differ for a moment, while the albums of a new one are read
+    pub fn search_composer_name(&self) -> Option<String> {
+        let imp = self.imp();
+        let key = imp.search_filter.borrow().composer.clone()?;
+        let composer = imp.composer.borrow();
+        composer
+            .as_ref()
+            .filter(|composer| composer.key == key)
+            .map(|composer| composer.name.clone())
+    }
+
     // What the tracks taken from an album have to match, to be added,
     // played, dragged or shown: the search and the composer picked, or
     // nothing when the whole albums are taken
