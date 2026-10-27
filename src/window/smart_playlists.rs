@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use adw::prelude::*;
+
 use super::*;
 
 impl Window {
@@ -37,5 +39,54 @@ impl Window {
                 win.play_in_place_of_queue(files);
             }
         ));
+    }
+
+    // Asks before clearing the history, from Preferences, which shows the
+    // toast once it's done
+    pub(super) fn confirm_clear_play_history(&self) {
+        let preferences = self.visible_dialog().and_downcast::<PreferencesDialog>();
+        let dialog = adw::AlertDialog::builder()
+            .heading(i18n("Clear the Play History?"))
+            .body(i18n(
+                "Recently Played, Most Played and Not Heard Lately will be empty, \
+                 and the shuffle won’t go by what you’ve heard until you play more. \
+                 Your favorites are kept.",
+            ))
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        dialog.add_responses(&[
+            ("cancel", &i18n("_Cancel")),
+            ("clear", &i18n("_Clear History")),
+        ]);
+        dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+        dialog.connect_response(
+            Some("clear"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| {
+                    let message = win.clear_play_history();
+                    match &preferences {
+                        Some(preferences) => preferences.toast(&message),
+                        None => win.add_toast(message),
+                    }
+                }
+            ),
+        );
+        dialog.present(Some(self));
+    }
+
+    // What was heard of the playing track goes too, and what's heard of it
+    // from now on counts
+    fn clear_play_history(&self) -> String {
+        self.player().forget_listen();
+        match play_stats::clear_history() {
+            Ok(()) => i18n("Play history cleared"),
+            Err(e) => {
+                log::warn!("Unable to clear the play history: {e}");
+                i18n("Unable to clear the play history")
+            }
+        }
     }
 }

@@ -22,7 +22,7 @@ use crate::{
         Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, SleepTimer,
         Track, TrackSource, WaveformGenerator,
     },
-    play_stats::{self, ListenTracker},
+    play_stats::{self, Listen, ListenTracker},
     utils,
     work_sections::continues_work,
 };
@@ -838,8 +838,9 @@ impl AudioPlayer {
     // Logs the listen to the current track, if it was heard long enough,
     // in the background
     fn end_listen(&self) {
-        if let Some(listen) = self.listens.borrow_mut().finish(play_stats::now()) {
-            gio::spawn_blocking(move || play_stats::record(&listen));
+        if let Some(listen) = self.finish_listen() {
+            let generation = play_stats::history_generation();
+            gio::spawn_blocking(move || play_stats::record(&listen, generation));
         }
     }
 
@@ -848,9 +849,21 @@ impl AudioPlayer {
     // playing is on it. If the track keeps playing, the rest of it is
     // another listen
     pub fn save_listen(&self) {
-        if let Some(listen) = self.listens.borrow_mut().finish(play_stats::now()) {
-            play_stats::record(&listen);
+        if let Some(listen) = self.finish_listen() {
+            play_stats::record(&listen, play_stats::history_generation());
         }
+    }
+
+    // What was heard of the current track doesn't count, as when the
+    // history is cleared; what is heard from now on does
+    pub fn forget_listen(&self) {
+        self.listens.borrow_mut().finish(play_stats::now());
+    }
+
+    // The listen to the current track, unless no history is kept
+    fn finish_listen(&self) -> Option<Listen> {
+        let listen = self.listens.borrow_mut().finish(play_stats::now())?;
+        self.settings.boolean("keep-play-history").then_some(listen)
     }
 
     pub fn set_current_track(&self, track: Option<Track>) {

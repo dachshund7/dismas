@@ -24,8 +24,9 @@ out on purpose. It also keeps Amberol's values:
   the cover files next to them. The Flatpak has no network access at all. The
   MusicBrainz links in Track Information open in your web browser.
 - **What you listen to stays on your computer.** Dismas keeps a history of
-  the tracks you play, for the smart playlists and the shuffle, in a database
-  of its own, and doesn't send it anywhere.
+  the tracks you play, for the smart playlists and the shuffle, in a
+  database of its own, and doesn't send it anywhere. You can stop keeping
+  it, or clear it, in Preferences.
 - **It's a GNOME app.** It's built with libadwaita, follows the light or dark
   style of the desktop, and fits in a window as narrow as 360 pixels, as on a
   phone.

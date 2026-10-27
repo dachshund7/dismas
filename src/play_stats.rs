@@ -13,6 +13,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -208,16 +209,45 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     tx.commit()
 }
 
+// Bumped each time the history is cleared, before it is: a listen that
+// ended before, still being written in the background, is dropped
+static HISTORY_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+// What a listen that ends now is recorded with
+pub fn history_generation() -> u64 {
+    HISTORY_GENERATION.load(Ordering::SeqCst)
+}
+
 // Logs the listen, adds it to the totals of its track, and drops the
-// listens older than a year
-pub fn record(listen: &Listen) {
-    if let Err(e) = with_connection(|conn| insert_listen(conn, listen)) {
+// listens older than a year; unless the history was cleared since the
+// listen ended, at `generation`. That's checked once the database is this
+// thread's to write, as clearing it bumps the generation first
+pub fn record(listen: &Listen, generation: u64) {
+    let result = with_connection(|conn| {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if history_generation() != generation {
+            debug!(
+                "Dropping the listen to {}, from before the history was cleared",
+                listen.uri
+            );
+            return Ok(());
+        }
+        write_listen(&tx, listen)?;
+        tx.commit()
+    });
+    if let Err(e) = result {
         warn!("Unable to record the listen to {}: {e}", listen.uri);
     }
 }
 
+#[cfg(test)]
 fn insert_listen(conn: &mut Connection, listen: &Listen) -> rusqlite::Result<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    write_listen(&tx, listen)?;
+    tx.commit()
+}
+
+fn write_listen(tx: &rusqlite::Transaction, listen: &Listen) -> rusqlite::Result<()> {
     tx.execute(
         "INSERT INTO listens (uri, ended, heard, counted) VALUES (?1, ?2, ?3, ?4)",
         params![
@@ -246,7 +276,29 @@ fn insert_listen(conn: &mut Connection, listen: &Listen) -> rusqlite::Result<()>
         "DELETE FROM listens WHERE ended < ?1",
         [listen.ended - KEPT],
     )?;
-    tx.commit()
+    Ok(())
+}
+
+// Forgets the listens and the totals of the tracks, but not the favorites,
+// which are marked rather than heard
+pub fn clear_history() -> rusqlite::Result<()> {
+    HISTORY_GENERATION.fetch_add(1, Ordering::SeqCst);
+    with_connection(delete_history)
+}
+
+fn delete_history(conn: &mut Connection) -> rusqlite::Result<()> {
+    // What was deleted is overwritten in the file, rather than left in
+    // pages that are only marked as free, and the log of the changes is
+    // emptied once they're in it
+    conn.pragma_update(None, "secure_delete", true)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute("DELETE FROM listens", [])?;
+    tx.execute("DELETE FROM totals", [])?;
+    tx.commit()?;
+    if let Err(e) = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())) {
+        debug!("Unable to empty the log of the play stats: {e}");
+    }
+    Ok(())
 }
 
 // The URIs of the last tracks heard, in the order they were last heard,
@@ -835,5 +887,24 @@ mod tests {
         delete_favorite(&conn, "a").unwrap();
         insert_favorite(&conn, "a", now).unwrap();
         assert_eq!(query_favorites(&conn).unwrap(), ["b", "a"]);
+    }
+
+    #[test]
+    fn clearing_the_history_keeps_the_favorites() {
+        let mut conn = test_db();
+        let now = now();
+        insert_listen(&mut conn, &listen("a", now - 100, 60)).unwrap();
+        insert_listen(&mut conn, &listen("b", now - 50, 60)).unwrap();
+        insert_favorite(&conn, "a", now).unwrap();
+
+        delete_history(&mut conn).unwrap();
+        assert!(query_recently_played(&conn).unwrap().is_empty());
+        let uris = ["a".to_string(), "b".to_string()];
+        assert!(query_track_stats(&mut conn, &uris).unwrap().is_empty());
+        assert_eq!(query_favorites(&conn).unwrap(), ["a"]);
+
+        // Listening again starts it over
+        insert_listen(&mut conn, &listen("b", now, 60)).unwrap();
+        assert_eq!(query_recently_played(&conn).unwrap(), ["b"]);
     }
 }

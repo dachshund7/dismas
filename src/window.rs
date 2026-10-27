@@ -292,6 +292,11 @@ mod imp {
                 debug!("Window::win.play()");
                 win.player().toggle_play();
             });
+            // Installed, rather than added to the window, so that other
+            // programs can't activate it over D-Bus: it can't be undone
+            klass.install_action("win.clear-play-history", None, move |win, _, _| {
+                win.confirm_clear_play_history();
+            });
             klass.install_action("win.seek-backwards", None, move |win, _, _| {
                 debug!("Window::win.seek-backwards");
                 win.player().seek_backwards();

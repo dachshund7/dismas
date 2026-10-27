@@ -51,6 +51,27 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
     // The rows go through the window's action, which passes the mode on
     // to the player
     Adw.PreferencesGroup {
+      title: _("Play History");
+      description: _("Recently Played, Most Played, Not Heard Lately and the shuffle go by the tracks you play, which are kept on this computer only");
+
+      Adw.SwitchRow play_history_row {
+        title: _("_Keep a Play History");
+        subtitle: _("When off, the tracks you play aren't added, and the history so far stays");
+        use-underline: true;
+      }
+
+      Adw.ButtonRow {
+        title: _("_Clear History…");
+        use-underline: true;
+        action-name: "win.clear-play-history";
+
+        styles [
+          "destructive-action",
+        ]
+      }
+    }
+
+    Adw.PreferencesGroup {
       title: "ReplayGain";
       description: _("Play tracks at an even loudness, from their ReplayGain tags");
 

@@ -33,6 +33,8 @@ mod imp {
         #[template_child]
         pub restore_playlist_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub play_history_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub recoloring_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub waveform_row: TemplateChild<adw::SwitchRow>,
@@ -86,6 +88,7 @@ mod imp {
             for (key, row) in [
                 ("background-play", &self.background_play_row),
                 ("restore-playlist", &self.restore_playlist_row),
+                ("keep-play-history", &self.play_history_row),
                 ("enable-recoloring", &self.recoloring_row),
                 ("show-waveform", &self.waveform_row),
                 ("zen-mode", &self.zen_mode_row),
@@ -345,7 +348,7 @@ impl PreferencesDialog {
         exclusion
     }
 
-    fn toast(&self, title: &str) {
+    pub fn toast(&self, title: &str) {
         self.add_toast(utils::plain_toast(title));
     }
 

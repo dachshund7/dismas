@@ -29,6 +29,8 @@ All notable changes to this project will be documented in this file.
   and so do the albums on a drive once it's plugged in. Folders on network
   shares, and in the Flatpak those added through the document portal, are
   read again whenever the album grid is shown instead
+- Keep a Play History, in Preferences, to stop adding the tracks played
+  to the history, and Clear History, to delete it; the favorites are kept
 
 ### Changed
 

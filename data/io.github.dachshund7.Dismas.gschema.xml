@@ -120,6 +120,11 @@
 	    <summary>The direction the albums are sorted in</summary>
 	    <description>Whether the albums in the grid are sorted in ascending or descending order</description>
 	  </key>
+	  <key name="keep-play-history" type="b">
+	    <default>true</default>
+	    <summary>Keep a history of the tracks played</summary>
+	    <description>Recently Played, Most Played, Not Heard Lately and the shuffle go by the history. Turned off, the history so far is kept, and the tracks played aren't added to it</description>
+	  </key>
 	  <key name="amberol-migrated" type="b">
 	    <default>false</default>
 	    <summary>Whether the data of Amberol was looked for</summary>
