@@ -243,11 +243,35 @@ fn remove_if_exists(path: &Path) -> std::io::Result<()> {
 
 // The tracks of a playlist; the queue has none until it's first saved
 pub fn load(name: &str) -> Option<Vec<gio::File>> {
-    let path = playlist_path(name)?;
+    load_in(&data_dir(), name)
+}
+
+fn load_in(dir: &Path, name: &str) -> Option<Vec<gio::File>> {
+    let path = path_in(dir, name)?;
     if name.is_empty() && !path.exists() {
         return Some(Vec::new());
     }
     read_m3u(&path)
+}
+
+// Adds tracks at the end of a playlist that isn't selected, whose tracks
+// are only in its file; the selected one is saved from the queue, which
+// would write over them. Its point to resume from and its order from
+// before shuffling stay right, as the tracks before them don't move
+pub fn append(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
+    append_in(&data_dir(), name, files)
+}
+
+fn append_in(dir: &Path, name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
+    let path = path_in(dir, name).ok_or_else(|| invalid_name_error(name))?;
+    let mut tracks = load_in(dir, name).ok_or_else(|| {
+        glib::Error::new(
+            gio::IOErrorEnum::Failed,
+            &format!("Unable to read the playlist {name:?}"),
+        )
+    })?;
+    tracks.extend_from_slice(files);
+    write_path(&path, &tracks)
 }
 
 // The tracks of an M3U playlist anywhere, like one to import
@@ -517,6 +541,41 @@ mod tests {
 
         let taken = |name: &str| name == "Mix" || name == "Mix 2";
         assert_eq!(free_name_among("Mix", taken), "Mix 3");
+    }
+
+    #[test]
+    fn append_adds_tracks_at_the_end() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let file = |name: &str| gio::File::for_path(format!("/music/{name}"));
+        let paths = |name: &str| -> Vec<_> {
+            load_in(&dir, name)
+                .unwrap()
+                .iter()
+                .map(|f| f.path().unwrap())
+                .collect()
+        };
+
+        // The queue has no file until it's saved
+        append_in(&dir, "", &[file("a.opus")]).unwrap();
+        assert_eq!(paths(""), [Path::new("/music/a.opus")]);
+
+        write_path(&path_in(&dir, "Mix").unwrap(), &[file("b.opus")]).unwrap();
+        append_in(&dir, "Mix", &[file("c.opus"), file("Album.cue/track02")]).unwrap();
+        assert_eq!(
+            paths("Mix"),
+            [
+                Path::new("/music/b.opus"),
+                Path::new("/music/c.opus"),
+                Path::new("/music/Album.cue/track02"),
+            ]
+        );
+
+        // A saved playlist whose file is gone isn't made again
+        assert!(append_in(&dir, "Gone", &[file("d.opus")]).is_err());
+        assert!(!path_in(&dir, "Gone").unwrap().exists());
+        assert!(append_in(&dir, "../x", &[file("d.opus")]).is_err());
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     // A data dir of its own for a test, with a playlist named "Mix" that

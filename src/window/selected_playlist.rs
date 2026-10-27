@@ -388,7 +388,7 @@ impl Window {
 
     // Asks for the name of a playlist, starting from `name`, and passes it
     // to `done` without the surrounding spaces
-    fn show_playlist_name_dialog(
+    pub(super) fn show_playlist_name_dialog(
         &self,
         heading: &str,
         response_label: &str,

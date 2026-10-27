@@ -6,8 +6,9 @@ use super::{adding::Tracks, *};
 impl Window {
     // The menu of a track, at the given point of its row; a row of the
     // queue, rather than of an album's tracks, can be removed. Both can be
-    // played next, marked as favorites, and go to the album, the tracks of
-    // an album only while the search leaves some of them out
+    // played next, added to a playlist, marked as favorites, and go to the
+    // album, the tracks of an album only while the search leaves some of
+    // them out
     pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, in_queue: bool) {
         let Some(track) = row.track() else {
             return;
@@ -30,34 +31,28 @@ impl Window {
         let tracks = match (in_queue, selection) {
             (true, true) => Tracks::InQueue(queue.selected_tracks()),
             (true, false) => Tracks::InQueue(vec![track.clone()]),
-            (false, true) => Tracks::Files(album_tracks.files()),
-            (false, false) => Tracks::Files(vec![track.file()]),
+            (false, true) => Tracks::AlbumTracks(album_tracks.files()),
+            (false, false) => Tracks::AlbumTracks(vec![track.file()]),
         };
+        self.add_adding_actions(&actions, move |_| Some(tracks.clone()));
 
+        let section = gio::Menu::new();
         // The playing track is where it would go
         let playing = !selection && in_queue && queue.current().as_ref() == Some(&track);
         if !playing {
-            let play_next = gio::SimpleAction::new("play-next", None);
-            play_next.set_enabled(self.imp().loads.get() == 0);
-            play_next.connect_activate(clone!(
-                #[weak(rename_to = win)]
-                self,
-                #[strong]
-                tracks,
-                move |_, _| {
-                    // Like their Add button, the tracks of an album go to
-                    // the queue, which the pane then shows
-                    if !in_queue {
-                        win.show_playlist_view();
-                    }
-                    win.play_next(tracks.clone());
-                }
-            ));
-            actions.add_action(&play_next);
-            let section = gio::Menu::new();
             section.append(Some(&i18n("Play Next")), Some("track.play-next"));
-            menu.append_section(None, &section);
         }
+        // The tracks of the queue are in the selected playlist already
+        if !in_queue {
+            let item = gio::MenuItem::new(Some(&self.add_to_selected_label()), None);
+            item.set_action_and_target_value(
+                Some("track.add-to"),
+                Some(&self.selected_playlist().to_variant()),
+            );
+            section.append_item(&item);
+        }
+        section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu("track"));
+        menu.append_section(None, &section);
 
         let section = gio::Menu::new();
 

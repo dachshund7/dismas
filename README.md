@@ -55,14 +55,15 @@ What Dismas adds
   queue, with an Undo.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
-  the Playlists page. Each playlist resumes where it was, paused at the same
-  track and position, when you switch back to it and when Dismas starts.
-  Tracks whose files are missing, such as on a drive that isn't plugged in,
-  or can't be read, stay in their places in the playlist, greyed out, and
-  playback skips them until their files are back. Import and export M3U
-  playlists. Exported paths are relative to the
-  playlist's folder, so you can copy a playlist along with the music to
-  another device.
+  the Playlists page. Add to Playlist, in the menu of a track, adds it to
+  another playlist without switching to it, so the music goes on. Each
+  playlist resumes where it was, paused at the same track and position, when
+  you switch back to it and when Dismas starts. Tracks whose files are
+  missing, such as on a drive that isn't plugged in, or can't be read, stay
+  in their places in the playlist, greyed out, and playback skips them until
+  their files are back. Import and export M3U playlists. Exported paths are
+  relative to the playlist's folder, so you can copy a playlist along with
+  the music to another device.
 - **Smart playlists and favorites:** mark tracks as favorites with the heart
   next to the sleep timer, or with Ctrl+D. On the Playlists page, Favorites
   plays them in the order you marked them, Recently Played plays the last 100

@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
   isn't cut; tracks played next one after the other play in the order they
   were chosen. In the playlist pane, it moves the track rather than adding
   it again
+- Add to Playlist, in the menu of a track, adds it to another playlist
+  without switching to it, so the music goes on, or to a new playlist; the
+  toast has an Open button to switch to it
 
 ### Changed
 
