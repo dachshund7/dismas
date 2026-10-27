@@ -695,6 +695,30 @@ pub struct ComposerInfo {
     pub albums: u32,
 }
 
+// Whether a track of the albums of the grid has a composer, without the
+// tracks in the `hidden` folders
+pub fn has_composers(hidden: &[PathBuf]) -> bool {
+    match with_connection(|conn| query_has_composers(conn, hidden)) {
+        Ok(has) => has,
+        Err(e) => {
+            warn!("Unable to look for composers: {e}");
+            false
+        }
+    }
+}
+
+fn query_has_composers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<bool> {
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    conn.query_row(
+        &format!(
+            "SELECT EXISTS (SELECT 1 FROM tracks
+             WHERE album_id IS NOT NULL AND composers IS NOT NULL{hidden_sql})"
+        ),
+        rusqlite::params_from_iter(hidden_params),
+        |row| row.get(0),
+    )
+}
+
 // The composers of the tracks of the albums of the grid, by their sort
 // names, without the tracks in the `hidden` folders
 pub fn composers(hidden: &[PathBuf]) -> Vec<ComposerInfo> {
@@ -2448,6 +2472,13 @@ mod tests {
             .unwrap();
         }
         let hidden = [PathBuf::from("/m/Gone")];
+        assert!(super::query_has_composers(&conn, &hidden).unwrap());
+        let only_anonymous = [
+            PathBuf::from("/m/A"),
+            PathBuf::from("/m/B"),
+            PathBuf::from("/m/Gone"),
+        ];
+        assert!(!super::query_has_composers(&conn, &only_anonymous).unwrap());
 
         let composers = super::query_composers(&conn, &hidden).unwrap();
         let listed: Vec<(&str, u32)> = composers

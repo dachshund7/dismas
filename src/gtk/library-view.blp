@@ -63,8 +63,10 @@ template $DismasLibraryView: Widget {
           }
 
           // The composers of the albums, to show only the albums of one;
-          // it's highlighted while it does
+          // it's highlighted while it does, and hidden while no track has
+          // a composer
           MenuButton composer_button {
+            visible: false;
             margin-start: 6;
             icon-name: "avatar-default-symbolic";
             tooltip-text: _("Composers");

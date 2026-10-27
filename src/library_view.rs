@@ -1043,6 +1043,16 @@ impl LibraryView {
         self.update_search();
     }
 
+    // The Composers button is only there while a track has a composer. A
+    // composer picked goes with it, so that the albums aren't left filtered
+    // by a button that can't be seen
+    fn set_composers_available(&self, available: bool) {
+        self.imp().composer_button.set_visible(available);
+        if !available && self.has_composer() {
+            self.set_composer(None);
+        }
+    }
+
     // Whether only the albums of a composer are shown
     pub fn has_composer(&self) -> bool {
         self.imp().composer.borrow().is_some()
@@ -1390,17 +1400,19 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let (hidden, albums) = gio::spawn_blocking(move || {
+                let (hidden, albums, has_composers) = gio::spawn_blocking(move || {
                     let roots = library::roots(&folders);
                     let hidden = [roots.unavailable, roots.excluded].concat();
                     let albums = library::albums(&hidden);
-                    (hidden, albums)
+                    let has_composers = library::has_composers(&hidden);
+                    (hidden, albums, has_composers)
                 })
                 .await
                 .unwrap_or_default();
                 if this.imp().reload_generation.get() == generation {
                     this.imp().hidden_folders.replace(hidden);
                     this.show_albums(albums);
+                    this.set_composers_available(has_composers);
                 }
             }
         ));
