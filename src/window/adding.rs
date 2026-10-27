@@ -138,9 +138,11 @@ impl Window {
         }
     }
 
-    // Makes a playlist with the tracks, without selecting it, so that what
-    // plays goes on
-    pub(super) fn add_to_new_playlist(&self, tracks: Tracks) {
+    // Makes a playlist with the tracks `source` gives, without selecting
+    // it, so that what plays goes on. They're taken once the playlist is
+    // named, as taking the selected albums leaves selection mode, and the
+    // selection would be lost if the dialog was cancelled
+    pub(super) fn add_to_new_playlist(&self, source: impl Fn(&Self) -> Option<Tracks> + 'static) {
         if self.imp().loads.get() > 0 {
             return;
         }
@@ -149,8 +151,10 @@ impl Window {
             &i18n("_Create"),
             "",
             move |win, name| {
+                let Some(tracks) = source(win) else {
+                    return;
+                };
                 let name = name.to_string();
-                let tracks = tracks.clone();
                 glib::spawn_future_local(clone!(
                     #[weak]
                     win,
@@ -330,9 +334,8 @@ impl Window {
             #[strong]
             source,
             move |_, _| {
-                if let Some(tracks) = source(&win) {
-                    win.add_to_new_playlist(tracks);
-                }
+                let source = source.clone();
+                win.add_to_new_playlist(move |win| source(win));
             }
         ));
 
