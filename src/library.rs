@@ -704,6 +704,9 @@ pub struct ComposerInfo {
     // The name its tracks give it the most, and the name it's sorted by
     pub name: String,
     pub sort: String,
+    // Both names, normalized with `normalize_search_text()`, which
+    // searching the list looks into
+    pub search: String,
     // The number of albums with a track by the composer
     pub albums: u32,
 }
@@ -790,12 +793,14 @@ fn query_composers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Ve
     let mut composers: Vec<(glib::CollationKey, ComposerInfo)> = seen
         .into_iter()
         .map(|(key, seen)| {
+            let name = most(seen.names);
             let sort = most(seen.sorts);
             let info = ComposerInfo {
                 key,
-                name: most(seen.names),
-                albums: seen.albums.len() as u32,
+                search: normalize_search_text(&format!("{name} {sort}")),
+                name,
                 sort: sort.clone(),
+                albums: seen.albums.len() as u32,
             };
             (glib::CollationKey::from(sort.as_str()), info)
         })
@@ -2525,6 +2530,11 @@ mod tests {
                 ("Bach, Carl Philipp Emanuel", 1),
                 ("Bach, Johann Sebastian", 2)
             ]
+        );
+        // The list's search looks into both names
+        assert_eq!(
+            composers[1].search,
+            "johann sebastian bach bach, johann sebastian"
         );
 
         // Only Johann Sebastian's, not his son's, though the names share a

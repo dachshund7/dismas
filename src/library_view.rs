@@ -964,23 +964,19 @@ impl LibraryView {
         let imp = self.imp();
         // Each item is a composer, or None for all of them
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        // The words searched for, normalized once for all the composers
+        let words: Rc<RefCell<Vec<String>>> = Rc::default();
         let filter = gtk::CustomFilter::new(clone!(
-            #[weak(rename_to = this)]
-            self,
-            #[upgrade_or]
-            false,
+            #[strong]
+            words,
             move |item| {
-                let text = normalize_search_text(&this.imp().composer_search.text());
+                let words = words.borrow();
                 let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
                 let composer = item.borrow::<Option<library::ComposerInfo>>();
                 match composer.as_ref() {
                     // "All Composers" isn't something to search for
-                    None => text.trim().is_empty(),
-                    Some(composer) => {
-                        let names =
-                            normalize_search_text(&format!("{} {}", composer.name, composer.sort));
-                        text.split_whitespace().all(|word| names.contains(word))
-                    }
+                    None => words.is_empty(),
+                    Some(composer) => words.iter().all(|word| composer.search.contains(word)),
                 }
             }
         ));
@@ -992,7 +988,15 @@ impl LibraryView {
         imp.composer_search.connect_search_changed(clone!(
             #[weak]
             filter,
-            move |_| filter.changed(gtk::FilterChange::Different)
+            move |entry| {
+                words.replace(
+                    normalize_search_text(&entry.text())
+                        .split_whitespace()
+                        .map(ToString::to_string)
+                        .collect(),
+                );
+                filter.changed(gtk::FilterChange::Different);
+            }
         ));
         // Enter takes the first one found
         imp.composer_search.connect_activate(clone!(
