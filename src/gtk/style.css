@@ -83,18 +83,21 @@ playbackcontrol {
  * hardly differs from the one of the others, and a colored icon alone
  * would hardly show */
 playbackcontrol menubutton.sleep-timer-on > button,
+playbackcontrol button.stop-after:checked,
 playbackcontrol button.shuffle:checked {
   background-color: var(--accent-bg-color);
   color: var(--accent-fg-color);
 }
 
 playbackcontrol menubutton.sleep-timer-on > button:hover,
+playbackcontrol button.stop-after:checked:hover,
 playbackcontrol button.shuffle:checked:hover {
   background-image: image(color-mix(in srgb, currentColor 10%, transparent));
 }
 
 playbackcontrol menubutton.sleep-timer-on > button:active,
 playbackcontrol menubutton.sleep-timer-on > button:checked,
+playbackcontrol button.stop-after:checked:active,
 playbackcontrol button.shuffle:checked:active {
   background-image: image(color-mix(in srgb, currentColor 20%, transparent));
 }

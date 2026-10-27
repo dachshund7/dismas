@@ -41,7 +41,7 @@ mod imp {
         #[template_child]
         pub sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
         #[template_child]
-        pub stop_after_work_button: TemplateChild<gtk::Button>,
+        pub stop_after_work_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub favorite_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
@@ -173,20 +173,25 @@ impl PlaybackControl {
         self.imp().sleep_timer_popover.popdown();
     }
 
-    // Shows what the sleep timer is waiting for, or None when it's off
+    // Shows what the sleep timer is waiting for, or None when it's off:
+    // its button is highlighted, and its tooltip says it
     pub fn set_sleep_timer(&self, status: Option<&str>) {
-        let imp = self.imp();
-        let button = imp.sleep_timer_button.get();
+        let button = self.imp().sleep_timer_button.get();
         if let Some(status) = status {
-            imp.sleep_timer_label.set_label(status);
-            imp.sleep_timer_label.set_visible(true);
             button.set_tooltip_text(Some(status));
             button.add_css_class("sleep-timer-on");
         } else {
-            imp.sleep_timer_label.set_visible(false);
             button.set_tooltip_text(Some(&i18n("Sleep Timer")));
             button.remove_css_class("sleep-timer-on");
         }
+    }
+
+    // The time left, at the top of the popover while the timer counts
+    // down; the end of a track or a work shows on its button instead
+    pub fn set_sleep_timer_remaining(&self, remaining: Option<&str>) {
+        let label = &self.imp().sleep_timer_label;
+        label.set_label(remaining.unwrap_or_default());
+        label.set_visible(remaining.is_some());
     }
 
     pub fn set_repeat_mode(&self, repeat_mode: RepeatMode) {

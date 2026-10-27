@@ -197,7 +197,7 @@ Popover sleep_timer_popover {
     margin-start: 6;
     margin-end: 6;
 
-    // Shows the time left while the timer is on
+    // Shows the time left while the timer counts down
     Label sleep_timer_label {
       visible: false;
 
@@ -206,28 +206,34 @@ Popover sleep_timer_popover {
       ]
     }
 
+    // The one that's waiting is highlighted
     Box {
       orientation: vertical;
+      spacing: 3;
 
-      Button {
+      ToggleButton {
         label: _("Stop _After This Track");
         use-underline: true;
-        action-name: "win.sleep-timer-stop-after-track";
+        action-name: "win.sleep-timer-stop-after";
+        action-target: "'track'";
 
         styles [
           "flat",
+          "stop-after",
         ]
       }
 
       // Only while a movement of a work plays
-      Button stop_after_work_button {
+      ToggleButton stop_after_work_button {
         label: _("Stop After This _Work");
         use-underline: true;
-        action-name: "win.sleep-timer-stop-after-work";
+        action-name: "win.sleep-timer-stop-after";
+        action-target: "'work'";
         visible: false;
 
         styles [
           "flat",
+          "stop-after",
         ]
       }
     }
