@@ -1011,6 +1011,8 @@ impl LibraryView {
                 let hidden = imp.hidden_folders.borrow().clone();
                 glib::spawn_future_local(clone!(
                     #[weak]
+                    this,
+                    #[weak]
                     store,
                     async move {
                         let composers = gio::spawn_blocking(move || library::composers(&hidden))
@@ -1021,6 +1023,11 @@ impl LibraryView {
                             .map(glib::BoxedAnyObject::new)
                             .collect();
                         store.splice(0, store.n_items(), &items);
+                        // From the top, with All Composers, rather than
+                        // where it was left, at the composer picked
+                        this.imp()
+                            .composer_list
+                            .scroll_to(0, gtk::ListScrollFlags::NONE, None);
                     }
                 ));
             }
