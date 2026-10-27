@@ -281,6 +281,9 @@ All notable changes to this project will be documented in this file.
   by a Pause from the desktop's media controls just after startup, or by a
   quick Play and Pause, stayed silent when played a few seconds later, or
   played with its time and waveform stuck where it started
+- Esc did nothing with the cursor in an empty search of the album grid;
+  it now hides the playlist pane beside the grid, as it does elsewhere in
+  the window
 
 ### Removed
 

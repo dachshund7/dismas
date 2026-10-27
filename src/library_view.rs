@@ -834,15 +834,7 @@ impl LibraryView {
             }
         ));
 
-        // Esc clears the search, which also leaves selection mode
-        imp.search_entry.connect_stop_search(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |entry| {
-                this.set_selection_mode(false);
-                entry.set_text("");
-            }
-        ));
+        // Esc is the window's, in window/albums.rs
         crate::utils::focus_on_clear(&imp.search_entry);
 
         imp.select_all_button.connect_clicked(clone!(

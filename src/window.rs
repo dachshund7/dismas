@@ -428,23 +428,12 @@ mod imp {
                 "queue.remove-selected",
             );
 
-            // Esc leaves selection mode, or else hides the playlist pane, or
-            // else leaves fullscreen; the collapsed split view hides its
-            // pane on Esc by itself, so the pane only needs hiding here when
-            // it's beside the content
             klass.add_binding(gdk::Key::Escape, gdk::ModifierType::empty(), |win| {
-                if win.exit_selection_mode() {
-                    return glib::Propagation::Stop;
+                if win.escape() {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
                 }
-                if win.playlist_visible() && !win.imp().split_view.is_collapsed() {
-                    win.set_user_playlist_visible(false);
-                    return glib::Propagation::Stop;
-                }
-                if win.is_fullscreen() {
-                    win.unfullscreen();
-                    return glib::Propagation::Stop;
-                }
-                glib::Propagation::Proceed
             });
 
             // GtkWindow's own property, which also follows the window
@@ -1061,6 +1050,25 @@ impl Window {
         {
             scrolled.emit_scroll_child(scroll, false);
         }
+    }
+
+    // Esc leaves selection mode, or else hides the playlist pane, or else
+    // leaves fullscreen; the collapsed split view hides its pane on Esc by
+    // itself, so the pane only needs hiding here when it's beside the
+    // content. Returns whether there was anything to do
+    fn escape(&self) -> bool {
+        if self.exit_selection_mode() {
+            return true;
+        }
+        if self.playlist_visible() && !self.imp().split_view.is_collapsed() {
+            self.set_user_playlist_visible(false);
+            return true;
+        }
+        if self.is_fullscreen() {
+            self.unfullscreen();
+            return true;
+        }
+        false
     }
 
     // The text entry with the focus: the focus is on the entry's text, or on

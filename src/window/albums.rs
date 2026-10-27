@@ -233,14 +233,20 @@ impl Window {
             }
         ));
 
-        // The search entry takes Esc to clear the search, so the window
-        // does not get it to leave selection mode; do both, as the tracks
-        // selected in the queue would otherwise stay selected
+        // The search entry takes Esc, so the window doesn't get it. With
+        // text, Esc clears the search and leaves selection mode, as the
+        // tracks selected in the queue would otherwise stay selected; in an
+        // empty search, it does what it does elsewhere in the window
         library_view.search_entry().connect_stop_search(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_| {
-                win.exit_selection_mode();
+            move |entry| {
+                if entry.text().is_empty() {
+                    win.escape();
+                } else {
+                    win.exit_selection_mode();
+                    entry.set_text("");
+                }
             }
         ));
 
