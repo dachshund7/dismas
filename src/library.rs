@@ -1660,8 +1660,12 @@ pub fn composer_key(name: &str) -> String {
 
 // The name a composer without a sort name is sorted by: the last name
 // first, as in "Beethoven, Ludwig van", keeping a number or "Jr." after
-// it, as in "Strauss, Johann II"
+// it, as in "Strauss, Johann II". A name with a comma is taken to be
+// written that way already, as some taggers do
 fn sort_name(name: &str) -> String {
+    if name.contains(',') {
+        return name.trim().to_string();
+    }
     let words: Vec<&str> = name.split_whitespace().collect();
     let suffix = words.len() > 2
         && matches!(
@@ -2445,6 +2449,10 @@ mod tests {
         assert_eq!(sort_name("Ludwig van Beethoven"), "Beethoven, Ludwig van");
         assert_eq!(sort_name("Johann Strauss II"), "Strauss, Johann II");
         assert_eq!(sort_name("Pérotin"), "Pérotin");
+        assert_eq!(
+            sort_name("Bach, Johann Sebastian"),
+            "Bach, Johann Sebastian"
+        );
     }
 
     #[test]
