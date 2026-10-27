@@ -284,6 +284,9 @@ All notable changes to this project will be documented in this file.
 - Esc did nothing with the cursor in an empty search of the album grid;
   it now hides the playlist pane beside the grid, as it does elsewhere in
   the window
+- After hiding the playlist pane on the album page, typing didn't always
+  search the albums, and Esc didn't always clear their search; the cursor
+  goes to the album search now
 
 ### Removed
 

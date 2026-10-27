@@ -601,6 +601,21 @@ mod imp {
         fn set_playlist_visible(&self, visible: bool) {
             if visible != self.playlist_visible.replace(visible) {
                 self.split_view.set_show_sidebar(visible);
+                // The split view moves the focus out of a pane it hides:
+                // beside the content, to the first widget of the page that
+                // takes it, and over it, back to where it was before the pane
+                // opened; the focus also stays on a button or an album that
+                // was clicked. On the album page, it goes to the search
+                // instead, so that typing searches and Esc clears the search,
+                // unless it's there already, as taking it again would select
+                // the text being typed
+                if !visible
+                    && self.page() == "library"
+                    && gtk::prelude::GtkWindowExt::focus(&*self.obj())
+                        .is_none_or(|focus| !focus.is_ancestor(&self.library_view.search_entry()))
+                {
+                    self.library_view.focus_search();
+                }
                 self.obj().notify_playlist_visible();
                 self.obj().notify_user_playlist_visible();
             }
