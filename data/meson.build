@@ -52,8 +52,9 @@ install_data('io.github.dachshund7.Dismas.gschema.xml',
   install_dir: get_option('datadir') / 'glib-2.0/schemas',
 )
 
-# Compile schemas locally, so we can run uninstalled under a devenv
-gnome.compile_schemas()
+# Compile schemas locally, so we can run uninstalled under a devenv; the
+# schema is named, or a key added to it wouldn't compile it again
+gnome.compile_schemas(depend_files: 'io.github.dachshund7.Dismas.gschema.xml')
 
 compile_schemas = find_program('glib-compile-schemas', required: false)
 if compile_schemas.found()
