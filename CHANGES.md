@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Play Next, in the menu of a track, puts it after the playing track, or
+  after the last movement of the work that's playing, so that the work
+  isn't cut; tracks played next one after the other play in the order they
+  were chosen. In the playlist pane, it moves the track rather than adding
+  it again
+
 ### Changed
 
 ### Fixed

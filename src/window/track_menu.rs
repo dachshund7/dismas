@@ -1,19 +1,64 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::*;
+use super::{adding::Tracks, *};
 
 impl Window {
     // The menu of a track, at the given point of its row; a row of the
     // queue, rather than of an album's tracks, can be removed. Both can be
-    // marked as favorites, and go to the album, the tracks of an album only
-    // while the search leaves some of them out
+    // played next, marked as favorites, and go to the album, the tracks of
+    // an album only while the search leaves some of them out
     pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, in_queue: bool) {
         let Some(track) = row.track() else {
             return;
         };
 
         let actions = gio::SimpleActionGroup::new();
+        let menu = gio::Menu::new();
+
+        // On a selected track, they take all the selected ones, like
+        // removing it; on another, only that one
+        let album_tracks = self.imp().album_tracks.get();
+        let player = self.player();
+        let queue = player.queue();
+        let selection = track.selected()
+            && if in_queue {
+                self.queue_selection()
+            } else {
+                album_tracks.selection_mode()
+            };
+        let tracks = match (in_queue, selection) {
+            (true, true) => Tracks::InQueue(queue.selected_tracks()),
+            (true, false) => Tracks::InQueue(vec![track.clone()]),
+            (false, true) => Tracks::Files(album_tracks.files()),
+            (false, false) => Tracks::Files(vec![track.file()]),
+        };
+
+        // The playing track is where it would go
+        let playing = !selection && in_queue && queue.current().as_ref() == Some(&track);
+        if !playing {
+            let play_next = gio::SimpleAction::new("play-next", None);
+            play_next.set_enabled(self.imp().loads.get() == 0);
+            play_next.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[strong]
+                tracks,
+                move |_, _| {
+                    // Like their Add button, the tracks of an album go to
+                    // the queue, which the pane then shows
+                    if !in_queue {
+                        win.show_playlist_view();
+                    }
+                    win.play_next(tracks.clone());
+                }
+            ));
+            actions.add_action(&play_next);
+            let section = gio::Menu::new();
+            section.append(Some(&i18n("Play Next")), Some("track.play-next"));
+            menu.append_section(None, &section);
+        }
+
         let section = gio::Menu::new();
 
         // Only the track clicked, even when it's selected, as the selected
@@ -56,7 +101,6 @@ impl Window {
         // The album is looked up while the menu opens, and the item stays
         // off for the tracks that are not in the album grid; the tracks of
         // an album show all of them, scrolled to the track
-        let album_tracks = self.imp().album_tracks.get();
         if in_queue {
             let album_id: Rc<RefCell<Option<String>>> = Rc::default();
             let go_to_album = gio::SimpleAction::new("go-to-album", None);
@@ -132,14 +176,12 @@ impl Window {
 
         section.append(Some(&i18n("Open Directory")), Some("track.open-directory"));
         section.append(Some(&i18n("Track Information")), Some("track.info"));
-        let menu = gio::Menu::new();
         menu.append_section(None, &section);
 
         // On a selected track, it removes all the selected ones, like the
         // button of selection mode; on another, only that one. It comes
         // last, away from the pointer, as the menu opens under it
         if in_queue {
-            let selection = self.queue_selection() && track.selected();
             let remove = gio::SimpleAction::new("remove", None);
             remove.connect_activate(clone!(
                 #[weak(rename_to = win)]
@@ -157,7 +199,7 @@ impl Window {
             ));
             actions.add_action(&remove);
 
-            let several = selection && self.player().queue().n_selected_tracks() > 1;
+            let several = selection && queue.n_selected_tracks() > 1;
             let label = if several {
                 i18n("Remove Selected Tracks")
             } else {

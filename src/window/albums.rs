@@ -119,7 +119,7 @@ impl Window {
                         files,
                         QueueMode::Add,
                         LoadOptions {
-                            insert_before: before,
+                            place: before.map_or(Place::End, Place::Before),
                             ..Default::default()
                         },
                     );

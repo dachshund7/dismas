@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+mod adding;
 mod albums;
 mod bindings;
 mod favorites;
@@ -92,8 +93,20 @@ struct LoadOptions {
     resume: Option<ResumePoint>,
     // The tracks took the place of these, which the toast can put back
     replaced: Option<ReplacedQueue>,
-    // They go before this track, or at the end if it was removed meanwhile
-    insert_before: Option<Track>,
+    // Where they go in the queue
+    place: Place,
+}
+
+// Where tracks go in the queue, worked out once they're read, as the
+// queue can change meanwhile
+#[derive(Default)]
+enum Place {
+    #[default]
+    End,
+    // Before this track, or at the end if it was removed meanwhile
+    Before(Track),
+    // To play next, see `Queue::play_next_before()`
+    Next,
 }
 
 mod imp {

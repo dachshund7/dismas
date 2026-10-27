@@ -71,7 +71,9 @@ What Dismas adds
   but haven't heard in the last 2 months. They play in place of the queue,
   with an Undo.
 - **Queue editing and drag and drop:** drag tracks by their handle to
-  reorder them, and select ranges with Shift+click. Drop files between the
+  reorder them, and select ranges with Shift+click. Play Next, in the menu
+  of a track, puts it after the playing track, or after the last movement
+  of the work that's playing. Drop files between the
   tracks of the playlist pane, or drag albums from the grid into place there.
   Elsewhere on the window, files go to one of two zones: the large one adds
   them to the selected playlist, and the one below it plays them in place of

@@ -157,7 +157,7 @@ impl Window {
             switch_to,
             resume,
             replaced,
-            insert_before,
+            place,
         } = options;
         let play = matches!(mode, QueueMode::Play(_));
         // The file to start playing from; its place among the tracks read
@@ -243,11 +243,17 @@ impl Window {
                     }
 
                     // Bulk add to avoid hammering the UI with list model updates
-                    queue.insert_tracks(&tracks, insert_before.as_ref());
+                    let before = match &place {
+                        Place::End => None,
+                        Place::Before(track) => Some(track.clone()),
+                        Place::Next => queue.play_next_before(&[]),
+                    };
+                    queue.insert_tracks(&tracks, before.as_ref());
                     // The list keeps the rows it shows in place, so tracks put
                     // above the first of them would be out of its view; the
                     // list goes to the track that plays instead
-                    if insert_before.is_some() || (close_search && !play) {
+                    let placed = !matches!(place, Place::End);
+                    if placed || (close_search && !play) {
                         win.reveal_queue_track(&tracks[0]);
                     }
 
@@ -283,6 +289,12 @@ impl Window {
                             }
                         }
                     }
+                    // The tracks played next after these go after them,
+                    // also into an empty queue, where they start it
+                    let play_next = matches!(place, Place::Next);
+                    if play_next {
+                        queue.set_play_next_anchor(tracks.last());
+                    }
                     match mode {
                         // Show where the album went, even if the
                         // queue was closed while adding it
@@ -306,12 +318,24 @@ impl Window {
                         if was_empty || play {
                             player.play();
                         } else {
-                            win.add_skip_to_toast(
-                                i18n("Added a new track"),
-                                i18n("Play"),
-                                &tracks[0],
-                            );
+                            let msg = if play_next {
+                                i18n("The track will play next")
+                            } else {
+                                i18n("Added a new track")
+                            };
+                            win.add_skip_to_toast(msg, i18n("Play"), &tracks[0]);
                         }
+                    } else if play_next && !was_empty {
+                        let msg = ni18n_f(
+                            // Translators: the `{}` must be left unmodified;
+                            // it will be expanded to the number of tracks put
+                            // in the queue to play after the playing one
+                            "One track will play next",
+                            "{} tracks will play next",
+                            tracks.len() as u32,
+                            &[&tracks.len().to_string()],
+                        );
+                        win.add_toast(msg);
                     } else {
                         let msg = ni18n_f(
                             // Translators: the `{}` must be left unmodified;
@@ -349,7 +373,7 @@ impl Window {
                         queue,
                         mode,
                         LoadOptions {
-                            insert_before: before,
+                            place: before.map_or(Place::End, Place::Before),
                             ..Default::default()
                         },
                     ),
