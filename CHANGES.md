@@ -44,6 +44,9 @@ All notable changes to this project will be documented in this file.
 
 - Scan the Music Folders moved from the main menu to Preferences, as Scan
   Now, as the music folders are watched
+- Whole Albums is filled with the accent color while it's on, like the
+  shuffle and sleep timer buttons, as the grey of a pressed button hardly
+  showed
 
 ### Fixed
 
