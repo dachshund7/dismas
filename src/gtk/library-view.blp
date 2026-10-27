@@ -9,9 +9,10 @@ template $DismasLibraryView: Widget {
     [top]
     Adw.HeaderBar {
       // The title is left out when the window is too narrow for it, even
-      // with the buttons of the pages folded into a menu
+      // with the buttons of the pages folded into a menu. Under it is the
+      // composer whose albums are shown, if any
       title-widget: $DismasFitBin {
-        child: Adw.WindowTitle {
+        child: Adw.WindowTitle page_title {
           title: _("Albums");
         };
       };
@@ -114,12 +115,6 @@ template $DismasLibraryView: Widget {
           }
         };
       };
-    }
-
-    // While the albums of a composer are shown
-    [top]
-    Adw.Banner composer_banner {
-      button-label: _("Show All");
     }
 
     content: Stack albums_stack {

@@ -118,7 +118,7 @@ mod imp {
         #[template_child]
         pub composer_list: TemplateChild<gtk::ListView>,
         #[template_child]
-        pub composer_banner: TemplateChild<adw::Banner>,
+        pub page_title: TemplateChild<adw::WindowTitle>,
         #[template_child]
         pub whole_albums_revealer: TemplateChild<gtk::Revealer>,
         #[template_child]
@@ -1025,12 +1025,6 @@ impl LibraryView {
                 ));
             }
         ));
-
-        imp.composer_banner.connect_button_clicked(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |_| this.set_composer(None)
-        ));
     }
 
     fn pick_composer(&self, list: &gtk::FilterListModel, pos: u32) {
@@ -1054,20 +1048,26 @@ impl LibraryView {
         self.imp().composer.borrow().is_some()
     }
 
+    // The composer whose albums are shown is under the title of the page,
+    // and on the tooltip of the button, as a narrow window leaves out the
+    // title; the button is highlighted
     fn update_composer(&self) {
         let imp = self.imp();
         let composer = imp.composer.borrow();
         if let Some(composer) = composer.as_ref() {
-            imp.composer_banner.set_title(&i18n_k(
+            imp.page_title.set_subtitle(&composer.name);
+            imp.composer_button.set_tooltip_text(Some(&i18n_k(
                 // Translators: `{composer}` must be left unmodified; it is
-                // expanded to the name of a composer
-                "Music by {composer}",
+                // expanded to the name of the composer whose albums are
+                // shown
+                "Composers: {composer}",
                 &[("composer", &composer.name)],
-            ));
-            imp.composer_banner.set_revealed(true);
+            )));
             imp.composer_button.add_css_class("filtering");
         } else {
-            imp.composer_banner.set_revealed(false);
+            imp.page_title.set_subtitle("");
+            imp.composer_button
+                .set_tooltip_text(Some(&i18n("Composers")));
             imp.composer_button.remove_css_class("filtering");
         }
     }
