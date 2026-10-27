@@ -5,6 +5,7 @@ use std::{
     cell::{Cell, OnceCell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
+    time::{Duration, Instant},
 };
 
 use adw::{prelude::*, subclass::prelude::*};
@@ -45,6 +46,12 @@ type PendingCovers = HashMap<String, Vec<(String, glib::WeakRef<AlbumCell>)>>;
 // The size of the cover on the copy of an album that follows the pointer
 // while it's dragged
 const DRAG_COVER_SIZE: i32 = 64;
+
+// How long after a scan the music folders that can't be watched are read
+// again when the albums are shown. Reading a network share or a folder
+// from the document portal takes a while, and going back and forth
+// between the pages would read it each time
+const UNWATCHED_RESCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 // The albums dragged from the grid, with the words of the search each was
 // selected in, like the ones the Add button adds, and whether they are
@@ -189,8 +196,9 @@ mod imp {
         // their files change
         pub watch: OnceCell<Rc<library::FolderWatch>>,
         // A music folder that's there can't be watched, so it's read again
-        // when the albums are shown
+        // when the albums are shown, if the last scan finished a while ago
         pub unwatched: Cell<bool>,
+        pub last_scan_finished: Cell<Option<Instant>>,
         // Bumped for each reload of the albums
         pub reload_generation: Cell<u32>,
         // The music folders that aren't there, as of the last reload, whose
@@ -1511,10 +1519,15 @@ impl LibraryView {
     }
 
     // A music folder that can't be watched is read again when the albums
-    // are shown, unless it's being read already
+    // are shown, unless it's being read already, or was read in the last
+    // few minutes
     pub fn scan_unwatched(&self) {
         let imp = self.imp();
-        if imp.unwatched.get() && !imp.scanning.get() {
+        let recent = imp
+            .last_scan_finished
+            .get()
+            .is_some_and(|finished| finished.elapsed() < UNWATCHED_RESCAN_INTERVAL);
+        if imp.unwatched.get() && !imp.scanning.get() && !recent {
             self.start_scan(false);
         }
     }
@@ -1541,7 +1554,7 @@ impl LibraryView {
         // folder, before there is anything to count
         let counting = Rc::new(Cell::new(false));
         glib::timeout_add_local(
-            std::time::Duration::from_millis(100),
+            Duration::from_millis(100),
             clone!(
                 #[weak(rename_to = this)]
                 self,
@@ -1600,6 +1613,7 @@ impl LibraryView {
                 // another one follows. The channel also closes if the scan
                 // panicked
                 counting.set(true);
+                this.imp().last_scan_finished.set(Some(Instant::now()));
                 if result.n_changed > 0 || result.covers_changed {
                     this.imp().library_changed.set(true);
                 }

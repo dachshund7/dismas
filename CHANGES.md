@@ -28,7 +28,7 @@ All notable changes to this project will be documented in this file.
   grid by themselves, a couple of seconds after their files stop changing,
   and so do the albums on a drive once it's plugged in. Folders on network
   shares, and in the Flatpak those added through the document portal, are
-  read again whenever the album grid is shown instead
+  read again when the album grid is shown instead, at most every 5 minutes
 - Keep a Play History, in Preferences, to stop adding the tracks played
   to the history, and Clear History, to delete it; the favorites are kept
 - Random Album, on the Playlists page, plays an album picked at random in

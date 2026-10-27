@@ -372,9 +372,9 @@ Dismas installed without Flatpak can:
   elsewhere, like one on a second drive, need to be added in Preferences,
   which gives Dismas access to them through the document portal. If that
   access is taken back, the folder shows as unavailable until it's added
-  again. Such a folder isn't watched for changes, so it's read again each
-  time the album grid is shown. Symbolic links in the Music folder that
-  point outside it don't work in the sandbox.
+  again. Such a folder isn't watched for changes, so it's read again when
+  the album grid is shown, at most every 5 minutes. Symbolic links in the
+  Music folder that point outside it don't work in the sandbox.
 - Files opened or dropped from outside the music folders reach Dismas one at
   a time, through the document portal, without the files next to them. A
   `.cue` sheet then can't reach its audio file, and cover files next to the
