@@ -910,7 +910,7 @@ fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> WatchList {
             list.unwatched = true;
             continue;
         }
-        add_folders(root, &roots.excluded, &mut list.folders);
+        add_folders(root, roots, &mut list.folders);
     }
     list
 }
@@ -925,20 +925,24 @@ fn is_remote(path: &Path) -> bool {
 }
 
 // A folder, and the folders in it that the scan reads
-fn add_folders(folder: &Path, excluded: &[PathBuf], folders: &mut Vec<PathBuf>) {
+fn add_folders(folder: &Path, roots: &Roots, folders: &mut Vec<PathBuf>) {
     folders.push(folder.to_path_buf());
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if entry.file_type().is_ok_and(|t| t.is_dir())
-            && is_library_entry(&path)
-            && !excluded.contains(&path)
-        {
-            add_folders(&path, excluded, folders);
+        if entry.file_type().is_ok_and(|t| t.is_dir()) && scan_reads(&path, roots) {
+            add_folders(&path, roots, folders);
         }
     }
+}
+
+// Whether the scan reads a file or a folder it comes to in the music
+// folders: not a hidden one, nor a folder left out. The folders watched
+// are the ones it reads, so both go by this
+fn scan_reads(path: &Path, roots: &Roots) -> bool {
+    is_library_entry(path) && !roots.excluded.iter().any(|excluded| excluded == path)
 }
 
 // When the file of tracks last changed, and its size: with the audio
@@ -1006,7 +1010,7 @@ fn scan_with(
         .iter()
         .flat_map(|root| {
             utils::load_files_from_folder_filtered(&gio::File::for_path(root), true, &|path| {
-                is_library_entry(path) && !roots.excluded.iter().any(|excluded| excluded == path)
+                scan_reads(path, roots)
             })
         })
         .filter_map(|file| file.path())
