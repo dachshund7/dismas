@@ -295,8 +295,14 @@ fn delete_history(conn: &mut Connection) -> rusqlite::Result<()> {
     tx.execute("DELETE FROM listens", [])?;
     tx.execute("DELETE FROM totals", [])?;
     tx.commit()?;
-    if let Err(e) = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())) {
-        debug!("Unable to empty the log of the play stats: {e}");
+    // A checkpoint that another connection holds up doesn't fail: its first
+    // column says it was blocked. The next one empties the log then
+    match conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+        row.get::<_, i64>(0)
+    }) {
+        Ok(0) => {}
+        Ok(_) => debug!("Unable to empty the log of the play stats: it's in use"),
+        Err(e) => debug!("Unable to empty the log of the play stats: {e}"),
     }
     Ok(())
 }

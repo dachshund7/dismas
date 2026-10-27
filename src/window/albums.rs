@@ -129,9 +129,11 @@ impl Window {
         };
         let albums = Rc::new(albums);
 
+        // Off while tracks are read, like the other ways to add them
+        let enabled = self.imp().loads.get() == 0;
         let actions = gio::SimpleActionGroup::new();
         let play = gio::SimpleAction::new("play", None);
-        play.set_enabled(self.imp().loads.get() == 0);
+        play.set_enabled(enabled);
         play.connect_activate(clone!(
             #[weak(rename_to = win)]
             self,
@@ -140,7 +142,6 @@ impl Window {
             move |_, _| win.queue_albums(albums(&win), true)
         ));
         actions.add_action(&play);
-        let enabled = self.imp().loads.get() == 0;
         self.add_adding_actions(&actions, enabled, move |win| {
             Some(Tracks::Albums(albums(win)))
         });
@@ -363,8 +364,8 @@ impl Window {
 
 // The files of the tracks of albums, each with what its tracks have to
 // match: the search and the composer picked, or nothing for the whole
-// album; reading
-// them from the library takes a while, so it's done in a separate thread
+// album; reading them from the library takes a while, so it's done in a
+// separate thread
 pub(super) async fn album_files(albums: Vec<(String, TrackFilter)>) -> Option<Vec<gio::File>> {
     let paths = gio::spawn_blocking(move || {
         albums

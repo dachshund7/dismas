@@ -956,9 +956,10 @@ impl LibraryView {
     }
 
     // The list of composers next to the search: choosing one shows only
-    // their albums, with the tracks that are theirs, like a search, and a
-    // banner over them, whose button shows all the albums again. It's read
-    // each time it opens, as the albums can change
+    // their albums, with the tracks that are theirs, like a search, and
+    // names them under the title of the page; All Composers, or Esc in an
+    // empty search, shows all the albums again. It's read each time it
+    // opens, as the albums can change
     fn setup_composers(&self) {
         let imp = self.imp();
         // Each item is a composer, or None for all of them
@@ -1525,11 +1526,6 @@ impl LibraryView {
             .set_visible(page == "albums" && imp.scanning.get());
     }
 
-    // Shows the albums we know about, then looks for changes in the music
-    // folders in a separate thread; `requested` is whether the user asked
-    // for it, to tell them what it found. During a scan, another one follows
-    // it, as the folders might have changed since it started; the user can't
-    // ask for one then, as the action is off
     // Files that come, go or change in the music folders are read once
     // they stop changing, as at startup
     fn setup_watch(&self) {
@@ -1555,6 +1551,11 @@ impl LibraryView {
         }
     }
 
+    // Shows the albums we know about, then looks for changes in the music
+    // folders in a separate thread; `requested` is whether the user asked
+    // for it, to tell them what it found. During a scan, another one follows
+    // it, as the folders might have changed since it started; the user can't
+    // ask for one then, as the action is off
     pub fn start_scan(&self, requested: bool) {
         let imp = self.imp();
         if imp.scanning.get() {

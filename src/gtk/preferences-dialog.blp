@@ -48,8 +48,6 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
-    // The rows go through the window's action, which passes the mode on
-    // to the player
     Adw.PreferencesGroup {
       title: _("Play History");
       description: _("Recently Played, Most Played, Not Heard Lately and the shuffle go by the tracks you play, which are kept on this computer only");
@@ -71,6 +69,8 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
+    // The rows go through the window's action, which passes the mode on
+    // to the player
     Adw.PreferencesGroup {
       title: "ReplayGain";
       description: _("Play tracks at an even loudness, from their ReplayGain tags");

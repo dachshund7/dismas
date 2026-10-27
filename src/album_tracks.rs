@@ -462,13 +462,13 @@ impl AlbumTracks {
         self.imp().back_button.set_tooltip_text(Some(tooltip));
     }
 
-    // The label of the button that adds the tracks to the selected playlist
     // The menu next to the button that adds the tracks, with the other
     // ways to add them
     pub fn set_add_menu(&self, menu: &gio::MenuModel) {
         self.imp().add_button.set_menu_model(Some(menu));
     }
 
+    // The label of the button that adds the tracks to the selected playlist
     pub fn set_add_label(&self, label: &str) {
         utils::set_playlist_button_label(&self.imp().add_button, label);
     }
