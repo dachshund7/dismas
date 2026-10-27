@@ -1652,11 +1652,11 @@ impl LibraryView {
                 // by another scan. A scan that panicked doesn't say
                 if finished {
                     let imp = this.imp();
-                    imp.unwatched.set(result.unwatched);
+                    imp.unwatched.set(result.watch.unwatched);
                     if imp
                         .watch
                         .get()
-                        .is_some_and(|watch| watch.set_folders(&result.watched))
+                        .is_some_and(|watch| watch.set_folders(&result.watch))
                     {
                         imp.rescan_pending.set(true);
                     }

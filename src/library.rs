@@ -94,11 +94,24 @@ pub struct ScanResult {
     // Whether covers of the albums were made again, which can keep their
     // names, as when a cover file next to the tracks changed
     pub covers_changed: bool,
-    // The folders to watch for files that come, go or change, see
-    // `folders_to_watch()`, and whether a music folder that's there can't
-    // be watched, so that it's read again when the albums are shown
-    pub watched: Vec<PathBuf>,
+    // What to watch for changes, see `folders_to_watch()`
+    pub watch: WatchList,
+}
+
+// What to watch for changes in the music folders, as of a scan
+#[derive(Debug, Default)]
+pub struct WatchList {
+    // The folders to watch for files that come, go or change
+    pub folders: Vec<PathBuf>,
+    // Whether a music folder that's there can't be watched, so that it's
+    // read again when the albums are shown
     pub unwatched: bool,
+    // The music folders that are there, without symbolic links: a drive
+    // unmounted can take one away, and a drive mounted in one adds to it.
+    // While one isn't there, a drive mounted anywhere can bring it back,
+    // as the folder a symbolic link leads to is only known once it's there
+    pub available: Vec<PathBuf>,
+    pub unavailable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -848,7 +861,7 @@ pub fn scan(folders: &[MusicFolder], thumbnail_size: u32, sender: &Sender<ScanEv
     });
     debug!("Library scan: {} ms", now.elapsed().as_millis());
     // Even when the database couldn't be read, the folders are watched
-    (result.watched, result.unwatched) = folders_to_watch(folders, &roots(folders));
+    result.watch = folders_to_watch(folders, &roots(folders));
 
     let _ = sender.try_send(ScanEvent::Finished(result));
 }
@@ -874,23 +887,27 @@ fn scan_internal(
 // links, which the scan doesn't read either. Changes in a folder on a
 // network share can be made from other computers, which aren't told
 // about, and the folders that came through the document portal aren't
-// watched either; returns whether a music folder that's there is one of
-// them. This blocks
-fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> (Vec<PathBuf>, bool) {
-    let mut watched = Vec::new();
-    let mut unwatched = false;
+// watched either. Also the music folders, for the drives mounted and
+// unmounted, see `WatchList`. This blocks
+fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> WatchList {
+    let mut list = WatchList {
+        unavailable: !roots.unavailable.is_empty(),
+        ..WatchList::default()
+    };
     for root in &roots.available {
+        list.available
+            .push(std::fs::canonicalize(root).unwrap_or_else(|_| root.clone()));
         let portal = folders
             .iter()
             .any(|folder| folder.path == *root && folder.host.is_some());
         if portal || is_remote(root) {
             debug!("Library: not watching {root:?}");
-            unwatched = true;
+            list.unwatched = true;
             continue;
         }
-        add_folders(root, &roots.excluded, &mut watched);
+        add_folders(root, &roots.excluded, &mut list.folders);
     }
-    (watched, unwatched)
+    list
 }
 
 fn is_remote(path: &Path) -> bool {
@@ -2350,7 +2367,8 @@ mod tests {
         let mut folder = MusicFolder::new(music.clone());
         folder.excluded.push(PathBuf::from("Audiobooks"));
         let folders = [folder];
-        let (mut watched, unwatched) = super::folders_to_watch(&folders, &super::roots(&folders));
+        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        let mut watched = list.folders;
         watched.sort();
         let relative: Vec<&Path> = watched
             .iter()
@@ -2366,16 +2384,24 @@ mod tests {
                 Path::new("Bach/Partitas/CD2"),
             ]
         );
-        assert!(!unwatched);
+        assert!(!list.unwatched);
+        assert_eq!(list.available, [music.canonicalize().unwrap()]);
+        assert!(!list.unavailable);
 
         // A folder that came through the document portal isn't watched
         let folders = [MusicFolder {
             host: Some(PathBuf::from("/media/music")),
             ..MusicFolder::new(music.clone())
         }];
-        let (watched, unwatched) = super::folders_to_watch(&folders, &super::roots(&folders));
-        assert!(watched.is_empty());
-        assert!(unwatched);
+        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        assert!(list.folders.is_empty());
+        assert!(list.unwatched);
+
+        // A drive mounted anywhere can bring back a folder that isn't there
+        let folders = [MusicFolder::new(music.join("Unplugged"))];
+        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        assert!(list.folders.is_empty());
+        assert!(list.unavailable);
 
         std::fs::remove_dir_all(music).unwrap();
         std::fs::remove_dir_all(elsewhere).unwrap();
