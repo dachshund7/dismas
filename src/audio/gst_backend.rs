@@ -98,6 +98,9 @@ struct Gapless {
     // Changes whenever the player loads a track itself, so it can tell
     // the tracks that started before
     generation: u64,
+    // Whether the pipeline played since the player loaded the track; until
+    // then, it's never paused (see `GstBackend::pause`)
+    played: bool,
 }
 
 impl Gapless {
@@ -152,6 +155,9 @@ pub struct GstBackend {
     // loaded, from the start of the track: GstPlay would only seek once
     // it's ready to play
     start_position: Cell<Option<u64>>,
+    // Where the track was last asked to start, from the start of the
+    // track, in case it's paused before it plays
+    starting_at: Cell<u64>,
     // Whether the track plays once it's loaded
     play_requested: Cell<bool>,
     gapless: Arc<Mutex<Gapless>>,
@@ -521,6 +527,7 @@ impl GstBackend {
             gst_player,
             replaygain: GstReplayGain::new().ok(),
             start_position: Cell::default(),
+            starting_at: Cell::default(),
             play_requested: Cell::default(),
             gapless: Arc::default(),
         };
@@ -662,6 +669,15 @@ impl GstBackend {
                     gst_play::PlayMessage::Warning(message) => {
                         warn!("GStreamer warning: {}", message.error());
                     }
+                    gst_play::PlayMessage::StateChanged(message)
+                        if message.state() == gst_play::PlayState::Playing =>
+                    {
+                        let mut gapless = gapless.lock().unwrap();
+                        // Not the file before the one being loaded
+                        if gapless.pending_loads == 0 {
+                            gapless.played = true;
+                        }
+                    }
                     gst_play::PlayMessage::EndOfStream(_) => {
                         if let Err(e) = sender.try_send(PlaybackAction::PlayNext) {
                             error!("Failed to send PlayNext: {e}");
@@ -707,6 +723,7 @@ impl GstBackend {
             gapless.advanced = None;
             gapless.cut = false;
             gapless.start_seek = false;
+            gapless.played = false;
             if source.is_some() {
                 gapless.pending_loads += 1;
                 gapless.loaded_at = Some(Instant::now());
@@ -772,6 +789,9 @@ impl GstBackend {
             let start = {
                 let mut gapless = self.gapless();
                 gapless.start_seek = false;
+                if !gapless.played {
+                    self.starting_at.set(destination.seconds());
+                }
                 gapless
                     .playing()
                     .map_or(gst::ClockTime::ZERO, |playing| playing.start)
@@ -782,9 +802,8 @@ impl GstBackend {
     }
 
     // The track starts at the position once it plays, unless it's moved
-    // or changed before. Getting it ready to play now, paused, could leave
-    // PulseAudio waiting for it to start, and the track stuck at the
-    // position, if it starts a few seconds later
+    // or changed before. Getting it ready now, paused, would leave its
+    // position stuck once it plays (see `pause()`)
     pub fn resume_at(&self, position: u64) {
         self.start_position.set(Some(position));
     }
@@ -810,7 +829,9 @@ impl GstBackend {
             return;
         }
 
-        self.start_position.take();
+        if let Some(position) = self.start_position.take() {
+            self.starting_at.set(position);
+        }
         self.gst_player.play();
         // GstPlay seeks once the track is ready to play
         if let Some(position) = position {
@@ -826,8 +847,28 @@ impl GstBackend {
         }
     }
 
+    // A track that hasn't played since it was loaded isn't paused: paused,
+    // the pipeline would get ready to play, and if it only started a few
+    // seconds later, PulseAudio would play it with its position stuck
+    // where it started, so GstPlay would report no positions until it
+    // stops. Such a track stays unloaded instead, or is loaded again if it
+    // was starting, and starts where it would have once it plays
     pub fn pause(&self) {
         self.play_requested.set(false);
+        // Not asked to play since it was loaded
+        if self.start_position.get().is_some() {
+            return;
+        }
+        let (current, played) = {
+            let gapless = self.gapless();
+            (gapless.current.clone(), gapless.played)
+        };
+        if current.is_some() && !played {
+            let position = self.starting_at.get();
+            self.set_track(current.as_ref());
+            self.start_position.set(Some(position));
+            return;
+        }
         self.gst_player.pause();
     }
 

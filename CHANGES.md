@@ -277,6 +277,10 @@ All notable changes to this project will be documented in this file.
 - `RUST_LOG` didn't change what Dismas logged, so the README's way of
   getting a debug log didn't work, and a release build, like the
   Flatpak's, couldn't give one
+- With PulseAudio, a track paused before it had started playing, such as
+  by a Pause from the desktop's media controls just after startup, or by a
+  quick Play and Pause, stayed silent when played a few seconds later, or
+  played with its time and waveform stuck where it started
 
 ### Removed
 
