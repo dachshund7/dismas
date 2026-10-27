@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
 };
 
@@ -31,9 +31,9 @@ mod imp {
         pub current_pos: Cell<Option<u32>>,
         #[property(name = "n-tracks", get = Self::n_tracks, type = u32)]
         n_tracks: std::marker::PhantomData<u32>,
-        // The last track Play Next put in, which the next ones go after
-        // while it's still to come
-        pub play_next_anchor: glib::WeakRef<Track>,
+        // The tracks Play Next put in, which the next ones go after while
+        // they follow the current track
+        pub played_next: RefCell<Vec<glib::WeakRef<Track>>>,
     }
 
     #[glib::object_subclass]
@@ -47,7 +47,7 @@ mod imp {
                 repeat_mode: Cell::new(RepeatMode::default()),
                 current_pos: Cell::new(None),
                 n_tracks: Default::default(),
-                play_next_anchor: glib::WeakRef::new(),
+                played_next: RefCell::default(),
             }
         }
     }
@@ -118,7 +118,7 @@ impl Queue {
     }
 
     pub fn set_current_track(&self, track: Option<Track>) {
-        self.set_play_next_anchor(None);
+        self.forget_played_next();
         if let Some(track) = track {
             if let Some(pos) = self.position(&track) {
                 self.imp().current_pos.replace(Some(pos));
@@ -311,29 +311,47 @@ impl Queue {
     }
 
     // The track that tracks played next go before, or `None` for the end:
-    // after those Play Next put in before, while they're still to come, or
-    // else after the movements of the current track's work, so that it
-    // isn't cut; the tracks moved there don't count
+    // after the current track and the movements of its work, so that it
+    // isn't cut, and after the tracks Play Next put right after those,
+    // so that they play in the order they were chosen; the tracks moved
+    // there don't count
     pub fn play_next_before(&self, moving: &[Track]) -> Option<Track> {
         let tracks: Vec<Track> = self
             .tracks()
             .into_iter()
             .filter(|t| !moving.contains(t))
             .collect();
-        let find = |track: Track| tracks.iter().position(|t| *t == track);
-        let current = self.current().and_then(find);
-        let anchor = self.imp().play_next_anchor.upgrade().and_then(find);
-        let pos = play_next_pos(tracks.len(), current, anchor, |pos| {
-            continues_work(&tracks[pos - 1], &tracks[pos])
-        });
+        let current = self
+            .current()
+            .and_then(|current| tracks.iter().position(|t| *t == current));
+        let played_next: Vec<Track> = self
+            .imp()
+            .played_next
+            .borrow()
+            .iter()
+            .filter_map(glib::WeakRef::upgrade)
+            .collect();
+        let pos = play_next_pos(
+            tracks.len(),
+            current,
+            |pos| continues_work(&tracks[pos - 1], &tracks[pos]),
+            |pos| played_next.contains(&tracks[pos]),
+        );
         tracks.get(pos).cloned()
     }
 
-    // The last track Play Next put in; the ones put in next go after it.
-    // Going to another track forgets it, as a jump leaves it behind or far
-    // ahead
-    pub fn set_play_next_anchor(&self, track: Option<&Track>) {
-        self.imp().play_next_anchor.set(track);
+    // Tracks Play Next put in; the ones put in next go after them, while
+    // nothing else comes in between
+    pub fn mark_played_next(&self, tracks: &[Track]) {
+        let mut played_next = self.imp().played_next.borrow_mut();
+        played_next.retain(|t| t.upgrade().is_some_and(|t| !tracks.contains(&t)));
+        played_next.extend(tracks.iter().map(ObjectExt::downgrade));
+    }
+
+    // Going to another track forgets them, as a jump leaves them behind or
+    // far ahead
+    fn forget_played_next(&self) {
+        self.imp().played_next.borrow_mut().clear();
     }
 
     // The selected tracks, in the order of the queue
@@ -357,14 +375,14 @@ impl Queue {
     // The covers go with the tracks, unless other tracks of their albums
     // are still around, like the tracks that replace these
     pub fn clear(&self) {
-        self.set_play_next_anchor(None);
+        self.forget_played_next();
         self.imp().current_pos.replace(None);
         self.imp().store.remove_all();
         self.notify_n_tracks();
     }
 
     pub fn skip_track(&self, pos: u32) -> Option<Track> {
-        self.set_play_next_anchor(None);
+        self.forget_played_next();
         self.imp().current_pos.replace(Some(pos));
         self.notify_current();
         self.track_at(pos)
@@ -375,7 +393,7 @@ impl Queue {
     pub fn previous_track(&self) -> Option<Track> {
         let current_pos = self.imp().current_pos.get()?;
         let prev = (0..current_pos).rev().find(|&pos| self.playable(pos))?;
-        self.set_play_next_anchor(None);
+        self.forget_played_next();
         self.imp().current_pos.replace(Some(prev));
         self.notify_current();
         self.track_at(prev)
@@ -466,24 +484,26 @@ impl Queue {
 }
 
 // Where Play Next puts tracks among `n_tracks`, as a position to insert
-// at: after the last track it put in, at `anchor`, while that's still to
-// come; otherwise after the current track and the tracks after it that
-// continue its work, which `continues(pos)` tells for the track at `pos`
-// and the one before it. With no current track, at the start
+// at: after the current track and the tracks after it that continue its
+// work, which `continues(pos)` tells for the track at `pos` and the one
+// before it, then after the tracks that follow them that Play Next put in,
+// `played_next(pos)`. A track that comes in between, like one dragged
+// there, ends those, so tracks moved around can't push the place further
+// down. With no current track, at the start
 fn play_next_pos(
     n_tracks: usize,
     current: Option<usize>,
-    anchor: Option<usize>,
     continues: impl Fn(usize) -> bool,
+    played_next: impl Fn(usize) -> bool,
 ) -> usize {
     let Some(current) = current else {
         return 0;
     };
-    if let Some(anchor) = anchor.filter(|&anchor| anchor > current) {
-        return anchor + 1;
-    }
-    (current + 1..n_tracks)
+    let after_work = (current + 1..n_tracks)
         .find(|&pos| !continues(pos))
+        .unwrap_or(n_tracks);
+    (after_work..n_tracks)
+        .find(|&pos| !played_next(pos))
         .unwrap_or(n_tracks)
 }
 
@@ -968,45 +988,69 @@ mod tests {
         (3..=4).contains(&pos)
     }
 
+    fn none(_: usize) -> bool {
+        false
+    }
+
     #[test]
     fn play_next_goes_after_the_current_track() {
-        assert_eq!(play_next_pos(6, Some(0), None, continues_the_work), 1);
-        assert_eq!(play_next_pos(6, Some(5), None, continues_the_work), 6);
+        assert_eq!(play_next_pos(6, Some(0), continues_the_work, none), 1);
+        assert_eq!(play_next_pos(6, Some(5), continues_the_work, none), 6);
     }
 
     #[test]
     fn play_next_goes_after_the_current_work() {
         for current in 2..=4 {
-            assert_eq!(play_next_pos(6, Some(current), None, continues_the_work), 5);
+            assert_eq!(play_next_pos(6, Some(current), continues_the_work, none), 5);
         }
         // The last movement of the work ends the queue
-        assert_eq!(play_next_pos(5, Some(2), None, continues_the_work), 5);
+        assert_eq!(play_next_pos(5, Some(2), continues_the_work, none), 5);
     }
 
     #[test]
     fn play_next_goes_after_the_tracks_it_put_in() {
-        assert_eq!(play_next_pos(6, Some(2), Some(3), continues_the_work), 4);
-        assert_eq!(play_next_pos(6, Some(0), Some(5), continues_the_work), 6);
-        // Once playback reached it, the work counts again
-        assert_eq!(play_next_pos(6, Some(3), Some(3), continues_the_work), 5);
-        assert_eq!(play_next_pos(6, Some(4), Some(1), continues_the_work), 5);
+        let played_next = |pos: usize| pos == 1 || pos == 2;
+        assert_eq!(
+            play_next_pos(6, Some(0), continues_the_work, played_next),
+            3
+        );
+        // Those after the work count, from its last movement
+        let played_next = |pos: usize| pos == 5;
+        assert_eq!(
+            play_next_pos(7, Some(2), continues_the_work, played_next),
+            6
+        );
+        assert_eq!(
+            play_next_pos(6, Some(2), continues_the_work, played_next),
+            6
+        );
+    }
+
+    #[test]
+    fn play_next_stops_at_a_track_in_between() {
+        // Track 2 was dragged between the tracks Play Next put in
+        let played_next = |pos: usize| pos == 1 || pos == 3;
+        assert_eq!(play_next_pos(6, Some(0), none, played_next), 2);
+        // and those further down don't count
+        let played_next = |pos: usize| pos == 4;
+        assert_eq!(play_next_pos(6, Some(0), none, played_next), 1);
     }
 
     #[test]
     fn play_next_goes_at_the_start_without_a_current_track() {
-        assert_eq!(play_next_pos(6, None, Some(3), continues_the_work), 0);
-        assert_eq!(play_next_pos(0, None, None, continues_the_work), 0);
+        assert_eq!(play_next_pos(6, None, continues_the_work, |_| true), 0);
+        assert_eq!(play_next_pos(0, None, continues_the_work, none), 0);
     }
 
     #[test]
-    fn play_next_before_follows_the_anchor_until_a_jump() {
+    fn play_next_before_goes_after_the_tracks_put_in_until_a_jump() {
         let (queue, t) = queue_of(5);
         queue.skip_track(0);
         assert_eq!(queue.play_next_before(&[]), Some(t[1].clone()));
 
-        queue.set_play_next_anchor(Some(&t[2]));
+        queue.mark_played_next(&t[1..3]);
         assert_eq!(queue.play_next_before(&[]), Some(t[3].clone()));
-        // Playing on keeps it, and the tracks moved don't count
+        // Playing on keeps them, and the tracks moved don't count
         queue.next_track();
         assert_eq!(queue.play_next_before(&[]), Some(t[3].clone()));
         assert_eq!(queue.play_next_before(&t[2..3]), Some(t[3].clone()));
@@ -1014,9 +1058,29 @@ mod tests {
 
         queue.skip_track(3);
         assert_eq!(queue.play_next_before(&[]), Some(t[4].clone()));
-        queue.set_play_next_anchor(Some(&t[4]));
+        queue.mark_played_next(&t[4..5]);
         assert_eq!(queue.play_next_before(&[]), None);
         queue.previous_track();
+        assert_eq!(queue.play_next_before(&[]), Some(t[3].clone()));
+    }
+
+    #[test]
+    fn play_next_before_stays_next_to_the_current_track_after_a_drag() {
+        let (queue, t) = queue_of(6);
+        queue.skip_track(0);
+        queue.mark_played_next(&t[1..2]);
+        // Two tracks dragged between the current track and the one Play
+        // Next put in, which used to send the next ones below it
+        queue.move_tracks(&t[3..5], Some(&t[1]));
+        assert_eq!(order(&queue, &t), [0, 3, 4, 1, 2, 5]);
+        assert_eq!(queue.play_next_before(&[]), Some(t[3].clone()));
+
+        // The one Play Next put in, dragged further down
+        let (queue, t) = queue_of(6);
+        queue.skip_track(0);
+        queue.mark_played_next(&t[1..3]);
+        queue.move_tracks(&t[2..3], None);
+        assert_eq!(order(&queue, &t), [0, 1, 3, 4, 5, 2]);
         assert_eq!(queue.play_next_before(&[]), Some(t[3].clone()));
     }
 }

@@ -80,10 +80,7 @@ impl Window {
 
         let before = queue.play_next_before(&moved);
         player.move_tracks(&moved, before.as_ref());
-        // They keep the order they had in the queue, whatever the order
-        // they were given in
-        let last = moved.iter().max_by_key(|t| queue.position(t));
-        queue.set_play_next_anchor(last);
+        queue.mark_played_next(&moved);
         self.store_queue();
         if let Some(first) = moved.iter().min_by_key(|t| queue.position(t)) {
             self.reveal_queue_track(first);

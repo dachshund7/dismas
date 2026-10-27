@@ -293,7 +293,7 @@ impl Window {
                     // also into an empty queue, where they start it
                     let play_next = matches!(place, Place::Next);
                     if play_next {
-                        queue.set_play_next_anchor(tracks.last());
+                        queue.mark_played_next(&tracks);
                     }
                     match mode {
                         // Show where the album went, even if the
