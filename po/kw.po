@@ -8,10 +8,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: amberol main\n"
 "Report-Msgid-Bugs-To: https://gitlab.gnome.org/World/amberol/-/issues/\n"
-"POT-Creation-Date: 2026-04-05 16:57+0000\n"
-"PO-Revision-Date: 2026-04-05 19:52+0100\n"
+"POT-Creation-Date: 2026-07-08 19:26+0000\n"
+"PO-Revision-Date: 2026-10-22 01:02+0100\n"
 "Last-Translator: Flynn Peck <cirilla@tuta.io>\n"
-"Language-Team: kw\n"
+"Language-Team: Cornish\n"
 "Language: kw\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -23,7 +23,7 @@ msgstr ""
 "X-DL-Branch: main\n"
 "X-DL-Domain: po\n"
 "X-DL-State: Translating\n"
-"X-Generator: Gtranslator 50.0\n"
+"X-Generator: Gtranslator 51.0\n"
 
 #: data/io.bassi.Amberol.desktop.in.in:2
 #: data/io.bassi.Amberol.metainfo.xml.in.in:6
@@ -37,7 +37,7 @@ msgstr "Gwarier Ilow"
 #. Translators: Search terms to find this application. Do NOT translate or localize the semicolons! The list MUST also end with a semicolon!
 #: data/io.bassi.Amberol.desktop.in.in:11
 msgid "music;player;media;audio;playlist;"
-msgstr "ilow;gwarier;media;son;rol kanow;"
+msgstr "ilow;gwarier;media;son;rol ganow;seni;"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:7
 msgid "Plays music, and nothing else"
@@ -50,7 +50,7 @@ msgid ""
 "you are looking for."
 msgstr ""
 "Dismas yw gwarier ilow heb kammgrysyansow. Mar mynnowgh gwari ilow kavadow "
-"war dha system leel, Dismas yw an gwarier ilow rag ty."
+"war agas kevreyth leel, Dismas yw an gwarier ilow ragowgh hwi."
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:14
 msgid "Current features:"
@@ -70,24 +70,25 @@ msgstr "skoodhyans draylya ha droppya rag lostya kanow"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:19
 msgid "shuffle and repeat"
-msgstr "chonsya ha dasleverel"
+msgstr "chonsya ha daswari"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:20
 msgid "MPRIS integration"
-msgstr "oberi gans MPRIS"
+msgstr "oberyans gans MPRIS"
 
 #: data/io.bassi.Amberol.metainfo.xml.in.in:48
+#: data/io.bassi.Amberol.metainfo.xml.in.in:50
 msgid "Emmanuele Bassi"
 msgstr "Emmanuele Bassi"
 
 #: src/gtk/playback-control.blp:21
 msgid "Play the Previous Song"
-msgstr "Gwari an Gan Kynsa"
+msgstr "Gwari an Gan Gyns"
 
 #: src/gtk/playback-control.blp:28
 msgctxt "a11y"
 msgid "Skip backwards"
-msgstr "Skyppya war gamm"
+msgstr "Skyppya a-dhelergh"
 
 #: src/gtk/playback-control.blp:36
 msgid "Toggle Play"
@@ -105,20 +106,20 @@ msgstr "Gwari an Gan Nessa"
 #: src/gtk/playback-control.blp:59
 msgctxt "a11y"
 msgid "Skip forward"
-msgstr "Skyppya war-rag"
+msgstr "Skyppya a-rag"
 
 #: src/gtk/playback-control.blp:79
 msgid "Toggle Playlist"
-msgstr "Dewis Rol Kanow"
+msgstr "Dewis Rol Ganow"
 
 #: src/gtk/playback-control.blp:86
 msgctxt "a11y"
 msgid "Toggle playlist"
-msgstr "Dewis rol kanow"
+msgstr "Dewis rol ganow"
 
 #: src/gtk/playback-control.blp:94
 msgid "Shuffle the Playlist"
-msgstr "Chonsya an Rol Kanow"
+msgstr "Chonsya an Rol Ganow"
 
 #: src/gtk/playback-control.blp:97
 msgctxt "a11y"
@@ -127,16 +128,16 @@ msgstr "Chonsya"
 
 #: src/gtk/playback-control.blp:116
 msgid "Enable Repeat"
-msgstr "Bywhe Dasleverel"
+msgstr "Bywhe Daswari"
 
 #: src/gtk/playback-control.blp:123
 msgctxt "a11y"
 msgid "Repeat"
-msgstr "Dasleverel"
+msgstr "Daswari"
 
 #: src/gtk/playback-control.blp:133
 msgid "Main Menu"
-msgstr "Rol Chif"
+msgstr "Pennrol"
 
 #: src/gtk/playback-control.blp:141
 msgctxt "a11y"
@@ -153,11 +154,11 @@ msgstr "Ygeri Restrenva"
 
 #: src/gtk/playback-control.blp:164
 msgid "Add _Song"
-msgstr "Addya _Kan"
+msgstr "Keworra _Kan"
 
 #: src/gtk/playback-control.blp:169
 msgid "Add _Folder"
-msgstr "Addya _Restrenva"
+msgstr "Keworra _Restrenva"
 
 #: src/gtk/playback-control.blp:174
 msgid "Clear"
@@ -165,7 +166,7 @@ msgstr "Dilea"
 
 #: src/gtk/playback-control.blp:181
 msgid "_Match Cover Art"
-msgstr "_Omdhesedha Art Kuntilow"
+msgstr "_Omdhesedha orth Art Kuntilow"
 
 #: src/gtk/playback-control.blp:186
 msgid "_Background Playback"
@@ -208,11 +209,11 @@ msgstr "Hwilas Kanow y'n Rol"
 
 #: src/gtk/playlist-view.blp:25
 msgid "Playlist"
-msgstr "Rol Kanow"
+msgstr "Rol Ganow"
 
 #: src/gtk/playlist-view.blp:47
 msgid "Close the Playlist"
-msgstr "Degea an Rol Kanow"
+msgstr "Degea an Rol Ganow"
 
 #: src/gtk/playlist-view.blp:55
 msgid "Select Songs in the Playlist"
@@ -243,12 +244,12 @@ msgstr "Remova Kanow Dewisys"
 #: src/gtk/queue-row.blp:27
 msgctxt "a11y"
 msgid "No cover available"
-msgstr "Art kuntilow kavadow vyth"
+msgstr "Nyns eus art kuntilow kavadow"
 
 #: src/gtk/queue-row.blp:81
 msgctxt "a11y"
 msgid "Currently playing"
-msgstr "Gwari y'n eur ma"
+msgstr "Ow kwari lemmyn"
 
 #: src/gtk/shortcuts-dialog.blp:10
 msgctxt "shortcut window"
@@ -263,7 +264,7 @@ msgstr "Dewis pennrol"
 #: src/gtk/shortcuts-dialog.blp:18
 msgctxt "shortcut window"
 msgid "Copy song details to the clipboard"
-msgstr "Kopia manylyno kan war'n astel glypp"
+msgstr "Kopia manylyon kan war'n astel glypp"
 
 #: src/gtk/shortcuts-dialog.blp:23
 msgctxt "shortcut window"
@@ -278,37 +279,37 @@ msgstr "Kwytya"
 #: src/gtk/shortcuts-dialog.blp:34
 msgctxt "shortcut window"
 msgid "Playlist"
-msgstr "Rol Kanow"
+msgstr "Rol Ganow"
 
 #: src/gtk/shortcuts-dialog.blp:37
 msgctxt "shortcut window"
 msgid "Add a song to the playlist"
-msgstr "Addya kanow dhe'n rol"
+msgstr "Keworra kanow dhe'n rol ganow"
 
 #: src/gtk/shortcuts-dialog.blp:42
 msgctxt "shortcut window"
 msgid "Add a folder to the playlist"
-msgstr "Addya restrenva dhe'n rol kanow"
+msgstr "Keworra restrenva dhe'n rol ganow"
 
 #: src/gtk/shortcuts-dialog.blp:47
 msgctxt "shortcut window"
 msgid "Clear the playlist"
-msgstr "Dilea an rol"
+msgstr "Klerhe an rol"
 
 #: src/gtk/shortcuts-dialog.blp:52
 msgctxt "shortcut window"
 msgid "Toggle the playlist pane"
-msgstr "Dewis an kwarel rol kanow"
+msgstr "Dewis kwarel an rol ganow"
 
 #: src/gtk/shortcuts-dialog.blp:57
 msgctxt "shortcut window"
 msgid "Search the playlist"
-msgstr "Hwilas an rol kanow"
+msgstr "Hwilas an rol ganow"
 
 #: src/gtk/shortcuts-dialog.blp:62
 msgctxt "shortcut window"
 msgid "Toggle shuffling songs"
-msgstr "Dewis ow chonsya kanow"
+msgstr "Dewis chonsyans a ganow"
 
 #: src/gtk/shortcuts-dialog.blp:68
 msgctxt "shortcut window"
@@ -323,7 +324,7 @@ msgstr "Dewis gwari/powes"
 #: src/gtk/shortcuts-dialog.blp:76
 msgctxt "shortcut window"
 msgid "Previous song"
-msgstr "Kan kyns"
+msgstr "Kan gyns"
 
 #: src/gtk/shortcuts-dialog.blp:81
 msgctxt "shortcut window"
@@ -333,41 +334,41 @@ msgstr "Kan nessa"
 #: src/gtk/shortcuts-dialog.blp:86
 msgctxt "shortcut window"
 msgid "Seek backwards in the current song"
-msgstr "Travalya war gamm y'n gan a-lemmyn"
+msgstr "Travalya a-dhelergh y'n gan a-lemmyn"
 
 #: src/gtk/shortcuts-dialog.blp:91
 msgctxt "shortcut window"
 msgid "Seek forward in the current song"
-msgstr "Travalya war-rag y'n gan a-lemmyn"
+msgstr "Travalya a-rag y'n gan a-lemmyn"
 
 #: src/gtk/window.blp:15
 msgid "Drop a song to add it to the playlist"
-msgstr "Droppya kan rag addya dhe'n rol"
+msgstr "Droppya kan rag hy heworra dhe'n rol"
 
 #: src/gtk/window.blp:39
 msgid ""
 "Select a file or a folder, or drag files from your file manager to the "
 "application window to add songs to the playlist"
 msgstr ""
-"Dewis restren po restrenva, po draylya restrennow dhyworth dha dyghtyer "
-"restrennow dhe'n fenester app rag addya kanow dhe'n rol"
+"Dewisewgh restren po restrenva, po draylyewgh restrennow dhyworth agas "
+"dyghtyer restrennow dhe'n fenester app rag keworra kanow dhe'n rol"
 
 #: src/gtk/window.blp:48
 msgid "Restore Playlist"
-msgstr "Daswul Rol Kanow"
+msgstr "Daskor Rol Ganow"
 
 #: src/gtk/window.blp:58
 msgid "Add Folder"
-msgstr "Addya Restrenva"
+msgstr "Keworra Restrenva"
 
 #: src/gtk/window.blp:67
 msgid "Add Song"
-msgstr "Addya Kan"
+msgstr "Keworra Kan"
 
 #: src/gtk/window.blp:128
 msgctxt "a11y"
 msgid "Elapsed time"
-msgstr "Termyn hwarvosys"
+msgstr "Termyn passys"
 
 #: src/gtk/window.blp:142
 msgctxt "a11y"
@@ -381,7 +382,7 @@ msgstr "Flynn"
 
 #: src/application.rs:255
 msgid "Dismas needs to run in the background to play music"
-msgstr "Res yw dhe Dismas eksekutya yn kilva rag gwari ilow"
+msgstr "Yma edhom dhe Dismas eksekutya y'n gilva rag gwari ilow"
 
 #: src/audio/inhibit_controller.rs:40
 msgid "Playback in progress"
@@ -389,7 +390,7 @@ msgstr "Senyans yn avonsyans"
 
 #: src/audio/song.rs:341
 msgid "Unknown artist"
-msgstr "Awtour ankoth"
+msgstr "Artydh ankoth"
 
 #: src/audio/song.rs:348
 msgid "Unknown title"
@@ -401,19 +402,19 @@ msgstr "Kuntilow ankoth"
 
 #: src/cover_picture.rs:75
 msgid "Cover image"
-msgstr "Aven kuntilow"
+msgstr "Skeusen kuntilow"
 
 #: src/playback_control.rs:115
 msgid "Do Not Repeat"
-msgstr "Na Dhasleverel"
+msgstr "Na Dhaswari"
 
 #: src/playback_control.rs:119
 msgid "Repeat All Songs"
-msgstr "Dasleverel Oll Kanow"
+msgstr "Daswari Oll Kanow"
 
 #: src/playback_control.rs:123
 msgid "Repeat the Current Song"
-msgstr "Dasleverel an Gan A-Lemmyn"
+msgstr "Daswari an Gan A-Lemmyn"
 
 #: src/window.rs:149
 msgid "Audio files"
@@ -421,7 +422,7 @@ msgstr "Restrennow son"
 
 #: src/window.rs:159
 msgid "_Add Song"
-msgstr "_Addya Kan"
+msgstr "_Keworra Kan"
 
 #: src/window.rs:163
 msgid "Open File"
@@ -433,7 +434,7 @@ msgstr "Ny yllir drehedhes restrennow"
 
 #: src/window.rs:182
 msgid "_Add Folder"
-msgstr "_Addya Restrenva"
+msgstr "_Keworra Restrenva"
 
 #: src/window.rs:185
 msgid "Open Folder"
@@ -441,15 +442,15 @@ msgstr "Ygeri Restrenva"
 
 #: src/window.rs:512
 msgid "No available song found"
-msgstr "Kan kavadow kevys vyth"
+msgstr "Nyns eus gan gavadow kevys"
 
 #: src/window.rs:574
 msgid "No songs found"
-msgstr "Kanow kevys vyth"
+msgstr "Nyns eus kanow kevys"
 
 #: src/window.rs:607
 msgid "Added a new song"
-msgstr "Addys kan nowydh"
+msgstr "Keworrys kan nowydh"
 
 #: src/window.rs:608
 msgid "Play"
@@ -462,8 +463,8 @@ msgstr "Gwari"
 #, rust-format
 msgid "Added one song"
 msgid_plural "Added {} songs"
-msgstr[0] "Addys unn kan"
-msgstr[1] "Addys {} kanow"
+msgstr[0] "Keworrys unn kan"
+msgstr[1] "Keworrys {} kanow"
 
 #: src/window.rs:1247
 msgid "Unable to access dropped files"
@@ -495,7 +496,7 @@ msgstr[1] "{} mynysennow remenant"
 
 #: src/window.rs:1466
 msgid "No song selected"
-msgstr "Kan dewisys vyth"
+msgstr "Nyns eus kan dhewisys"
 
 #. Translators: The '{}' must be left unmodified, and
 #. it is expanded to the number of songs selected
@@ -503,7 +504,7 @@ msgstr "Kan dewisys vyth"
 #, rust-format
 msgid "{} song selected"
 msgid_plural "{} songs selected"
-msgstr[0] "{} kan dewisys"
+msgstr[0] "{} kan dhewisys"
 msgstr[1] "{} kanow dewisys"
 
 #. Translators: `{title}` and `{artist}` must be left
@@ -512,7 +513,7 @@ msgstr[1] "{} kanow dewisys"
 #: src/window.rs:1527
 #, rust-format
 msgid "Currently playing “{title}” by “{artist}”"
-msgstr "Ow gwari y'n eur ma “{title}” gans “{artist}”"
+msgstr "Ow kwari lemmyn “{title}” gans “{artist}”"
 
 #: src/window.rs:1564
 msgid "Unable to open folder"
