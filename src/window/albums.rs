@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::*;
+use super::{adding::Tracks, *};
 
 impl Window {
     // Shows the tracks of an album in the sidebar, in place of the
@@ -82,7 +82,11 @@ impl Window {
         let library_view = self.imp().library_view.get();
         let albums = library_view.selected_albums();
         library_view.set_selection_mode(false);
+        self.queue_albums(albums, play);
+    }
 
+    // Adds the tracks of albums to the queue, or plays them in its place
+    fn queue_albums(&self, albums: Vec<(String, Vec<String>)>, play: bool) {
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
             self,
@@ -101,6 +105,65 @@ impl Window {
                 }
             }
         ));
+    }
+
+    // The menu of an album, at a point of its cell. On an album selected in
+    // selection mode, its items take all the selected ones, and leave
+    // selection mode like the buttons of its bar; on another, only that
+    // one. A search takes only the tracks that match it, as elsewhere
+    fn show_album_menu(&self, album: &Album, cell: &gtk::Widget, x: f64, y: f64) {
+        let library_view = self.imp().library_view.get();
+        let selection = library_view.selection_mode() && album.selected();
+        let album_id = album.id();
+        let albums = move |win: &Self| {
+            let library_view = win.imp().library_view.get();
+            if selection {
+                let albums = library_view.selected_albums();
+                library_view.set_selection_mode(false);
+                albums
+            } else {
+                vec![(album_id.clone(), library_view.track_words())]
+            }
+        };
+        let albums = Rc::new(albums);
+
+        let actions = gio::SimpleActionGroup::new();
+        let play = gio::SimpleAction::new("play", None);
+        play.set_enabled(self.imp().loads.get() == 0);
+        play.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            albums,
+            move |_, _| win.queue_albums(albums(&win), true)
+        ));
+        actions.add_action(&play);
+        self.add_adding_actions(&actions, move |win| Some(Tracks::Albums(albums(win))));
+
+        let section = gio::Menu::new();
+        section.append(Some(&i18n("Play")), Some("album.play"));
+        section.append(Some(&i18n("Play Next")), Some("album.play-next"));
+        let item = gio::MenuItem::new(Some(&self.add_to_selected_label()), None);
+        item.set_action_and_target_value(
+            Some("album.add-to"),
+            Some(&self.selected_playlist().to_variant()),
+        );
+        section.append_item(&item);
+        section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu("album"));
+
+        let popover = gtk::PopoverMenu::from_model(Some(&section));
+        popover.insert_action_group("album", Some(&actions));
+        popover.set_parent(cell);
+        popover.set_has_arrow(false);
+        popover.set_halign(gtk::Align::Start);
+        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        // The menu item is activated after the popover closes, so it can
+        // only go once the action ran
+        popover.connect_closed(|popover| {
+            let popover = popover.clone();
+            glib::idle_add_local_once(move || popover.unparent());
+        });
+        popover.popup();
     }
 
     // Adds the tracks of albums dragged from the grid to the queue, before
@@ -152,6 +215,12 @@ impl Window {
                     win.set_playlist_visible(false);
                 }
             }
+        ));
+
+        library_view.connect_album_menu_requested(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, album, cell, x, y| win.show_album_menu(album, cell, x, y)
         ));
 
         library_view.connect_album_activated(clone!(
@@ -259,7 +328,7 @@ impl Window {
 // The files of the tracks of albums, each with the words its tracks have
 // to match: those of the search, or none for the whole album; reading
 // them from the library takes a while, so it's done in a separate thread
-async fn album_files(albums: Vec<(String, Vec<String>)>) -> Option<Vec<gio::File>> {
+pub(super) async fn album_files(albums: Vec<(String, Vec<String>)>) -> Option<Vec<gio::File>> {
     let paths = gio::spawn_blocking(move || {
         albums
             .iter()

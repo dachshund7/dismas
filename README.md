@@ -38,12 +38,13 @@ What Dismas adds
 ----------------
 
 - **Album grid:** browse the albums in your music folders, sorted by artist,
-  title, year or date added, and select albums or tracks to play or to add to
-  a playlist. The Music folder is the default. Other folders, like one on a
-  second drive, can be added in Preferences, where each folder can also leave
-  out folders inside it, such as audiobooks or podcasts. While a folder isn't
-  there, as when its drive isn't plugged in, its albums are hidden, and they
-  come back without being read again.
+  title, year or date added, and select albums or tracks to play or to add
+  to a playlist. Right-click an album, or long-press it, to play it, play it
+  next, or add it to a playlist. The Music folder is the default. Other
+  folders, like one on a second drive, can be added in Preferences, where
+  each folder can also leave out folders inside it, such as audiobooks or
+  podcasts. While a folder isn't there, as when its drive isn't plugged in,
+  its albums are hidden, and they come back without being read again.
 - **Search by any tag:** searching the albums or the queue looks in every
   tag of the tracks, not just the title, artist and album. Find a recording
   by its conductor, soloist, orchestra, ensemble, composer, work or label,

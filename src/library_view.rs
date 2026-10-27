@@ -260,6 +260,15 @@ mod imp {
                     // Add or play the tracks of the selected albums
                     Signal::builder("add-albums").build(),
                     Signal::builder("play-albums").build(),
+                    // The menu of an album, at a point of its cell
+                    Signal::builder("album-menu-requested")
+                        .param_types([
+                            Album::static_type(),
+                            gtk::Widget::static_type(),
+                            f64::static_type(),
+                            f64::static_type(),
+                        ])
+                        .build(),
                     // Albums started or stopped being dragged
                     Signal::builder("albums-drag-begin").build(),
                     Signal::builder("albums-drag-end").build(),
@@ -303,6 +312,23 @@ impl LibraryView {
             "album-activated",
             false,
             glib::closure_local!(move |view: &Self, album: &Album| f(view, album)),
+        )
+    }
+
+    pub fn connect_album_menu_requested<F: Fn(&Self, &Album, &gtk::Widget, f64, f64) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "album-menu-requested",
+            false,
+            glib::closure_local!(move |view: &Self,
+                                       album: &Album,
+                                       cell: &gtk::Widget,
+                                       x: f64,
+                                       y: f64| {
+                f(view, album, cell, x, y);
+            }),
         )
     }
 
@@ -580,6 +606,7 @@ impl LibraryView {
                     }
                 ));
                 content.add_controller(click);
+                this.setup_album_menu(&content, item);
                 this.setup_album_drag(&content, item, &picture);
                 content.set_list_item(item);
 
@@ -611,6 +638,45 @@ impl LibraryView {
         ));
 
         factory.upcast()
+    }
+
+    // A right click, or a long press on a touchscreen, opens the menu of
+    // the album, like those of the tracks
+    fn setup_album_menu(&self, cell: &AlbumCell, item: &gtk::ListItem) {
+        let request = clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            cell,
+            #[weak]
+            item,
+            move |x: f64, y: f64| {
+                if let Some(album) = item.item().and_downcast::<Album>() {
+                    let cell = cell.upcast_ref::<gtk::Widget>();
+                    this.emit_by_name::<()>("album-menu-requested", &[&album, cell, &x, &y]);
+                }
+            }
+        );
+
+        let click = gtk::GestureClick::builder()
+            .button(gdk::BUTTON_SECONDARY)
+            .build();
+        click.connect_pressed(clone!(
+            #[strong]
+            request,
+            move |gesture, _, x, y| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                request(x, y);
+            }
+        ));
+        cell.add_controller(click);
+
+        let long_press = gtk::GestureLongPress::builder().touch_only(true).build();
+        long_press.connect_pressed(move |gesture, x, y| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            request(x, y);
+        });
+        cell.add_controller(long_press);
     }
 
     // An album is dragged to a place in the playlist pane; in selection

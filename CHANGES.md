@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - Add to Playlist, in the menu of a track, adds it to another playlist
   without switching to it, so the music goes on, or to a new playlist; the
   toast has an Open button to switch to it
+- The albums in the grid have a menu, with a right click or a long press:
+  Play, Play Next, Add to the selected playlist, and Add to Playlist. On an
+  album selected in selection mode, it takes all the selected ones
 
 ### Changed
 

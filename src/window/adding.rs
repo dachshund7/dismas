@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::*;
+use super::{albums::album_files, *};
 
 // Tracks to play next or add to a playlist, from wherever they're chosen
 #[derive(Clone)]
@@ -10,14 +10,17 @@ pub(super) enum Tracks {
     InQueue(Vec<Track>),
     // Tracks of the album shown in the pane, which shows the queue again
     // when they go to it, as with their Add button
-    AlbumTracks(Vec<gio::File>),
+    ShownAlbum(Vec<gio::File>),
+    // Albums of the grid, each with the words its tracks have to match
+    Albums(Vec<(String, Vec<String>)>),
 }
 
 impl Tracks {
     async fn files(self) -> Option<Vec<gio::File>> {
         match self {
             Tracks::InQueue(tracks) => Some(tracks.iter().map(Track::file).collect()),
-            Tracks::AlbumTracks(files) => Some(files),
+            Tracks::ShownAlbum(files) => Some(files),
+            Tracks::Albums(albums) => album_files(albums).await,
         }
     }
 }
@@ -37,7 +40,8 @@ impl Window {
                 self.move_to_play_next(&tracks);
                 return;
             }
-            Tracks::AlbumTracks(_) => self.show_playlist_view(),
+            Tracks::ShownAlbum(_) => self.show_playlist_view(),
+            Tracks::Albums(_) => {}
         }
 
         glib::spawn_future_local(clone!(
@@ -100,7 +104,7 @@ impl Window {
             return;
         }
         let to_queue = name == self.selected_playlist();
-        if to_queue && matches!(tracks, Tracks::AlbumTracks(_)) {
+        if to_queue && matches!(tracks, Tracks::ShownAlbum(_)) {
             self.show_playlist_view();
         }
 

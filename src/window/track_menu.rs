@@ -31,8 +31,8 @@ impl Window {
         let tracks = match (in_queue, selection) {
             (true, true) => Tracks::InQueue(queue.selected_tracks()),
             (true, false) => Tracks::InQueue(vec![track.clone()]),
-            (false, true) => Tracks::AlbumTracks(album_tracks.files()),
-            (false, false) => Tracks::AlbumTracks(vec![track.file()]),
+            (false, true) => Tracks::ShownAlbum(album_tracks.files()),
+            (false, false) => Tracks::ShownAlbum(vec![track.file()]),
         };
         self.add_adding_actions(&actions, move |_| Some(tracks.clone()));
 
