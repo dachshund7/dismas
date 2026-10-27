@@ -206,9 +206,11 @@ mod imp {
         pub hidden_folders: RefCell<Vec<std::path::PathBuf>>,
         // The albums the grid shows, as they were read
         pub shown_albums: RefCell<Vec<library::AlbumInfo>>,
-        // A scan changed tracks or made covers again since the albums were
-        // last shown
-        pub library_changed: Cell<bool>,
+        // A scan made covers again since the albums were last shown, which
+        // can keep their paths, and whether it changed tracks, which a
+        // search can find or not find now
+        pub covers_changed: Cell<bool>,
+        pub tracks_changed: Cell<bool>,
         // What the albums are sorted by, read from the settings once for
         // all the comparisons of a sort
         pub sort_order: Cell<Option<(AlbumSort, bool)>>,
@@ -1446,9 +1448,15 @@ impl LibraryView {
 
         // After a scan that changed nothing, as at most starts, the albums
         // read again are the same, and the grid stays as it is, rather
-        // than read the covers it shows again
-        let changed = imp.library_changed.take();
-        if !changed && *imp.shown_albums.borrow() == albums {
+        // than read the covers it shows again. So does it after tags were
+        // changed in a way the grid doesn't show, as when a tagger saves
+        // an album, though a search can find other tracks now
+        let covers_changed = imp.covers_changed.take();
+        let tracks_changed = imp.tracks_changed.take();
+        if !covers_changed && *imp.shown_albums.borrow() == albums {
+            if tracks_changed && imp.search_matches.borrow().is_some() {
+                self.update_search();
+            }
             return;
         }
         imp.shown_albums.replace(albums.clone());
@@ -1473,7 +1481,7 @@ impl LibraryView {
 
         // A cover made again can keep its path; otherwise, the covers in
         // the cache are still the ones of these albums
-        if changed {
+        if covers_changed {
             imp.textures.borrow_mut().clear();
         }
         self.update_stack();
@@ -1614,8 +1622,11 @@ impl LibraryView {
                 // panicked
                 counting.set(true);
                 this.imp().last_scan_finished.set(Some(Instant::now()));
-                if result.n_changed > 0 || result.covers_changed {
-                    this.imp().library_changed.set(true);
+                if result.covers_changed {
+                    this.imp().covers_changed.set(true);
+                }
+                if result.n_changed > 0 {
+                    this.imp().tracks_changed.set(true);
                 }
                 let uris: Vec<String> = result
                     .updated
