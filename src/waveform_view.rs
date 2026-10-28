@@ -129,15 +129,9 @@ mod imp {
                 return true;
             }
 
-            let pos = self.position.get();
-
-            match direction {
-                gtk::DirectionType::Left if pos == 0.0 => false,
-                gtk::DirectionType::Left if pos > 0.0 => true,
-                gtk::DirectionType::Right if pos < 1.0 => true,
-                gtk::DirectionType::Right if pos == 1.0 => false,
-                _ => false,
-            }
+            // The arrows seek, see `setup_gesture()`, rather than move the
+            // focus out
+            false
         }
 
         fn request_mode(&self) -> gtk::SizeRequestMode {
@@ -394,6 +388,9 @@ impl Default for WaveformView {
     }
 }
 
+// How far an arrow key seeks, as a share of the track
+const KEY_STEP: f64 = 0.05;
+
 const ANIMATION_USECS: f64 = 250_000.0;
 
 // The loudest peak is drawn at the full height, but the peaks of a track
@@ -478,20 +475,36 @@ impl WaveformView {
         ));
         self.add_controller(motion_gesture);
 
+        // The arrows step through the track, as long as they're held, like
+        // a slider's, and Home and End go to its start and its end. The
+        // waveform is drawn from the right in right-to-left text, as the
+        // pointer seeks it, so the arrows go the other way there. The keys
+        // with modifiers are the window's, e.g. Ctrl+Right to seek forward
         let key_controller = gtk::EventControllerKey::new();
         key_controller.set_name(Some("waveform-key"));
-        key_controller.connect_key_released(clone!(
+        key_controller.connect_key_pressed(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_, keyval, _, _| {
-                let delta = match keyval {
-                    gdk::Key::Left => -0.05,
-                    gdk::Key::Right => 0.05,
-                    _ => return,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, keyval, _, state| {
+                if !(state & gtk::accelerator_get_default_mod_mask()).is_empty() {
+                    return glib::Propagation::Proceed;
+                }
+                let step = match this.direction() {
+                    gtk::TextDirection::Rtl => -KEY_STEP,
+                    _ => KEY_STEP,
                 };
-
-                let position = this.imp().position.get() + delta;
-                this.emit_by_name::<()>("position-changed", &[&position]);
+                let position = this.imp().position.get();
+                let position = match keyval {
+                    gdk::Key::Left | gdk::Key::KP_Left => position - step,
+                    gdk::Key::Right | gdk::Key::KP_Right => position + step,
+                    gdk::Key::Home | gdk::Key::KP_Home => 0.0,
+                    gdk::Key::End | gdk::Key::KP_End => 1.0,
+                    _ => return glib::Propagation::Proceed,
+                };
+                this.emit_by_name::<()>("position-changed", &[&position.clamp(0.0, 1.0)]);
+                glib::Propagation::Stop
             }
         ));
         self.add_controller(key_controller);

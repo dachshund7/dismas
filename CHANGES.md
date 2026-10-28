@@ -70,6 +70,9 @@ All notable changes to this project will be documented in this file.
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane
   a place up or down, along with the selected tracks if it's one of them
 - Ctrl+Z undoes replacing the queue, while the toast that says so is up
+- The waveform shows when it has the focus. Holding an arrow key seeks
+  on, and Home and End go to the start and the end of the track, as in a
+  slider, which keeps Home, End, Page Up and Page Down too
 
 ### Changed
 

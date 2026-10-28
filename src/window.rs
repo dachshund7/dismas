@@ -1035,7 +1035,8 @@ impl Window {
     // Page Up, Page Down, Home and End scroll a list, see `scroll_list()`;
     // the lists would move their focus instead. Text entries keep Home and
     // End when they have text, to move the cursor; the album search has the
-    // focus while the grid shows.
+    // focus while the grid shows. The sliders and the waveform keep them,
+    // to go to their ends.
     //
     // Ctrl+Left and Ctrl+Right seek, here rather than as accels, which would
     // run before a text entry with text could move its cursor by word; the
@@ -1076,6 +1077,10 @@ impl Window {
             let entry = win.focused_editable();
             let in_entry = entry.is_some();
             let in_text = entry.is_some_and(|entry| !entry.text().is_empty());
+            // A slider, or the waveform, takes them to go to its ends
+            let in_slider = focus
+                .as_ref()
+                .is_some_and(|focus| focus.is::<gtk::Range>() || focus.is::<WaveformView>());
             let handled = match keyval {
                 gdk::Key::Left | gdk::Key::KP_Left if ctrl && !in_text => {
                     WidgetExt::activate_action(&win, "win.seek-backwards", None).is_ok()
@@ -1088,19 +1093,19 @@ impl Window {
                 gdk::Key::space => {
                     !in_entry && WidgetExt::activate_action(&win, "win.play", None).is_ok()
                 }
-                gdk::Key::Page_Up | gdk::Key::KP_Page_Up => {
+                gdk::Key::Page_Up | gdk::Key::KP_Page_Up if !in_slider => {
                     win.scroll_list(focus, gtk::ScrollType::PageBackward);
                     true
                 }
-                gdk::Key::Page_Down | gdk::Key::KP_Page_Down => {
+                gdk::Key::Page_Down | gdk::Key::KP_Page_Down if !in_slider => {
                     win.scroll_list(focus, gtk::ScrollType::PageForward);
                     true
                 }
-                gdk::Key::Home | gdk::Key::KP_Home if !in_text => {
+                gdk::Key::Home | gdk::Key::KP_Home if !in_text && !in_slider => {
                     win.scroll_list(focus, gtk::ScrollType::Start);
                     true
                 }
-                gdk::Key::End | gdk::Key::KP_End if !in_text => {
+                gdk::Key::End | gdk::Key::KP_End if !in_text && !in_slider => {
                     win.scroll_list(focus, gtk::ScrollType::End);
                     true
                 }
