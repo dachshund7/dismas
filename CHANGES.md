@@ -43,7 +43,7 @@ All notable changes to this project will be documented in this file.
   and the number of their albums; picking one shows only their albums,
   taking only the tracks they're on, and it combines with a composer and
   with the search
-- A Works page, next to the albums (Ctrl+4), lists the works of the
+- A Works page, next to the albums (Ctrl+3), lists the works of the
   albums under the names of their composers, with the number of their
   recordings. It shares the albums' search and the composer and performer
   picked, so switching between the two keeps them. A work shows
@@ -68,7 +68,8 @@ All notable changes to this project will be documented in this file.
 - The year of an album, which the grid can be sorted by, is when its
   tracks were recorded, if their tags say, or else when they were first
   released, rather than the year of a reissue
-
+- Ctrl+4 shows the playlists, and Ctrl+3 the new Works page, so that the
+  shortcuts follow the order of the page buttons
 - The music folders are read again once after updating, as the library
   now keeps the composers, the works and the performers of each track,
   and when it was made

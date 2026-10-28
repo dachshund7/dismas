@@ -802,12 +802,13 @@ mod imp {
         fn set_page(&self, page: String) {
             let obj = self.obj();
             let old_page = self.page();
+            // Without a work, there are no works to go to, as there's no
+            // player with nothing to play
+            if page == "works" && !self.library_view.has_works() {
+                obj.notify_page();
+                return;
+            }
             // The albums and the works are one page, which shows either
-            let page = if page == "works" && !self.library_view.has_works() {
-                "library".to_string()
-            } else {
-                page
-            };
             match page.as_str() {
                 "library" => self.library_view.set_view("albums"),
                 "works" => self.library_view.set_view("works"),

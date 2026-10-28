@@ -107,8 +107,8 @@ mod imp {
             // In the order of the buttons of the pages
             obj.set_accels_for_action("win.page::player", &["<primary>1"]);
             obj.set_accels_for_action("win.page::library", &["<primary>2", "<primary>g"]);
-            obj.set_accels_for_action("win.page::playlists", &["<primary>3"]);
-            obj.set_accels_for_action("win.page::works", &["<primary>4"]);
+            obj.set_accels_for_action("win.page::works", &["<primary>3"]);
+            obj.set_accels_for_action("win.page::playlists", &["<primary>4"]);
         }
     }
 

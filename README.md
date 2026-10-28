@@ -269,7 +269,7 @@ Keyboard shortcuts
 | Ctrl+D                           | Mark or unmark the playing track as a favorite |
 | Ctrl+I                           | Track information                              |
 | Ctrl+C                           | Copy the playing track's title and artist      |
-| Ctrl+1 to Ctrl+4                 | Player / albums / playlists / works            |
+| Ctrl+1 to Ctrl+4                 | Player / albums / works / playlists            |
 | Ctrl+G                           | Search the albums                              |
 | Ctrl+F                           | Search the queue                               |
 | Ctrl+R                           | Shuffle, or put back the order from before     |
