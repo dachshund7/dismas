@@ -69,6 +69,7 @@ All notable changes to this project will be documented in this file.
   that has the focus, as a right click does
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane
   a place up or down, along with the selected tracks if it's one of them
+- Ctrl+Z undoes replacing the queue, while the toast that says so is up
 
 ### Changed
 

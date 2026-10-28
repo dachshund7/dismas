@@ -30,6 +30,7 @@ src/playlists_page.rs
 src/preferences_dialog.rs
 src/queue_row.rs
 src/track_info_dialog.rs
+src/window.rs
 src/window/adding.rs
 src/window/albums.rs
 src/window/loading.rs

@@ -283,6 +283,8 @@ mod imp {
         // The toast about the last track that failed to play, which the
         // next one takes the place of
         pub failed_toast: glib::WeakRef<adw::Toast>,
+        // The toast with an Undo button that Ctrl+Z presses, while it's up
+        pub undo_toast: glib::WeakRef<adw::Toast>,
 
         // The handlers connected to objects that outlive the window, the
         // player's and the style manager, which are disconnected when it
@@ -556,6 +558,7 @@ mod imp {
                 settings: utils::settings_manager(),
                 player: std::cell::OnceCell::new(),
                 failed_toast: glib::WeakRef::new(),
+                undo_toast: glib::WeakRef::new(),
                 handlers: RefCell::default(),
             }
         }
@@ -1116,12 +1119,25 @@ impl Window {
     // Ctrl+C copies the details of the playing track, once the focused
     // widget has had the key: an accel would run before it, and take the
     // key from a search with text selected. Text without a selection turns
-    // its own copying off, so the key comes on to the window
+    // its own copying off, so the key comes on to the window. Ctrl+Z
+    // presses the Undo of a toast likewise, after a search has undone its
+    // typing
     fn setup_edit_shortcuts(&self) {
         let controller = gtk::ShortcutController::new();
         controller.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("<Control>c"),
             Some(gtk::NamedAction::new("win.copy")),
+        ));
+        controller.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("<Control>z"),
+            Some(gtk::CallbackAction::new(|widget, _| {
+                let win = widget.downcast_ref::<Window>().unwrap();
+                if win.press_undo() {
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            })),
         ));
         self.add_controller(controller);
     }
@@ -1236,7 +1252,7 @@ impl Window {
         msg: String,
         button: String,
         clicked: impl Fn(&Self) + 'static,
-    ) {
+    ) -> adw::Toast {
         let toast = utils::plain_toast(&msg);
         toast.set_button_label(Some(&button));
         toast.connect_button_clicked(clone!(
@@ -1244,7 +1260,37 @@ impl Window {
             self,
             move |_| clicked(&win)
         ));
-        self.imp().toast_overlay.add_toast(toast);
+        self.imp().toast_overlay.add_toast(toast.clone());
+        toast
+    }
+
+    // A toast whose button undoes something, which Ctrl+Z presses too
+    pub(super) fn add_undo_toast(&self, msg: String, undo: impl Fn(&Self) + 'static) {
+        let toast = self.add_toast_with_button(msg, i18n("Undo"), undo);
+        toast.connect_dismissed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |toast| {
+                if win.imp().undo_toast.upgrade().as_ref() == Some(toast) {
+                    win.imp().undo_toast.set(None);
+                }
+            }
+        ));
+        self.imp().undo_toast.set(Some(&toast));
+    }
+
+    // Ctrl+Z, while a toast with an Undo button is up, presses it: the
+    // keyboard can hardly reach the button before the toast goes. Says
+    // whether there was one
+    fn press_undo(&self) -> bool {
+        let Some(toast) = self.imp().undo_toast.upgrade() else {
+            return false;
+        };
+        // A button pressed by hand dismisses its toast, but the signal
+        // alone doesn't
+        toast.emit_by_name::<()>("button-clicked", &[]);
+        toast.dismiss();
+        true
     }
 
     // The queue can change while the toast is up, so the track is

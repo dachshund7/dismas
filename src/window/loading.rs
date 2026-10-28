@@ -453,9 +453,7 @@ impl Window {
                 &[&n_tracks.to_string()],
             )
         };
-        self.add_toast_with_button(msg, i18n("Undo"), move |win| {
-            win.undo_replace(&replaced);
-        });
+        self.add_undo_toast(msg, move |win| win.undo_replace(&replaced));
     }
 
     // Reads the tags of the tracks in the queue and in the album shown in
