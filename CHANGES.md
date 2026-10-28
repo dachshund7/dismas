@@ -9,8 +9,8 @@ All notable changes to this project will be documented in this file.
 - Opening an M3U playlist with Dismas, from a file manager or on the
   command line, opens its tracks, as it does a folder; it said it found
   none. They're found as when the playlist is imported
-- WebM files that are audio alone, as yt-dlp downloads them, are read as
-  tracks; those with a video are left out
+- WebM files are read as tracks, and their sound plays; a video in them
+  isn't shown
 - Play Next, in the menu of a track, puts it after the playing track, or
   after the last movement of the work that's playing, so that the work
   isn't cut; tracks played next one after the other play in the order they

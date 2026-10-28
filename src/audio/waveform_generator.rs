@@ -315,6 +315,7 @@ impl WaveformGenerator {
             .by_name("uridecodebin")
             .unwrap();
         uridecodebin.set_property("uri", track.audio_uri());
+        skip_video_decoders(&uridecodebin);
 
         // A track of a CUE sheet is a part of its file, which the pipeline
         // seeks to once it's ready
@@ -443,6 +444,29 @@ impl WaveformGenerator {
     }
 }
 
+// The video of a WebM file isn't shown, and decoding it made its waveform
+// many times slower, so the decoders of videos are skipped. The type of
+// what the signal returns is the playback plugin's, which has no binding
+fn skip_video_decoders(uridecodebin: &gst::Element) {
+    let Some(results) =
+        glib::Type::from_name("GstAutoplugSelectResult").and_then(glib::EnumClass::with_type)
+    else {
+        return;
+    };
+    uridecodebin.connect("autoplug-select", false, move |values| {
+        let video_decoder = values
+            .get(3)
+            .and_then(|value| value.get::<gst::ElementFactory>().ok())
+            .is_some_and(|factory| {
+                let klass = factory
+                    .metadata(gst::ELEMENT_METADATA_KLASS)
+                    .unwrap_or_default();
+                klass.contains("Decoder") && klass.contains("Video")
+            });
+        results.to_value_by_nick(if video_decoder { "skip" } else { "try" })
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,5 +498,72 @@ mod tests {
         bytes.pop();
         assert_eq!(decode_peaks(&bytes), None);
         assert_eq!(decode_peaks(&encode_peaks(&[])), Some(Vec::new()));
+    }
+
+    // Runs a pipeline to its end; false if an element is missing
+    fn run(pipeline: &gst::Element) -> bool {
+        pipeline.set_state(gst::State::Playing).unwrap();
+        let done = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(20),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        pipeline.set_state(gst::State::Null).unwrap();
+        done.is_some_and(|message| message.type_() == gst::MessageType::Eos)
+    }
+
+    #[test]
+    fn the_video_of_a_file_is_not_decoded_for_its_waveform() {
+        gst::init().unwrap();
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-waveform-XXXXXX")).unwrap();
+        let path = dir.join("video.webm");
+        // vp8enc and webmmux come with the good plugins, opusenc with base
+        let Ok(writer) = gst::parse::launch(&format!(
+            "audiotestsrc num-buffers=10 samplesperbuffer=4800 ! audioconvert ! opusenc ! mux. \
+             videotestsrc num-buffers=10 ! vp8enc ! webmmux name=mux \
+             ! filesink location=\"{}\"",
+            path.display()
+        )) else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        };
+        if !run(&writer) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+
+        let pipeline = gst::parse::launch(
+            "uridecodebin name=uridecodebin ! audioconvert ! level name=level ! fakesink",
+        )
+        .unwrap();
+        let bin = pipeline.downcast_ref::<gst::Bin>().unwrap();
+        let uridecodebin = bin.by_name("uridecodebin").unwrap();
+        uridecodebin.set_property("uri", glib::filename_to_uri(&path, None).unwrap().as_str());
+        skip_video_decoders(&uridecodebin);
+        // The audio is decoded to its end, and no video decoder is made
+        let decoders = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        bin.connect_deep_element_added({
+            let decoders = decoders.clone();
+            move |_, _, element| {
+                if let Some(factory) = element.factory() {
+                    let klass = factory
+                        .metadata(gst::ELEMENT_METADATA_KLASS)
+                        .unwrap_or_default();
+                    if klass.contains("Decoder") {
+                        decoders.lock().unwrap().push(klass.to_string());
+                    }
+                }
+            }
+        });
+        assert!(run(&pipeline));
+        let decoders = decoders.lock().unwrap();
+        assert!(
+            decoders.iter().any(|klass| klass.contains("Audio")),
+            "{decoders:?}"
+        );
+        assert!(
+            !decoders.iter().any(|klass| klass.contains("Video")),
+            "{decoders:?}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

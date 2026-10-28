@@ -159,9 +159,8 @@ pub fn child_main(args: &[OsString]) -> glib::ExitCode {
 }
 
 // What GStreamer finds in a file: nothing unless it has an audio stream
-// that can be decoded, as the file couldn't play otherwise, nor if it has
-// a video, as a WebM file can: those of yt-dlp's audio are audio alone,
-// but other WebM files are films. A cover can be a stream of one image
+// that can be decoded, as the file couldn't play otherwise. A video, as a
+// WebM file can have, is left out when it plays
 fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
     gst::init().ok()?;
     let uri = glib::filename_to_uri(path, None).ok()?;
@@ -178,10 +177,6 @@ fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
         }
     };
     let audio = info.audio_streams().into_iter().next()?;
-    if info.video_streams().iter().any(|video| !video.is_image()) {
-        debug!("{path:?} is a video");
-        return None;
-    }
     let caps = audio.caps()?;
     if !can_decode(&caps) {
         debug!("No decoder for the {caps} of {path:?}");
@@ -201,7 +196,11 @@ fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
     }
 
     let duration_ms = info.duration().map_or(0, gst::ClockTime::mseconds);
+    // The size of a file with a video counts the video too
     let size_bitrate = || {
+        if !info.video_streams().is_empty() {
+            return None;
+        }
         let size = std::fs::metadata(path).ok()?.len();
         // Bits a millisecond are kbps
         u32::try_from(size * 8 / duration_ms.max(1)).ok()
@@ -423,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn webm_files_count_without_a_video() {
+    fn webm_files_count_with_or_without_a_video() {
         let dir = test_dir("webm");
         let audio = dir.join("audio.webm");
         let video = dir.join("video.webm");
@@ -439,7 +438,8 @@ mod tests {
         ));
         if wrote {
             assert!(discover_file(&audio, false).is_some());
-            assert!(discover_file(&video, false).is_none());
+            let video = discover_file(&video, false).unwrap();
+            assert!(video.duration_ms > 0);
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

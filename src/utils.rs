@@ -357,8 +357,9 @@ pub fn is_audio_path(path: &std::path::Path) -> bool {
     is_audio_type(&mime_type)
 }
 
-// Playlists have audio types too, and WebM files are often audio alone, as
-// yt-dlp downloads them; one with a video is turned down when it's read
+// Playlists have audio types too. WebM files have a video type, but are
+// nearly always downloaded music in the music folders, with a video or
+// not, and only their sound is played
 pub fn is_audio_type(mime_type: &str) -> bool {
     const PLAYLISTS: [&str; 4] = [
         "audio/x-mpegurl",
