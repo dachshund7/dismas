@@ -587,15 +587,19 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
          GROUP BY t.album_id"
     ))?;
     // Without an album artist, the albums whose tracks are by different
-    // artists are compilations, and those whose tracks have none are by an
-    // unknown artist
+    // artists are by the one of most of them, as a track "feat." another
+    // artist doesn't make a compilation, or else compilations; those whose
+    // tracks have none are by an unknown artist
+    let mut main_artists = main_artists(conn, hidden)?;
     let various = i18n("Various Artists");
     let unknown = i18n("Unknown artist");
     let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
         let artist = match row.get::<_, Option<String>>(2)? {
             Some(artist) => artist,
             None if row.get::<_, i64>(7)? == 0 => unknown.clone(),
-            None => various.clone(),
+            None => main_artists
+                .remove(&row.get::<_, String>(0)?)
+                .unwrap_or_else(|| various.clone()),
         };
         let sort_key = row
             .get::<_, Option<String>>(5)?
@@ -626,6 +630,28 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
     albums.sort_by(|(a, _), (b, _)| a.cmp(b));
 
     Ok(albums.into_iter().map(|(_, info)| info).collect())
+}
+
+// The artist of more than half of the tracks of each album, for the albums
+// that have one
+fn main_artists(
+    conn: &Connection,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<HashMap<String, String>> {
+    let (hidden_sql, hidden_params) = hidden_condition("t.file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT album_id, artist FROM (
+             SELECT t.album_id, t.artist, COUNT(*) AS n,
+                    SUM(COUNT(*)) OVER (PARTITION BY t.album_id) AS total
+             FROM tracks t
+             WHERE t.album_id IS NOT NULL{hidden_sql}
+             GROUP BY t.album_id, t.artist)
+         WHERE artist IS NOT NULL AND 2 * n > total"
+    ))?;
+    stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?
+    .collect()
 }
 
 // What the tracks taken from albums match: every word of a search, normalized
@@ -4184,5 +4210,47 @@ mod tests {
         assert_eq!(albums[0].year.as_deref(), Some("1960"));
         assert_eq!(albums[0].label.as_deref(), Some("Hyperion"));
         assert_eq!(albums[0].catalog_number.as_deref(), Some("CDA67100"));
+    }
+
+    #[test]
+    fn an_album_without_an_album_artist_is_by_most_of_its_tracks() {
+        let conn = test_db();
+        let add = |album: &str, n: usize, artist: Option<&str>| {
+            for i in 0..n {
+                let path = format!("/m/{album}/{}-{i}", artist.unwrap_or("none"));
+                conn.execute(
+                    "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                         artist)
+                     VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2, ?3)",
+                    rusqlite::params![path.as_bytes(), album, artist],
+                )
+                .unwrap();
+            }
+        };
+        // A track "feat." another artist doesn't make a compilation
+        add("feat", 9, Some("A"));
+        add("feat", 1, Some("A feat. B"));
+        // Five artists, none on most of the tracks
+        for artist in ["A", "B", "C", "D", "E"] {
+            add("compilation", 2, Some(artist));
+        }
+        // Half isn't most
+        add("half", 2, Some("A"));
+        add("half", 2, Some("B"));
+        // One artist, and tracks without one
+        add("one", 1, Some("A"));
+        add("one", 3, None);
+        add("none", 2, None);
+
+        let artists: std::collections::HashMap<String, String> = super::query_albums(&conn, &[])
+            .unwrap()
+            .into_iter()
+            .map(|album| (album.id, album.artist))
+            .collect();
+        assert_eq!(artists["feat"], "A");
+        assert_eq!(artists["compilation"], "Various Artists");
+        assert_eq!(artists["half"], "Various Artists");
+        assert_eq!(artists["one"], "A");
+        assert_eq!(artists["none"], "Unknown artist");
     }
 }

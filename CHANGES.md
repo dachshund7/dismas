@@ -144,6 +144,9 @@ All notable changes to this project will be documented in this file.
 - Tracks and folders behind symbolic links in the music folders, as in a
   library that beets links to, or in a folder that was opened or dropped,
   were left out
+- An album without an album artist tag showed as by Various Artists as
+  soon as one of its tracks had another artist, as with "feat."; it's by
+  the artist of most of its tracks, if one has more than half of them
 
 ### Removed
 

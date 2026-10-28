@@ -215,7 +215,6 @@ impl CoverCache {
     // thread
     pub fn cover_art(path: &Path, tag: &lofty::tag::Tag) -> AlbumCover {
         let mut album_artist = None;
-        let mut track_artist = None;
         let mut album = None;
 
         fn get_text_value(value: &lofty::tag::ItemValue) -> Option<String> {
@@ -229,14 +228,16 @@ impl CoverCache {
             match item.key() {
                 lofty::prelude::ItemKey::AlbumTitle => album = get_text_value(item.value()),
                 lofty::prelude::ItemKey::AlbumArtist => album_artist = get_text_value(item.value()),
-                lofty::prelude::ItemKey::TrackArtist => track_artist = get_text_value(item.value()),
                 _ => (),
             }
         }
 
-        // We use the album and artist to ensure we share the
-        // same cover data for every track in the album; if we
-        // don't have an album, we use the file name. Without pictures in
+        // We use the album, its artist and its folder to ensure we share
+        // the same cover data for every track in the album; if we don't
+        // have an album, we use the file name. Without an album artist, the
+        // folder tells albums apart, rather than the artist of each track,
+        // which gave each track of a compilation a cover of its own to
+        // decode and keep. Without pictures in
         // the tags, the cover can only be a file in the folder, which the
         // tracks in it share, e.g. files without tags. Paths are hashed as
         // bytes, as they are not always valid UTF-8
@@ -250,8 +251,6 @@ impl CoverCache {
             hasher.update(&album);
 
             if let Some(artist) = album_artist {
-                hasher.update(&artist);
-            } else if let Some(artist) = track_artist {
                 hasher.update(&artist);
             }
 
