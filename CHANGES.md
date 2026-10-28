@@ -133,6 +133,8 @@ All notable changes to this project will be documented in this file.
 - MP3, AIFF, WAV and AAC files showed no record label, and AAC files
   (.aac) also lost the work and recording date that the Work Hierarchy
   plugin writes
+- MP3, AIFF, WAV and AAC files tagged by MusicBrainz Picard didn't show
+  their soloists and other performers, only their conductor
 
 ### Removed
 

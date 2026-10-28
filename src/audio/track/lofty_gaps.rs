@@ -14,11 +14,17 @@
 
 use std::collections::HashSet;
 
-use lofty::{ape::ApeItem, id3::v2::FrameId};
+use lofty::{
+    ape::ApeItem,
+    id3::v2::{Frame, FrameId},
+    tag::SplitTag,
+};
 
 use super::*;
 
 const TPUB: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TPUB"));
+const TMCL: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TMCL"));
+const TIPL: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TIPL"));
 
 // The items lofty left out of a file's tag, to add to it
 #[derive(Debug, Default)]
@@ -53,9 +59,14 @@ impl Fills {
     // has. MusicBrainz Picard writes the record label there
     pub(super) fn from_id3v2(tag: Option<&Id3v2Tag>) -> Self {
         let mut fills = Self::default();
-        if let Some(labels) = tag.and_then(|tag| tag.get_texts(&TPUB)) {
+        let Some(tag) = tag else {
+            return fills;
+        };
+        if let Some(labels) = tag.get_texts(&TPUB) {
             fills.add(ItemKey::Label, labels);
         }
+        let performers = performers(tag);
+        fills.add(ItemKey::Performer, performers.iter().map(String::as_str));
         fills
     }
 
@@ -83,11 +94,49 @@ impl Fills {
     }
 }
 
+// lofty 0.25.4 leaves the performers of an ID3v2 tag out of the tag: it
+// doesn't read TMCL, the musicians' credits, at all, and of TIPL, the people
+// involved, it reads only the roles it has a key for, like "producer".
+// MusicBrainz Picard writes each performer with their instrument or voice
+// as the role, in TMCL, or in TIPL in ID3v2.3, which has no TMCL. The pairs
+// are those lofty's own split of the tag leaves, so a role it learns to
+// read leaves this fill by itself. They're written as in Picard's Vorbis
+// comments, "Name (role)", or the name alone for the role "performer" or
+// none, as Picard reads them
+fn performers(tag: &Id3v2Tag) -> Vec<String> {
+    let mut credits = Id3v2Tag::new();
+    for id in [&TMCL, &TIPL] {
+        if let Some(frame) = tag.get(id) {
+            credits.insert(frame.clone());
+        }
+    }
+    let (left, _) = credits.split_tag();
+
+    let mut performers = Vec::new();
+    for id in [&TMCL, &TIPL] {
+        let Some(Frame::KeyValue(frame)) = left.get(id) else {
+            continue;
+        };
+        for (role, name) in frame.key_value_pairs.iter() {
+            let (role, name) = (role.trim(), name.trim());
+            if name.is_empty() {
+                continue;
+            }
+            performers.push(if role.is_empty() || role == "performer" {
+                name.to_string()
+            } else {
+                format!("{name} ({role})")
+            });
+        }
+    }
+    performers
+}
+
 #[cfg(test)]
 mod tests {
     use lofty::{
         TextEncoding,
-        id3::v2::{Frame, TextInformationFrame},
+        id3::v2::{KeyValueFrame, TextInformationFrame},
         tag::TagType,
     };
 
@@ -189,6 +238,63 @@ mod tests {
         );
         // lofty's own reading is kept
         assert_eq!(tag.get_string(ItemKey::Publisher), Some("EMI"));
+    }
+
+    // A TMCL or TIPL frame, of roles and names
+    fn credits_frame(id: FrameId<'static>, pairs: &[(&str, &str)]) -> Frame<'static> {
+        let pairs: Vec<(Cow<str>, Cow<str>)> = pairs
+            .iter()
+            .map(|(role, name)| (role.to_string().into(), name.to_string().into()))
+            .collect();
+        Frame::KeyValue(KeyValueFrame::new(id, TextEncoding::UTF8, pairs))
+    }
+
+    #[test]
+    fn still_no_performers_from_tmcl_or_tipl() {
+        let mut tmcl = Id3v2Tag::new();
+        tmcl.insert(credits_frame(TMCL, &[("cello", "Jacqueline du Pré")]));
+        assert!(
+            Tag::from(tmcl).get(ItemKey::Performer).is_none(),
+            "lofty now reads TMCL as Performer: performers() only needs TIPL's roles"
+        );
+        let mut tipl = Id3v2Tag::new();
+        tipl.insert(credits_frame(TIPL, &[("cello", "Jacqueline du Pré")]));
+        assert!(
+            Tag::from(tipl).get(ItemKey::Performer).is_none(),
+            "lofty now reads TIPL's other roles as Performer: performers() only needs TMCL"
+        );
+    }
+
+    #[test]
+    fn performers_are_filled_in_from_tmcl_and_the_roles_left_in_tipl() {
+        let mut id3v2 = Id3v2Tag::new();
+        id3v2.insert(credits_frame(
+            TMCL,
+            &[("cello", "Jacqueline du Pré"), ("performer", "Janet Baker")],
+        ));
+        id3v2.insert(credits_frame(
+            TIPL,
+            &[
+                ("producer", "Suvi Raj Grubb"),
+                ("orchestra", "London Symphony Orchestra"),
+            ],
+        ));
+        let fills = Fills::from_id3v2(Some(&id3v2));
+        let mut tag = Tag::from(id3v2);
+        fills.apply(&mut tag);
+        assert_eq!(
+            tag.get_strings(ItemKey::Performer).collect::<Vec<_>>(),
+            [
+                "Jacqueline du Pré (cello)",
+                "Janet Baker",
+                "London Symphony Orchestra (orchestra)"
+            ]
+        );
+        // The producer is lofty's, and isn't a performer too
+        assert_eq!(
+            tag.get_strings(ItemKey::Producer).collect::<Vec<_>>(),
+            ["Suvi Raj Grubb"]
+        );
     }
 
     #[test]

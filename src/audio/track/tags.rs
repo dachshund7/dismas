@@ -383,7 +383,7 @@ mod tests {
         crate::utils::write_test_wav(&path, 1);
         let mut id3v2 = Id3v2Tag::new();
         id3v2.set_title("Primary".to_string());
-        crate::utils::write_test_id3v2(&path, &id3v2);
+        crate::utils::write_test_id3v2(&path, &id3v2, false);
 
         let read = read_file_tags(&path, ReadOptions::ALL);
         let _ = std::fs::remove_dir_all(&dir);
@@ -404,11 +404,62 @@ mod tests {
         let json = r#"{"version":1,"segments":[]}"#;
         let mut id3v2 = Id3v2Tag::new();
         let _ = id3v2.insert_user_text(WORK_HIERARCHY.to_string(), json.to_string());
-        crate::utils::write_test_id3v2(&path, &id3v2);
+        crate::utils::write_test_id3v2(&path, &id3v2, false);
 
         let read = read_file_tags(&path, ReadOptions::ALL);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(read.unwrap().extra.work_hierarchy.as_deref(), Some(json));
+    }
+
+    #[test]
+    fn performers_are_read_from_id3v2_tags_of_both_versions() {
+        use lofty::id3::v2::{Frame, FrameId, KeyValueFrame};
+
+        let credits = |id: &'static str, pairs: &[(&str, &str)]| {
+            let pairs: Vec<(Cow<str>, Cow<str>)> = pairs
+                .iter()
+                .map(|(role, name)| (role.to_string().into(), name.to_string().into()))
+                .collect();
+            Frame::KeyValue(KeyValueFrame::new(
+                FrameId::Valid(Cow::Borrowed(id)),
+                lofty::TextEncoding::UTF8,
+                pairs,
+            ))
+        };
+        // As MusicBrainz Picard writes them in ID3v2.4; in ID3v2.3, which
+        // has no TMCL, both go in one IPLS frame, which is read as TIPL
+        let mut id3v2 = Id3v2Tag::new();
+        id3v2.insert(credits(
+            "TMCL",
+            &[("cello", "Jacqueline du Pré"), ("performer", "Janet Baker")],
+        ));
+        id3v2.insert(credits("TIPL", &[("producer", "Suvi Raj Grubb")]));
+
+        let dir = std::env::temp_dir().join(format!("dismas-tags-tmcl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let read = [false, true].map(|id3v23| {
+            let path = dir.join(format!("Track{}.wav", u8::from(id3v23)));
+            crate::utils::write_test_wav(&path, 1);
+            crate::utils::write_test_id3v2(&path, &id3v2, id3v23);
+            read_file_tags(&path, ReadOptions::ALL)
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+
+        for read in read {
+            let read = read.unwrap();
+            let credits = TrackCredits::from_tag(&read.tag, &read.extra);
+            let mut performers: Vec<(&str, Option<&str>)> = credits
+                .performers
+                .iter()
+                .map(|c| (c.name.as_str(), c.role.as_deref()))
+                .collect();
+            performers.sort();
+            assert_eq!(
+                performers,
+                [("Jacqueline du Pré", Some("cello")), ("Janet Baker", None)]
+            );
+            assert_eq!(credits.producers, ["Suvi Raj Grubb"]);
+        }
     }
 
     // A raw AAC file, a few ADTS frames of AAC LC at 44.1 kHz in stereo,
@@ -442,8 +493,8 @@ mod tests {
             ),
         ));
         let _ = id3v2.insert_user_text(RECORDING_DATE.to_string(), "1962-05-25".to_string());
-        crate::utils::write_test_id3v2(&wav, &id3v2);
-        crate::utils::write_test_id3v2(&aac, &id3v2);
+        crate::utils::write_test_id3v2(&wav, &id3v2, false);
+        crate::utils::write_test_id3v2(&aac, &id3v2, false);
 
         let read = [&wav, &aac].map(|path| read_file_tags(path, ReadOptions::ALL));
         let _ = std::fs::remove_dir_all(&dir);

@@ -515,7 +515,8 @@ pub fn write_test_wav(path: &std::path::Path, seconds: u32) {
     std::fs::write(path, bytes).unwrap();
 }
 
-// Writes an ID3v2 tag to a test file, as a tagger would. It's the only
+// Writes an ID3v2 tag to a test file, as a tagger would, in ID3v2.4 or
+// ID3v2.3. It's the only
 // code that writes tags: Dismas never writes to music files, which
 // clippy.toml enforces
 #[cfg(test)]
@@ -524,9 +525,10 @@ pub fn write_test_wav(path: &std::path::Path, seconds: u32) {
     clippy::disallowed_types,
     reason = "tests need files with tags to read"
 )]
-pub fn write_test_id3v2(path: &std::path::Path, tag: &lofty::id3::v2::Id3v2Tag) {
+pub fn write_test_id3v2(path: &std::path::Path, tag: &lofty::id3::v2::Id3v2Tag, id3v23: bool) {
     use lofty::{config::WriteOptions, tag::TagExt};
-    tag.save_to_path(path, WriteOptions::default()).unwrap();
+    let options = WriteOptions::default().use_id3v23(id3v23);
+    tag.save_to_path(path, options).unwrap();
 }
 
 #[cfg(test)]
