@@ -2234,37 +2234,64 @@ struct WorkItem {
     section: u32,
 }
 
-// The rows of the list of works: the name of the work, and under it, dimmed,
-// the work or the collection it's part of, if any, and the number of its
-// recordings
+// The rows of the list of works: the name of the work, then, dimmed, the
+// work or the collection it's part of, if any, which the end of a long row
+// cuts off first, and the number of its recordings. The rows are all one
+// line high, as a list with rows of different heights guesses where the
+// rows it hasn't measured are, and keeps moving them while it scrolls; the
+// tooltip has the full title, and it's only made when it shows
 fn work_factory() -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let name = gtk::Label::builder()
             .xalign(0.0)
-            .wrap(true)
-            .wrap_mode(gtk::pango::WrapMode::WordChar)
-            .build();
-        let collection = gtk::Label::builder()
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .css_classes(["caption", "dim-label"])
-            .build();
-        let text = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
             .hexpand(true)
-            .valign(gtk::Align::Center)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
             .build();
-        text.append(&name);
-        text.append(&collection);
         let count = gtk::Label::builder()
             .css_classes(["dim-label", "numeric"])
             .build();
         // The scrollbar is drawn over the right edge of the list
-        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
-        row.append(&text);
+        let row = gtk::Box::builder()
+            .spacing(12)
+            .margin_end(12)
+            .has_tooltip(true)
+            .build();
+        row.append(&name);
         row.append(&count);
+        row.connect_query_tooltip(glib::clone!(
+            #[weak]
+            item,
+            #[upgrade_or]
+            false,
+            move |_, _, _, _, tooltip| {
+                let Some(work) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
+                    return false;
+                };
+                let work = &work.borrow::<WorkItem>().info;
+                let recordings = ni18n_f(
+                    // Translators: The '{}' must be left unmodified, and it
+                    // is expanded to the number of recordings of a work in
+                    // the music folders
+                    "{} recording",
+                    "{} recordings",
+                    work.recordings,
+                    &[&work.recordings.to_string()],
+                );
+                let text = [
+                    Some(work.title.as_deref().unwrap_or(&work.name)),
+                    work.collection.as_deref(),
+                    Some(&recordings),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("\n");
+                tooltip.set_text(Some(&text));
+                true
+            }
+        ));
         item.set_child(Some(&row));
     });
     factory.connect_bind(|_, item| {
@@ -2272,15 +2299,9 @@ fn work_factory() -> gtk::SignalListItemFactory {
         let Some(row) = item.child() else {
             return;
         };
-        let (Some(text), Some(count)) = (
-            row.first_child(),
+        let (Some(name), Some(count)) = (
+            row.first_child().and_downcast::<gtk::Label>(),
             row.last_child().and_downcast::<gtk::Label>(),
-        ) else {
-            return;
-        };
-        let (Some(name), Some(collection)) = (
-            text.first_child().and_downcast::<gtk::Label>(),
-            text.last_child().and_downcast::<gtk::Label>(),
         ) else {
             return;
         };
@@ -2288,23 +2309,15 @@ fn work_factory() -> gtk::SignalListItemFactory {
             return;
         };
         let work = &work.borrow::<WorkItem>().info;
-        name.set_label(&work.name);
-        collection.set_label(work.collection.as_deref().unwrap_or_default());
-        collection.set_visible(work.collection.is_some());
+        let title = glib::markup_escape_text(&work.name);
+        match &work.collection {
+            Some(collection) => {
+                let collection = glib::markup_escape_text(collection);
+                name.set_markup(&format!("{title}  <span alpha=\"55%\">{collection}</span>"));
+            }
+            None => name.set_markup(&title),
+        }
         count.set_label(&work.recordings.to_string());
-        let recordings = ni18n_f(
-            // Translators: The '{}' must be left unmodified, and it is
-            // expanded to the number of recordings of a work in the
-            // music folders
-            "{} recording",
-            "{} recordings",
-            work.recordings,
-            &[&work.recordings.to_string()],
-        );
-        row.set_tooltip_text(Some(&format!(
-            "{}\n{recordings}",
-            work.title.as_deref().unwrap_or(&work.name)
-        )));
     });
     factory
 }
@@ -2316,7 +2329,7 @@ fn work_section_factory() -> gtk::SignalListItemFactory {
         let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
         let label = gtk::Label::builder()
             .xalign(0.0)
-            .wrap(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
             .css_classes(["heading", "works-composer"])
             .build();
         header.set_child(Some(&label));
