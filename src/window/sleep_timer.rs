@@ -147,7 +147,7 @@ impl Window {
         {
             action.set_enabled(track.is_some());
         }
-        let movement = track.is_some_and(|track| track.movement_work().is_some());
+        let movement = track.is_some_and(|track| track.is_movement());
         self.imp()
             .playback_control
             .set_stop_after_work_visible(movement);

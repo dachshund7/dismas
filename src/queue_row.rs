@@ -604,7 +604,7 @@ impl QueueRow {
 
     // Whether the row is the first movement of a work, under its header
     fn starts_work(&self) -> bool {
-        if self.track().and_then(|t| t.movement_work()).is_none() {
+        if !self.track().is_some_and(|t| t.is_movement()) {
             return false;
         }
         let Some(position) = self.imp().list_item.upgrade().map(|item| item.position()) else {

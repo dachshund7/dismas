@@ -369,6 +369,12 @@ impl TrackCredits {
         }
     }
 
+    // Whether the track is a movement of a work, which `movement_label()`
+    // names
+    pub fn is_movement(&self) -> bool {
+        self.work.is_some() && self.movement.is_some()
+    }
+
     // The performers to show in the queue for a track that is not part of
     // a larger work, when the artist is its composer, as classical
     // releases are often tagged; the artist would be the only name shown.

@@ -225,6 +225,40 @@ impl TrackData {
         self.album.is_none().then_some(self.fallback_album.as_str())
     }
 
+    // The composers of the work of a movement, which all its movements
+    // share, or else the track's, or else its artist; a single name isn't
+    // copied
+    fn work_composers(&self) -> Cow<'_, str> {
+        let credits = self.credits();
+        let names = if credits.work_composers.is_empty() {
+            &credits.composers
+        } else {
+            &credits.work_composers
+        };
+        match names.as_slice() {
+            [] => self
+                .artist()
+                .map_or_else(|| i18n("Unknown artist").into(), Cow::Borrowed),
+            [name] => Cow::Borrowed(name),
+            names => names.join(", ").into(),
+        }
+    }
+
+    // The release the track is from: its MusicBrainz id, or else its album
+    // and album artist
+    fn release_key(&self) -> Cow<'_, str> {
+        let credits = self.credits();
+        match &credits.musicbrainz.release {
+            Some(id) => Cow::Borrowed(id),
+            None => format!(
+                "{}\0{}",
+                self.shown_album(),
+                credits.album_artist.as_deref().unwrap_or_default()
+            )
+            .into(),
+        }
+    }
+
     // The title that searches look into: the one in the tags, or else the
     // one from the file name, but not the number of a track of a CUE sheet
     // without a title
@@ -513,37 +547,54 @@ mod imp {
 
         // The work the movement belongs to, if the track is a movement
         pub(super) fn movement_work(&self) -> Option<String> {
-            self.movement()?;
-            self.data.borrow().credits().work.clone()
+            let data = self.data.borrow();
+            let credits = data.credits();
+            credits
+                .work
+                .as_ref()
+                .filter(|_| credits.is_movement())
+                .cloned()
         }
 
+        // The rows of the queue are bound to this and the two below as
+        // they're shown, so they borrow the levels of a movement, rather
+        // than copy them to find out whether it has any
         fn row_title(&self) -> String {
-            match self.movement_levels() {
-                Some((_, movement)) => movement,
-                None => self.movement().unwrap_or_else(|| self.title()),
+            let data = self.data.borrow();
+            let credits = data.credits();
+            match &credits.movement_levels {
+                Some((_, movement)) if credits.is_movement() => movement.clone(),
+                _ => credits.movement_label().unwrap_or_else(|| self.title()),
             }
         }
 
         fn row_subtitle(&self) -> String {
-            match self.data.borrow().missing_reason() {
+            let data = self.data.borrow();
+            match data.missing_reason() {
                 Some(Missing::NotFound) => return i18n("File not found"),
                 Some(Missing::Unreadable) => return i18n("Unable to read the file"),
                 None => {}
             }
-            match (self.movement_levels(), self.movement()) {
-                (Some((levels, _)), _) => levels,
+            let credits = data.credits();
+            match (&credits.movement_levels, credits.is_movement()) {
+                (Some((levels, _)), true) => levels.clone(),
                 // The artist of classical releases is often the composer
-                (None, Some(_)) => Some(self.performers())
+                (_, true) => Some(self.performers())
                     .filter(|p| !p.is_empty())
                     .unwrap_or_else(|| self.artist()),
-                (None, None) => self.listed_composers().unwrap_or_else(|| self.artist()),
+                (_, false) => self.listed_composers().unwrap_or_else(|| self.artist()),
             }
         }
 
         fn row_credits(&self) -> String {
-            if self.movement_levels().is_some() {
+            let (is_movement, has_levels) = {
+                let data = self.data.borrow();
+                let credits = data.credits();
+                (credits.is_movement(), credits.movement_levels.is_some())
+            };
+            if is_movement && has_levels {
                 self.performers()
-            } else if self.movement().is_some() {
+            } else if is_movement {
                 String::new()
             } else if self.listed_composers().is_some() {
                 self.artist()
@@ -582,8 +633,13 @@ mod imp {
 
         // The levels of the work above the movement, and the movement
         pub(super) fn movement_levels(&self) -> Option<(String, String)> {
-            self.movement()?;
-            self.data.borrow().credits().movement_levels.clone()
+            let data = self.data.borrow();
+            let credits = data.credits();
+            credits
+                .movement_levels
+                .as_ref()
+                .filter(|_| credits.is_movement())
+                .cloned()
         }
 
         // The composers, or the artist if the track has no composer
@@ -737,6 +793,11 @@ impl Track {
         self.imp().movement_work()
     }
 
+    // Whether the track is a movement of a work
+    pub fn is_movement(&self) -> bool {
+        self.imp().data.borrow().credits().is_movement()
+    }
+
     // The levels of the work above the movement, and the movement, if the
     // queue shows them on separate lines
     pub fn movement_levels(&self) -> Option<(String, String)> {
@@ -753,30 +814,18 @@ impl Track {
         self.imp().data.borrow().credits().year()
     }
 
-    // The composers of the work a movement is part of, which all its
-    // movements share, or `composer()` if the tags don't say
-    pub fn work_composers(&self) -> String {
-        let composers = self.imp().data.borrow().credits().work_composers.join(", ");
-        if composers.is_empty() {
-            self.composer()
-        } else {
-            composers
-        }
-    }
-
-    // The release the track is from: its MusicBrainz id, or else its album
-    // and album artist
-    pub fn release_key(&self) -> String {
-        let data = self.imp().data.borrow();
-        let credits = data.credits();
-        match &credits.musicbrainz.release {
-            Some(id) => id.clone(),
-            None => format!(
-                "{}\0{}",
-                data.shown_album(),
-                credits.album_artist.as_deref().unwrap_or_default()
-            ),
-        }
+    // Whether both tracks are movements of the same work, by the same
+    // composers, from the same release (see `TrackData::work_composers()`
+    // and `TrackData::release_key()`). Rows of the queue are compared
+    // with the ones next to them as they're shown, so nothing is copied
+    // but the names of several composers, or of an album without an id
+    pub fn same_work_as(&self, other: &Track) -> bool {
+        let (a, b) = (self.imp().data.borrow(), other.imp().data.borrow());
+        a.credits().is_movement()
+            && b.credits().is_movement()
+            && a.credits().work == b.credits().work
+            && a.work_composers() == b.work_composers()
+            && a.release_key() == b.release_key()
     }
 
     // Whether the track comes after another on their album, by disc and
@@ -789,7 +838,12 @@ impl Track {
         };
         match (position(other), position(self)) {
             (Some(before), Some(after)) => after > before,
-            _ => self.uri() != other.uri(),
+            _ => !self
+                .imp()
+                .data
+                .borrow()
+                .file
+                .equal(&other.imp().data.borrow().file),
         }
     }
 
@@ -799,7 +853,7 @@ impl Track {
     pub fn shuffle_artist(&self) -> Option<String> {
         let data = self.imp().data.borrow();
         let composers = &data.credits().composers;
-        if self.movement_work().is_some() && !composers.is_empty() {
+        if data.credits().is_movement() && !composers.is_empty() {
             Some(composers.join(", "))
         } else {
             data.artist().map(ToString::to_string)
@@ -1106,6 +1160,115 @@ mod tests {
         let b = movement("x2", None, &vivaldi, "/x2/b.opus");
         assert!(continues_work(&a, &b));
         assert!(!continues_work(&a, &a));
+    }
+
+    #[test]
+    fn movements_without_ids_continue_a_work_by_its_composers_and_album() {
+        use crate::work_sections::continues_work;
+
+        let movement = |work: &str, composers: &[&str], album: &str, number: u32| {
+            Track::new(TrackData {
+                album: Some(album.to_string()),
+                artist: Some("Amsterdam Baroque Orchestra".to_string()),
+                credits: TrackCredits {
+                    work: Some(work.to_string()),
+                    movement: Some("Aria".to_string()),
+                    composers: composers.iter().map(ToString::to_string).collect(),
+                    track_number: Some(number),
+                    album_artist: Some("Ton Koopman".to_string()),
+                    ..Default::default()
+                },
+                file: gtk::gio::File::for_path(format!("/{album}/{number}.flac")),
+                ..Default::default()
+            })
+        };
+        let bachs = ["Johann Sebastian Bach", "Carl Philipp Emanuel Bach"];
+        let first = movement("Cantata", &bachs, "Cantatas", 1);
+        assert!(continues_work(
+            &first,
+            &movement("Cantata", &bachs, "Cantatas", 2)
+        ));
+        // Not another work, other composers, or another album
+        assert!(!continues_work(
+            &first,
+            &movement("Other", &bachs, "Cantatas", 2)
+        ));
+        assert!(!continues_work(
+            &first,
+            &movement("Cantata", &bachs[..1], "Cantatas", 2)
+        ));
+        assert!(!continues_work(
+            &first,
+            &movement("Cantata", &bachs, "Other", 2)
+        ));
+        // Without composers, by the artist
+        let first = movement("Cantata", &[], "Cantatas", 1);
+        assert!(continues_work(
+            &first,
+            &movement("Cantata", &[], "Cantatas", 2)
+        ));
+        assert!(!continues_work(
+            &first,
+            &movement("Cantata", &bachs, "Cantatas", 2)
+        ));
+
+        // A track without a movement is no movement of its work
+        let whole = Track::new(TrackData {
+            credits: TrackCredits {
+                movement: None,
+                ..first.credit_details()
+            },
+            file: gtk::gio::File::for_path("/Cantatas/2.flac"),
+            ..Default::default()
+        });
+        assert!(!continues_work(&first, &whole));
+    }
+
+    #[test]
+    fn the_rows_of_movements_show_their_levels_or_their_performers() {
+        let credits = TrackCredits {
+            work: Some("Messiah, HWV 56".to_string()),
+            movement: Some("Sinfony".to_string()),
+            movement_number: Some("1".to_string()),
+            composers: vec!["George Frideric Handel".to_string()],
+            conductors: vec!["Paul McCreesh".to_string()],
+            genres: vec!["Classical".to_string()],
+            ..Default::default()
+        };
+        let track = |credits: TrackCredits| {
+            Track::new(TrackData {
+                title: Some("Messiah, HWV 56: Sinfony".to_string()),
+                artist: Some("Gabrieli Consort".to_string()),
+                credits,
+                ..Default::default()
+            })
+        };
+
+        // The levels above the movement go under it, and the performers
+        // after them
+        let levelled = track(TrackCredits {
+            movement_levels: Some(("Part I".to_string(), "1. Sinfony".to_string())),
+            ..credits.clone()
+        });
+        assert_eq!(levelled.row_title(), "1. Sinfony");
+        assert_eq!(levelled.row_subtitle(), "Part I");
+        assert_eq!(levelled.row_credits(), "Paul McCreesh");
+
+        // Without levels, the performers go under it
+        let movement = track(credits.clone());
+        assert_eq!(movement.row_title(), "1. Sinfony");
+        assert_eq!(movement.row_subtitle(), "Paul McCreesh");
+        assert_eq!(movement.row_credits(), "");
+
+        // Levels without a movement are no movement's
+        let whole = track(TrackCredits {
+            movement: None,
+            movement_levels: Some(("Part I".to_string(), "1. Sinfony".to_string())),
+            ..credits
+        });
+        assert_eq!(whole.row_title(), "Messiah, HWV 56: Sinfony");
+        assert_eq!(whole.row_subtitle(), "George Frideric Handel");
+        assert_eq!(whole.row_credits(), "Gabrieli Consort");
     }
 
     #[test]

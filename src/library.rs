@@ -2461,7 +2461,7 @@ fn work_entry(
     }
     let is_movement = credits.movement_label().is_some();
 
-    // The composers of the work, as `Track::work_composers()` finds them,
+    // The composers of the work, as `TrackData::work_composers()` finds them,
     // sorted by their own sort names if the tags have them
     let only_artist;
     let work_names: &[String] = if !credits.work_composers.is_empty() {

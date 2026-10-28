@@ -144,29 +144,21 @@ fn same_section(model: &gio::ListModel, position: u32) -> bool {
     let (Some(previous), Some(track)) = (track(position - 1), track(position)) else {
         return false;
     };
-    continues_work(&previous, &track)
-        || (previous.movement_work().is_none() && track.movement_work().is_none())
-}
-
-// The work of a movement, the composers of the work and the release the
-// movement is from. The composers are the work's, which all its movements
-// share: a movement can credit others too, e.g. the author of the hymn in
-// a chorale of a Bach cantata. The header shows the first movement's own,
-// as MusicBrainz sometimes credits a work to someone else, e.g. Bach's BWV
-// 981 to Marcello, whose concerto it arranges
-fn work_key(track: &Track) -> Option<(String, String, String)> {
-    let work = track.movement_work()?;
-    Some((work, track.work_composers(), track.release_key()))
+    continues_work(&previous, &track) || (!previous.is_movement() && !track.is_movement())
 }
 
 // Whether a movement continues the work of the track before it, so that
 // the queue shows them under one header, and the shuffle moves them
 // together: the same work by the same composers, from the same release, and
 // later on the album. Two recordings of the work one after the other are
-// apart, and so is the work added twice
+// apart, and so is the work added twice. The composers are the work's,
+// which all its movements share: a movement can credit others too, e.g.
+// the author of the hymn in a chorale of a Bach cantata. The header shows
+// the first movement's own, as MusicBrainz sometimes credits a work to
+// someone else, e.g. Bach's BWV 981 to Marcello, whose concerto it
+// arranges
 pub fn continues_work(previous: &Track, track: &Track) -> bool {
-    work_key(track).is_some_and(|key| work_key(previous) == Some(key))
-        && track.follows_on_album(previous)
+    track.same_work_as(previous) && track.follows_on_album(previous)
 }
 
 // The headers of the sections in the queue: a line between each section,
