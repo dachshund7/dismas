@@ -60,6 +60,16 @@ template $DismasPageSwitcher: Widget {
       };
     }
 
+    // Hidden while no track is part of a work; see page_switcher.rs
+    ToggleButton works_button {
+      visible: false;
+      icon-name: "sheet-music-symbolic";
+      focus-on-click: false;
+      action-name: "win.page";
+      action-target: "'works'";
+      tooltip-text: _("Works");
+    }
+
     ToggleButton {
       icon-name: "view-list-bullet-symbolic";
       focus-on-click: false;
@@ -104,6 +114,12 @@ menu pages_menu {
     item {
       label: _("_Albums");
       action: "switcher.library";
+    }
+
+    item {
+      label: _("_Works");
+      action: "switcher.works";
+      hidden-when: "action-disabled";
     }
 
     item {

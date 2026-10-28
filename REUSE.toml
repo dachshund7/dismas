@@ -78,6 +78,13 @@ precedence = "closest"
 SPDX-FileCopyrightText = "2026  John Hamilton"
 SPDX-License-Identifier = "CC-BY-SA-3.0"
 
+# The page of Adwaita's document icons, with a note drawn for Dismas
+[[annotations]]
+path = "src/assets/icons/sheet-music-symbolic.svg"
+precedence = "closest"
+SPDX-FileCopyrightText = ["The GNOME Project", "2026  John Hamilton"]
+SPDX-License-Identifier = "CC-BY-SA-3.0"
+
 [[annotations]]
 path = ["po/POTFILES.in", "po/LINGUAS"]
 precedence = "aggregate"

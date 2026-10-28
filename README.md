@@ -61,10 +61,10 @@ What Dismas adds
   their albums, with only the tracks that are theirs. The Performers button
   next to it does the same for the conductors, the ensembles and the
   soloists, with what they play or sing, and picking a composer and a
-  performer shows the albums where they meet. Works, under the search,
-  lists the works instead of the albums, by composer, with the number of
-  their recordings; open one to compare its recordings, with their
-  performers and years, and play one. Other Recordings, in the menu of a
+  performer shows the albums where they meet. The Works page, next to the
+  albums, lists the works instead, by composer, with the number of their
+  recordings, and keeps the search and what you picked; open one to compare
+  its recordings, with their performers and years, and play one. Other Recordings, in the menu of a
   movement, shows the recordings of its work next to whatever you're
   doing.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
@@ -269,7 +269,7 @@ Keyboard shortcuts
 | Ctrl+D                           | Mark or unmark the playing track as a favorite |
 | Ctrl+I                           | Track information                              |
 | Ctrl+C                           | Copy the playing track's title and artist      |
-| Ctrl+1 / Ctrl+2 / Ctrl+3         | Player / albums / playlists                    |
+| Ctrl+1 to Ctrl+4                 | Player / albums / playlists / works            |
 | Ctrl+G                           | Search the albums                              |
 | Ctrl+F                           | Search the queue                               |
 | Ctrl+R                           | Shuffle, or put back the order from before     |

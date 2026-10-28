@@ -43,9 +43,10 @@ All notable changes to this project will be documented in this file.
   and the number of their albums; picking one shows only their albums,
   taking only the tracks they're on, and it combines with a composer and
   with the search
-- Works, under the album search, lists the works of the albums under the
-  names of their composers, with the number of their recordings, and
-  follows the search and the composer and performer picked. A work shows
+- A Works page, next to the albums (Ctrl+4), lists the works of the
+  albums under the names of their composers, with the number of their
+  recordings. It shares the albums' search and the composer and performer
+  picked, so switching between the two keeps them. A work shows
   its recordings, oldest first, each with its performers, the year it was
   made and the album, to play one, add it, or go to its album
 - Other Recordings, in the menu of a track of a work and in the menu of

@@ -138,8 +138,6 @@ mod imp {
         #[template_child]
         pub page_title: TemplateChild<adw::WindowTitle>,
         #[template_child]
-        pub view_toggle: TemplateChild<adw::ToggleGroup>,
-        #[template_child]
         pub works_list: TemplateChild<gtk::ListView>,
         #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
@@ -163,11 +161,13 @@ mod imp {
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
         pub selection_mode: Cell<bool>,
-        // What the page shows, "albums" or "works", as in the
-        // "library-view" setting, which it's bound to; the works are only
-        // shown while a track is part of one (`has_works`)
+        // What the page shows, "albums" or "works": the window's Albums
+        // and Works pages are both this one, which keeps the search, the
+        // composer and the performer picked from one to the other. The
+        // works are only shown while a track is part of one
         #[property(get, set = Self::set_view, explicit_notify)]
         pub view: RefCell<String>,
+        #[property(get)]
         pub has_works: Cell<bool>,
         // The works the search finds, and the filter they were read for;
         // `None` until they're read, and again once the tracks changed
@@ -997,8 +997,8 @@ impl LibraryView {
     }
 
     // The list of the works the search finds, under the names of their
-    // composers, which takes the place of the grid with the Works toggle
-    // under the search; activating one shows its recordings
+    // composers, which takes the place of the grid on the Works page;
+    // activating one shows its recordings
     fn setup_works(&self) {
         let imp = self.imp();
         imp.works_list.set_factory(Some(&work_factory()));
@@ -1024,14 +1024,7 @@ impl LibraryView {
             }
         ));
 
-        let settings = self.app_settings();
-        settings.bind("library-view", self, "view").build();
-        // Only once the setting gave the view a name, as the toggles have
-        // none for the empty one before it
-        self.bind_property("view", &*imp.view_toggle, "active-name")
-            .bidirectional()
-            .sync_create()
-            .build();
+        imp.view.replace("albums".to_string());
     }
 
     // The music folders that aren't there or are left out, whose tracks
@@ -1067,11 +1060,16 @@ impl LibraryView {
         imp.has_works.get() && *imp.view.borrow() == "works"
     }
 
-    // The Works toggle is only there while a track is part of a work
+    // The Works page is only there while a track is part of a work, and
+    // goes back to the albums once none is
     fn set_works_available(&self, available: bool) {
         let imp = self.imp();
-        imp.view_toggle.set_visible(available);
-        imp.has_works.set(available);
+        if imp.has_works.replace(available) != available {
+            self.notify_has_works();
+        }
+        if !available {
+            self.set_view("albums");
+        }
         self.update_view();
     }
 

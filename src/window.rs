@@ -204,7 +204,9 @@ mod imp {
         // The list of playlists, shown over the player or the album grid
         #[property(get, set = Self::set_playlists_visible, explicit_notify)]
         pub playlists_visible: Cell<bool>,
-        // The visible page: "player", "library" or "playlists"
+        // The visible page: "player", "library" (the albums), "works" or
+        // "playlists"; the albums and the works are the same page of the
+        // content, whose view says which
         #[property(name = "page", get = Self::page, set = Self::set_page, explicit_notify, type = String)]
         page: std::marker::PhantomData<String>,
         // Whether there is anything to play, to go to the player
@@ -215,6 +217,10 @@ mod imp {
         // library view is bound, so it can't follow the view itself
         #[property(get, set)]
         pub library_scanning: Cell<bool>,
+        // Whether a track is part of a work, for the Works buttons of the
+        // page switchers, like `library_scanning`
+        #[property(get, set)]
+        pub works_available: Cell<bool>,
         // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
         // What waits for the end of startup, e.g. files from the command line
@@ -526,6 +532,7 @@ mod imp {
                 page: std::marker::PhantomData,
                 player_available: Cell::new(false),
                 library_scanning: Cell::new(false),
+                works_available: Cell::new(false),
                 starting: Cell::new(true),
                 after_startup: RefCell::default(),
                 pending_playlist: RefCell::default(),
@@ -567,6 +574,16 @@ mod imp {
                 .bind_property("scanning", &*self.obj(), "library-scanning")
                 .sync_create()
                 .build();
+            self.library_view
+                .bind_property("has-works", &*self.obj(), "works-available")
+                .sync_create()
+                .build();
+            // The works going away shows the albums
+            self.library_view.connect_view_notify(clone!(
+                #[weak(rename_to = obj)]
+                self.obj(),
+                move |_| obj.notify_page()
+            ));
 
             // Only in selection mode
             self.obj()
@@ -635,7 +652,7 @@ mod imp {
                 // unless it's there already, as taking it again would select
                 // the text being typed
                 if !visible
-                    && self.page() == "library"
+                    && matches!(self.page().as_str(), "library" | "works")
                     && gtk::prelude::GtkWindowExt::focus(&*self.obj())
                         .is_none_or(|focus| !focus.is_ancestor(&self.library_view.search_entry()))
                 {
@@ -768,7 +785,11 @@ mod imp {
             if self.playlists_visible.get() {
                 "playlists"
             } else if self.library_visible.get() {
-                "library"
+                if self.library_view.shows_works() {
+                    "works"
+                } else {
+                    "library"
+                }
             } else {
                 "player"
             }
@@ -781,9 +802,21 @@ mod imp {
         fn set_page(&self, page: String) {
             let obj = self.obj();
             let old_page = self.page();
+            // The albums and the works are one page, which shows either
+            let page = if page == "works" && !self.library_view.has_works() {
+                "library".to_string()
+            } else {
+                page
+            };
+            match page.as_str() {
+                "library" => self.library_view.set_view("albums"),
+                "works" => self.library_view.set_view("works"),
+                _ => {}
+            }
             let (library, playlists) = match page.as_str() {
-                // Going to the albums from the playlists closes them
-                "library" => (true, false),
+                // Going to the albums or the works from the playlists
+                // closes them
+                "library" | "works" => (true, false),
                 "playlists" => (self.library_visible.get(), true),
                 // With nothing to play, there is no player to go to
                 _ if obj.queue_is_empty() => {
@@ -802,9 +835,9 @@ mod imp {
                 self.library_view.scan_unwatched();
             }
             self.update_content_page();
-            // Typing searches the albums right away, and asking for the
-            // albums again goes back to their search
-            if page == "library" {
+            // Typing searches the albums or the works right away, and asking
+            // for them again goes back to their search
+            if matches!(page.as_str(), "library" | "works") {
                 self.library_view.focus_search();
             }
             // The focus moves to the page, and the shortcuts would show it
@@ -828,7 +861,9 @@ mod imp {
         }
 
         fn update_content_page(&self) {
-            self.content_stack.set_visible_child_name(&self.page());
+            let page = self.page();
+            let name = if page == "works" { "library" } else { &page };
+            self.content_stack.set_visible_child_name(name);
             self.obj().notify_page();
         }
 

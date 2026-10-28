@@ -16,10 +16,6 @@
     <value nick="year" value="2"/>
     <value nick="added" value="3"/>
   </enum>
-  <enum id="io.github.dachshund7.Dismas.LibraryView">
-    <value nick="albums" value="0"/>
-    <value nick="works" value="1"/>
-  </enum>
   <enum id="io.github.dachshund7.Dismas.SortOrder">
     <value nick="ascending" value="0"/>
     <value nick="descending" value="1"/>
@@ -123,11 +119,6 @@
 	    <default>'ascending'</default>
 	    <summary>The direction the albums are sorted in</summary>
 	    <description>Whether the albums in the grid are sorted in ascending or descending order</description>
-	  </key>
-	  <key name="library-view" enum="io.github.dachshund7.Dismas.LibraryView">
-	    <default>'albums'</default>
-	    <summary>What the albums page shows</summary>
-	    <description>The albums page shows the albums, or the works of their tracks</description>
 	  </key>
 	  <key name="keep-play-history" type="b">
 	    <default>true</default>

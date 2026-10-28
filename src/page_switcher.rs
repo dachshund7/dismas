@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The buttons that switch between the player, the album grid and the
-// playlists, in the header of each; the one of the visible page is
+// The buttons that switch between the player, the album grid, the works
+// and the playlists, in the header of each; the one of the visible page is
 // active, through the `win.page` action. The playlist pane's toggle
 // is on their left, apart from them.
 //
@@ -32,6 +32,8 @@ mod imp {
         #[template_child]
         pub player_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
+        pub works_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
         pub library_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         pub pages_menu_button: TemplateChild<gtk::MenuButton>,
@@ -41,7 +43,7 @@ mod imp {
         pub pages_menu_icon: TemplateChild<gtk::Image>,
         // The bindings to the window, while the switcher is in it
         pub bindings: RefCell<Vec<glib::Binding>>,
-        pub player_handler: RefCell<Option<(glib::WeakRef<gtk::Window>, glib::SignalHandlerId)>>,
+        pub handlers: RefCell<Vec<(glib::WeakRef<gtk::Window>, glib::SignalHandlerId)>>,
     }
 
     #[glib::object_subclass]
@@ -56,7 +58,7 @@ mod imp {
             klass.set_css_name("pageswitcher");
 
             // The items of the menu of the pages
-            for page in ["player", "library", "playlists"] {
+            for page in ["player", "library", "works", "playlists"] {
                 klass.install_action(&format!("switcher.{page}"), None, move |obj, _, _| {
                     obj.show_page(page);
                 });
@@ -150,7 +152,9 @@ mod imp {
 
         // The button of the player follows the window, rather than the
         // `win.page` action like the others: the action would make it
-        // sensitive whenever it's enabled, even with nothing to play
+        // sensitive whenever it's enabled, even with nothing to play. The
+        // button of the works is there while a track is part of one, and
+        // so is their item in the menu of the pages
         fn root(&self) {
             self.parent_root();
 
@@ -162,6 +166,9 @@ mod imp {
                 win.bind_property("player-available", &*self.player_button, "sensitive")
                     .sync_create()
                     .build(),
+                win.bind_property("works-available", &*self.works_button, "visible")
+                    .sync_create()
+                    .build(),
                 win.bind_property("page", &*self.player_button, "active")
                     .transform_to(|_, page: String| Some(page == "player"))
                     .sync_create()
@@ -170,6 +177,7 @@ mod imp {
                     .transform_to(|_, page: String| {
                         Some(match page.as_str() {
                             "library" => "view-grid-symbolic",
+                            "works" => "sheet-music-symbolic",
                             "playlists" => "view-list-bullet-symbolic",
                             _ => "audio-x-generic-symbolic",
                         })
@@ -188,29 +196,34 @@ mod imp {
             self.bindings
                 .replace(bindings.into_iter().chain(scanning_bindings).collect());
 
-            let update_player = glib::clone!(
-                #[weak]
-                obj,
-                move |win: &crate::window::Window| {
-                    obj.action_set_enabled("switcher.player", win.property("player-available"));
-                }
+            let handlers = [("player", "player-available"), ("works", "works-available")].map(
+                |(page, property)| {
+                    let action = format!("switcher.{page}");
+                    let update = glib::clone!(
+                        #[weak]
+                        obj,
+                        move |win: &crate::window::Window| {
+                            obj.action_set_enabled(&action, win.property(property));
+                        }
+                    );
+                    update(&win);
+                    let handler = win.connect_notify_local(Some(property), move |win, _| {
+                        update(win);
+                    });
+                    (win.upcast_ref::<gtk::Window>().downgrade(), handler)
+                },
             );
-            update_player(&win);
-            let handler = win.connect_notify_local(Some("player-available"), move |win, _| {
-                update_player(win);
-            });
-            self.player_handler
-                .replace(Some((win.upcast_ref::<gtk::Window>().downgrade(), handler)));
+            self.handlers.replace(handlers.into());
         }
 
         fn unroot(&self) {
             for binding in self.bindings.take() {
                 binding.unbind();
             }
-            if let Some((win, handler)) = self.player_handler.take()
-                && let Some(win) = win.upgrade()
-            {
-                win.disconnect(handler);
+            for (win, handler) in self.handlers.take() {
+                if let Some(win) = win.upgrade() {
+                    win.disconnect(handler);
+                }
             }
 
             self.parent_unroot();
