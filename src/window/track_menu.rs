@@ -164,6 +164,20 @@ impl Window {
         ));
         actions.add_action(&open_directory);
 
+        // Ctrl+C does the same on the track's row
+        let copy = gio::SimpleAction::new("copy", None);
+        copy.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            track,
+            move |_, _| win.copy_track_details(&track)
+        ));
+        actions.add_action(&copy);
+        let item = gio::MenuItem::new(Some(&i18n("Copy")), Some("track.copy"));
+        item.set_attribute_value("accel", Some(&"<primary>c".to_variant()));
+        section.append_item(&item);
+
         section.append(Some(&i18n("Open Directory")), Some("track.open-directory"));
         section.append(Some(&i18n("Track Information")), Some("track.info"));
         menu.append_section(None, &section);
@@ -203,12 +217,29 @@ impl Window {
         popup_menu(&menu, "track", &actions, row.upcast_ref(), x, y);
     }
 
+    // The More menu's Copy, about the playing track
     pub(super) fn copy_track(&self) {
         let player = self.player();
         let state = player.state();
         if let Some(track) = state.track() {
-            self.clipboard().set_text(&track.copied_details());
+            self.copy_track_details(&track);
         }
+    }
+
+    // Ctrl+C: the track of the row with the focus, in the playlist pane or
+    // an album's tracks, as the key goes by the focus, or else the playing
+    // track
+    pub(super) fn copy_focused_track(&self) {
+        let track = utils::focused_child::<QueueRow>(self)
+            .and_then(|row| row.track())
+            .or_else(|| self.player().state().track());
+        if let Some(track) = track {
+            self.copy_track_details(&track);
+        }
+    }
+
+    fn copy_track_details(&self, track: &Track) {
+        self.clipboard().set_text(&track.copied_details());
     }
 
     async fn playing_album(&self) -> Option<(String, gio::File)> {

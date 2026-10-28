@@ -1141,10 +1141,11 @@ impl Window {
         self.add_controller(controller);
     }
 
-    // Ctrl+C copies the details of the playing track, once the focused
-    // widget has had the key: an accel would run before it, and take the
-    // key from a search with text selected. Text without a selection turns
-    // its own copying off, so the key comes on to the window.
+    // Ctrl+C copies the details of the track with the focus, or else of the
+    // playing track, once the focused widget has had the key: an accel would
+    // run before it, and take the key from a search with text selected.
+    // Text without a selection turns its own copying off, so the key comes
+    // on to the window.
     //
     // Ctrl+Z presses the Undo of a toast, before the focused widget has the
     // key, as GTK's text takes it even with nothing to undo. A search with
@@ -1153,7 +1154,13 @@ impl Window {
         let controller = gtk::ShortcutController::new();
         controller.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("<Control>c"),
-            Some(gtk::NamedAction::new("win.copy")),
+            Some(gtk::CallbackAction::new(|widget, _| {
+                widget
+                    .downcast_ref::<Window>()
+                    .unwrap()
+                    .copy_focused_track();
+                glib::Propagation::Stop
+            })),
         ));
         self.add_controller(controller);
 

@@ -66,16 +66,25 @@ pub fn setup_primary_menu_button(button: &gtk::MenuButton) {
     }
 }
 
-// The row or the cell of a list or a grid that has the focus. The focus is
-// on a widget in the row, or on the list's item, whose child is the row or
-// a widget around it, like the SlideBin of the queue's rows
-pub fn focused_child<W: IsA<gtk::Widget>>(list: &impl IsA<gtk::Widget>) -> Option<W> {
-    let focus = list.root()?.focus()?;
-    if !focus.is_ancestor(list) {
+// The row or the cell that has the focus, in a list or a grid, or in any
+// list in a widget, like the window. The focus is on a widget in the row,
+// or on the list's item, whose child is the row or a widget around it, like
+// the SlideBin of the queue's rows
+pub fn focused_child<W: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Option<W> {
+    let focus = widget.root()?.focus()?;
+    if !focus.is_ancestor(widget) {
         return None;
     }
     if let Some(row) = focus.ancestor(W::static_type()) {
         return row.downcast().ok();
+    }
+    // Only from an item of a list, as the first rows of a list with the
+    // focus itself aren't the ones with it
+    if !focus
+        .parent()
+        .is_some_and(|parent| parent.is::<gtk::ListBase>())
+    {
+        return None;
     }
     let mut child = focus.first_child();
     while let Some(widget) = child {
