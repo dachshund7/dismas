@@ -98,6 +98,41 @@ template $DismasLibraryView: Widget {
             };
           }
 
+          // The conductors, groups and players of the albums, divided into
+          // those, to show only the albums of one; like the composers
+          MenuButton performer_button {
+            visible: false;
+            margin-start: 6;
+            icon-name: "system-users-symbolic";
+            tooltip-text: _("Performers");
+
+            popover: Popover performer_popover {
+              child: Box {
+                orientation: vertical;
+                spacing: 6;
+
+                SearchEntry performer_search {
+                  placeholder-text: _("Search performers");
+                }
+
+                ScrolledWindow {
+                  hscrollbar-policy: never;
+                  propagate-natural-height: true;
+                  min-content-width: 300;
+                  max-content-height: 400;
+
+                  child: ListView performer_list {
+                    single-click-activate: true;
+
+                    styles [
+                      "navigation-sidebar",
+                    ]
+                  };
+                }
+              };
+            };
+          }
+
           // While the search matches only some of the tracks of albums,
           // takes the whole albums instead; it slides in, as the entry
           // gives it room

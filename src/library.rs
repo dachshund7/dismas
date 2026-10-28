@@ -617,21 +617,23 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
 }
 
 // What the tracks taken from albums match: every word of a search, normalized
-// with `normalize_search_text()`, in any of their tags, and a composer, by
-// its key (`composer_key()`). An empty one matches every track
+// with `normalize_search_text()`, in any of their tags, a composer and a
+// performer, by their keys (`composer_key()`). An empty one matches every
+// track
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
     pub words: Vec<String>,
     pub composer: Option<String>,
+    pub performer: Option<String>,
 }
 
 impl TrackFilter {
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty() && self.composer.is_none()
+        self.words.is_empty() && self.composer.is_none() && self.performer.is_none()
     }
 
     // The SQL conditions on a track, each after " AND ", and their values;
-    // a track without search text or composers matches nothing
+    // a track without search text, composers or performers matches nothing
     fn conditions(&self) -> (String, Vec<String>) {
         let mut sql = String::new();
         let mut values = Vec::new();
@@ -642,6 +644,10 @@ impl TrackFilter {
         if let Some(key) = &self.composer {
             sql.push_str(" AND instr(composers, ?) > 0");
             values.push(format!("\n{key}\t"));
+        }
+        if let Some(key) = &self.performer {
+            sql.push_str(" AND instr(performers, ?) > 0");
+            values.push(format!("\t{key}\t"));
         }
         (sql, values)
     }
@@ -814,19 +820,11 @@ fn query_composers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Ve
         }
     }
 
-    // The most common, and of those the first in alphabetical order
-    let most = |counts: HashMap<String, usize>| {
-        counts
-            .into_iter()
-            .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-            .map(|(name, _)| name)
-            .unwrap_or_default()
-    };
     let mut composers: Vec<(glib::CollationKey, ComposerInfo)> = seen
         .into_iter()
         .map(|(key, seen)| {
-            let name = most(seen.names);
-            let sort = most(seen.sorts);
+            let name = most_common(seen.names);
+            let sort = most_common(seen.sorts);
             let info = ComposerInfo {
                 key,
                 search: normalize_search_text(&format!("{name} {sort}")),
@@ -839,6 +837,186 @@ fn query_composers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Ve
         .collect();
     composers.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
     Ok(composers.into_iter().map(|(_, info)| info).collect())
+}
+
+// Of the values counted, the most common, and of those the first in
+// alphabetical order
+fn most_common(counts: HashMap<String, usize>) -> String {
+    counts
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+        .map(|(value, _)| value)
+        .unwrap_or_default()
+}
+
+// A conductor or performer of the tracks of the albums of the grid, see
+// `performer_entries()`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PerformerInfo {
+    // See `composer_key()`
+    pub key: String,
+    // Whether they conduct, are a group or play, by most of their albums,
+    // see `query_performers()`
+    pub kind: PerformerKind,
+    // The name their tracks give them the most, and the name they're
+    // sorted by
+    pub name: String,
+    pub sort: String,
+    // What they play or sing, the most common first, e.g. "piano" and
+    // "harpsichord"
+    pub roles: Vec<String>,
+    // The names and the roles, normalized with `normalize_search_text()`,
+    // which searching the list looks into, so that "piano" finds the
+    // pianists
+    pub search: String,
+    // The number of albums with a track they perform on
+    pub albums: u32,
+}
+
+// Whether a track of the albums of the grid has a conductor or performer,
+// without the tracks in the `hidden` folders
+pub fn has_performers(hidden: &[PathBuf]) -> bool {
+    match with_connection(|conn| query_has_performers(conn, hidden)) {
+        Ok(has) => has,
+        Err(e) => {
+            warn!("Unable to look for performers: {e}");
+            false
+        }
+    }
+}
+
+fn query_has_performers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<bool> {
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    conn.query_row(
+        &format!(
+            "SELECT EXISTS (SELECT 1 FROM tracks
+             WHERE album_id IS NOT NULL AND performers IS NOT NULL{hidden_sql})"
+        ),
+        rusqlite::params_from_iter(hidden_params),
+        |row| row.get(0),
+    )
+}
+
+// The conductors, groups and players of the tracks of the albums of the
+// grid, in that order, each by their sort names, without the tracks in the
+// `hidden` folders
+pub fn performers(hidden: &[PathBuf]) -> Vec<PerformerInfo> {
+    match with_connection(|conn| query_performers(conn, hidden)) {
+        Ok(performers) => performers,
+        Err(e) => {
+            warn!("Unable to list the performers: {e}");
+            Vec::new()
+        }
+    }
+}
+
+// Each performer is listed once, as what most of their albums have them
+// do, as someone who conducts can play too. A name in the album artist
+// that a track doesn't credit is taken to be a group's, without a role,
+// though it can be a player's that other tracks credit, so it only counts
+// when nothing else does
+fn query_performers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<PerformerInfo>> {
+    // The albums of a performer, as each kind, and how often each of its
+    // names and roles is given
+    #[derive(Default)]
+    struct Seen {
+        albums: HashSet<String>,
+        kinds: HashMap<PerformerKind, HashSet<String>>,
+        names: HashMap<String, usize>,
+        sorts: HashMap<String, usize>,
+        roles: HashMap<String, usize>,
+    }
+
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT album_id, performers FROM tracks
+         WHERE album_id IS NOT NULL AND performers IS NOT NULL{hidden_sql}"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut seen: HashMap<String, Seen> = HashMap::new();
+    for row in rows {
+        let (album, entries) = row?;
+        for line in entries.lines() {
+            let mut fields = line.split('\t');
+            let (Some(kind), Some(key), Some(name), Some(sort), Some(role)) = (
+                fields.next().and_then(performer_kind_from_code),
+                fields.next(),
+                fields.next(),
+                fields.next(),
+                fields.next(),
+            ) else {
+                continue;
+            };
+            let performer = seen.entry(key.to_string()).or_default();
+            if !performer.albums.contains(&album) {
+                performer.albums.insert(album.clone());
+            }
+            let guessed = kind == PerformerKind::Ensemble && role.is_empty();
+            if !guessed {
+                performer
+                    .kinds
+                    .entry(kind)
+                    .or_default()
+                    .insert(album.clone());
+            }
+            *performer.names.entry(name.to_string()).or_default() += 1;
+            *performer.sorts.entry(sort.to_string()).or_default() += 1;
+            if !role.is_empty() {
+                *performer.roles.entry(role.to_string()).or_default() += 1;
+            }
+        }
+    }
+
+    let mut performers: Vec<(glib::CollationKey, PerformerInfo)> = seen
+        .into_iter()
+        .map(|(key, seen)| {
+            // With as many albums, conducting comes first, and a group last
+            let preference = |kind: &PerformerKind| match kind {
+                PerformerKind::Conductor => 2,
+                PerformerKind::Soloist => 1,
+                PerformerKind::Ensemble => 0,
+            };
+            let kind = seen
+                .kinds
+                .iter()
+                .max_by(|a, b| {
+                    a.1.len()
+                        .cmp(&b.1.len())
+                        .then_with(|| preference(a.0).cmp(&preference(b.0)))
+                })
+                .map_or(PerformerKind::Ensemble, |(kind, _)| *kind);
+            let name = most_common(seen.names);
+            let sort = match kind {
+                PerformerKind::Ensemble => name.clone(),
+                PerformerKind::Conductor | PerformerKind::Soloist => most_common(seen.sorts),
+            };
+            let roles: Vec<String> = seen
+                .roles
+                .into_iter()
+                .sorted_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)))
+                .map(|(role, _)| role)
+                .collect();
+            let info = PerformerInfo {
+                key,
+                kind,
+                search: normalize_search_text(&format!("{name} {sort} {}", roles.join(" "))),
+                name,
+                sort: sort.clone(),
+                roles,
+                albums: seen.albums.len() as u32,
+            };
+            (glib::CollationKey::from(sort.as_str()), info)
+        })
+        .collect();
+    performers.sort_by(|a, b| {
+        a.1.kind
+            .cmp(&b.1.kind)
+            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| a.1.key.cmp(&b.1.key))
+    });
+    Ok(performers.into_iter().map(|(_, info)| info).collect())
 }
 
 // The files of the tracks of an album, in order; with a filter, only the
@@ -1762,6 +1940,15 @@ fn performer_kind_code(kind: PerformerKind) -> char {
     }
 }
 
+fn performer_kind_from_code(code: &str) -> Option<PerformerKind> {
+    match code {
+        "c" => Some(PerformerKind::Conductor),
+        "e" => Some(PerformerKind::Ensemble),
+        "s" => Some(PerformerKind::Soloist),
+        _ => None,
+    }
+}
+
 // The names in the values of a tag, which can also be separated by
 // semicolons, without repeats
 fn split_names<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
@@ -2137,7 +2324,7 @@ mod tests {
                 &conn,
                 &super::TrackFilter {
                     words,
-                    composer: None,
+                    ..Default::default()
                 },
                 &hidden,
             )
@@ -2809,8 +2996,8 @@ mod tests {
         // Only Johann Sebastian's, not his son's, though the names share a
         // word, with the tracks that are his
         let filter = super::TrackFilter {
-            words: Vec::new(),
             composer: Some("johann sebastian bach".to_string()),
+            ..Default::default()
         };
         let mut albums: Vec<(String, (u32, u32))> =
             super::query_search_albums(&conn, &filter, &hidden)
@@ -2831,5 +3018,123 @@ mod tests {
         let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
         assert_eq!(albums.get("a"), Some(&(1, 2)));
         assert_eq!(albums.len(), 1);
+    }
+
+    #[test]
+    fn performers_are_listed_once_by_what_they_do_the_most() {
+        use crate::audio::PerformerKind;
+
+        let conn = test_db();
+        let herreweghe = "c\tphilippe herreweghe\tPhilippe Herreweghe\tHerreweghe, Philippe\t";
+        let cvg = "e\tcollegium vocale gent\tCollegium Vocale Gent\tCollegium Vocale Gent\t\
+                   choir vocals";
+        let eerens = "s\tilse eerens\tIlse Eerens\tEerens, Ilse\tsoprano vocals";
+        // Named in the album artist of a track she doesn't sing on
+        let eerens_guessed = "e\tilse eerens\tIlse Eerens\tIlse Eerens\t";
+        let chandler = "c\tadrian chandler\tAdrian Chandler\tChandler, Adrian\t";
+        let chandler_solo = "s\tadrian chandler\tAdrian Chandler\tChandler, Adrian\tsolo violin";
+        let entries = |lines: &[&str]| format!("\n{}\n", lines.join("\n"));
+        for (path, album, performers, composers) in [
+            (
+                "/m/A/01.opus",
+                "a",
+                entries(&[herreweghe, cvg, eerens]),
+                Some("\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\n"),
+            ),
+            (
+                "/m/A/02.opus",
+                "a",
+                entries(&[herreweghe, eerens_guessed]),
+                None,
+            ),
+            ("/m/B/01.opus", "b", entries(&[herreweghe, cvg]), None),
+            (
+                "/m/C/01.opus",
+                "c",
+                entries(&[chandler, chandler_solo]),
+                None,
+            ),
+            ("/m/D/01.opus", "d", entries(&[chandler]), None),
+            ("/m/D/02.opus", "d", entries(&[chandler_solo]), None),
+            ("/m/Gone/01.opus", "g", entries(&[eerens]), None),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, performers,
+                                     composers, search)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4, '')",
+                rusqlite::params![path.as_bytes(), album, performers, composers],
+            )
+            .unwrap();
+        }
+        let hidden = [PathBuf::from("/m/Gone")];
+        assert!(super::query_has_performers(&conn, &hidden).unwrap());
+
+        let performers = super::query_performers(&conn, &hidden).unwrap();
+        let listed: Vec<(PerformerKind, &str, &[String], u32)> = performers
+            .iter()
+            .map(|p| (p.kind, p.sort.as_str(), p.roles.as_slice(), p.albums))
+            .collect();
+        let roles = |roles: &[&str]| roles.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(
+            listed,
+            [
+                // Conducting on as many albums as playing solo
+                (
+                    PerformerKind::Conductor,
+                    "Chandler, Adrian",
+                    roles(&["solo violin"]).as_slice(),
+                    2
+                ),
+                (PerformerKind::Conductor, "Herreweghe, Philippe", &[], 2),
+                (
+                    PerformerKind::Ensemble,
+                    "Collegium Vocale Gent",
+                    roles(&["choir vocals"]).as_slice(),
+                    2
+                ),
+                // A singer, though the album artist named her on a track
+                (
+                    PerformerKind::Soloist,
+                    "Eerens, Ilse",
+                    roles(&["soprano vocals"]).as_slice(),
+                    1
+                ),
+            ]
+        );
+        // The list's search looks into the names and the roles
+        assert_eq!(
+            performers[3].search,
+            "ilse eerens eerens, ilse soprano vocals"
+        );
+
+        // A performer's albums, whatever they do on them, with the tracks
+        // that are theirs, and with a composer too
+        let filter = super::TrackFilter {
+            performer: Some("adrian chandler".to_string()),
+            ..Default::default()
+        };
+        let mut albums: Vec<(String, (u32, u32))> =
+            super::query_search_albums(&conn, &filter, &hidden)
+                .unwrap()
+                .into_iter()
+                .collect();
+        albums.sort();
+        assert_eq!(
+            albums,
+            [("c".to_string(), (1, 1)), ("d".to_string(), (2, 2))]
+        );
+        let filter = super::TrackFilter {
+            performer: Some("ilse eerens".to_string()),
+            ..Default::default()
+        };
+        let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
+        assert_eq!(albums.get("a"), Some(&(2, 2)));
+        assert_eq!(albums.len(), 1);
+        let filter = super::TrackFilter {
+            composer: Some("antonin dvorak".to_string()),
+            ..filter
+        };
+        let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
+        assert_eq!(albums.get("a"), Some(&(1, 2)));
     }
 }

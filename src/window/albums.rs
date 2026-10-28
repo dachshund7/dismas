@@ -11,14 +11,14 @@ impl Window {
         &self,
         album: &Album,
         filter: &TrackFilter,
-        composer: Option<&str>,
+        picks: &PickNames,
         reveal: Option<&gio::File>,
     ) {
         let imp = self.imp();
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
             imp.sidebar_was_visible.set(self.playlist_visible());
         }
-        imp.album_tracks.show_album(album, filter, composer, reveal);
+        imp.album_tracks.show_album(album, filter, picks, reveal);
         imp.sidebar_stack.set_visible_child_name("album");
         self.set_playlist_visible(true);
     }
@@ -36,7 +36,12 @@ impl Window {
         let Some(album) = album else {
             return;
         };
-        self.show_album_tracks(&album, &TrackFilter::default(), None, Some(track));
+        self.show_album_tracks(
+            &album,
+            &TrackFilter::default(),
+            &PickNames::default(),
+            Some(track),
+        );
     }
 
     // Goes back from the tracks of an album to the queue, closing the
@@ -253,11 +258,10 @@ impl Window {
             self,
             move |_, album| {
                 let library_view = win.imp().library_view.get();
-                let composer = library_view.search_composer_name();
                 win.show_album_tracks(
                     album,
                     &library_view.search_filter(),
-                    composer.as_deref(),
+                    &library_view.search_pick_names(),
                     None,
                 );
             }
@@ -337,16 +341,16 @@ impl Window {
         // The search entry takes Esc, so the window doesn't get it. With
         // text, Esc clears the search and leaves selection mode, as the
         // tracks selected in the queue would otherwise stay selected; in an
-        // empty search, it shows the albums of all the composers again, or
-        // does what it does elsewhere in the window
+        // empty search, it shows the albums of all the composers and
+        // performers again, or does what it does elsewhere in the window
         library_view.search_entry().connect_stop_search(clone!(
             #[weak(rename_to = win)]
             self,
             move |entry| {
                 let library_view = win.imp().library_view.get();
-                if entry.text().is_empty() && library_view.has_composer() {
+                if entry.text().is_empty() && library_view.has_picks() {
                     win.exit_selection_mode();
-                    library_view.set_composer(None);
+                    library_view.clear_picks();
                 } else if entry.text().is_empty() {
                     win.escape();
                 } else {

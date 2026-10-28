@@ -39,7 +39,7 @@ use crate::{
     drag_overlay::DragOverlay,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album, TrackFilter},
-    library_view::{AlbumDrag, LibraryView},
+    library_view::{AlbumDrag, LibraryView, PickNames},
     page_switcher::PageSwitcher,
     play_stats,
     playback_control::PlaybackControl,

@@ -15,6 +15,7 @@ use crate::{
     audio::{Track, load_tracks},
     i18n::{i18n, ni18n_f, ni18n_k},
     library::{self, Album, TrackFilter},
+    library_view::PickNames,
     queue_row::QueueRow,
     utils,
     work_sections::{WorkSectionModel, work_header_factory},
@@ -60,11 +61,11 @@ mod imp {
 
         pub tracks: RefCell<Option<gio::ListStore>>,
         pub files: RefCell<Vec<gio::File>>,
-        // The album that is showing, and the search and the composer it
-        // was shown for, with the composer's name
+        // The album that is showing, and the search, and the composer and
+        // performer, it was shown for, with their names
         pub album: RefCell<Option<Album>>,
         pub filter: RefCell<TrackFilter>,
-        pub composer: RefCell<Option<String>>,
+        pub picks: RefCell<PickNames>,
         // While the search leaves out some of the tracks, the number of
         // the tracks that match it and the number of all of them
         pub left_out: Cell<Option<(u32, u32)>>,
@@ -484,14 +485,14 @@ impl AlbumTracks {
     }
 
     // Shows the tracks of an album that the filter matches, or all of them
-    // with an empty one; `composer` is the name of the composer the filter
-    // picks, if any. The track of `reveal`, if any, is scrolled to and
-    // flashes once it's read
+    // with an empty one; `picks` names the composer and the performer the
+    // filter picks, if any. The track of `reveal`, if any, is scrolled to
+    // and flashes once it's read
     pub fn show_album(
         &self,
         album: &Album,
         filter: &TrackFilter,
-        composer: Option<&str>,
+        picks: &PickNames,
         reveal: Option<&gio::File>,
     ) {
         let imp = self.imp();
@@ -501,7 +502,7 @@ impl AlbumTracks {
 
         imp.album.replace(Some(album.clone()));
         imp.filter.replace(filter.clone());
-        imp.composer.replace(composer.map(ToString::to_string));
+        imp.picks.replace(picks.clone());
         self.load(reveal);
     }
 
@@ -523,17 +524,50 @@ impl AlbumTracks {
 
     // Says how many of the tracks the search matches while it leaves out
     // some, with or without Whole Albums, whose toggle shows which. With
-    // only a composer picked, and no words to search for, it says how many
-    // are theirs
+    // only a composer or a performer picked, and no words to search for, it
+    // says how many are theirs
     fn update_filter_bar(&self) {
         let imp = self.imp();
         let Some((matching, total)) = imp.left_out.get() else {
             imp.filter_bar.set_reveal_child(false);
             return;
         };
-        let composer = imp.composer.borrow();
-        let label = match composer.as_deref() {
-            Some(composer) if imp.filter.borrow().words.is_empty() => ni18n_k(
+        let picks = imp.picks.borrow();
+        let words = !imp.filter.borrow().words.is_empty();
+        let label = match (picks.composer.as_deref(), picks.performer.as_deref()) {
+            (Some(composer), Some(performer)) if !words => ni18n_k(
+                // Translators: `{n}`, `{total}`, `{composer}` and
+                // `{performer}` must be left unmodified; they are expanded
+                // to the number of tracks of the album by a composer with a
+                // performer, the number of all of them, the name of the
+                // composer and the name of the performer, which can be a
+                // conductor, a group or a player. The plural follows `{n}`
+                "{n} of the {total} tracks is by {composer}, with {performer}",
+                "{n} of the {total} tracks are by {composer}, with {performer}",
+                matching,
+                &[
+                    ("n", &matching.to_string()),
+                    ("total", &total.to_string()),
+                    ("composer", composer),
+                    ("performer", performer),
+                ],
+            ),
+            (None, Some(performer)) if !words => ni18n_k(
+                // Translators: `{n}`, `{total}` and `{performer}` must be
+                // left unmodified; they are expanded to the number of
+                // tracks of the album with a performer, the number of all
+                // of them, and the name of the performer, which can be a
+                // conductor, a group or a player. The plural follows `{n}`
+                "{n} of the {total} tracks is with {performer}",
+                "{n} of the {total} tracks are with {performer}",
+                matching,
+                &[
+                    ("n", &matching.to_string()),
+                    ("total", &total.to_string()),
+                    ("performer", performer),
+                ],
+            ),
+            (Some(composer), None) if !words => ni18n_k(
                 // Translators: `{n}`, `{total}` and `{composer}` must be
                 // left unmodified; they are expanded to the number of
                 // tracks of the album by a composer, the number of all of

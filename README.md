@@ -58,7 +58,10 @@ What Dismas adds
   next to the queue's search plays only the tracks it found, in place of the
   queue, with an Undo. The Composers button next to the album search lists
   the composers of your albums, by their last names; pick one to see only
-  their albums, with only the tracks that are theirs.
+  their albums, with only the tracks that are theirs. The Performers button
+  next to it does the same for the conductors, the ensembles and the
+  soloists, with what they play or sing, and picking a composer and a
+  performer shows the albums where they meet.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
   the Playlists page. Add to Playlist, in the menu of a track, adds it to

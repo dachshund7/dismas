@@ -38,6 +38,11 @@ All notable changes to this project will be documented in this file.
   the albums by their last names, with the number of their albums; picking
   one shows only their albums, taking only the tracks that are theirs, as
   a search does, and it combines with the search
+- Performers, the button next to Composers, lists the conductors, the
+  ensembles and the soloists of the albums, with what they play or sing
+  and the number of their albums; picking one shows only their albums,
+  taking only the tracks they're on, and it combines with a composer and
+  with the search
 - Searching the queue and the albums also finds tracks by the names that
   the Work Hierarchy plugin gives their works, the works those are part
   of and the collections they're in, such as "Well-Tempered" for the

@@ -4,6 +4,7 @@
 use std::{
     cell::{Cell, OnceCell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
+    path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -16,7 +17,7 @@ use std::sync::LazyLock;
 
 use crate::{
     album_cell::AlbumCell,
-    audio::normalize_search_text,
+    audio::{PerformerKind, normalize_search_text},
     i18n::{i18n, i18n_f, i18n_k, ni18n_f},
     library::{self, Album, AlbumSort, ScanEvent, ScanResult, TrackFilter},
     square_bin::SquareBin,
@@ -125,6 +126,14 @@ mod imp {
         #[template_child]
         pub composer_list: TemplateChild<gtk::ListView>,
         #[template_child]
+        pub performer_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub performer_popover: TemplateChild<gtk::Popover>,
+        #[template_child]
+        pub performer_search: TemplateChild<gtk::SearchEntry>,
+        #[template_child]
+        pub performer_list: TemplateChild<gtk::ListView>,
+        #[template_child]
         pub page_title: TemplateChild<adw::WindowTitle>,
         #[template_child]
         pub whole_albums_revealer: TemplateChild<gtk::Revealer>,
@@ -170,11 +179,13 @@ mod imp {
         // The albums matching the search, if there is one, with the
         // number of their tracks that match it and the number of all of them
         pub search_matches: RefCell<Option<HashMap<String, (u32, u32)>>>,
-        // The words of the search and the composer the matches are for
+        // The words of the search, and the composer and the performer, that
+        // the matches are for
         pub search_filter: RefCell<TrackFilter>,
-        // The composer whose albums the grid shows, picked from the list
-        // next to the search
+        // The composer and the performer whose albums the grid shows,
+        // picked from the lists next to the search
         pub composer: RefCell<Option<library::ComposerInfo>>,
+        pub performer: RefCell<Option<library::PerformerInfo>>,
         // The albums the search matches are added, played, dragged and
         // shown with all their tracks, rather than those that match it;
         // the toggle next to the search and the banner of the album's
@@ -203,7 +214,7 @@ mod imp {
         pub reload_generation: Cell<u32>,
         // The music folders that aren't there, as of the last reload, whose
         // albums are hidden
-        pub hidden_folders: RefCell<Vec<std::path::PathBuf>>,
+        pub hidden_folders: RefCell<Vec<PathBuf>>,
         // The albums the grid shows, as they were read
         pub shown_albums: RefCell<Vec<library::AlbumInfo>>,
         // A scan made covers again since the albums were last shown, which
@@ -276,7 +287,7 @@ mod imp {
             obj.setup_grid();
             obj.setup_actions();
             obj.setup_watch();
-            obj.setup_composers();
+            obj.setup_pickers();
             obj.connect_signals();
             // It names the selected playlist
             crate::utils::wrap_tooltip(&*self.add_albums_button);
@@ -955,16 +966,72 @@ impl LibraryView {
         self.update_selection();
     }
 
-    // The list of composers next to the search: choosing one shows only
-    // their albums, with the tracks that are theirs, like a search, and
-    // names them under the title of the page; All Composers, or Esc in an
-    // empty search, shows all the albums again. It's read each time it
-    // opens, as the albums can change
-    fn setup_composers(&self) {
+    // The lists of composers and of performers next to the search:
+    // choosing one shows only their albums, with the tracks that are
+    // theirs, like a search, and names them under the title of the page;
+    // they combine with each other and with the search. All Composers or
+    // All Performers, or Esc in an empty search, shows all the albums again
+    fn setup_pickers(&self) {
         let imp = self.imp();
-        // Each item is a composer, or None for all of them
+        self.setup_picker(
+            Picker {
+                popover: imp.composer_popover.get(),
+                search: imp.composer_search.get(),
+                list: imp.composer_list.get(),
+                read: library::composers,
+                search_text: |composer: &library::ComposerInfo| &composer.search,
+                pick: Self::set_composer,
+            },
+            None,
+        );
+        imp.composer_list.set_factory(Some(&composer_factory()));
+
+        // The performers are in sections: the conductors, the groups and
+        // the players, with All Performers first, in a section of its own
+        let sections = gtk::CustomSorter::new(|a, b| {
+            let kind = |item: &glib::Object| {
+                let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
+                let performer = item.borrow::<Option<library::PerformerInfo>>();
+                performer.as_ref().map(|performer| performer.kind)
+            };
+            kind(a).cmp(&kind(b)).into()
+        });
+        self.setup_picker(
+            Picker {
+                popover: imp.performer_popover.get(),
+                search: imp.performer_search.get(),
+                list: imp.performer_list.get(),
+                read: library::performers,
+                search_text: |performer: &library::PerformerInfo| &performer.search,
+                pick: Self::set_performer,
+            },
+            Some(sections.upcast()),
+        );
+        imp.performer_list.set_factory(Some(&performer_factory()));
+        imp.performer_list
+            .set_header_factory(Some(&performer_section_factory()));
+    }
+
+    // Sets up a list to pick from: it's read each time it opens, as the
+    // albums can change, with None, for all of them, first. Its search
+    // finds the items by their `search_text`, and Enter takes the first one
+    // found. The `sections` sorter, if any, divides the list into sections,
+    // which the list is already sorted by
+    fn setup_picker<T: Clone + Send + 'static>(
+        &self,
+        picker: Picker<T>,
+        sections: Option<gtk::Sorter>,
+    ) {
+        let Picker {
+            popover,
+            search,
+            list,
+            read,
+            search_text,
+            pick,
+        } = picker;
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
-        // The words searched for, normalized once for all the composers
+        // The words searched for, normalized once for all the items
         let words: Rc<RefCell<Vec<String>>> = Rc::default();
         let filter = gtk::CustomFilter::new(clone!(
             #[strong]
@@ -972,20 +1039,28 @@ impl LibraryView {
             move |item| {
                 let words = words.borrow();
                 let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
-                let composer = item.borrow::<Option<library::ComposerInfo>>();
-                match composer.as_ref() {
+                match item.borrow::<Option<T>>().as_ref() {
                     // "All Composers" isn't something to search for
                     None => words.is_empty(),
-                    Some(composer) => words.iter().all(|word| composer.search.contains(word)),
+                    Some(item) => {
+                        let text = search_text(item);
+                        words.iter().all(|word| text.contains(word.as_str()))
+                    }
                 }
             }
         ));
-        let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
-        imp.composer_list
-            .set_model(Some(&gtk::NoSelection::new(Some(filtered.clone()))));
-        imp.composer_list.set_factory(Some(&composer_factory()));
+        let model: gio::ListModel = match sections {
+            Some(sections) => {
+                let sorted = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
+                sorted.set_section_sorter(Some(&sections));
+                sorted.upcast()
+            }
+            None => store.clone().upcast(),
+        };
+        let filtered = gtk::FilterListModel::new(Some(model), Some(filter.clone()));
+        list.set_model(Some(&gtk::NoSelection::new(Some(filtered.clone()))));
 
-        imp.composer_search.connect_search_changed(clone!(
+        search.connect_search_changed(clone!(
             #[weak]
             filter,
             move |entry| {
@@ -998,51 +1073,56 @@ impl LibraryView {
                 filter.changed(gtk::FilterChange::Different);
             }
         ));
-        // Enter takes the first one found
-        imp.composer_search.connect_activate(clone!(
+        search.connect_activate(clone!(
             #[weak(rename_to = this)]
             self,
             #[weak]
+            popover,
+            #[weak]
             filtered,
-            move |_| this.pick_composer(&filtered, 0)
+            move |_| this.pick_from(&popover, &filtered, 0, pick)
         ));
-        imp.composer_list.connect_activate(clone!(
+        list.connect_activate(clone!(
             #[weak(rename_to = this)]
             self,
             #[weak]
+            popover,
+            #[weak]
             filtered,
-            move |_, pos| this.pick_composer(&filtered, pos)
+            move |_, pos| this.pick_from(&popover, &filtered, pos, pick)
         ));
 
-        imp.composer_popover.connect_show(clone!(
+        popover.connect_show(clone!(
             #[weak(rename_to = this)]
             self,
             #[weak]
             store,
+            #[weak]
+            search,
+            #[weak]
+            list,
             move |_| {
-                let imp = this.imp();
-                imp.composer_search.set_text("");
-                imp.composer_search.grab_focus();
-                let hidden = imp.hidden_folders.borrow().clone();
+                search.set_text("");
+                search.grab_focus();
+                let hidden = this.imp().hidden_folders.borrow().clone();
                 glib::spawn_future_local(clone!(
                     #[weak]
-                    this,
-                    #[weak]
                     store,
+                    #[weak]
+                    list,
                     async move {
-                        let composers = gio::spawn_blocking(move || library::composers(&hidden))
+                        let items = gio::spawn_blocking(move || read(&hidden))
                             .await
                             .unwrap_or_default();
                         let items: Vec<glib::BoxedAnyObject> = std::iter::once(None)
-                            .chain(composers.into_iter().map(Some))
+                            .chain(items.into_iter().map(Some))
                             .map(glib::BoxedAnyObject::new)
                             .collect();
                         store.splice(0, store.n_items(), &items);
                         // From the top, with All Composers, rather than
-                        // where it was left, at the composer picked. The
-                        // search can have found none, if it was typed in
-                        // while they were read
-                        let list = &this.imp().composer_list;
+                        // where it was left, at the one picked. The search
+                        // can have found none, if it was typed in while
+                        // they were read
                         if list.model().is_some_and(|model| model.n_items() > 0) {
                             list.scroll_to(0, gtk::ListScrollFlags::NONE, None);
                         }
@@ -1052,16 +1132,22 @@ impl LibraryView {
         ));
     }
 
-    fn pick_composer(&self, list: &gtk::FilterListModel, pos: u32) {
+    fn pick_from<T: Clone + 'static>(
+        &self,
+        popover: &gtk::Popover,
+        list: &gtk::FilterListModel,
+        pos: u32,
+        pick: fn(&Self, Option<T>),
+    ) {
         let Some(item) = list.item(pos).and_downcast::<glib::BoxedAnyObject>() else {
             return;
         };
-        let composer = item.borrow::<Option<library::ComposerInfo>>().clone();
-        self.imp().composer_popover.popdown();
-        self.set_composer(composer);
+        let picked = item.borrow::<Option<T>>().clone();
+        popover.popdown();
+        pick(self, picked);
         // The popover gives the focus back to its button as it closes. The
-        // search takes it, as the composer's albums are searched further
-        // there, and Esc in it shows all the albums again
+        // search takes it, as the albums picked are searched further there,
+        // and Esc in it shows all the albums again
         glib::idle_add_local_once(clone!(
             #[weak(rename_to = this)]
             self,
@@ -1069,53 +1155,103 @@ impl LibraryView {
         ));
     }
 
-    // Shows only the albums of a composer, or all of them
-    pub fn set_composer(&self, composer: Option<library::ComposerInfo>) {
+    // Shows only the albums of a composer, or of all of them
+    fn set_composer(&self, composer: Option<library::ComposerInfo>) {
         self.imp().composer.replace(composer);
-        self.update_composer();
+        self.update_picks();
         self.update_search();
     }
 
-    // The Composers button is only there while a track has a composer. A
-    // composer picked goes with it, so that the albums aren't left filtered
-    // by a button that can't be seen
-    fn set_composers_available(&self, available: bool) {
-        self.imp().composer_button.set_visible(available);
-        if !available && self.has_composer() {
-            self.set_composer(None);
+    // Shows only the albums of a performer, or of all of them
+    fn set_performer(&self, performer: Option<library::PerformerInfo>) {
+        self.imp().performer.replace(performer);
+        self.update_picks();
+        self.update_search();
+    }
+
+    // The Composers and Performers buttons are only there while a track
+    // has a composer, or a performer. One picked goes with its button, so
+    // that the albums aren't left filtered by a button that can't be seen
+    fn set_pickers_available(&self, composers: bool, performers: bool) {
+        let imp = self.imp();
+        imp.composer_button.set_visible(composers);
+        imp.performer_button.set_visible(performers);
+        let composer = !composers && imp.composer.replace(None).is_some();
+        let performer = !performers && imp.performer.replace(None).is_some();
+        if composer || performer {
+            self.update_picks();
+            self.update_search();
         }
     }
 
-    // Whether only the albums of a composer are shown
-    pub fn has_composer(&self) -> bool {
-        self.imp().composer.borrow().is_some()
+    // Whether only the albums of a composer or a performer are shown
+    pub fn has_picks(&self) -> bool {
+        let imp = self.imp();
+        imp.composer.borrow().is_some() || imp.performer.borrow().is_some()
     }
 
-    // The composer whose albums are shown is under the title of the page,
-    // and on the tooltip of the button, as a narrow window leaves out the
-    // title; the button is highlighted
-    fn update_composer(&self) {
+    // Shows the albums of all the composers and performers again
+    pub fn clear_picks(&self) {
+        let imp = self.imp();
+        imp.composer.replace(None);
+        imp.performer.replace(None);
+        self.update_picks();
+        self.update_search();
+    }
+
+    // The composer and the performer whose albums are shown are under the
+    // title of the page, and on the tooltips of their buttons, as a narrow
+    // window leaves out the title; the buttons are highlighted
+    fn update_picks(&self) {
         let imp = self.imp();
         let composer = imp.composer.borrow();
-        if let Some(composer) = composer.as_ref() {
-            imp.page_title.set_subtitle(&composer.name);
-            imp.composer_button.set_tooltip_text(Some(&i18n_k(
-                // Translators: `{composer}` must be left unmodified; it is
-                // expanded to the name of the composer whose albums are
-                // shown
-                "Composers: {composer}",
-                &[("composer", &composer.name)],
-            )));
-            imp.composer_button.add_css_class("filtering");
-        } else {
-            imp.page_title.set_subtitle("");
-            imp.composer_button
-                .set_tooltip_text(Some(&i18n("Composers")));
-            imp.composer_button.remove_css_class("filtering");
+        let performer = imp.performer.borrow();
+        // Once, if they're the same, as for a composer who plays
+        let names = [
+            composer.as_ref().map(|c| c.name.as_str()),
+            performer
+                .as_ref()
+                .filter(|p| composer.as_ref().is_none_or(|c| c.key != p.key))
+                .map(|p| p.name.as_str()),
+        ];
+        imp.page_title
+            .set_subtitle(&names.into_iter().flatten().collect::<Vec<_>>().join(" · "));
+
+        imp.composer_button
+            .set_tooltip_text(Some(&match composer.as_ref() {
+                Some(composer) => i18n_k(
+                    // Translators: `{composer}` must be left unmodified; it is
+                    // expanded to the name of the composer whose albums are
+                    // shown
+                    "Composers: {composer}",
+                    &[("composer", &composer.name)],
+                ),
+                None => i18n("Composers"),
+            }));
+        imp.performer_button
+            .set_tooltip_text(Some(&match performer.as_ref() {
+                Some(performer) => i18n_k(
+                    // Translators: `{performer}` must be left unmodified; it is
+                    // expanded to the name of the conductor, the group or the
+                    // player whose albums are shown
+                    "Performers: {performer}",
+                    &[("performer", &performer.name)],
+                ),
+                None => i18n("Performers"),
+            }));
+        for (button, picked) in [
+            (&imp.composer_button, composer.is_some()),
+            (&imp.performer_button, performer.is_some()),
+        ] {
+            if picked {
+                button.add_css_class("filtering");
+            } else {
+                button.remove_css_class("filtering");
+            }
         }
     }
 
-    // What the search and the composer picked ask for
+    // What the search and the composer and performer picked ask for
     fn wanted_filter(&self) -> TrackFilter {
         let imp = self.imp();
         TrackFilter {
@@ -1124,12 +1260,13 @@ impl LibraryView {
                 .map(ToString::to_string)
                 .collect(),
             composer: imp.composer.borrow().as_ref().map(|c| c.key.clone()),
+            performer: imp.performer.borrow().as_ref().map(|p| p.key.clone()),
         }
     }
 
     // Looks for the albums with a track that contains every word of the
     // search, in any of its tags, like searching the queue, and that's by
-    // the composer picked, if any
+    // the composer picked, with the performer picked, if any
     fn update_search(&self) {
         let filter = self.wanted_filter();
         if filter.is_empty() {
@@ -1220,27 +1357,37 @@ impl LibraryView {
         imp.whole_albums_revealer.set_reveal_child(partial);
     }
 
-    // What the tracks of an album the search found match: its words and
-    // the composer picked
+    // What the tracks of an album the search found match: its words, and
+    // the composer and the performer picked
     pub fn search_filter(&self) -> TrackFilter {
         self.imp().search_filter.borrow().clone()
     }
 
-    // The name of the composer in `search_filter()`, if any. The one picked
-    // can differ for a moment, while the albums of a new one are read
-    pub fn search_composer_name(&self) -> Option<String> {
+    // The names of the composer and the performer in `search_filter()`, if
+    // any. The ones picked can differ for a moment, while the albums of new
+    // ones are read
+    pub fn search_pick_names(&self) -> PickNames {
         let imp = self.imp();
-        let key = imp.search_filter.borrow().composer.clone()?;
-        let composer = imp.composer.borrow();
-        composer
-            .as_ref()
-            .filter(|composer| composer.key == key)
-            .map(|composer| composer.name.clone())
+        let filter = imp.search_filter.borrow();
+        PickNames {
+            composer: imp
+                .composer
+                .borrow()
+                .as_ref()
+                .filter(|composer| filter.composer.as_ref() == Some(&composer.key))
+                .map(|composer| composer.name.clone()),
+            performer: imp
+                .performer
+                .borrow()
+                .as_ref()
+                .filter(|performer| filter.performer.as_ref() == Some(&performer.key))
+                .map(|performer| performer.name.clone()),
+        }
     }
 
     // What the tracks taken from an album have to match, to be added,
-    // played, dragged or shown: the search and the composer picked, or
-    // nothing when the whole albums are taken
+    // played, dragged or shown: the search and the composer and performer
+    // picked, or nothing when the whole albums are taken
     pub fn track_filter(&self) -> TrackFilter {
         let imp = self.imp();
         if imp.whole_albums.get() {
@@ -1274,7 +1421,8 @@ impl LibraryView {
         if hidden {
             imp.search_entry.set_text("");
             imp.composer.replace(None);
-            self.update_composer();
+            imp.performer.replace(None);
+            self.update_picks();
             self.set_search_matches(TrackFilter::default(), None);
         }
 
@@ -1445,19 +1593,21 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let (hidden, albums, has_composers) = gio::spawn_blocking(move || {
-                    let roots = library::roots(&folders);
-                    let hidden = [roots.unavailable, roots.excluded].concat();
-                    let albums = library::albums(&hidden);
-                    let has_composers = library::has_composers(&hidden);
-                    (hidden, albums, has_composers)
-                })
-                .await
-                .unwrap_or_default();
+                let (hidden, albums, has_composers, has_performers) =
+                    gio::spawn_blocking(move || {
+                        let roots = library::roots(&folders);
+                        let hidden = [roots.unavailable, roots.excluded].concat();
+                        let albums = library::albums(&hidden);
+                        let has_composers = library::has_composers(&hidden);
+                        let has_performers = library::has_performers(&hidden);
+                        (hidden, albums, has_composers, has_performers)
+                    })
+                    .await
+                    .unwrap_or_default();
                 if this.imp().reload_generation.get() == generation {
                     this.imp().hidden_folders.replace(hidden);
                     this.show_albums(albums);
-                    this.set_composers_available(has_composers);
+                    this.set_pickers_available(has_composers, has_performers);
                 }
             }
         ));
@@ -1684,6 +1834,28 @@ impl LibraryView {
     }
 }
 
+// A list next to the search, to pick a composer or a performer from, see
+// `LibraryView::setup_picker()`
+struct Picker<T> {
+    popover: gtk::Popover,
+    search: gtk::SearchEntry,
+    list: gtk::ListView,
+    // Reads the items, in another thread, without the hidden folders
+    read: fn(&[PathBuf]) -> Vec<T>,
+    // The text, normalized, that the list's search looks into
+    search_text: fn(&T) -> &str,
+    // Shows the albums of the item picked, or of all of them
+    pick: fn(&LibraryView, Option<T>),
+}
+
+// The names of the composer and the performer whose albums are shown, if
+// any, which the bar over an album's tracks says
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PickNames {
+    pub composer: Option<String>,
+    pub performer: Option<String>,
+}
+
 // The rows of the list of composers: the name they're sorted by, and the
 // number of their albums
 fn composer_factory() -> gtk::SignalListItemFactory {
@@ -1727,6 +1899,104 @@ fn composer_factory() -> gtk::SignalListItemFactory {
             name.set_tooltip_text(None);
             count.set_label("");
         }
+    });
+    factory
+}
+
+// The rows of the list of performers: the name they're sorted by, then,
+// dimmed, what they play or sing, which the end of a long row cuts off
+// first, and the number of their albums
+fn performer_factory() -> gtk::SignalListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let name = gtk::Label::builder()
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        let count = gtk::Label::builder()
+            .css_classes(["dim-label", "numeric"])
+            .build();
+        // The scrollbar is drawn over the right edge of the list
+        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
+        row.append(&name);
+        row.append(&count);
+        item.set_child(Some(&row));
+    });
+    factory.connect_bind(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let Some(row) = item.child() else {
+            return;
+        };
+        let (Some(name), Some(count)) = (
+            row.first_child().and_downcast::<gtk::Label>(),
+            row.last_child().and_downcast::<gtk::Label>(),
+        ) else {
+            return;
+        };
+        let Some(performer) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
+            return;
+        };
+        if let Some(performer) = performer
+            .borrow::<Option<library::PerformerInfo>>()
+            .as_ref()
+        {
+            let sort = glib::markup_escape_text(&performer.sort);
+            let roles = glib::markup_escape_text(&performer.roles.join(", "));
+            if roles.is_empty() {
+                name.set_markup(&sort);
+            } else {
+                name.set_markup(&format!("{sort}  <span alpha=\"55%\">{roles}</span>"));
+            }
+            let tooltip = [performer.name.as_str(), &performer.roles.join(", ")]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            name.set_tooltip_text(Some(&tooltip));
+            count.set_label(&performer.albums.to_string());
+        } else {
+            name.set_label(&i18n("All Performers"));
+            name.set_tooltip_text(None);
+            count.set_label("");
+        }
+    });
+    factory
+}
+
+// The headers of the sections of the list of performers; All Performers,
+// at the top, has none
+fn performer_section_factory() -> gtk::SignalListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        let label = gtk::Label::builder()
+            .xalign(0.0)
+            .css_classes(["caption-heading", "dim-label", "picker-section"])
+            .build();
+        header.set_child(Some(&label));
+    });
+    factory.connect_bind(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        let Some(label) = header.child().and_downcast::<gtk::Label>() else {
+            return;
+        };
+        let kind = header
+            .item()
+            .and_downcast::<glib::BoxedAnyObject>()
+            .and_then(|item| {
+                item.borrow::<Option<library::PerformerInfo>>()
+                    .as_ref()
+                    .map(|performer| performer.kind)
+            });
+        label.set_visible(kind.is_some());
+        label.set_label(&match kind {
+            Some(PerformerKind::Conductor) => i18n("Conductors"),
+            Some(PerformerKind::Ensemble) => i18n("Ensembles"),
+            Some(PerformerKind::Soloist) => i18n("Soloists"),
+            None => String::new(),
+        });
     });
     factory
 }
