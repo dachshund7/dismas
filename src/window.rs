@@ -1144,20 +1144,29 @@ impl Window {
     // Ctrl+C copies the details of the playing track, once the focused
     // widget has had the key: an accel would run before it, and take the
     // key from a search with text selected. Text without a selection turns
-    // its own copying off, so the key comes on to the window. Ctrl+Z
-    // presses the Undo of a toast likewise, after a search has undone its
-    // typing
+    // its own copying off, so the key comes on to the window.
+    //
+    // Ctrl+Z presses the Undo of a toast, before the focused widget has the
+    // key, as GTK's text takes it even with nothing to undo. A search with
+    // text keeps it, to undo its typing first
     fn setup_edit_shortcuts(&self) {
         let controller = gtk::ShortcutController::new();
         controller.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("<Control>c"),
             Some(gtk::NamedAction::new("win.copy")),
         ));
+        self.add_controller(controller);
+
+        let controller = gtk::ShortcutController::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         controller.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("<Control>z"),
             Some(gtk::CallbackAction::new(|widget, _| {
                 let win = widget.downcast_ref::<Window>().unwrap();
-                if win.press_undo() {
+                let in_text = win
+                    .focused_editable()
+                    .is_some_and(|entry| !entry.text().is_empty());
+                if !in_text && win.press_undo() {
                     glib::Propagation::Stop
                 } else {
                     glib::Propagation::Proceed
