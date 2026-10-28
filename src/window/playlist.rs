@@ -99,6 +99,22 @@ impl Window {
                     self,
                     move |start, end, ctrl| win.toggle_queue_work(start, end, ctrl)
                 ),
+                clone!(
+                    #[weak(rename_to = win)]
+                    self,
+                    move |widget: &gtk::Widget, x, y, start| {
+                        let track = win
+                            .imp()
+                            .playlist_view
+                            .queue_view()
+                            .model()
+                            .and_then(|model| model.item(start))
+                            .and_downcast::<Track>();
+                        if let Some(track) = track {
+                            win.show_work_menu(widget, x, y, &track);
+                        }
+                    }
+                ),
                 // While a search hides tracks, they can't be moved, as with
                 // the rows
                 Some((

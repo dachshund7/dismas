@@ -1118,6 +1118,13 @@ fn query_works(
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkInfo>> {
+    let rows = query_work_rows(conn, filter, None, hidden)?;
+    Ok(works_of_rows(&rows))
+}
+
+// The works of the rows with a recording that the filter matches, sorted
+// as in `works()`
+fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
     // The recordings of a work that the filter matches, and how often each
     // of its names is given, by all its tracks
     #[derive(Default)]
@@ -1134,9 +1141,8 @@ fn query_works(
         }
     };
 
-    let rows = query_work_rows(conn, filter, None, hidden)?;
     let mut seen: HashMap<String, Seen> = HashMap::new();
-    for recording in recordings_of_works(&rows) {
+    for recording in recordings_of_works(rows) {
         let rows: Vec<&WorkRow> = recording.into_iter().map(|i| &rows[i]).collect();
         let Some(key) = &rows[0].work else {
             continue;
@@ -1181,7 +1187,48 @@ fn query_works(
         })
         .collect();
     works.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
-    Ok(works.into_iter().map(|(_, info)| info).collect())
+    works.into_iter().map(|(_, info)| info).collect()
+}
+
+// The work of a track, if it's part of one in the library, and the number
+// of its other recordings, without the tracks in the `hidden` folders
+pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<(WorkInfo, u32)> {
+    match with_connection(|conn| query_track_work(conn, path, hidden)) {
+        Ok(work) => work,
+        Err(e) => {
+            warn!("Unable to look up the work of a track: {e}");
+            None
+        }
+    }
+}
+
+fn query_track_work(
+    conn: &Connection,
+    path: &Path,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<Option<(WorkInfo, u32)>> {
+    let key: Option<String> = conn
+        .query_row(
+            "SELECT work_key FROM tracks WHERE path = ?1 AND work_key IS NOT NULL",
+            [path_bytes(path)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    let rows = query_work_rows(conn, &TrackFilter::default(), Some(&key), hidden)?;
+    let others = recordings_of_works(&rows)
+        .into_iter()
+        .filter(|recording| {
+            rows[recording[0]].work.as_deref() == Some(key.as_str())
+                && !recording.iter().any(|&i| rows[i].path == path)
+        })
+        .count();
+    let work = works_of_rows(&rows)
+        .into_iter()
+        .find(|work| work.key == key);
+    Ok(work.map(|work| (work, others as u32)))
 }
 
 // The recordings of a work that the filter matches, with all their
@@ -3899,6 +3946,22 @@ mod tests {
                 (None, strings(&["/m/B/04"]), String::new()),
                 (None, strings(&["/m/E/03"]), String::new()),
             ]
+        );
+        // The other recordings of the work of a track
+        let others = |path: &str| {
+            super::query_track_work(&conn, Path::new(path), &hidden)
+                .unwrap()
+                .map(|(work, others)| (work.name, others))
+        };
+        assert_eq!(
+            others("/m/B/04"),
+            Some(("Goldberg Variations".to_string(), 2))
+        );
+        assert_eq!(others("/m/A/01"), Some(("Requiem v B-moll".to_string(), 1)));
+        assert_eq!(others("/m/A/03"), None);
+        assert_eq!(
+            others("/m/Gone/01"),
+            Some(("Requiem v B-moll".to_string(), 2))
         );
         assert_eq!(
             recordings("kdf", &all),

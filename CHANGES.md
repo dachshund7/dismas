@@ -48,6 +48,10 @@ All notable changes to this project will be documented in this file.
   follows the search and the composer and performer picked. A work shows
   its recordings, each with its performers, the year and the album, to
   play one, add it, or go to its album
+- Other Recordings, in the menu of a track of a work and in the menu of
+  the header of a work, with a right click or a long press, shows all the
+  recordings of the work in the music folders, with the track's own among
+  them
 - Searching the queue and the albums also finds tracks by the names that
   the Work Hierarchy plugin gives their works, the works those are part
   of and the collections they're in, such as "Well-Tempered" for the

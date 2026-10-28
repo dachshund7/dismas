@@ -186,6 +186,16 @@ mod imp {
                             f64::static_type(),
                         ])
                         .build(),
+                    // The menu of a work, at a point of its header, with
+                    // its first movement
+                    Signal::builder("work-menu-requested")
+                        .param_types([
+                            gtk::Widget::static_type(),
+                            f64::static_type(),
+                            f64::static_type(),
+                            Track::static_type(),
+                        ])
+                        .build(),
                     // The menu of a recording of a work, at a point of its
                     // header, with the positions of its first track and
                     // past its last one
@@ -253,6 +263,23 @@ impl AlbumTracks {
             false,
             glib::closure_local!(move |view: &Self, row: &QueueRow, x: f64, y: f64| f(
                 view, row, x, y
+            )),
+        )
+    }
+
+    pub fn connect_work_menu_requested<F: Fn(&Self, &gtk::Widget, f64, f64, &Track) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "work-menu-requested",
+            false,
+            glib::closure_local!(move |view: &Self,
+                                       widget: &gtk::Widget,
+                                       x: f64,
+                                       y: f64,
+                                       track: &Track| f(
+                view, widget, x, y, track
             )),
         )
     }
@@ -339,6 +366,22 @@ impl AlbumTracks {
                 #[weak(rename_to = this)]
                 self,
                 move |start, end, ctrl| this.toggle_work(start, end, ctrl)
+            ),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |widget: &gtk::Widget, x, y, start| {
+                    let track = this
+                        .imp()
+                        .tracks
+                        .borrow()
+                        .as_ref()
+                        .and_then(|tracks| tracks.item(start))
+                        .and_downcast::<Track>();
+                    if let Some(track) = track {
+                        this.emit_by_name::<()>("work-menu-requested", &[widget, &x, &y, &track]);
+                    }
+                }
             ),
             None::<(fn() -> bool, fn(&Track, u32))>,
         );

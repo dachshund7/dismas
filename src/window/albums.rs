@@ -132,6 +132,80 @@ impl Window {
         ));
     }
 
+    // An item of a menu that shows the recordings of the work of a track in
+    // the sidebar, with the number of the others; the work is looked up
+    // while the menu opens, and the item stays off for a track that isn't
+    // in the library, or whose work has no other recording. Its own
+    // recording is among them, and the track flashes
+    pub(super) fn add_other_recordings_item(
+        &self,
+        section: &gio::Menu,
+        actions: &gio::SimpleActionGroup,
+        prefix: &str,
+        track: &Track,
+    ) {
+        let work: Rc<RefCell<Option<library::WorkInfo>>> = Rc::default();
+        let action = gio::SimpleAction::new("other-recordings", None);
+        action.set_enabled(false);
+        action.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            work,
+            #[strong]
+            track,
+            move |_, _| {
+                if let Some(work) = work.borrow().as_ref() {
+                    win.show_work_recordings(work, &TrackFilter::default(), Some(&track.file()));
+                }
+            }
+        ));
+        actions.add_action(&action);
+        let position = section.n_items();
+        let detailed = format!("{prefix}.other-recordings");
+        section.append(Some(&i18n("Other Recordings")), Some(&detailed));
+
+        let Some(path) = track.file().path() else {
+            return;
+        };
+        let hidden = self.imp().library_view.hidden_folders();
+        glib::spawn_future_local(clone!(
+            #[weak]
+            action,
+            #[weak]
+            section,
+            async move {
+                let found = gio::spawn_blocking(move || library::track_work(&path, &hidden))
+                    .await
+                    .ok()
+                    .flatten();
+                let Some((info, others)) = found.filter(|(_, others)| *others > 0) else {
+                    return;
+                };
+                work.replace(Some(info));
+                section.remove(position);
+                let label = i18n_k(
+                    // Translators: `{n}` must be left unmodified; it is
+                    // expanded to the number of the other recordings of
+                    // the work of a track in the music folders
+                    "Other Recordings ({n})",
+                    &[("n", &others.to_string())],
+                );
+                section.insert(position, Some(&label), Some(&detailed));
+                action.set_enabled(true);
+            }
+        ));
+    }
+
+    // The menu of a work, at a point of its header in the queue or among
+    // the tracks of an album, with its first movement
+    pub(super) fn show_work_menu(&self, widget: &gtk::Widget, x: f64, y: f64, track: &Track) {
+        let actions = gio::SimpleActionGroup::new();
+        let section = gio::Menu::new();
+        self.add_other_recordings_item(&section, &actions, "work", track);
+        popup_menu(&section, "work", &actions, widget, x, y);
+    }
+
     // Plays tracks of the sidebar in place of the queue, from the one at
     // `start`, as an album's Play button does
     fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
@@ -376,6 +450,11 @@ impl Window {
                 let (files, start) = album_tracks.files_to_play(pos);
                 win.play_shown_tracks(files, start);
             }
+        ));
+        album_tracks.connect_work_menu_requested(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, widget, x, y, track| win.show_work_menu(widget, x, y, track)
         ));
         album_tracks.connect_recording_menu_requested(clone!(
             #[weak(rename_to = win)]

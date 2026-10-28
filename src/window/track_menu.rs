@@ -143,6 +143,11 @@ impl Window {
             section.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
         }
 
+        // A track of a work, unless the work's recordings are showing
+        if track.credit_details().work.is_some() && (in_queue || !album_tracks.shows_work()) {
+            self.add_other_recordings_item(&section, &actions, "track", &track);
+        }
+
         let info = gio::SimpleAction::new("info", None);
         info.connect_activate(clone!(
             #[weak(rename_to = win)]

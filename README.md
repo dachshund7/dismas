@@ -64,7 +64,9 @@ What Dismas adds
   performer shows the albums where they meet. Works, under the search,
   lists the works instead of the albums, by composer, with the number of
   their recordings; open one to compare its recordings, with their
-  performers and years, and play one.
+  performers and years, and play one. Other Recordings, in the menu of a
+  movement, shows the recordings of its work next to whatever you're
+  doing.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
   the Playlists page. Add to Playlist, in the menu of a track, adds it to
