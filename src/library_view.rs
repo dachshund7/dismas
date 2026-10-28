@@ -1190,6 +1190,10 @@ impl LibraryView {
                 search: imp.composer_search.get(),
                 list: imp.composer_list.get(),
                 read: library::composers,
+                others: |filter| TrackFilter {
+                    composer: None,
+                    ..filter
+                },
                 search_text: |composer: &library::ComposerInfo| &composer.search,
                 pick: Self::set_composer,
             },
@@ -1213,6 +1217,10 @@ impl LibraryView {
                 search: imp.performer_search.get(),
                 list: imp.performer_list.get(),
                 read: library::performers,
+                others: |filter| TrackFilter {
+                    performer: None,
+                    ..filter
+                },
                 search_text: |performer: &library::PerformerInfo| &performer.search,
                 pick: Self::set_performer,
             },
@@ -1224,7 +1232,10 @@ impl LibraryView {
     }
 
     // Sets up a list to pick from: it's read each time it opens, as the
-    // albums can change, with None, for all of them, first. Its search
+    // albums can change, with None, for all of them, first. It only has the
+    // items with a track that the search and the other picks match, so that
+    // a composer's list of performers has only theirs, and the other way
+    // round, and its counts are of those albums. Its search
     // finds the items by their `search_text`, and Enter takes the first one
     // found. The `sections` sorter, if any, divides the list into sections,
     // which the list is already sorted by
@@ -1238,6 +1249,7 @@ impl LibraryView {
             search,
             list,
             read,
+            others,
             search_text,
             pick,
         } = picker;
@@ -1316,13 +1328,14 @@ impl LibraryView {
                 search.set_text("");
                 search.grab_focus();
                 let hidden = this.imp().hidden_folders.borrow().clone();
+                let filter = others(this.wanted_filter());
                 glib::spawn_future_local(clone!(
                     #[weak]
                     store,
                     #[weak]
                     list,
                     async move {
-                        let items = gio::spawn_blocking(move || read(&hidden))
+                        let items = gio::spawn_blocking(move || read(&hidden, &filter))
                             .await
                             .unwrap_or_default();
                         let items: Vec<glib::BoxedAnyObject> = std::iter::once(None)
@@ -2076,8 +2089,12 @@ struct Picker<T> {
     popover: gtk::Popover,
     search: gtk::SearchEntry,
     list: gtk::ListView,
-    // Reads the items, in another thread, without the hidden folders
-    read: fn(&[PathBuf]) -> Vec<T>,
+    // Reads the items, in another thread, without the hidden folders,
+    // those of the tracks the filter matches
+    read: fn(&[PathBuf], &TrackFilter) -> Vec<T>,
+    // The filter of the items that go with the others picked and the
+    // search: the one of the albums shown, without the item picked
+    others: fn(TrackFilter) -> TrackFilter,
     // The text, normalized, that the list's search looks into
     search_text: fn(&T) -> &str,
     // Shows the albums of the item picked, or of all of them

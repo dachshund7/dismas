@@ -61,7 +61,8 @@ What Dismas adds
   their albums, with only the tracks that are theirs. The Performers button
   next to it does the same for the conductors, the ensembles and the
   soloists, with what they play or sing, and picking a composer and a
-  performer shows the albums where they meet. The Works page, next to the
+  performer shows the albums where they meet; once one is picked, the
+  other list has only the names that go with it. The Works page, next to the
   albums, lists the works instead, by composer, with the number of their
   recordings, and keeps the search and what you picked; open one to compare
   its recordings, with their performers and years, and play one. Other Recordings, in the menu of a
