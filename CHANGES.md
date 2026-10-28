@@ -120,6 +120,9 @@ All notable changes to this project will be documented in this file.
   the text selected
 - On a touchscreen, a flick that started on the name of a work, over its
   movements, didn't scroll the list
+- Screen readers found no name for the seek bar, the volume slider or the
+  album search, read the time played as "Elapsed time" rather than the time,
+  and read a playing icon on every track of the playlist
 
 ### Removed
 

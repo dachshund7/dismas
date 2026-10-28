@@ -19,6 +19,10 @@ template $DismasVolumeControl: Widget {
   Scale volume_scale {
     hexpand: true;
     margin-end: 6;
+
+    accessibility {
+      label: C_("a11y", "Volume");
+    }
   }
 
   Image volume_high_image {

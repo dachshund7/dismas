@@ -1269,6 +1269,32 @@ impl AlbumTracks {
                     ),
                     None => title,
                 });
+
+                // The buttons say which recording they're for, to a screen
+                // reader going from one header to the next
+                let name = if recording.performers.is_empty() {
+                    album.label().to_string()
+                } else {
+                    recording.performers.clone()
+                };
+                let play = text.next_sibling();
+                let more = play.as_ref().and_then(gtk::Widget::next_sibling);
+                if let (Some(play), Some(more)) = (play, more) {
+                    play.update_property(&[gtk::accessible::Property::Label(&i18n_k(
+                        // Translators: `{recording}` must be left unmodified;
+                        // it is expanded to the performers of a recording of
+                        // a work, or else to its album
+                        "Play the recording by {recording}",
+                        &[("recording", &name)],
+                    ))]);
+                    more.update_property(&[gtk::accessible::Property::Label(&i18n_k(
+                        // Translators: `{recording}` must be left unmodified;
+                        // it is expanded to the performers of a recording of
+                        // a work, or else to its album
+                        "Options for the recording by {recording}",
+                        &[("recording", &name)],
+                    ))]);
+                }
             }
         ));
         factory.upcast()

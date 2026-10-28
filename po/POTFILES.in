@@ -34,6 +34,7 @@ src/window.rs
 src/window/adding.rs
 src/window/albums.rs
 src/window/loading.rs
+src/window/now_playing.rs
 src/window/playlist.rs
 src/window/selected_playlist.rs
 src/window/selection.rs

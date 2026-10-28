@@ -89,6 +89,10 @@ template $DismasWindow: Adw.ApplicationWindow {
 
                       $DismasWaveformView waveform_view {
                         can-focus: "true";
+
+                        accessibility {
+                          label: C_("a11y", "Position");
+                        }
                       }
 
                       // In place of the waveform, without the "show-waveform"
@@ -101,6 +105,10 @@ template $DismasWindow: Adw.ApplicationWindow {
                           step-increment: 0.05;
                           page-increment: 0.05;
                         };
+
+                        accessibility {
+                          label: C_("a11y", "Position");
+                        }
                       }
 
                       CenterBox {
@@ -111,8 +119,9 @@ template $DismasWindow: Adw.ApplicationWindow {
                         Label elapsed_label {
                           label: "0:00";
 
+                          // Its name is the time, which this describes
                           accessibility {
-                            label: C_("a11y", "Elapsed time");
+                            description: C_("a11y", "Elapsed time");
                           }
 
                           styles [
@@ -125,8 +134,9 @@ template $DismasWindow: Adw.ApplicationWindow {
                         Label remaining_label {
                           label: "0:00";
 
+                          // Its name is the time, which this describes
                           accessibility {
-                            label: C_("a11y", "Remaining time");
+                            description: C_("a11y", "Remaining time");
                           }
 
                           styles [

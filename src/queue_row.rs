@@ -131,6 +131,7 @@ mod imp {
             self.parent_constructed();
 
             self.obj().init_widgets();
+            self.obj().update_playing();
         }
 
         fn signals() -> &'static [Signal] {
@@ -702,7 +703,10 @@ impl QueueRow {
         )
     }
 
-    // The current track shows a pause icon while the player is paused
+    // The current track shows a pause icon while the player is paused. The
+    // icon of the other rows is see-through, to keep its room, so it has no
+    // name there, as a screen reader would read it on every row; GTK still
+    // presents an icon with the hidden state
     fn update_playing_icon(&self) {
         let imp = self.imp();
         let (icon, label) = if imp.paused.get() {
@@ -714,14 +718,20 @@ impl QueueRow {
             )
         };
         imp.track_playing_image.set_icon_name(Some(icon));
-        imp.track_playing_image
-            .update_property(&[gtk::accessible::Property::Label(&label)]);
+        if imp.playing.get() {
+            imp.track_playing_image
+                .update_property(&[gtk::accessible::Property::Label(&label)]);
+        } else {
+            imp.track_playing_image
+                .reset_property(gtk::AccessibleProperty::Label);
+        }
     }
 
     fn update_playing(&self) {
         let imp = self.imp();
         let opacity = if imp.playing.get() { 1.0 } else { 0.0 };
         imp.track_playing_image.set_opacity(opacity);
+        self.update_playing_icon();
     }
 
     // Selected rows are highlighted in selection mode, in place of a

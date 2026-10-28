@@ -200,6 +200,29 @@ impl Window {
         } else {
             self.imp().remaining_label.set_text("0:00");
         }
+
+        // A screen reader reads the place in the track as times, rather than
+        // as the share of the track that the seek bars' values are
+        let imp = self.imp();
+        let seek_bars: [&gtk::Accessible; 2] =
+            [imp.waveform_view.upcast_ref(), imp.seek_scale.upcast_ref()];
+        for seek_bar in seek_bars {
+            match (elapsed, remaining) {
+                (Some(elapsed), Some(remaining)) => {
+                    seek_bar.update_property(&[gtk::accessible::Property::ValueText(&i18n_k(
+                        // Translators: `{elapsed}` and `{length}` must be left
+                        // unmodified; they are expanded to the time played of
+                        // a track and its length, as in "1:23 of 4:56"
+                        "{elapsed} of {length}",
+                        &[
+                            ("elapsed", &utils::format_duration(elapsed)),
+                            ("length", &utils::format_duration(elapsed + remaining)),
+                        ],
+                    ))]);
+                }
+                _ => seek_bar.reset_property(gtk::AccessibleProperty::ValueText),
+            }
+        }
     }
 
     pub fn set_track_position(&self, position: f64) {

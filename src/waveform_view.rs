@@ -62,6 +62,8 @@ mod imp {
         const NAME: &'static str = "DismasWaveformView";
         type Type = super::WaveformView;
         type ParentType = gtk::Widget;
+        // So that screen readers get its value, and can set it
+        type Interfaces = (gtk::AccessibleRange,);
 
         fn class_init(klass: &mut Self::Class) {
             klass.set_css_name("waveformview");
@@ -117,6 +119,16 @@ mod imp {
             obj.update_property(&[gtk::accessible::Property::ValueNow(pos)]);
             obj.queue_draw();
             obj.notify_position();
+        }
+    }
+
+    impl AccessibleImpl for WaveformView {}
+
+    impl AccessibleRangeImpl for WaveformView {
+        fn set_current_value(&self, value: f64) -> bool {
+            self.obj()
+                .emit_by_name::<()>("position-changed", &[&value.clamp(0.0, 1.0)]);
+            true
         }
     }
 
@@ -374,7 +386,7 @@ fn bar_state(edge: f64, cursor_pos: [f64; 2], is_rtl: bool) -> BarState {
 glib::wrapper! {
     pub struct WaveformView(ObjectSubclass<imp::WaveformView>)
         @extends gtk::Widget,
-        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+        @implements gtk::Accessible, gtk::AccessibleRange, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 fn ease_out_cubic(t: f64) -> f64 {

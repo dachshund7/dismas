@@ -57,9 +57,15 @@ template $DismasLibraryView: Widget {
         hexpand: true;
 
         child: Box {
+          // Its accessible label follows the placeholder, see
+          // `LibraryView::update_view()`
           SearchEntry search_entry {
             hexpand: true;
             placeholder-text: _("Search albums");
+
+            accessibility {
+              label: _("Search albums");
+            }
           }
 
           // The composers of the albums, to show only the albums of one;
