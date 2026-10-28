@@ -46,7 +46,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 15;
+const SCHEMA_VERSION: i32 = 16;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -77,7 +77,9 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         work_collection TEXT,
         work_composers TEXT,
         movement_order TEXT,
-        performers TEXT
+        performers TEXT,
+        label TEXT,
+        catalog_number TEXT
     );
     CREATE INDEX tracks_album ON tracks (album_id);
     CREATE INDEX tracks_file ON tracks (file);
@@ -130,11 +132,15 @@ pub struct AlbumInfo {
     pub artist: String,
     // The key the artist is sorted by
     pub artist_sort: String,
+    // The year its tracks were made, the earliest, see `TrackCredits::year()`
     pub year: Option<String>,
     // When the first track of the album was added, in seconds since the
     // epoch
     pub added: Option<i64>,
     pub cover: Option<String>,
+    // The record label, and the number it gives the release
+    pub label: Option<String>,
+    pub catalog_number: Option<String>,
 }
 
 // The tags we keep for each track
@@ -157,6 +163,9 @@ struct TrackTags {
     work: Option<WorkEntry>,
     // The conductors and performers, see `performer_entries()`
     performers: Option<String>,
+    // The first record label, and the first catalogue number
+    label: Option<String>,
+    catalog_number: Option<String>,
 }
 
 // The work of a track, as the library keeps it
@@ -571,7 +580,7 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
                          CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
                               ELSE MAX(t.artist) END),
                 MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added),
-                COUNT(DISTINCT t.artist)
+                COUNT(DISTINCT t.artist), MAX(t.label), MAX(t.catalog_number)
          FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
          WHERE t.album_id IS NOT NULL{hidden_sql}
          GROUP BY t.album_id"
@@ -599,6 +608,8 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
             year: row.get(3)?,
             added: row.get(6)?,
             cover: row.get(4)?,
+            label: row.get(8)?,
+            catalog_number: row.get(9)?,
         };
         let key = (
             key,
@@ -1739,9 +1750,10 @@ fn scan_with(
                 "INSERT OR REPLACE INTO tracks
                  (path, file, mtime, ctime, size, album_id, album, album_artist, artist,
                   artist_sort, year, disc, track, title, search, added, composers, work_key,
-                  work, work_title, work_collection, work_composers, movement_order, performers)
+                  work, work_title, work_collection, work_composers, movement_order, performers,
+                  label, catalog_number)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             )?;
             for source in chunk {
                 let key = path_bytes(&source.path);
@@ -1812,6 +1824,8 @@ fn scan_with(
                         work.and_then(|w| w.composers.as_ref()),
                         work.and_then(|w| w.order.as_ref()),
                         tags.performers,
+                        tags.label,
+                        tags.catalog_number,
                     ])?;
                     n_changed += 1;
                     if was_known {
@@ -2193,11 +2207,6 @@ impl TrackTags {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         let artist_sort = get(ItemKey::AlbumArtistSortOrder).filter(|s| !s.is_empty());
-        let year = get(ItemKey::RecordingDate)
-            .or_else(|| get(ItemKey::Year))
-            .or_else(|| get(ItemKey::ReleaseDate))
-            .map(|s| s.chars().take(4).collect::<String>())
-            .filter(|s| !s.is_empty());
 
         // The release id from MusicBrainz tells apart albums with the same
         // name; without it, we use the album artist, so the discs of an
@@ -2257,7 +2266,7 @@ impl TrackTags {
             album_artist: album_artist.as_deref().map(plain_commas),
             artist: artist.as_deref().map(plain_commas),
             artist_sort,
-            year,
+            year: credits.year(),
             disc: tag.disk(),
             track: tag.track(),
             title,
@@ -2265,6 +2274,8 @@ impl TrackTags {
             composers: composer_entries(&names, &sorts),
             work: work_entry(&credits, artist.as_deref(), &names, &sorts),
             performers: performer_entries(&credits.listed_performers()),
+            label: credits.labels.first().cloned(),
+            catalog_number: credits.catalog_numbers.first().cloned(),
         }
     }
 }
@@ -3971,5 +3982,47 @@ mod tests {
                 String::new()
             )]
         );
+    }
+
+    #[test]
+    fn albums_have_the_year_they_were_made_and_their_label() {
+        use lofty::tag::{ItemKey, Tag, TagType};
+
+        use super::ExtraComments;
+
+        // A reissue goes by its first release, and a recording date first
+        let path = Path::new("/music/Cello Suites/01.flac");
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::RecordingDate, "2007-03-01".to_string());
+        tag.insert_text(ItemKey::OriginalReleaseDate, "1961".to_string());
+        tag.insert_text(ItemKey::Label, "Hyperion".to_string());
+        tag.insert_text(ItemKey::CatalogNumber, "CDA67100".to_string());
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &ExtraComments::default());
+        assert_eq!(tags.year.as_deref(), Some("1961"));
+        assert_eq!(tags.label.as_deref(), Some("Hyperion"));
+        assert_eq!(tags.catalog_number.as_deref(), Some("CDA67100"));
+        let extra = ExtraComments::with_recording_date("1960-05/1960-06");
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &extra);
+        assert_eq!(tags.year.as_deref(), Some("1960"));
+
+        // The album has the earliest year of its tracks, and its label
+        let conn = test_db();
+        for (path, year, label) in [
+            ("/m/A/01", "1961", Some("Hyperion")),
+            ("/m/A/02", "1960", None),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album, year,
+                                     label, catalog_number)
+                 VALUES (?1, ?1, 0, 0, 0, 0, 'a', 'Cello Suites', ?2, ?3, 'CDA67100')",
+                rusqlite::params![path.as_bytes(), year, label],
+            )
+            .unwrap();
+        }
+        let albums = super::query_albums(&conn, &[]).unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].year.as_deref(), Some("1960"));
+        assert_eq!(albums[0].label.as_deref(), Some("Hyperion"));
+        assert_eq!(albums[0].catalog_number.as_deref(), Some("CDA67100"));
     }
 }

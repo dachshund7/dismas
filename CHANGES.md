@@ -46,8 +46,8 @@ All notable changes to this project will be documented in this file.
 - Works, under the album search, lists the works of the albums under the
   names of their composers, with the number of their recordings, and
   follows the search and the composer and performer picked. A work shows
-  its recordings, each with its performers, the year and the album, to
-  play one, add it, or go to its album
+  its recordings, oldest first, each with its performers, the year it was
+  made and the album, to play one, add it, or go to its album
 - Other Recordings, in the menu of a track of a work and in the menu of
   the header of a work, with a right click or a long press, shows all the
   recordings of the work in the music folders, with the track's own among
@@ -56,11 +56,18 @@ All notable changes to this project will be documented in this file.
   the Work Hierarchy plugin gives their works, the works those are part
   of and the collections they're in, such as "Well-Tempered" for the
   Preludes and Fugues
+- Track Information says when a track was recorded, from the
+  RECORDINGDATE tag that the Work Hierarchy plugin writes from MusicBrainz
 
 ### Changed
 
+- The year of an album, which the grid can be sorted by, is when its
+  tracks were recorded, if their tags say, or else when they were first
+  released, rather than the year of a reissue
+
 - The music folders are read again once after updating, as the library
-  now keeps the composers, the works and the performers of each track
+  now keeps the composers, the works and the performers of each track,
+  and when it was made
 - Scan the Music Folders moved from the main menu to Preferences, as Scan
   Now, as the music folders are watched
 - Whole Albums is filled with the accent color while it's on, like the

@@ -15,6 +15,9 @@ use super::*;
 pub struct ExtraComments {
     // The JSON written by the "Work Hierarchy" plugin of MusicBrainz Picard
     pub(super) work_hierarchy: Option<String>,
+    // When the track was recorded, which the same plugin writes from
+    // MusicBrainz, e.g. "1937-11-08/1938-03-08"
+    pub(super) recording_date: Option<String>,
     // A CUE sheet that splits the file into tracks
     pub cue_sheet: Option<String>,
     // The names of the composers to sort them by, e.g. "Bach, Johann
@@ -31,6 +34,9 @@ pub struct ExtraComments {
 // named after it in MP4 files
 const WORK_HIERARCHY: &str = "work_hierarchy";
 
+// The name of the tag with the recording date, written the same way
+const RECORDING_DATE: &str = "recordingdate";
+
 impl ExtraComments {
     // The items of a file with a "Work Hierarchy" tag, for the tests of
     // other modules
@@ -42,10 +48,21 @@ impl ExtraComments {
         }
     }
 
+    // The items of a file with a recording date, for the tests of other
+    // modules
+    #[cfg(test)]
+    pub fn with_recording_date(date: &str) -> Self {
+        ExtraComments {
+            recording_date: Some(date.to_string()),
+            ..Default::default()
+        }
+    }
+
     pub(super) fn from_vorbis(comments: Option<&VorbisComments>) -> Self {
         let get = |key| comments.and_then(|c| c.get(key)).map(ToString::to_string);
         ExtraComments {
             work_hierarchy: get("WORK_HIERARCHY"),
+            recording_date: get("RECORDINGDATE"),
             cue_sheet: get("CUESHEET"),
             composer_sort: comments
                 .map(|c| c.get_all("COMPOSERSORT").map(ToString::to_string).collect())
@@ -65,6 +82,7 @@ impl ExtraComments {
         };
         ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
+            recording_date: get(RECORDING_DATE),
             cue_sheet: get("Cuesheet"),
             // Several values are separated by nul characters
             composer_sort: get("ComposerSort")
@@ -73,28 +91,40 @@ impl ExtraComments {
         }
     }
 
+    // The descriptions of "TXXX" frames are compared as they are, and other
+    // taggers write them in capitals
     pub(super) fn from_id3v2(tag: Option<&Id3v2Tag>) -> Self {
+        let get = |name: &str| {
+            let tag = tag?;
+            tag.get_user_text(name)
+                .or_else(|| tag.get_user_text(&name.to_uppercase()))
+                .map(ToString::to_string)
+        };
         ExtraComments {
-            work_hierarchy: tag
-                .and_then(|tag| tag.get_user_text(WORK_HIERARCHY))
-                .map(ToString::to_string),
+            work_hierarchy: get(WORK_HIERARCHY),
+            recording_date: get(RECORDING_DATE),
             ..Default::default()
         }
     }
 
     pub(super) fn from_mp4(ilst: Option<&Ilst>) -> Self {
-        let ident = AtomIdent::Freeform {
-            mean: "com.apple.iTunes".into(),
-            name: WORK_HIERARCHY.into(),
+        let get = |name: &str| {
+            [name.to_string(), name.to_uppercase()]
+                .into_iter()
+                .find_map(|name| {
+                    let ident = AtomIdent::Freeform {
+                        mean: "com.apple.iTunes".into(),
+                        name: name.into(),
+                    };
+                    ilst?.get(&ident)?.data().find_map(|data| match data {
+                        AtomData::UTF8(text) => Some(text.clone()),
+                        _ => None,
+                    })
+                })
         };
-        let work_hierarchy = ilst.and_then(|ilst| ilst.get(&ident)).and_then(|atom| {
-            atom.data().find_map(|data| match data {
-                AtomData::UTF8(text) => Some(text.clone()),
-                _ => None,
-            })
-        });
         ExtraComments {
-            work_hierarchy,
+            work_hierarchy: get(WORK_HIERARCHY),
+            recording_date: get(RECORDING_DATE),
             ..Default::default()
         }
     }

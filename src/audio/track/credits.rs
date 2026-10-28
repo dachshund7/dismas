@@ -129,6 +129,12 @@ pub struct TrackCredits {
     pub track_total: Option<u32>,
     pub date: Option<String>,
     pub original_date: Option<String>,
+    // The date of the release from the release date tag, which taggers
+    // other than Picard write
+    pub release_date: Option<String>,
+    // When the track was recorded, e.g. "1937-11-08/1938-03-08", which the
+    // "Work Hierarchy" plugin writes from MusicBrainz
+    pub recording_date: Option<String>,
     // The MusicBrainz release types, e.g. "album" and "live"
     pub release_types: Vec<String>,
     // The medium of the disc, e.g. "CD" or "Digital Media"
@@ -184,6 +190,12 @@ impl TrackCredits {
     // `tag`, so `extra` has the ones we need
     pub fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
         let mut credits = Self::from_tag_items(tag);
+        credits.recording_date = extra
+            .recording_date
+            .as_deref()
+            .map(str::trim)
+            .filter(|date| !date.is_empty())
+            .map(ToString::to_string);
         let hierarchy = extra
             .work_hierarchy
             .as_deref()
@@ -277,6 +289,10 @@ impl TrackCredits {
                 .get_strings(ItemKey::OriginalReleaseDate)
                 .max_by_key(|s| s.len())
                 .map(ToString::to_string),
+            release_date: tag
+                .get_string(ItemKey::ReleaseDate)
+                .map(ToString::to_string),
+            recording_date: None,
             release_types: tag_strings(tag, ItemKey::MusicBrainzReleaseType),
             media: tag_strings(tag, ItemKey::OriginalMediaType),
             release_country: tag
@@ -294,6 +310,27 @@ impl TrackCredits {
             musicbrainz: MusicBrainzIds::from_tag(tag),
             composer_ids: None,
         }
+    }
+
+    // The year the track was made, which the albums are sorted by and
+    // which is shown with them: the year it was recorded, or else the year
+    // it was first released, as the date of a reissue says nothing of the
+    // recording, or else the year of the release
+    pub fn year(&self) -> Option<String> {
+        [
+            &self.recording_date,
+            &self.original_date,
+            &self.date,
+            &self.release_date,
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|date| {
+            let year = date.trim().get(..4)?;
+            year.chars()
+                .all(|c| c.is_ascii_digit())
+                .then(|| year.to_string())
+        })
     }
 
     // The original release date, if it's not the same as the date, e.g.

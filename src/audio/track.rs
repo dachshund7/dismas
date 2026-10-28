@@ -1540,6 +1540,33 @@ mod tests {
         assert_eq!(dates(Some("2007"), None).distinct_original_date(), None);
     }
 
+    #[test]
+    fn the_year_is_the_recordings_or_the_first_releases() {
+        // A reissue goes by the first release
+        assert_eq!(
+            dates(Some("2007-03-01"), Some("1961")).year().as_deref(),
+            Some("1961")
+        );
+        assert_eq!(
+            dates(Some("2015-04-28"), None).year().as_deref(),
+            Some("2015")
+        );
+        // The recording date comes first, even a range of them
+        let recorded = TrackCredits {
+            recording_date: Some("1937-11-08/1938-03-08".to_string()),
+            ..dates(Some("1989"), Some("1938"))
+        };
+        assert_eq!(recorded.year().as_deref(), Some("1937"));
+        // A date that doesn't start with a year is skipped
+        let odd = TrackCredits {
+            recording_date: Some("autumn".to_string()),
+            release_date: Some("2020-01-17".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(odd.year().as_deref(), Some("2020"));
+        assert_eq!(TrackCredits::default().year(), None);
+    }
+
     // The tracks read from some files, as the queue gets them
     fn read_tracks(files: &[&std::path::Path]) -> Vec<Vec<super::TrackData>> {
         use super::{Claims, TrackData, loader::FileCache};

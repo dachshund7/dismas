@@ -123,6 +123,12 @@ impl TrackInfoDialog {
             };
             performance.push((role, vec![performer.name.clone()]));
         }
+        // From when to when, if the sessions took several days
+        let recorded = credits
+            .recording_date
+            .as_deref()
+            .map(|date| date.replace('/', " – "));
+        performance.push((i18n("Recorded"), recorded.into_iter().collect()));
         fill_group(&imp.performance_group, &performance);
 
         let production = [

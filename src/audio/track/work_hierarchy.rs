@@ -1055,6 +1055,54 @@ mod tests {
         );
         assert_eq!(ExtraComments::from_mp4(None).work_hierarchy, None);
         assert_eq!(ExtraComments::from_ape(None).work_hierarchy, None);
+
+        // The recording date the plugin writes, the same way
+        let date = "1937-11-08/1938-03-08";
+        let mut comments = lofty::ogg::tag::VorbisComments::default();
+        comments.push("RECORDINGDATE".to_string(), date.to_string());
+        assert_eq!(
+            ExtraComments::from_vorbis(Some(&comments))
+                .recording_date
+                .as_deref(),
+            Some(date)
+        );
+        let mut ape = ApeTag::new();
+        ape.insert(
+            ApeItem::new(
+                "Recordingdate".to_string(),
+                ItemValue::Text(date.to_string()),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            ExtraComments::from_ape(Some(&ape))
+                .recording_date
+                .as_deref(),
+            Some(date)
+        );
+        // In capitals, as other taggers write it
+        let mut id3v2 = Id3v2Tag::new();
+        let _ = id3v2.insert_user_text("RECORDINGDATE".to_string(), date.to_string());
+        assert_eq!(
+            ExtraComments::from_id3v2(Some(&id3v2))
+                .recording_date
+                .as_deref(),
+            Some(date)
+        );
+        let mut ilst = Ilst::new();
+        ilst.insert(Atom::new(
+            AtomIdent::Freeform {
+                mean: "com.apple.iTunes".into(),
+                name: "recordingdate".into(),
+            },
+            AtomData::UTF8(date.to_string()),
+        ));
+        assert_eq!(
+            ExtraComments::from_mp4(Some(&ilst))
+                .recording_date
+                .as_deref(),
+            Some(date)
+        );
     }
 
     #[test]

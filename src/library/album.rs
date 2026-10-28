@@ -64,6 +64,11 @@ mod imp {
         pub year: RefCell<Option<String>>,
         #[property(get)]
         pub cover_path: RefCell<Option<String>>,
+        // The record label, and the number it gives the release
+        #[property(get)]
+        pub label: RefCell<Option<String>>,
+        #[property(get)]
+        pub catalog_number: RefCell<Option<String>>,
         // Whether the album is selected in the grid
         #[property(get, set)]
         pub selected: Cell<bool>,
@@ -103,6 +108,8 @@ impl Album {
         imp.artist.replace(info.artist);
         imp.year.replace(info.year);
         imp.cover_path.replace(info.cover);
+        imp.label.replace(info.label);
+        imp.catalog_number.replace(info.catalog_number);
         imp.added.set(info.added);
         let _ = imp
             .artist_key
@@ -161,6 +168,8 @@ mod tests {
             year: year.map(str::to_string),
             added,
             cover: None,
+            label: None,
+            catalog_number: None,
         })
     }
 
