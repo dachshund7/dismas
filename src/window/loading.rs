@@ -3,7 +3,7 @@
 
 use super::selected_playlist::start_in_music_folder;
 use super::*;
-use crate::cue_sheet;
+use crate::{cue_sheet, library};
 
 impl Window {
     // Called once the queue of the last session, or the files the
@@ -1047,9 +1047,15 @@ fn audio_files(files: Vec<gio::File>) -> Vec<gio::File> {
                         queue.push(file);
                     }
                 }
+                // Without the hidden folders and recycle bins in it, as
+                // the root of a drive has
                 gio::FileType::Directory => {
                     debug!("Adding folder '{}' to the queue", file.uri());
-                    queue.extend(utils::load_files_from_folder(&file, true));
+                    queue.extend(utils::load_files_from_folder_filtered(
+                        &file,
+                        true,
+                        &library::is_library_entry,
+                    ));
                 }
                 _ => (),
             }

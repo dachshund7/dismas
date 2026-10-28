@@ -529,6 +529,7 @@ pub fn file_name_key(name: &str) -> (bool, glib::FilenameCollationKey) {
     )
 }
 
+#[cfg(test)]
 pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::File> {
     load_files_from_folder_filtered(folder, recursive, &|_| true)
 }

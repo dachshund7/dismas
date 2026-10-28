@@ -418,14 +418,26 @@ pub fn is_available(path: &Path) -> bool {
 }
 
 // Hidden files and folders aren't part of the library, like the trash of
-// a drive, which keeps deleted files under their own names, and neither is
-// Windows' recycle bin
-fn is_library_entry(path: &Path) -> bool {
+// a drive, which keeps deleted files under their own names, and neither
+// are the recycle bins of Windows and of network drives, nor their
+// snapshots, which keep copies of the files, nor Synology's thumbnails
+pub fn is_library_entry(path: &Path) -> bool {
+    const LEFT_OUT: [&[u8]; 6] = [
+        b"$recycle.bin",
+        b"recycler",
+        b"#recycle",
+        b"#snapshot",
+        b"@recycle",
+        b"@eadir",
+    ];
     let Some(name) = path.file_name() else {
         return true;
     };
     let name = name.as_encoded_bytes();
-    !name.starts_with(b".") && name != b"$RECYCLE.BIN"
+    !name.starts_with(b".")
+        && !LEFT_OUT
+            .iter()
+            .any(|left_out| name.eq_ignore_ascii_case(left_out))
 }
 
 fn data_dir() -> PathBuf {
@@ -3404,13 +3416,23 @@ mod tests {
         use crate::utils::write_test_wav;
 
         let dir = test_dir("hidden");
-        for folder in ["Album", ".Trash-1000/files", "$RECYCLE.BIN"] {
+        for folder in [
+            "Album",
+            ".Trash-1000/files",
+            "$Recycle.Bin",
+            "#recycle",
+            "#snapshot/daily",
+            "Album/@eaDir",
+        ] {
             std::fs::create_dir_all(dir.join(folder)).unwrap();
         }
         write_test_wav(&dir.join("Album/One.wav"), 1);
         write_test_wav(&dir.join("Album/.Two.wav"), 1);
         write_test_wav(&dir.join(".Trash-1000/files/Three.wav"), 1);
-        write_test_wav(&dir.join("$RECYCLE.BIN/$R4ND0M.wav"), 1);
+        write_test_wav(&dir.join("$Recycle.Bin/$R4ND0M.wav"), 1);
+        write_test_wav(&dir.join("#recycle/Four.wav"), 1);
+        write_test_wav(&dir.join("#snapshot/daily/One.wav"), 1);
+        write_test_wav(&dir.join("Album/@eaDir/One.wav"), 1);
 
         let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();

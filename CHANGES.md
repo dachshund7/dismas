@@ -155,6 +155,10 @@ All notable changes to this project will be documented in this file.
   "2", and the discs of an album in folders of their own, without disc
   numbers, played with their tracks mixed together: the first track of
   each disc, then the second of each
+- Adding or dropping a folder, like the root of a drive, also added the
+  tracks in its trash and other hidden folders, and the recycle bins and
+  snapshots of network drives (`#recycle`, `#snapshot`, `@Recycle`) showed
+  in the album grid
 
 ### Removed
 
