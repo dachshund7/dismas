@@ -49,6 +49,7 @@ use crate::{
 };
 
 mod credits;
+pub mod discovered;
 mod file_name;
 mod loader;
 mod lofty_gaps;

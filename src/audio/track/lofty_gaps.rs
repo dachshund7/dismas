@@ -143,7 +143,7 @@ mod tests {
     use super::*;
 
     // The formats GStreamer plays that lofty can't read, which a survey of
-    // the formats found
+    // the formats found, and which `discovered` reads with GStreamer
     const UNREAD_EXTENSIONS: [&str; 7] = ["oga", "mka", "wma", "tta", "ac3", "dts", "au"];
 
     // The start of an Ogg FLAC file: an Ogg page whose first packet is the
@@ -168,15 +168,16 @@ mod tests {
             assert_eq!(
                 FileType::from_ext(ext),
                 None,
-                "lofty now knows .{ext}: give its FileType an arm in read_tagged_file and a \
-                 name in format_name, and drop it from UNREAD_EXTENSIONS"
+                "lofty now knows .{ext}, whose files it reads rather than GStreamer: give its \
+                 FileType an arm in read_tagged_file and a name in format_name, and drop it \
+                 from UNREAD_EXTENSIONS"
             );
         }
         assert_eq!(
             FileType::from_buffer(&ogg_flac_header()),
             None,
-            "lofty now reads Ogg FLAC: give its FileType an arm in read_tagged_file and a \
-             name in format_name"
+            "lofty now reads Ogg FLAC, rather than GStreamer: give its FileType an arm in \
+             read_tagged_file and a name in format_name"
         );
     }
 

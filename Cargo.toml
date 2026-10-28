@@ -57,6 +57,17 @@ version = "0.25"
 package = "gstreamer-play"
 version = "0.25"
 
+# Discovers the files that lofty can't read, with their tags; the
+# container's tags need GStreamer 1.20
+[dependencies.gst-pbutils]
+package = "gstreamer-pbutils"
+version = "0.25"
+features = ["v1_20"]
+
+[dependencies.gst-tag]
+package = "gstreamer-tag"
+version = "0.25"
+
 # Some lints from the pedantic group, whose fixes are mechanical
 [lints.clippy]
 uninlined_format_args = "warn"

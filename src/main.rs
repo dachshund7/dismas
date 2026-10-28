@@ -115,6 +115,25 @@ fn main() -> glib::ExitCode {
     }
     builder.init();
 
+    // Dismas started to read a file with GStreamer, for the Dismas that
+    // started it, which mustn't make an application: GApplication would
+    // pass the arguments on to the Dismas running
+    let args: Vec<_> = env::args_os().skip(1).collect();
+    if args
+        .first()
+        .is_some_and(|arg| arg == audio::discovered::CHILD_ARG)
+    {
+        return audio::discovered::child_main(&args[1..]);
+    }
+    // The child is Dismas itself. On Linux, it's the binary running, even
+    // if another was installed over it since, so that the two agree
+    #[cfg(target_os = "linux")]
+    audio::discovered::set_helper(PathBuf::from("/proc/self/exe"));
+    #[cfg(not(target_os = "linux"))]
+    if let Ok(exe) = env::current_exe() {
+        audio::discovered::set_helper(exe);
+    }
+
     // The path of the binary with its symbolic links resolved, so a link to
     // it, like the one the tarball's install.sh makes, finds the data too
     let paths = data_paths(env::current_exe().ok().as_deref(), Path::exists);

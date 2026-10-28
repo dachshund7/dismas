@@ -204,9 +204,31 @@ impl FileTags {
     }
 }
 
+impl FileTags {
+    // The tags of a file that lofty can't read, as Vorbis comments, read
+    // like those of an Ogg Vorbis file
+    pub(super) fn from_comments(
+        comments: VorbisComments,
+        properties: FileProperties,
+        format: Option<Cow<'static, str>>,
+    ) -> Self {
+        let LeftOut(extra, fills) = LeftOut::vorbis(Some(&comments));
+        let mut tag = Tag::from(comments);
+        fills.apply(&mut tag);
+        Self {
+            tag,
+            extra,
+            properties,
+            format,
+        }
+    }
+}
+
 // Opens a file and reads its tags, and the items in `ExtraComments` if it
-// has them; the options can leave out the covers and the properties
+// has them; the options can leave out the covers and the properties. A
+// file that lofty can't read, GStreamer may
 pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
+    let read_options = options;
     let options = options.parse_options();
     let probe = match Probe::open(path).map(|probe| probe.options(options).guess_file_type()) {
         Ok(Ok(probe)) => probe,
@@ -222,8 +244,12 @@ pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
     match read_tagged_file(probe, options) {
         Ok((file, left_out)) => Some(FileTags::new(file, left_out)),
         Err(e) => {
-            warn!("Unable to read file {path:?}: {e}");
-            None
+            let tags = discovered::discover(path, read_options);
+            match tags {
+                Some(_) => debug!("Read {path:?} with GStreamer, as lofty couldn't: {e}"),
+                None => warn!("Unable to read file {path:?}: {e}"),
+            }
+            tags
         }
     }
 }

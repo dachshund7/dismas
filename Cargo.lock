@@ -538,7 +538,9 @@ dependencies = [
  "glycin",
  "gstreamer",
  "gstreamer-audio",
+ "gstreamer-pbutils",
  "gstreamer-play",
+ "gstreamer-tag",
  "gtk4",
  "image",
  "itertools",
@@ -1443,6 +1445,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "gstreamer-pbutils"
+version = "0.25.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b72d09000974d928f66735a0332fc89af5b12d5d6a5897da29c664718655b72"
+dependencies = [
+ "glib",
+ "gstreamer",
+ "gstreamer-audio",
+ "gstreamer-pbutils-sys",
+ "gstreamer-video",
+ "libc",
+ "thiserror",
+]
+
+[[package]]
+name = "gstreamer-pbutils-sys"
+version = "0.25.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a06c546a11c9fa836a509a0383e7aa5a6d2603a115a2d375608610442b7283c"
+dependencies = [
+ "glib-sys",
+ "gobject-sys",
+ "gstreamer-audio-sys",
+ "gstreamer-sys",
+ "gstreamer-video-sys",
+ "libc",
+ "system-deps 9.0.1",
+]
+
+[[package]]
 name = "gstreamer-play"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1478,6 +1510,31 @@ dependencies = [
  "cfg-if",
  "glib-sys",
  "gobject-sys",
+ "libc",
+ "system-deps 9.0.1",
+]
+
+[[package]]
+name = "gstreamer-tag"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "790d1c673da71c87e9648d98e96cdd785784ae948a9728b95b2c7c10f6f4ee61"
+dependencies = [
+ "glib",
+ "gstreamer",
+ "gstreamer-tag-sys",
+ "libc",
+]
+
+[[package]]
+name = "gstreamer-tag-sys"
+version = "0.25.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae01f8c50fca5b69d7002337a4aefc81a3c5574da9232c80b5aaf2301b641647"
+dependencies = [
+ "glib-sys",
+ "gobject-sys",
+ "gstreamer-sys",
  "libc",
  "system-deps 9.0.1",
 ]
