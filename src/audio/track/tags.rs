@@ -6,6 +6,8 @@
 
 use std::{borrow::Cow, collections::HashSet};
 
+use lofty::{properties::FileProperties, tag::TagType};
+
 use super::*;
 
 // The Vorbis comments, APE items, ID3v2 frames and MP4 atoms that lofty
@@ -130,9 +132,67 @@ impl ExtraComments {
     }
 }
 
+// What to read of a file besides its tags
+#[derive(Debug, Clone, Copy)]
+pub struct ReadOptions {
+    pub covers: bool,
+    pub properties: bool,
+}
+
+impl ReadOptions {
+    pub const ALL: Self = Self {
+        covers: true,
+        properties: true,
+    };
+    // Without the covers and the properties, which the library doesn't keep
+    pub const TAGS: Self = Self {
+        covers: false,
+        properties: false,
+    };
+
+    // Each of lofty's setters returns a copy, so they're chained on a value
+    fn parse_options(self) -> ParseOptions {
+        ParseOptions::new()
+            .read_cover_art(self.covers)
+            .read_properties(self.properties)
+    }
+}
+
+// What the tracks of a file take from it, whatever its format
+pub struct FileTags {
+    // The tags of the file, the same in the queue, the album grid and the
+    // covers: its primary tag, or else its other tags together, as one can
+    // fill in for another, or else an empty tag
+    pub tag: Tag,
+    // The items lofty leaves out of the tag
+    pub extra: ExtraComments,
+    pub properties: FileProperties,
+    pub format: Option<Cow<'static, str>>,
+}
+
+impl FileTags {
+    // The tags are taken out of the file rather than copied, as they hold
+    // the covers
+    fn new(mut file: TaggedFile, extra: ExtraComments) -> Self {
+        let primary = file.primary_tag_type();
+        let tag = file.remove(primary).unwrap_or_else(|| {
+            let types: Vec<TagType> = file.tags().iter().map(Tag::tag_type).collect();
+            let tags = types.into_iter().filter_map(|t| file.remove(t)).collect();
+            merged_tag(tags).unwrap_or_else(|| Tag::new(primary))
+        });
+        Self {
+            tag,
+            extra,
+            properties: file.properties().clone(),
+            format: format_name(file.file_type()).map(Cow::Borrowed),
+        }
+    }
+}
+
 // Opens a file and reads its tags, and the items in `ExtraComments` if it
 // has them; the options can leave out the covers and the properties
-pub fn read_file_tags(path: &Path, options: ParseOptions) -> Option<(TaggedFile, ExtraComments)> {
+pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
+    let options = options.parse_options();
     let probe = match Probe::open(path).map(|probe| probe.options(options).guess_file_type()) {
         Ok(Ok(probe)) => probe,
         Ok(Err(e)) => {
@@ -145,7 +205,7 @@ pub fn read_file_tags(path: &Path, options: ParseOptions) -> Option<(TaggedFile,
         }
     };
     match read_tagged_file(probe, options) {
-        Ok(file) => Some(file),
+        Ok((file, extra)) => Some(FileTags::new(file, extra)),
         Err(e) => {
             warn!("Unable to read file {path:?}: {e}");
             None
@@ -153,24 +213,12 @@ pub fn read_file_tags(path: &Path, options: ParseOptions) -> Option<(TaggedFile,
     }
 }
 
-// The tag that the tracks of a file take, the same in the queue, the album
-// grid and the covers: the file's primary tag, or else its other tags
-// together, as one can fill in for another, the first one's items and
-// pictures over the next ones'
-pub fn file_tag(tagged_file: &TaggedFile) -> Option<Cow<'_, Tag>> {
-    merged_tag(tagged_file.primary_tag(), tagged_file.tags())
-}
-
-fn merged_tag<'a>(primary: Option<&'a Tag>, tags: &'a [Tag]) -> Option<Cow<'a, Tag>> {
-    if let Some(tag) = primary {
-        return Some(Cow::Borrowed(tag));
-    }
-    let (first, rest) = tags.split_first()?;
-    if rest.is_empty() {
-        return Some(Cow::Borrowed(first));
-    }
-    let mut merged = first.clone();
-    for tag in rest {
+// The tags of a file without a primary tag together, the first one's items
+// and pictures over the next ones'
+fn merged_tag(tags: Vec<Tag>) -> Option<Tag> {
+    let mut tags = tags.into_iter();
+    let mut merged = tags.next()?;
+    for mut tag in tags {
         let keys: HashSet<ItemKey> = merged.items().map(TagItem::key).collect();
         // The items of another format, whose keys the first one may not
         // have, are kept as they are, to be read
@@ -178,12 +226,12 @@ fn merged_tag<'a>(primary: Option<&'a Tag>, tags: &'a [Tag]) -> Option<Cow<'a, T
             merged.push_unchecked(item.clone());
         }
         if merged.pictures().is_empty() {
-            for picture in tag.pictures() {
-                merged.push_picture(picture.clone());
+            while !tag.pictures().is_empty() {
+                merged.push_picture(tag.remove_picture(0));
             }
         }
     }
-    Some(Cow::Owned(merged))
+    Some(merged)
 }
 
 // Reads a file, and the items in `ExtraComments` if it has them
@@ -305,9 +353,8 @@ mod tests {
             ],
         );
         ape.push_picture(Picture::unchecked(vec![1, 2, 3]).build());
-        let tags = [id3v1, ape];
 
-        let merged = merged_tag(None, &tags).unwrap();
+        let merged = merged_tag(vec![id3v1.clone(), ape]).unwrap();
         assert_eq!(merged.title().as_deref(), Some("Short"));
         assert_eq!(
             merged.get_strings(ItemKey::TrackArtist).collect::<Vec<_>>(),
@@ -318,15 +365,31 @@ mod tests {
         assert_eq!(merged.get_string(ItemKey::MusicBrainzReleaseId), Some("id"));
         assert_eq!(merged.pictures().len(), 1);
 
-        // A primary tag, or a single tag, is read as it is
-        let primary = tag(TagType::Id3v2, &[(ItemKey::TrackTitle, "Primary")]);
-        let read = merged_tag(Some(&primary), &tags).unwrap();
-        assert_eq!(read.title().as_deref(), Some("Primary"));
-        assert!(matches!(
-            merged_tag(None, &tags[..1]),
-            Some(Cow::Borrowed(_))
-        ));
-        assert!(merged_tag(None, &[]).is_none());
+        // A single tag is read as it is
+        let single = merged_tag(vec![id3v1]).unwrap();
+        assert_eq!(single.title().as_deref(), Some("Short"));
+        assert_eq!(single.album(), None);
+        assert!(merged_tag(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn a_file_with_a_primary_tag_is_read_from_it_alone() {
+        // A WAV file, whose primary tag is its ID3v2 chunk
+        let dir = std::env::temp_dir().join(format!("dismas-tags-primary-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Track.wav");
+        crate::utils::write_test_wav(&path, 1);
+        let mut id3v2 = Id3v2Tag::new();
+        id3v2.set_title("Primary".to_string());
+        crate::utils::write_test_id3v2(&path, &id3v2);
+
+        let read = read_file_tags(&path, ReadOptions::ALL);
+        let _ = std::fs::remove_dir_all(&dir);
+        let read = read.unwrap();
+        assert_eq!(read.tag.tag_type(), TagType::Id3v2);
+        assert_eq!(read.tag.title().as_deref(), Some("Primary"));
+        assert_eq!(read.format.as_deref(), Some("WAV"));
+        assert_eq!(read.properties.duration().as_secs(), 1);
     }
 
     #[test]
@@ -341,9 +404,8 @@ mod tests {
         let _ = id3v2.insert_user_text(WORK_HIERARCHY.to_string(), json.to_string());
         crate::utils::write_test_id3v2(&path, &id3v2);
 
-        let read = read_file_tags(&path, ParseOptions::new());
+        let read = read_file_tags(&path, ReadOptions::ALL);
         let _ = std::fs::remove_dir_all(&dir);
-        let (_, extra) = read.unwrap();
-        assert_eq!(extra.work_hierarchy.as_deref(), Some(json));
+        assert_eq!(read.unwrap().extra.work_hierarchy.as_deref(), Some(json));
     }
 }

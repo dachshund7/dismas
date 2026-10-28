@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    borrow::Cow,
     cell::{Cell, RefCell},
     collections::{BTreeMap, HashMap},
     fs::File,
@@ -59,7 +60,7 @@ pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
 pub use search::{normalize_search_text, search_key, track_search_text};
-pub use tags::{ExtraComments, file_tag, plain_commas, read_file_tags, track_title};
+pub use tags::{ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_title};
 use tags::{track_album, track_artist};
 use work_hierarchy::{MovementName, WorkHierarchy, WorkLabels};
 
@@ -137,7 +138,7 @@ impl Gains {
 // The format and the properties of the file of a track
 #[derive(Debug, Clone, Default)]
 pub struct FileDetails {
-    pub format: Option<&'static str>,
+    pub format: Option<Cow<'static, str>>,
     // The path outside the sandbox, if the file came through the document
     // portal
     pub path: Option<PathBuf>,

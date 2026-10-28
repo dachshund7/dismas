@@ -8,7 +8,6 @@ use std::{
 };
 
 use gtk::{gdk, gio, glib};
-use lofty::prelude::TaggedFileExt;
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
 
@@ -306,13 +305,9 @@ impl CoverCache {
     // use the cache, and it blocks, so it must not be called on the main
     // thread
     pub fn load_full_cover(path: &Path) -> Option<gdk::Texture> {
-        let (tagged_file, _) =
-            crate::audio::read_file_tags(path, lofty::config::ParseOptions::new())?;
+        let tags = crate::audio::read_file_tags(path, crate::audio::ReadOptions::ALL)?;
         // A file without tags can still have a cover file next to it
-        let empty = lofty::tag::Tag::new(tagged_file.primary_tag_type());
-        let tag = crate::audio::file_tag(&tagged_file);
-        let tag = tag.as_deref().unwrap_or(&empty);
-        let image = Self::load_cover(tag, path.parent(), FULL_COVER_SIZE)?;
+        let image = Self::load_cover(&tags.tag, path.parent(), FULL_COVER_SIZE)?;
 
         Some(image.into_texture())
     }
@@ -527,7 +522,7 @@ mod tests {
             entries.sort();
             dirs.extend(entries.iter().rev().filter(|path| path.is_dir()).cloned());
 
-            let tagged_file = entries
+            let tags = entries
                 .iter()
                 .filter(|path| {
                     gio::content_type_guess(Some(path), None)
@@ -535,15 +530,12 @@ mod tests {
                         .starts_with("audio/")
                 })
                 .find_map(|path| {
-                    crate::audio::read_file_tags(path, lofty::config::ParseOptions::new())
+                    crate::audio::read_file_tags(path, crate::audio::ReadOptions::ALL)
                 });
-            let Some((tagged_file, _)) = tagged_file else {
+            let Some(tags) = tags else {
                 continue;
             };
-            let Some(tag) = crate::audio::file_tag(&tagged_file) else {
-                continue;
-            };
-            let Some(image) = CoverCache::load_cover(&tag, Some(&dir), COVER_SIZE) else {
+            let Some(image) = CoverCache::load_cover(&tags.tag, Some(&dir), COVER_SIZE) else {
                 continue;
             };
             let Some(palette) = image.palette() else {

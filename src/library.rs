@@ -24,8 +24,7 @@ use async_channel::Sender;
 use gtk::{gio, gio::prelude::*, glib};
 use itertools::Itertools;
 use lofty::{
-    config::ParseOptions,
-    prelude::{Accessor, TaggedFileExt},
+    prelude::Accessor,
     tag::{ItemKey, Tag},
 };
 use log::{debug, warn};
@@ -35,9 +34,9 @@ pub use watch::FolderWatch;
 
 use crate::{
     audio::{
-        CoverCache, ExtraComments, ListedPerformer, PerformerKind, TrackCredits, file_tag,
-        normalize_search_text, plain_commas, read_file_tags, search_key, title_from_file_name,
-        track_search_text, track_title,
+        CoverCache, ExtraComments, FileTags, ListedPerformer, PerformerKind, ReadOptions,
+        TrackCredits, normalize_search_text, plain_commas, read_file_tags, search_key,
+        title_from_file_name, track_search_text, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
@@ -2129,13 +2128,9 @@ fn cover_file_time(dir: &Path) -> Option<std::time::SystemTime> {
 fn create_thumbnail(track: &Path, dir: &Path, album_id: &str, size: u32) -> Option<PathBuf> {
     let track = cue_sheet::audio_path(track)?;
     let track = track.as_path();
-    let (tagged_file, _) = read_file_tags(track, ParseOptions::new())?;
+    let tags = read_file_tags(track, ReadOptions::ALL)?;
     // A file without tags can still have a cover file next to it
-    let empty = Tag::new(tagged_file.primary_tag_type());
-    let tag = file_tag(&tagged_file);
-    let tag = tag.as_deref().unwrap_or(&empty);
-
-    let image = CoverCache::load_cover(tag, track.parent(), size)?;
+    let image = CoverCache::load_cover(&tags.tag, track.parent(), size)?;
     let dest = dir.join(thumbnail_name(album_id, size, image.has_alpha()));
     let saved = if image.has_alpha() {
         image.save_png(&dest)
@@ -2155,26 +2150,23 @@ fn create_thumbnail(track: &Path, dir: &Path, album_id: &str, size: u32) -> Opti
 // An audio file's tags, and the items lofty leaves out of them, which have
 // the CUE sheet in the tags, without the covers and properties, which the
 // library doesn't keep
-fn read_tags_only(path: &Path) -> Option<(lofty::file::TaggedFile, ExtraComments)> {
-    let mut options = ParseOptions::new();
-    options.read_cover_art(false).read_properties(false);
-    read_file_tags(path, options)
+fn read_tags_only(path: &Path) -> Option<FileTags> {
+    read_file_tags(path, ReadOptions::TAGS)
 }
 
 // The tracks of an audio file: the file, or the tracks that the CUE sheet
 // in its tags splits it into
 fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
-    let Some((tagged_file, extra)) = read_tags_only(path) else {
+    let Some(FileTags { tag, extra, .. }) = read_tags_only(path) else {
         return vec![(path.to_path_buf(), TrackTags::default())];
     };
-    let tag = file_tag(&tagged_file);
 
     let sheet = extra
         .cue_sheet
         .as_deref()
         .and_then(|text| SplitSheet::embedded(path, text));
     if let Some(sheet) = sheet {
-        let album_tag = cue_sheet::album_tag(tag.as_deref(), &sheet.sheet);
+        let album_tag = cue_sheet::album_tag(Some(&tag), &sheet.sheet);
         return sheet
             .tracks()
             .map(|(track, _)| cue_track_tags(&sheet, &album_tag, track))
@@ -2182,8 +2174,7 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
     }
 
     // A file without tags is in the album of its folder too
-    let empty = Tag::new(tagged_file.primary_tag_type());
-    let tags = TrackTags::from_tag(tag.as_deref().unwrap_or(&empty), path, Some(path), &extra);
+    let tags = TrackTags::from_tag(&tag, path, Some(path), &extra);
     vec![(path.to_path_buf(), tags)]
 }
 
@@ -2198,8 +2189,7 @@ fn read_sheet_tags(
         .map(|(track, audio)| {
             let album_tag = album_tags.entry(audio).or_insert_with(|| {
                 let file = read_tags_only(audio);
-                let tag = file.as_ref().and_then(|(file, _)| file_tag(file));
-                cue_sheet::album_tag(tag.as_deref(), &sheet.sheet)
+                cue_sheet::album_tag(file.as_ref().map(|file| &file.tag), &sheet.sheet)
             });
             cue_track_tags(sheet, album_tag, track)
         })

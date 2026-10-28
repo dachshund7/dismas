@@ -39,8 +39,7 @@ fn track_uuid(display_name: &str, number: Option<u32>, tags: [&Option<String>; 3
 // An audio file, with its tags and properties
 struct FileRead {
     path: PathBuf,
-    tagged_file: TaggedFile,
-    extra: ExtraComments,
+    tags: FileTags,
     display_name: Option<String>,
     size: Option<u64>,
     // The path outside the sandbox, if the file came through the document
@@ -50,7 +49,7 @@ struct FileRead {
 
 impl FileRead {
     fn read(path: &Path) -> Option<Self> {
-        let (tagged_file, extra) = read_file_tags(path, ParseOptions::new())?;
+        let tags = read_file_tags(path, ReadOptions::ALL)?;
         let info = gio::File::for_path(path)
             .query_info(
                 &format!("standard::display-name,standard::size,{ATTRIBUTE_HOST_PATH}"),
@@ -61,8 +60,7 @@ impl FileRead {
 
         Some(Self {
             path: path.to_path_buf(),
-            tagged_file,
-            extra,
+            tags,
             display_name: info.as_ref().map(|info| info.display_name().to_string()),
             size: info
                 .as_ref()
@@ -75,9 +73,9 @@ impl FileRead {
     }
 
     fn details(&self, replay_gain: ReplayGain) -> FileDetails {
-        let properties = self.tagged_file.properties();
+        let properties = &self.tags.properties;
         FileDetails {
-            format: format_name(self.tagged_file.file_type()),
+            format: self.tags.format.clone(),
             path: self.host_path.clone().or_else(|| Some(self.path.clone())),
             size: self.size,
             bitrate: properties.audio_bitrate().filter(|b| *b > 0),
@@ -103,8 +101,7 @@ struct CueFile {
 
 impl CueFile {
     fn new(sheet: &cue_sheet::CueSheet, read: &FileRead) -> Self {
-        let file_tag = file_tag(&read.tagged_file);
-        let mut tag = cue_sheet::album_tag(file_tag.as_deref(), sheet);
+        let mut tag = cue_sheet::album_tag(Some(&read.tags.tag), sheet);
         // All the tracks have the same album, so they share the cover
         let cover = CoverCache::cover_art(&read.path, &tag);
         while !tag.pictures().is_empty() {
@@ -114,7 +111,7 @@ impl CueFile {
             path: read.path.clone(),
             tag,
             cover,
-            duration: read.tagged_file.properties().duration(),
+            duration: read.tags.properties.duration(),
             display_name: read.display_name.clone(),
             details: read.details(ReplayGain::default()),
         }
@@ -172,7 +169,7 @@ impl FileCache {
             let read = FileRead::read(path)?;
             let sheet = Arc::new(SplitSheet::embedded(
                 path,
-                read.extra.cue_sheet.as_deref()?,
+                read.tags.extra.cue_sheet.as_deref()?,
             )?);
             // Its tracks take the rest from the file that was just read
             let key = (path.to_path_buf(), path.to_path_buf());
@@ -356,6 +353,7 @@ impl TrackData {
             return Vec::new();
         };
         let embedded = read
+            .tags
             .extra
             .cue_sheet
             .as_deref()
@@ -389,13 +387,8 @@ impl TrackData {
     // A track that is a whole file
     fn whole_file(file: gio::File, read: &FileRead) -> Self {
         let path = &read.path;
-        let tagged_file = &read.tagged_file;
-        let extra = &read.extra;
-
-        // A file without tags can still have a cover file next to it
-        let empty = Tag::new(tagged_file.primary_tag_type());
-        let tag = file_tag(tagged_file);
-        let tag = tag.as_deref().unwrap_or(&empty);
+        let tag = &read.tags.tag;
+        let extra = &read.tags.extra;
         let artist = track_artist(tag);
         let title = track_title(tag);
         let album = track_album(tag);
@@ -424,7 +417,7 @@ impl TrackData {
             credits,
             cover: Some(CoverCache::cover_art(path, tag)),
             uuid,
-            duration: sane_duration(tagged_file.properties().duration()),
+            duration: sane_duration(read.tags.properties.duration()),
             details: read.details(replay_gain),
             file,
             audio: None,

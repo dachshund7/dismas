@@ -233,7 +233,7 @@ fn file_fields(details: &FileDetails) -> Vec<(String, Vec<String>)> {
         ),
         (
             i18n("Format"),
-            details.format.map(str::to_string).into_iter().collect(),
+            details.format.iter().map(ToString::to_string).collect(),
         ),
         (
             i18n("Bitrate"),
