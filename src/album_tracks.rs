@@ -378,7 +378,7 @@ impl AlbumTracks {
                 let matching = this.imp().matching.borrow();
                 if matching
                     .as_ref()
-                    .is_some_and(|matching| !matching.uris.contains(&track.uri()))
+                    .is_some_and(|matching| !matching.uris.contains(track.file().uri().as_str()))
                 {
                     row.add_css_class("unmatched");
                 } else {
@@ -724,12 +724,12 @@ impl AlbumTracks {
                 return (self.files(), pos);
             };
             let clicked = tracks.get(pos as usize);
-            if clicked.is_some_and(|track| !matching.contains(&track.uri())) {
+            if clicked.is_some_and(|track| !matching.contains(track.file().uri().as_str())) {
                 return (tracks.iter().map(Track::file).collect(), pos);
             }
             let matched: Vec<&Track> = tracks
                 .iter()
-                .filter(|track| matching.contains(&track.uri()))
+                .filter(|track| matching.contains(track.file().uri().as_str()))
                 .collect();
             let start = matched
                 .iter()
@@ -768,7 +768,7 @@ impl AlbumTracks {
             .as_ref()?
             .item(pos)
             .and_downcast::<Track>()?;
-        let index = *imp.recording_of.borrow().get(&track.uri())?;
+        let index = *imp.recording_of.borrow().get(track.file().uri().as_str())?;
         Some(imp.recordings.borrow().get(index)?.album_id.clone())
     }
 
@@ -890,7 +890,8 @@ impl AlbumTracks {
             let recording_of = imp.recording_of.clone();
             let same: SameSection = Rc::new(move |previous: &Track, track: &Track| {
                 let recording_of = recording_of.borrow();
-                recording_of.get(&previous.uri()) == recording_of.get(&track.uri())
+                recording_of.get(previous.file().uri().as_str())
+                    == recording_of.get(track.file().uri().as_str())
             });
             (Some(same), imp.recording_headers.get())
         } else {
@@ -1197,36 +1198,47 @@ impl AlbumTracks {
                 let track = header.item().and_downcast::<Track>();
                 let recordings = imp.recordings.borrow();
                 let recording = track
-                    .and_then(|track| imp.recording_of.borrow().get(&track.uri()).copied())
+                    .and_then(|track| {
+                        imp.recording_of
+                            .borrow()
+                            .get(track.file().uri().as_str())
+                            .copied()
+                    })
                     .and_then(|i| recordings.get(i));
                 let Some(recording) = recording else {
                     performers.set_label("");
                     album.set_label("");
                     return;
                 };
-                let title = recording
-                    .album
-                    .clone()
-                    .unwrap_or_else(|| i18n("Unknown album"));
+                let unknown;
+                let title = if let Some(title) = &recording.album {
+                    title.as_str()
+                } else {
+                    unknown = i18n("Unknown album");
+                    &unknown
+                };
                 performers.set_label(&recording.performers);
                 performers.set_visible(!recording.performers.is_empty());
-                album.set_label(&match &recording.year {
-                    Some(year) => i18n_k(
+                if let Some(year) = &recording.year {
+                    album.set_label(&i18n_k(
                         // Translators: `{year}` and `{album}` must be left
                         // unmodified; they are expanded to the year of an
                         // album with a recording of a work, and its title
                         "{year} · {album}",
-                        &[("year", year), ("album", &title)],
-                    ),
-                    None => title,
-                });
+                        &[("year", year), ("album", title)],
+                    ));
+                } else {
+                    album.set_label(title);
+                }
 
                 // The buttons say which recording they're for, to a screen
                 // reader going from one header to the next
+                let label;
                 let name = if recording.performers.is_empty() {
-                    album.label().to_string()
+                    label = album.label();
+                    label.as_str()
                 } else {
-                    recording.performers.clone()
+                    recording.performers.as_str()
                 };
                 let play = text.next_sibling();
                 let more = play.as_ref().and_then(gtk::Widget::next_sibling);
@@ -1236,14 +1248,14 @@ impl AlbumTracks {
                         // it is expanded to the performers of a recording of
                         // a work, or else to its album
                         "Play the recording by {recording}",
-                        &[("recording", &name)],
+                        &[("recording", name)],
                     ))]);
                     more.update_property(&[gtk::accessible::Property::Label(&i18n_k(
                         // Translators: `{recording}` must be left unmodified;
                         // it is expanded to the performers of a recording of
                         // a work, or else to its album
                         "Options for the recording by {recording}",
-                        &[("recording", &name)],
+                        &[("recording", name)],
                     ))]);
                 }
             }

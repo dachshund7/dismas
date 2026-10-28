@@ -55,7 +55,7 @@ mod imp {
     #[properties(wrapper_type = super::Album)]
     pub struct Album {
         #[property(get)]
-        pub id: RefCell<String>,
+        pub id: OnceCell<String>,
         #[property(get)]
         pub title: RefCell<String>,
         #[property(get)]
@@ -63,7 +63,7 @@ mod imp {
         #[property(get)]
         pub year: RefCell<Option<String>>,
         #[property(get)]
-        pub cover_path: RefCell<Option<String>>,
+        pub cover_path: OnceCell<Option<String>>,
         // The record label, and the number it gives the release
         #[property(get)]
         pub label: RefCell<Option<String>>,
@@ -103,11 +103,11 @@ impl Album {
     pub fn new(info: AlbumInfo) -> Self {
         let album: Self = glib::Object::new();
         let imp = album.imp();
-        imp.id.replace(info.id);
+        let _ = imp.id.set(info.id);
         imp.title.replace(info.title);
         imp.artist.replace(info.artist);
         imp.year.replace(info.year);
-        imp.cover_path.replace(info.cover);
+        let _ = imp.cover_path.set(info.cover);
         imp.label.replace(info.label);
         imp.catalog_number.replace(info.catalog_number);
         imp.added.set(info.added);
@@ -118,6 +118,16 @@ impl Album {
             .title_key
             .set(glib::CollationKey::from(imp.title.borrow().as_str()));
         album
+    }
+
+    // The id and the cover, borrowed: the grid's search and the covers read
+    // ahead look at many albums at a time
+    pub fn id_str(&self) -> &str {
+        self.imp().id.get().map_or("", String::as_str)
+    }
+
+    pub fn cover_path_str(&self) -> Option<&str> {
+        self.imp().cover_path.get().and_then(Option::as_deref)
     }
 
     // The order of two albums in the grid; the albums that tie are always

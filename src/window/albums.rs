@@ -288,7 +288,7 @@ impl Window {
         let partial = if selection {
             library_view.selection_partly_matched()
         } else {
-            library_view.partly_matches(&album.id())
+            library_view.partly_matches(album.id_str())
         };
 
         // Off while tracks are read, like the other ways to add them

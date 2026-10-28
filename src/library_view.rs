@@ -467,7 +467,7 @@ impl LibraryView {
             move |item| {
                 let album = item.downcast_ref::<Album>().unwrap();
                 match this.imp().search_matches.borrow().as_ref() {
-                    Some(matches) => matches.contains_key(&album.id()),
+                    Some(matches) => matches.contains_key(album.id_str()),
                     None => true,
                 }
             }
@@ -840,11 +840,11 @@ impl LibraryView {
         let Some(album) = cell.album() else {
             return;
         };
-        if let Some(path) = album.cover_path() {
-            let texture = self.imp().textures.borrow_mut().get(&path);
+        if let Some(path) = album.cover_path_str() {
+            let texture = self.imp().textures.borrow_mut().get(path);
             match texture {
                 Some(texture) => cell.picture().set_paintable(Some(&texture)),
-                None => self.read_cover(path, Some((album.id(), cell))),
+                None => self.read_cover(path.to_owned(), Some((album.id(), cell))),
             }
         }
         if let Some(position) = cell.position() {
@@ -874,13 +874,11 @@ impl LibraryView {
             .saturating_add(screenful)
             .min(model.n_items().saturating_sub(1));
         for position in position.saturating_sub(screenful)..=end {
-            if let Some(path) = model
-                .item(position)
-                .and_downcast::<Album>()
-                .and_then(|album| album.cover_path())
-                && !imp.textures.borrow().contains(&path)
+            if let Some(album) = model.item(position).and_downcast::<Album>()
+                && let Some(path) = album.cover_path_str()
+                && !imp.textures.borrow().contains(path)
             {
-                self.read_cover(path, None);
+                self.read_cover(path.to_owned(), None);
             }
         }
     }
@@ -927,7 +925,7 @@ impl LibraryView {
 
                 for (id, cell) in waiting.into_iter().flatten() {
                     if let Some(cell) = cell.upgrade()
-                        && cell.album().is_some_and(|album| album.id() == id)
+                        && cell.album().is_some_and(|album| album.id_str() == id)
                         && cell.picture().is_mapped()
                     {
                         cell.picture().set_paintable(Some(&texture));
@@ -1150,24 +1148,28 @@ impl LibraryView {
         let imp = self.imp();
         let new_search = imp
             .works_filter
-            .replace(Some((filter.clone(), generation)))
-            .is_none_or(|(before, _)| before != filter);
+            .borrow()
+            .as_ref()
+            .is_none_or(|(before, _)| *before != filter);
+        imp.works_filter.replace(Some((filter, generation)));
 
+        // A section for each composer, or composers, as they come sorted
+        fn composer_keys(info: &library::WorkInfo) -> impl Iterator<Item = &str> {
+            info.composers.iter().map(|composer| composer.key.as_str())
+        }
         let mut section = 0;
-        let mut previous: Option<Vec<String>> = None;
-        let items: Vec<WorkItem> = works
-            .into_iter()
-            .map(|info| {
-                let composers: Vec<String> = info.composers.iter().map(|c| c.key.clone()).collect();
-                if previous
-                    .as_ref()
-                    .is_some_and(|previous| *previous != composers)
-                {
+        let sections: Vec<_> = std::iter::once(0)
+            .chain(works.windows(2).map(|pair| {
+                if !composer_keys(&pair[0]).eq(composer_keys(&pair[1])) {
                     section += 1;
                 }
-                previous = Some(composers);
-                WorkItem { info, section }
-            })
+                section
+            }))
+            .collect();
+        let items: Vec<WorkItem> = works
+            .into_iter()
+            .zip(sections)
+            .map(|(info, section)| WorkItem { info, section })
             .collect();
         // A new search shows what it found from the top, with the header of
         // the first work. The list keeps its place by an item, so it's given
@@ -1578,7 +1580,7 @@ impl LibraryView {
         for album in model.iter::<Album>().flatten() {
             let (matching, total) = matches
                 .as_ref()
-                .and_then(|matches| matches.get(&album.id()).copied())
+                .and_then(|matches| matches.get(album.id_str()).copied())
                 .filter(|(matching, total)| matching < total)
                 .unwrap_or_default();
             if album.matching_tracks() != matching {
@@ -1639,7 +1641,7 @@ impl LibraryView {
             .as_ref()?
             .iter::<Album>()
             .flatten()
-            .find(|a| a.id() == album_id)
+            .find(|a| a.id_str() == album_id)
     }
 
     // Scrolls the grid to an album, clearing the search if it hides it
@@ -1683,7 +1685,7 @@ impl LibraryView {
         if selected {
             ids.insert(album.id());
         } else {
-            ids.remove(&album.id());
+            ids.remove(album.id_str());
         }
         drop(ids);
         self.update_selection();
@@ -1926,7 +1928,7 @@ impl LibraryView {
             let ids: HashSet<String> = albums.iter().map(Album::id).collect();
             selected.retain(|id| ids.contains(id));
             for album in &albums {
-                album.set_selected(selected.contains(&album.id()));
+                album.set_selected(selected.contains(album.id_str()));
             }
         }
         self.update_selection();
