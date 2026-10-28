@@ -895,7 +895,7 @@ fn read_entries(
     column: &str,
     filter: &TrackFilter,
     hidden: &[PathBuf],
-    mut read: impl FnMut(String, String, bool),
+    mut read: impl FnMut(&str, &str, bool),
 ) -> rusqlite::Result<()> {
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, {column}, {} FROM tracks
@@ -905,7 +905,11 @@ fn read_entries(
     ))?;
     let mut rows = stmt.query(rusqlite::params_from_iter(filter_values(filter, hidden)))?;
     while let Some(row) = rows.next()? {
-        read(row.get(0)?, row.get(1)?, row.get(2)?);
+        read(
+            row.get_ref(0)?.as_str()?,
+            row.get_ref(1)?.as_str()?,
+            row.get(2)?,
+        );
     }
     Ok(())
 }
@@ -957,13 +961,13 @@ fn query_composers(
                 else {
                     continue;
                 };
-                let composer = seen.entry(key.to_string()).or_default();
-                if matches && !composer.albums.contains(&album) {
-                    composer.albums.insert(album.clone());
+                let composer = entry_of(&mut seen, key);
+                if matches {
+                    insert_str(&mut composer.albums, album);
                 }
-                *composer.names.entry(name.to_string()).or_default() += 1;
+                count(&mut composer.names, name);
                 if !sort.is_empty() {
-                    *composer.sorts.entry(sort.to_string()).or_default() += 1;
+                    count(&mut composer.sorts, sort);
                 }
             }
         },
@@ -981,15 +985,16 @@ fn query_composers(
             } else {
                 tagged
             };
+            let collation = glib::CollationKey::from(sort.as_str());
             let info = ComposerInfo {
                 key,
                 search: normalize_search_text(&format!("{name} {sort}")),
                 name,
-                sort: sort.clone(),
+                sort,
                 label,
                 albums: seen.albums.len() as u32,
             };
-            (glib::CollationKey::from(sort.as_str()), info)
+            (collation, info)
         })
         .collect();
     composers.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
@@ -998,12 +1003,40 @@ fn query_composers(
 
 // Of the values counted, the most common, and of those the first in
 // alphabetical order
-fn most_common(counts: HashMap<String, usize>) -> String {
+fn most_common<S: Ord + Into<String>>(counts: HashMap<S, usize>) -> String {
     counts
         .into_iter()
         .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-        .map(|(value, _)| value)
+        .map(|(value, _)| value.into())
         .unwrap_or_default()
+}
+
+// The lists of composers and performers go through the values of every
+// track, which are mostly ones seen already, so these copy a value only
+// the first time
+
+// Counts a value once more
+fn count(counts: &mut HashMap<String, usize>, value: &str) {
+    if let Some(n) = counts.get_mut(value) {
+        *n += 1;
+    } else {
+        counts.insert(value.to_owned(), 1);
+    }
+}
+
+// Adds a value to a set
+fn insert_str(set: &mut HashSet<String>, value: &str) {
+    if !set.contains(value) {
+        set.insert(value.to_owned());
+    }
+}
+
+// The value of a key, a new one the first time
+fn entry_of<'a, V: Default>(map: &'a mut HashMap<String, V>, key: &str) -> &'a mut V {
+    if !map.contains_key(key) {
+        map.insert(key.to_owned(), V::default());
+    }
+    map.get_mut(key).unwrap()
 }
 
 // A conductor or performer of the tracks of the albums of the grid, see
@@ -1090,22 +1123,18 @@ fn query_performers(
                 ) else {
                     continue;
                 };
-                let performer = seen.entry(key.to_string()).or_default();
-                if matches && !performer.albums.contains(&album) {
-                    performer.albums.insert(album.clone());
+                let performer = entry_of(&mut seen, key);
+                if matches {
+                    insert_str(&mut performer.albums, album);
                 }
                 let guessed = kind == PerformerKind::Ensemble && role.is_empty();
                 if !guessed {
-                    performer
-                        .kinds
-                        .entry(kind)
-                        .or_default()
-                        .insert(album.clone());
+                    insert_str(performer.kinds.entry(kind).or_default(), album);
                 }
-                *performer.names.entry(name.to_string()).or_default() += 1;
-                *performer.sorts.entry(sort.to_string()).or_default() += 1;
+                count(&mut performer.names, name);
+                count(&mut performer.sorts, sort);
                 if !role.is_empty() {
-                    *performer.roles.entry(role.to_string()).or_default() += 1;
+                    count(&mut performer.roles, role);
                 }
             }
         },
@@ -1141,16 +1170,17 @@ fn query_performers(
                 .sorted_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)))
                 .map(|(role, _)| role)
                 .collect();
+            let collation = glib::CollationKey::from(sort.as_str());
             let info = PerformerInfo {
                 key,
                 kind,
                 search: normalize_search_text(&format!("{name} {sort} {}", roles.join(" "))),
                 name,
-                sort: sort.clone(),
+                sort,
                 roles,
                 albums: seen.albums.len() as u32,
             };
-            (glib::CollationKey::from(sort.as_str()), info)
+            (collation, info)
         })
         .collect();
     performers.sort_by(|a, b| {
@@ -1260,35 +1290,35 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
     // The recordings of a work that the filter matches, and how often each
     // of its names is given, by all its tracks
     #[derive(Default)]
-    struct Seen {
+    struct Seen<'a> {
         recordings: u32,
-        names: HashMap<String, usize>,
-        titles: HashMap<String, usize>,
-        collections: HashMap<String, usize>,
-        composers: HashMap<String, usize>,
+        names: HashMap<&'a str, usize>,
+        titles: HashMap<&'a str, usize>,
+        collections: HashMap<&'a str, usize>,
+        composers: HashMap<&'a str, usize>,
     }
-    let count = |counts: &mut HashMap<String, usize>, value: &Option<String>| {
+    fn count<'a>(counts: &mut HashMap<&'a str, usize>, value: Option<&'a str>) {
         if let Some(value) = value {
-            *counts.entry(value.clone()).or_default() += 1;
+            *counts.entry(value).or_default() += 1;
         }
-    };
+    }
 
-    let mut seen: HashMap<String, Seen> = HashMap::new();
+    let mut seen: HashMap<&str, Seen> = HashMap::new();
     for recording in recordings_of_works(rows) {
         let rows: Vec<&WorkRow> = recording.into_iter().map(|i| &rows[i]).collect();
-        let work = seen.entry(rows[0].work.clone()).or_default();
+        let work = seen.entry(&rows[0].work).or_default();
         if rows.iter().any(|row| row.matching) {
             work.recordings += 1;
         }
         for row in rows {
-            count(&mut work.names, &row.name);
-            count(&mut work.titles, &row.title);
-            count(&mut work.collections, &row.collection);
-            count(&mut work.composers, &row.composers);
+            count(&mut work.names, row.name.as_deref());
+            count(&mut work.titles, row.title.as_deref());
+            count(&mut work.collections, row.collection.as_deref());
+            count(&mut work.composers, row.composers.as_deref());
         }
     }
 
-    let most = |counts: HashMap<String, usize>| Some(most_common(counts)).filter(|s| !s.is_empty());
+    let most = |counts: HashMap<&str, usize>| Some(most_common(counts)).filter(|s| !s.is_empty());
     let mut works: Vec<(_, WorkInfo)> = seen
         .into_iter()
         .filter(|(_, seen)| seen.recordings > 0)
@@ -1297,7 +1327,7 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                 .map(|entries| work_composers(&entries))
                 .unwrap_or_default();
             let info = WorkInfo {
-                key,
+                key: key.to_owned(),
                 name: most(seen.names).unwrap_or_default(),
                 title: most(seen.titles),
                 collection: most(seen.collections),
@@ -1374,27 +1404,33 @@ fn query_work_recordings(
         .map(|recording| recording.into_iter().map(|i| &rows[i]).collect::<Vec<_>>())
         .filter(|rows| rows.iter().any(|row| row.matching))
         .map(|rows| {
-            let year = rows.iter().filter_map(|row| row.year.clone()).min();
             let album = rows.iter().find_map(|row| row.album.clone());
+            let collation = glib::CollationKey::from(album.as_deref().unwrap_or_default());
             let recording = WorkRecording {
                 album_id: rows[0].album_id.clone(),
-                album: album.clone(),
-                year: year.clone(),
+                album,
+                year: rows
+                    .iter()
+                    .filter_map(|row| row.year.as_deref())
+                    .min()
+                    .map(str::to_owned),
                 performers: performers_line(
                     rows.iter().filter_map(|row| row.performers.as_deref()),
                 ),
                 paths: rows.iter().map(|row| row.path.clone()).collect(),
             };
-            let sort_key = (
-                year.is_none(),
-                year,
-                glib::CollationKey::from(album.as_deref().unwrap_or_default()),
-                rows[0].album_id.clone(),
-            );
-            (sort_key, recording)
+            (collation, recording)
         })
         .collect();
-    recordings.sort_by(|a, b| a.0.cmp(&b.0));
+    // By year, those without one last, then by album
+    recordings.sort_by(|(a_album, a), (b_album, b)| {
+        (a.year.is_none(), &a.year, a_album, &a.album_id).cmp(&(
+            b.year.is_none(),
+            &b.year,
+            b_album,
+            &b.album_id,
+        ))
+    });
     Ok(recordings
         .into_iter()
         .map(|(_, recording)| recording)
@@ -1548,7 +1584,7 @@ fn performers_line<'a>(entries: impl Iterator<Item = &'a str>) -> String {
         ) else {
             continue;
         };
-        if !seen.insert(key.to_string()) {
+        if !seen.insert(key) {
             continue;
         }
         match kind {
