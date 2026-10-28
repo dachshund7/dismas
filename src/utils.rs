@@ -180,6 +180,24 @@ pub fn scroll_to_top_when_laid_out(
     });
 }
 
+// The part of a list that changed, past the items it has in common at its
+// start and at its end, which `same(old, new)` compares: where it starts,
+// the number of old items removed there, and the number of new ones put in
+// their place. A list keeps its place by its items, so replacing only
+// those keeps it where it was
+pub fn changed_range(
+    old_len: usize,
+    new_len: usize,
+    same: impl Fn(usize, usize) -> bool,
+) -> (usize, usize, usize) {
+    let shorter = old_len.min(new_len);
+    let start = (0..shorter).take_while(|&i| same(i, i)).count();
+    let end = (0..shorter - start)
+        .take_while(|&i| same(old_len - 1 - i, new_len - 1 - i))
+        .count();
+    (start, old_len - start - end, new_len - start - end)
+}
+
 // Gives a row of a list the tooltip that `text` makes from the item it's
 // bound to, made only when it shows. Setting the tooltip as the row is bound
 // makes GTK look for the window under the pointer, which grabs the X
@@ -787,6 +805,21 @@ mod tests {
         assert_eq!(format_duration(3600), "1:00:00");
         assert_eq!(format_duration(2 * 3600 - 1), "1:59:59");
         assert_eq!(format_remaining_time(75), "\u{200e}\u{2212}1:15");
+    }
+
+    #[test]
+    fn only_the_part_of_a_list_that_changed_is_replaced() {
+        let range =
+            |old: &[u32], new: &[u32]| changed_range(old.len(), new.len(), |o, n| old[o] == new[n]);
+        assert_eq!(range(&[1, 2, 3], &[1, 2, 3]), (3, 0, 0));
+        assert_eq!(range(&[1, 3], &[1, 2, 3]), (1, 0, 1));
+        assert_eq!(range(&[1, 2, 3], &[1, 3]), (1, 1, 0));
+        assert_eq!(range(&[1, 2, 3], &[1, 4, 3]), (1, 1, 1));
+        assert_eq!(range(&[], &[1, 2]), (0, 0, 2));
+        assert_eq!(range(&[1, 2], &[]), (0, 2, 0));
+        assert_eq!(range(&[1, 2, 3], &[4, 5]), (0, 3, 2));
+        // The items in common at the start and the end don't overlap
+        assert_eq!(range(&[1, 1], &[1, 1, 1]), (2, 0, 1));
     }
 
     #[test]

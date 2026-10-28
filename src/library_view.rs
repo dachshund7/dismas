@@ -169,10 +169,13 @@ mod imp {
         pub works_view: Cell<bool>,
         #[property(get)]
         pub has_works: Cell<bool>,
-        // The works the search finds, and the filter they were read for;
-        // `None` until they're read, and again once the tracks changed
+        // The works the search finds, and the filter and the generation of
+        // the library they were read for, `None` until they're read. The
+        // generation goes up each time the library is read again, as the
+        // tracks or the hidden folders can have changed
         pub works: RefCell<Option<gio::ListStore>>,
-        pub works_filter: RefCell<Option<TrackFilter>>,
+        pub works_filter: RefCell<Option<(TrackFilter, u32)>>,
+        pub works_generation: Cell<u32>,
         // The ids of the selected albums; a new search clears them, so
         // they're all among the albums it shows
         pub selected: RefCell<HashSet<String>>,
@@ -1093,18 +1096,23 @@ impl LibraryView {
     // The filter the works shown were read with, which their recordings
     // are found with
     fn search_filter_for_works(&self) -> TrackFilter {
-        self.imp().works_filter.borrow().clone().unwrap_or_default()
+        self.imp()
+            .works_filter
+            .borrow()
+            .as_ref()
+            .map(|(filter, _)| filter.clone())
+            .unwrap_or_default()
     }
 
     // Reads the works the search finds again, if they're shown and it
-    // changed since they were read, or the tracks did
+    // changed since they were read, or the library was read again
     fn update_works(&self) {
         let imp = self.imp();
         if !self.shows_works() {
             return;
         }
-        let filter = self.wanted_filter();
-        if imp.works_filter.borrow().as_ref() == Some(&filter) {
+        let wanted = (self.wanted_filter(), imp.works_generation.get());
+        if imp.works_filter.borrow().as_ref() == Some(&wanted) {
             return;
         }
 
@@ -1113,6 +1121,7 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
+                let (filter, generation) = wanted;
                 let Ok((filter, works)) = gio::spawn_blocking(move || {
                     let works = library::works(&filter, &hidden);
                     (filter, works)
@@ -1121,11 +1130,15 @@ impl LibraryView {
                 else {
                     return;
                 };
-                // Results for an older search arriving late
-                if this.wanted_filter() != filter || !this.shows_works() {
+                // Results for an older search, or from before the library
+                // was read again, arriving late
+                if this.wanted_filter() != filter
+                    || this.imp().works_generation.get() != generation
+                    || !this.shows_works()
+                {
                     return;
                 }
-                this.show_works(filter, works);
+                this.show_works(filter, generation, works);
             }
         ));
     }
@@ -1133,16 +1146,16 @@ impl LibraryView {
     // A work's recordings are found with the filter, as albums are, but
     // they're shown and played whole: a recording is one piece of music,
     // and a soloist found in one movement plays in the others too
-    fn show_works(&self, filter: TrackFilter, works: Vec<library::WorkInfo>) {
+    fn show_works(&self, filter: TrackFilter, generation: u32, works: Vec<library::WorkInfo>) {
         let imp = self.imp();
         let new_search = imp
             .works_filter
-            .replace(Some(filter.clone()))
-            .is_none_or(|before| before != filter);
+            .replace(Some((filter.clone(), generation)))
+            .is_none_or(|(before, _)| before != filter);
 
         let mut section = 0;
         let mut previous: Option<Vec<String>> = None;
-        let items: Vec<glib::BoxedAnyObject> = works
+        let items: Vec<WorkItem> = works
             .into_iter()
             .map(|info| {
                 let composers: Vec<String> = info.composers.iter().map(|c| c.key.clone()).collect();
@@ -1153,7 +1166,7 @@ impl LibraryView {
                     section += 1;
                 }
                 previous = Some(composers);
-                glib::BoxedAnyObject::new(WorkItem { info, section })
+                WorkItem { info, section }
             })
             .collect();
         // A new search shows what it found from the top, with the header of
@@ -1170,7 +1183,28 @@ impl LibraryView {
             };
             store
         };
-        store.splice(0, store.n_items(), &items);
+        // When the works are read again because the library was, only the
+        // ones that changed are replaced, so the list stays where it was,
+        // and stays as it was when none changed. A work is compared with the
+        // index of its section too, so when a section is added or removed,
+        // the works after it are replaced as well, and the sections stay in
+        // order
+        let shown = |pos: usize| {
+            store
+                .item(pos as u32)
+                .and_downcast::<glib::BoxedAnyObject>()
+        };
+        let (start, removed, added) =
+            utils::changed_range(store.n_items() as usize, items.len(), |old, new| {
+                shown(old).is_some_and(|work| *work.borrow::<WorkItem>() == items[new])
+            });
+        let added: Vec<glib::BoxedAnyObject> = items
+            .into_iter()
+            .skip(start)
+            .take(added)
+            .map(glib::BoxedAnyObject::new)
+            .collect();
+        store.splice(start as u32, removed as u32, &added);
     }
 
     // The lists of composers and of performers next to the search:
@@ -1857,7 +1891,8 @@ impl LibraryView {
                     this.set_pickers_available(has_composers, has_performers);
                     // The works are read again, as the tracks or the hidden
                     // folders can have changed
-                    this.imp().works_filter.replace(None);
+                    let works_generation = &this.imp().works_generation;
+                    works_generation.set(works_generation.get().wrapping_add(1));
                     this.set_works_available(has_works);
                 }
             }
@@ -2253,6 +2288,7 @@ fn performer_section_factory() -> gtk::SignalListItemFactory {
 
 // A work in the list of works, with the index of the section of its
 // composers
+#[derive(PartialEq)]
 struct WorkItem {
     info: library::WorkInfo,
     section: u32,
