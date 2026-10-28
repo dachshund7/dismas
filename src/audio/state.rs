@@ -9,7 +9,10 @@ use std::{
 use glib::subclass::Signal;
 use gtk::{gdk, glib, prelude::*, subclass::prelude::*};
 
-use crate::audio::{PlaybackState, Track};
+use crate::{
+    audio::{PlaybackState, Track},
+    i18n::i18n_k,
+};
 
 mod imp {
     use super::*;
@@ -26,6 +29,7 @@ mod imp {
         #[property(name = "title", get = Self::title, nullable, type = Option<String>)]
         #[property(name = "artist", get = Self::artist, nullable, type = Option<String>)]
         #[property(name = "album", get = Self::album, nullable, type = Option<String>)]
+        #[property(name = "album-line", get = Self::album_line, nullable, type = Option<String>)]
         #[property(name = "credits", get = Self::credits, nullable, type = Option<String>)]
         #[property(name = "heading", get = Self::heading, nullable, type = Option<String>)]
         #[property(name = "movement", get = Self::movement, nullable, type = Option<String>)]
@@ -82,6 +86,24 @@ mod imp {
 
         fn album(&self) -> Option<String> {
             self.current_track.borrow().as_ref().map(Track::album)
+        }
+
+        // The album, and the year the track was made, for the player
+        fn album_line(&self) -> Option<String> {
+            let track = self.current_track.borrow();
+            let track = track.as_ref()?;
+            let album = track.album();
+            Some(match track.year() {
+                Some(year) => i18n_k(
+                    // Translators: `{album}` and `{year}` must be left
+                    // unmodified; they are expanded to the album of the
+                    // track playing and the year it was recorded or first
+                    // released
+                    "{album} · {year}",
+                    &[("album", &album), ("year", &year)],
+                ),
+                None => album,
+            })
         }
 
         fn credits(&self) -> Option<String> {
@@ -145,6 +167,7 @@ impl PlayerState {
         self.notify_title();
         self.notify_artist();
         self.notify_album();
+        self.notify_album_line();
         self.notify_credits();
         self.notify_heading();
         self.notify_movement();
@@ -158,6 +181,7 @@ impl PlayerState {
         self.notify_title();
         self.notify_artist();
         self.notify_album();
+        self.notify_album_line();
         self.notify_credits();
         self.notify_heading();
         self.notify_movement();

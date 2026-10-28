@@ -60,6 +60,7 @@ All notable changes to this project will be documented in this file.
   RECORDINGDATE tag that the Work Hierarchy plugin writes from MusicBrainz
 - The tracks of an album show when it was made under its title, with its
   record label and catalogue number
+- The player shows the year after the album, as in "Cello Suites · 1961"
 
 ### Changed
 

@@ -119,8 +119,13 @@ impl Window {
             .bind_property("artist", &imp.track_details.get().artist_label(), "label")
             .sync_create()
             .build();
+        // With the year it was made
         state
-            .bind_property("album", &imp.track_details.get().album_label(), "label")
+            .bind_property(
+                "album-line",
+                &imp.track_details.get().album_label(),
+                "label",
+            )
             .sync_create()
             .build();
         state

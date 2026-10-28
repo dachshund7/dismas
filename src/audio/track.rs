@@ -741,6 +741,11 @@ impl Track {
         self.imp().composer()
     }
 
+    // The year the track was made, see `TrackCredits::year()`
+    pub fn year(&self) -> Option<String> {
+        self.imp().data.borrow().credits().year()
+    }
+
     // The composers of the work a movement is part of, which all its
     // movements share, or `composer()` if the tags don't say
     pub fn work_composers(&self) -> String {
