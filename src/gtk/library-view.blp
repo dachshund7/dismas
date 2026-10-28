@@ -121,7 +121,9 @@ template $DismasLibraryView: Widget {
                   ScrolledWindow {
                     hscrollbar-policy: never;
                     propagate-natural-height: true;
-                    min-content-width: 300;
+                    // The names of groups are long; the minimum content
+                    // width doesn't apply without a horizontal scrollbar
+                    width-request: 320;
                     max-content-height: 400;
 
                     child: ListView performer_list {
