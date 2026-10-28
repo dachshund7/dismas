@@ -73,6 +73,9 @@ All notable changes to this project will be documented in this file.
 - The waveform shows when it has the focus. Holding an arrow key seeks
   on, and Home and End go to the start and the end of the track, as in a
   slider, which keeps Home, End, Page Up and Page Down too
+- Show the Playing Track, Show in Playlist, Go to Album and Other
+  Recordings put the focus on the track they show, so that the keys go on
+  from there
 
 ### Changed
 

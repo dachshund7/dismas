@@ -835,7 +835,7 @@ pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCa
                 if let Some(bounds) = bounds {
                     center_bounds(view, &bounds);
                 }
-                flash(&track);
+                arrive(view, &track);
                 return glib::ControlFlow::Break;
             }
 
@@ -876,7 +876,7 @@ pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCa
                 fallback.set(Some(0));
                 return glib::ControlFlow::Continue;
             }
-            flash(&track);
+            arrive(view, &track);
             glib::ControlFlow::Break
         }
     ))
@@ -925,6 +925,16 @@ fn ease(progress: f64) -> f64 {
         }
     }
     bezier((low + high) / 2.0, 0.1, 1.0)
+}
+
+// The end of a glide to a track: its row flashes, and takes the focus,
+// as the track was asked for, e.g. with Show the Playing Track, so that
+// the keys go on from it
+fn arrive(view: &gtk::ListView, track: &Track) {
+    flash(track);
+    if let Some((item, _)) = track_item(view, track) {
+        item.grab_focus();
+    }
 }
 
 // Makes the row of a track flash, like its CSS animation
