@@ -177,12 +177,20 @@ queuerow label.track-artist {
   font-size: 85%;
 }
 
-/* The handle to drag a track to another place in the queue */
+/* The handle to drag a track to another place in the queue. Its padding
+ * makes it about as wide as a fingertip without moving the row's content:
+ * it reaches into the row's padding at the start, and only 4 pixels over
+ * the cover, where a tap plays the track */
 queuerow image.drag-handle {
-  padding: 0 4px;
-  margin: 0 -4px;
+  padding: 0 4px 0 12px;
+  margin: 0 -4px 0 -12px;
   opacity: 0.55;
   transition: opacity 150ms ease;
+}
+
+queuerow image.drag-handle:dir(rtl) {
+  padding: 0 12px 0 4px;
+  margin: 0 -12px 0 -4px;
 }
 
 listview > row:hover queuerow image.drag-handle {

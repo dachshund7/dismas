@@ -83,6 +83,9 @@ All notable changes to this project will be documented in this file.
   under new names and shortcuts
 - On a touchscreen, a swipe to the right on the tracks of an album or a
   work goes back to the playlist
+- On a touchscreen, the handle to drag a track in the playlist pane is
+  easier to grab, and over a narrow window, a swipe that starts on the edge
+  of the pane hides it, rather than resizing it
 
 ### Changed
 

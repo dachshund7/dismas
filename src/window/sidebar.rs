@@ -56,6 +56,17 @@ impl Window {
             #[strong]
             was_reset,
             move |gesture, x, y| {
+                // Over the content, the collapsed pane is hidden with a
+                // swipe to its edge, which can start on the handle; a touch
+                // there is left to the split view, while a mouse still
+                // resizes it
+                let touch = gesture
+                    .device()
+                    .is_some_and(|device| device.source() == gdk::InputSource::Touchscreen);
+                if touch && win.imp().split_view.is_collapsed() {
+                    gesture.set_state(gtk::EventSequenceState::Denied);
+                    return;
+                }
                 gesture.set_state(gtk::EventSequenceState::Claimed);
 
                 // A double click resets the width; we cannot use a separate
