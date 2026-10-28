@@ -157,6 +157,7 @@ impl Window {
             .queue_view()
             .set_model(Some(selection.upcast_ref::<gtk::SelectionModel>()));
         utils::setup_menu_key(&imp.playlist_view.queue_view(), QueueRow::request_menu);
+        self.setup_move_keys();
         imp.playlist_view.queue_view().connect_activate(clone!(
             #[weak(rename_to = win)]
             self,
@@ -543,6 +544,75 @@ impl Window {
         self.set_playlist_visible(true);
         // A track change stops the glide, and scrolls to the new track
         self.set_queue_scroll(Some(crate::queue_row::flash_track(&view, pos, track)));
+    }
+
+    // Alt+Up and Alt+Down move the track with the focus up or down a place,
+    // as dragging it there would, with the selected tracks if it's one of
+    // them
+    fn setup_move_keys(&self) {
+        let controller = gtk::ShortcutController::new();
+        for (trigger, up) in [
+            ("<Alt>Up|<Alt>KP_Up", true),
+            ("<Alt>Down|<Alt>KP_Down", false),
+        ] {
+            controller.add_shortcut(gtk::Shortcut::new(
+                gtk::ShortcutTrigger::parse_string(trigger),
+                Some(gtk::CallbackAction::new(clone!(
+                    #[weak(rename_to = win)]
+                    self,
+                    #[upgrade_or]
+                    glib::Propagation::Proceed,
+                    move |list, _| {
+                        let row = utils::focused_child::<QueueRow>(list);
+                        match row.and_then(|row| row.track()) {
+                            Some(track) => {
+                                win.move_queue_track_by_one(&track, up);
+                                glib::Propagation::Stop
+                            }
+                            None => glib::Propagation::Proceed,
+                        }
+                    }
+                ))),
+            ));
+        }
+        self.imp()
+            .playlist_view
+            .queue_view()
+            .add_controller(controller);
+    }
+
+    // Moves a track, or the selected tracks with it, past the track above
+    // the first of them or below the last, unless they're at the end of
+    // the queue already. While a search filters the queue, the tracks
+    // around a row aren't the ones around it in the queue, so they don't
+    // move, as they can't be dragged
+    fn move_queue_track_by_one(&self, track: &Track, up: bool) {
+        if self.queue_filtering() {
+            return;
+        }
+        let player = self.player();
+        let queue = player.queue();
+        let positions: Vec<u32> = if self.queue_selection() && track.selected() {
+            queue
+                .selected_tracks()
+                .iter()
+                .filter_map(|track| queue.position(track))
+                .collect()
+        } else {
+            queue.position(track).into_iter().collect()
+        };
+        let target = if up {
+            positions
+                .iter()
+                .min()
+                .and_then(|first| first.checked_sub(1))
+        } else {
+            positions.iter().max().map(|last| last + 1)
+        };
+        if let Some(target) = target.and_then(|pos| queue.model().item(pos).and_downcast::<Track>())
+        {
+            self.move_queue_track(track, &target, up);
+        }
     }
 
     // Moves a track above or below another one, dropped on its row. In

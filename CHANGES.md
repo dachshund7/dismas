@@ -67,6 +67,8 @@ All notable changes to this project will be documented in this file.
 - The player shows the year after the album, as in "Cello Suites · 1961"
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does
+- Alt+Up and Alt+Down move the track with the focus in the playlist pane
+  a place up or down, along with the selected tracks if it's one of them
 
 ### Changed
 

@@ -66,10 +66,20 @@ pub fn setup_primary_menu_button(button: &gtk::MenuButton) {
     }
 }
 
+// The row or the cell of a list or a grid that has the focus. The focus is
+// on the list's item, whose child is the row, or on a widget in the row
+pub fn focused_child<W: IsA<gtk::Widget>>(list: &impl IsA<gtk::Widget>) -> Option<W> {
+    let focus = list.root()?.focus()?;
+    focus
+        .ancestor(W::static_type())
+        .or_else(|| focus.first_child())
+        .filter(|child| child.is_ancestor(list))
+        .and_downcast::<W>()
+}
+
 // The Menu key and Shift+F10 open the menu of the row or the cell of a
-// list or a grid that has the focus, as a right click on it does. The
-// focus is on the list's item, whose child is the row, or on a widget in
-// the row
+// list or a grid that has the focus, as a right click on it does. Keys go
+// from the focus up, so the shortcut is on the list rather than the rows
 pub fn setup_menu_key<W: IsA<gtk::Widget>>(
     list: &impl IsA<gtk::Widget>,
     open: impl Fn(&W) + 'static,
@@ -77,23 +87,15 @@ pub fn setup_menu_key<W: IsA<gtk::Widget>>(
     let controller = gtk::ShortcutController::new();
     controller.add_shortcut(gtk::Shortcut::new(
         gtk::ShortcutTrigger::parse_string("Menu|<Shift>F10"),
-        Some(gtk::CallbackAction::new(move |list, _| {
-            let Some(focus) = list.root().and_then(|root| root.focus()) else {
-                return glib::Propagation::Proceed;
-            };
-            let child = focus
-                .ancestor(W::static_type())
-                .or_else(|| focus.first_child())
-                .filter(|child| child.is_ancestor(list))
-                .and_downcast::<W>();
-            match child {
+        Some(gtk::CallbackAction::new(
+            move |list, _| match focused_child::<W>(list) {
                 Some(child) => {
                     open(&child);
                     glib::Propagation::Stop
                 }
                 None => glib::Propagation::Proceed,
-            }
-        })),
+            },
+        )),
     ));
     list.add_controller(controller);
 }
