@@ -99,7 +99,6 @@ mod imp {
             obj.set_accels_for_action("win.volume-down", &["<primary>Down"]);
             obj.set_accels_for_action("win.previous", &["<Alt>Left"]);
             obj.set_accels_for_action("win.next", &["<Alt>Right"]);
-            obj.set_accels_for_action("win.copy", &["<primary>c"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
             obj.set_accels_for_action("win.favorite", &["<primary>d"]);
             obj.set_accels_for_action("win.preferences", &["<primary>comma"]);

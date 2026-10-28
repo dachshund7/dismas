@@ -926,6 +926,7 @@ impl Window {
         win.setup_x11_drop_shape();
         win.setup_select_all_shortcut();
         win.setup_key_shortcuts();
+        win.setup_edit_shortcuts();
         win.setup_track_info_button();
         win.setup_more_button();
         win.setup_library();
@@ -1109,6 +1110,19 @@ impl Window {
                 glib::Propagation::Proceed
             }
         });
+        self.add_controller(controller);
+    }
+
+    // Ctrl+C copies the details of the playing track, once the focused
+    // widget has had the key: an accel would run before it, and take the
+    // key from a search with text selected. Text without a selection turns
+    // its own copying off, so the key comes on to the window
+    fn setup_edit_shortcuts(&self) {
+        let controller = gtk::ShortcutController::new();
+        controller.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("<Control>c"),
+            Some(gtk::NamedAction::new("win.copy")),
+        ));
         self.add_controller(controller);
     }
 

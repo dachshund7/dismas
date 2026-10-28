@@ -91,6 +91,8 @@ All notable changes to this project will be documented in this file.
 
 - The tracks of a long album could open below the name of their first
   work
+- Ctrl+C in a search copied the details of the playing track, rather than
+  the text selected
 
 ### Removed
 

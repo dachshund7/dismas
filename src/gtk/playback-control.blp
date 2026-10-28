@@ -299,6 +299,8 @@ menu more_menu {
     item {
       label: _("Copy");
       action: "win.copy";
+      // Not an accel, see `Window::setup_edit_shortcuts()`
+      accel: "<primary>c";
     }
 
     item {
