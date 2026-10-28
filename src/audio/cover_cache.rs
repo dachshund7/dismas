@@ -171,7 +171,7 @@ impl CoverCache {
         // queue model. The files are only read if the pictures don't decode
         let files = dir
             .into_iter()
-            .flat_map(Self::cover_files)
+            .flat_map(Self::cover_files_for)
             .filter_map(|file| read_cover_file(&file));
 
         let cover = front
@@ -186,40 +186,28 @@ impl CoverCache {
     }
 
     // The files that can have the cover of the tracks in a folder, in the
-    // order they're looked for. The folder is read, as the case of their
-    // names varies, and any image type is taken, since glycin goes by the
-    // contents; the common types come first among files of the same name
-    pub fn cover_files(dir: &Path) -> impl Iterator<Item = PathBuf> {
-        const NAMES: [&str; 2] = ["cover", "folder"];
-
-        let mut files: Vec<(usize, u8, PathBuf)> = std::fs::read_dir(dir)
+    // order they're looked for: the ones named as covers are in it, and
+    // then in the folder of the album when it's in a disc folder, as in
+    // Album/CD1, which often has no cover of its own. Failing those, the
+    // only image in either folder, which can be named after the album
+    pub fn cover_files_for(dir: &Path) -> impl Iterator<Item = PathBuf> {
+        let album = dir
+            .parent()
+            .filter(|_| dir.file_name().is_some_and(crate::library::is_disc_folder));
+        let (named, only) = folder_covers(dir);
+        let (album_named, album_only) = album.map(folder_covers).unwrap_or_default();
+        named
             .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|entry| {
-                let path = entry.path();
-                let stem = path.file_stem()?.to_str()?;
-                let ext = path.extension()?.to_str()?;
-                let name_rank = NAMES
-                    .iter()
-                    .position(|name| stem.eq_ignore_ascii_case(name))?;
-                let (mime_type, _) = gio::content_type_guess(Some(&path), None);
-                if !mime_type.starts_with("image/") {
-                    return None;
-                }
-                let ext_rank =
-                    if ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg") {
-                        0
-                    } else if ext.eq_ignore_ascii_case("png") {
-                        1
-                    } else {
-                        2
-                    };
-                Some((name_rank, ext_rank, path))
-            })
-            .collect();
-        files.sort();
-        files.into_iter().map(|(_, _, path)| path)
+            .chain(album_named)
+            .chain(only)
+            .chain(album_only)
+    }
+
+    // The cover files of a folder alone
+    #[cfg(test)]
+    pub fn cover_files(dir: &Path) -> impl Iterator<Item = PathBuf> {
+        let (named, only) = folder_covers(dir);
+        named.into_iter().chain(only)
     }
 
     // The cover of the album of a track, loaded the first time one of its
@@ -311,6 +299,54 @@ impl CoverCache {
 
         Some(image.into_texture())
     }
+}
+
+// The images in a folder that are named as covers, in the order they're
+// looked for, and the only image in it, if it has one image and it isn't
+// named so. The folder is read, as the case of their names varies, and
+// any image type is taken, since glycin goes by the contents; the common
+// types come first among files of the same name
+fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
+    let mut named: Vec<(u8, u8, PathBuf)> = Vec::new();
+    let mut others = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let (Some(stem), Some(ext)) = (
+            path.file_stem().and_then(|s| s.to_str()),
+            path.extension().and_then(|s| s.to_str()),
+        ) else {
+            continue;
+        };
+        let (mime_type, _) = gio::content_type_guess(Some(&path), None);
+        if !mime_type.starts_with("image/") {
+            continue;
+        }
+        let stem = stem.to_lowercase();
+        let name_rank = match stem.as_str() {
+            "cover" => 0,
+            "folder" => 1,
+            "front" => 2,
+            // Windows Media Player's, AlbumArt_{…}_Large.jpg and
+            // AlbumArtSmall.jpg
+            name if name.starts_with("albumart") && name.ends_with("large") => 3,
+            name if name.starts_with("albumart") => 4,
+            // A scan of the back cover isn't the cover, even alone
+            name if name.starts_with("back") => continue,
+            _ => {
+                others.push(path);
+                continue;
+            }
+        };
+        let ext_rank = match ext.to_lowercase().as_str() {
+            "jpg" | "jpeg" => 0,
+            "png" => 1,
+            _ => 2,
+        };
+        named.push((name_rank, ext_rank, path));
+    }
+    named.sort();
+    let only = (others.len() == 1).then(|| others.remove(0));
+    (named.into_iter().map(|(_, _, path)| path).collect(), only)
 }
 
 // Reads a cover file next to the tracks, unless it's too large
@@ -460,6 +496,62 @@ mod tests {
             names,
             ["cover.JPG", "COVER.png", "cover.webp", "Folder.JPEG"]
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cover_files_have_other_names_and_places() {
+        let dir = glib::mkdtemp("dismas-cover-files-XXXXXX").unwrap();
+        let names = |folder: &str| -> Vec<String> {
+            CoverCache::cover_files_for(&dir.join(folder))
+                .map(|path| {
+                    path.strip_prefix(&dir)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect()
+        };
+        for file in [
+            // Windows Media Player's, the large one first
+            "WMP/AlbumArtSmall.jpg",
+            "WMP/AlbumArt_{0A1B}_Large.jpg",
+            "WMP/front.png",
+            // The cover of an album whose discs are in their own folders,
+            // after their own named covers, and before a lone image
+            "Album/cover.jpg",
+            "Album/CD1/disc.jpg",
+            "Album/CD2/front.jpg",
+            // The only image of a folder, unless it's the back cover
+            "Named/Abbey Road.jpg",
+            "Two/a.jpg",
+            "Two/b.jpg",
+            "Back/back.jpg",
+        ] {
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+
+        assert_eq!(
+            names("WMP"),
+            [
+                "WMP/front.png",
+                "WMP/AlbumArt_{0A1B}_Large.jpg",
+                "WMP/AlbumArtSmall.jpg"
+            ]
+        );
+        assert_eq!(
+            names("Album/CD1"),
+            ["Album/cover.jpg", "Album/CD1/disc.jpg"]
+        );
+        assert_eq!(
+            names("Album/CD2"),
+            ["Album/CD2/front.jpg", "Album/cover.jpg"]
+        );
+        assert_eq!(names("Named"), ["Named/Abbey Road.jpg"]);
+        assert!(names("Two").is_empty());
+        assert!(names("Back").is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

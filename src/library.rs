@@ -2122,11 +2122,11 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     Ok(())
 }
 
-// When the newest cover file in a folder of tracks was changed, if it
+// When the newest cover file for a folder of tracks was changed, if it
 // has any; the thumbnail is made from the first track of the album, which
 // takes its cover from these files when its tags have none
 fn cover_file_time(dir: &Path) -> Option<std::time::SystemTime> {
-    CoverCache::cover_files(dir)
+    CoverCache::cover_files_for(dir)
         .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
         .max()
 }
@@ -2218,19 +2218,22 @@ pub fn is_mbid(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
-// The folder of the album a track is in; the discs of an album are often
-// in their own folders, e.g. "CD 1" or "Disc 2"
-fn album_folder(path: &Path) -> Option<&Path> {
-    let parent = path.parent()?;
-    let name = parent.file_name()?.to_string_lossy().to_lowercase();
-    let is_disc_folder = ["cd", "disc", "disk"].iter().any(|prefix| {
+// Whether a folder holds a disc of an album, e.g. "CD 1" or "Disc 2"
+pub fn is_disc_folder(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy().to_lowercase();
+    ["cd", "disc", "disk"].iter().any(|prefix| {
         name.strip_prefix(prefix).is_some_and(|rest| {
             let rest = rest.trim_start_matches([' ', '_', '-', '.']);
             !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
         })
-    });
+    })
+}
 
-    if is_disc_folder {
+// The folder of the album a track is in; the discs of an album are often
+// in their own folders
+fn album_folder(path: &Path) -> Option<&Path> {
+    let parent = path.parent()?;
+    if is_disc_folder(parent.file_name()?) {
         parent.parent()
     } else {
         Some(parent)

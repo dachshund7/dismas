@@ -181,7 +181,9 @@ Besides what it adds, Dismas changes some of what Amberol already does:
   loaders, as a crafted image in a tag could otherwise attack the player. The
   player shows the cover at full size, rather than scaled up from a small
   copy. Cover files are found whatever their case or image type, such as
-  `Cover.JPG` or `folder.webp`.
+  `Cover.JPG`, `folder.webp`, `front.png` or Windows Media Player's
+  `AlbumArt` files, in the album's folder for the tracks in a disc folder
+  like `CD1`, and a folder's only image is taken whatever its name.
 - **Missing tags:** a track without a title tag shows its file name, and a
   track without an album tag shows the name of its folder, rather than
   "Unknown title" and "Unknown album".

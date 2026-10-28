@@ -118,6 +118,9 @@ All notable changes to this project will be documented in this file.
 - In Zen Mode and in fullscreen, pressing a key brings back the controls,
   as moving the pointer does, so that Tab doesn't go through buttons that
   can't be seen
+- Cover files are also found as `front.jpg` and as Windows Media Player's
+  `AlbumArt` files, in the album's folder for tracks in a disc folder like
+  `CD1`, and as the only image in a folder, whatever its name
 
 ### Fixed
 
