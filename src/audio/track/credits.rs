@@ -257,7 +257,7 @@ impl TrackCredits {
             movement,
             movement_number,
             movement_levels: None,
-            composers: tag_strings(tag, ItemKey::Composer),
+            composers: split_composers(tag.get_strings(ItemKey::Composer)),
             work_composers: Vec::new(),
             lyricists: tag_strings(tag, ItemKey::Lyricist),
             arrangers: tag_strings(tag, ItemKey::Arranger),
@@ -615,6 +615,24 @@ fn short_name(name: &str) -> Option<String> {
         [first, _, .., last] => Some(format!("{first} {last}")),
         _ => None,
     }
+}
+
+// The names of composers, or their sort names, in the values of a tag,
+// which can also be separated by semicolons, as Mp3tag and foobar2000
+// write them, or joined by " & " or " / ", as iTunes and others do, e.g.
+// "John Lennon & Paul McCartney" or "Lennon / McCartney", without repeats.
+// Only with spaces around them, so that "AC/DC" stays whole, and not by
+// commas, which a sort name has, as in "Bach, Johann Sebastian"
+pub fn split_composers<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
+    values
+        .flat_map(|value| value.split(';'))
+        .flat_map(|value| value.split(" & "))
+        .flat_map(|value| value.split(" / "))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unique()
+        .map(ToString::to_string)
+        .collect()
 }
 
 // All the values for a key, including the ones that were stored as a

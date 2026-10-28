@@ -36,7 +36,7 @@ use crate::{
     audio::{
         CoverCache, ExtraComments, FileTags, ListedPerformer, PerformerKind, ReadOptions,
         TrackCredits, normalize_search_text, plain_commas, read_file_tags, search_key,
-        title_from_file_name, track_search_text, track_title,
+        split_composers, title_from_file_name, track_search_text, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
@@ -45,7 +45,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 21;
+const SCHEMA_VERSION: i32 = 22;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -2416,8 +2416,8 @@ impl TrackTags {
             folder_album.as_deref(),
         );
 
-        let names = split_names(tag.get_strings(ItemKey::Composer));
-        let sorts = split_names(tag.get_strings(ItemKey::ComposerSortOrder));
+        let names = split_composers(tag.get_strings(ItemKey::Composer));
+        let sorts = split_composers(tag.get_strings(ItemKey::ComposerSortOrder));
 
         TrackTags {
             album_id: Some(album_id),
@@ -2550,18 +2550,6 @@ fn performer_kind_from_code(code: &str) -> Option<PerformerKind> {
         "s" => Some(PerformerKind::Soloist),
         _ => None,
     }
-}
-
-// The names in the values of a tag, which can also be separated by
-// semicolons, without repeats
-fn split_names<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
-    values
-        .flat_map(|value| value.split(';'))
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .unique()
-        .map(ToString::to_string)
-        .collect()
 }
 
 // The composers of a track, as the library keeps them: a line for each,

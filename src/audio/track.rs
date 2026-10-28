@@ -58,7 +58,7 @@ mod tags;
 mod work_hierarchy;
 
 use credits::is_composer;
-pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
+pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits, split_composers};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
@@ -888,6 +888,37 @@ mod tests {
             original_date: original_date.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn composers_joined_in_one_value_are_split() {
+        use super::split_composers;
+        let split = |values: &[&str]| split_composers(values.iter().copied());
+        assert_eq!(
+            split(&["John Lennon & Paul McCartney"]),
+            ["John Lennon", "Paul McCartney"]
+        );
+        assert_eq!(split(&["Lennon / McCartney"]), ["Lennon", "McCartney"]);
+        assert_eq!(
+            split(&["Benny Andersson; Björn Ulvaeus", "Benny Andersson"]),
+            ["Benny Andersson", "Björn Ulvaeus"]
+        );
+        // Without spaces around them, and commas, are part of a name
+        assert_eq!(split(&["AC/DC"]), ["AC/DC"]);
+        assert_eq!(
+            split(&["Bach, Johann Sebastian"]),
+            ["Bach, Johann Sebastian"]
+        );
+        // Sort names split the same way, so they go with the names
+        assert_eq!(
+            split(&["Lennon, John & McCartney, Paul"]),
+            ["Lennon, John", "McCartney, Paul"]
+        );
+
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::Composer, "Rodgers & Hammerstein".to_string());
+        let credits = TrackCredits::from_tag(&tag, &Default::default());
+        assert_eq!(credits.composers, ["Rodgers", "Hammerstein"]);
     }
 
     #[test]
