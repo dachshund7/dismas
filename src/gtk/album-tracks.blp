@@ -44,6 +44,22 @@ template $DismasAlbumTracks: Widget {
       };
     }
 
+    // When the album was made, its record label and its catalogue number;
+    // hidden for the recordings of a work, which each have their year
+    [top]
+    Label album_info {
+      visible: false;
+      ellipsize: end;
+      margin-start: 12;
+      margin-end: 12;
+      margin-bottom: 6;
+
+      styles [
+        "caption",
+        "dim-label",
+      ]
+    }
+
     // While the search leaves out some of the album's tracks, how many it
     // matches, with the same Whole Albums toggle as next to the search of
     // the album grid; it's in the colors of a banner, which can't hold a

@@ -41,6 +41,8 @@ mod imp {
         #[template_child]
         pub album_artist: TemplateChild<gtk::Label>,
         #[template_child]
+        pub album_info: TemplateChild<gtk::Label>,
+        #[template_child]
         pub filter_bar: TemplateChild<gtk::Revealer>,
         #[template_child]
         pub filter_label: TemplateChild<gtk::Label>,
@@ -599,6 +601,13 @@ impl AlbumTracks {
         imp.album_title.set_label(&album.title());
         imp.album_title.set_tooltip_text(Some(&album.title()));
         imp.album_artist.set_label(&album.artist());
+        let info = [album.year(), album.label(), album.catalog_number()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        imp.album_info.set_label(&info);
+        imp.album_info.set_visible(!info.is_empty());
 
         imp.album.replace(Some(album.clone()));
         imp.work.replace(None);
@@ -628,6 +637,7 @@ impl AlbumTracks {
             .collect::<Vec<_>>()
             .join(", ");
         imp.album_artist.set_label(&composers);
+        imp.album_info.set_visible(false);
 
         imp.album.replace(None);
         imp.work.replace(Some(work.clone()));

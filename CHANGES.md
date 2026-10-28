@@ -58,6 +58,8 @@ All notable changes to this project will be documented in this file.
   Preludes and Fugues
 - Track Information says when a track was recorded, from the
   RECORDINGDATE tag that the Work Hierarchy plugin writes from MusicBrainz
+- The tracks of an album show when it was made under its title, with its
+  record label and catalogue number
 
 ### Changed
 
