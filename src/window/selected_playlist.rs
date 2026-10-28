@@ -627,11 +627,7 @@ impl Window {
 
         // Looking for the tracks blocks; those that aren't where it says
         // are looked for in the music folders too
-        let music_folders: Vec<std::path::PathBuf> =
-            library::music_folders(&utils::settings_manager())
-                .into_iter()
-                .map(|folder| folder.path)
-                .collect();
+        let music_folders = library::music_folder_paths();
         let read = gio::spawn_blocking(move || {
             let files = playlists::import_m3u(&path, &music_folders)?;
             let n_entries = files.len();

@@ -302,7 +302,8 @@ dismas --add FILE…     # add them to the end of the selected playlist, without
 dismas --play FILE…    # play them in place of the queue, with an Undo
 ```
 
-Folders are read with their subfolders. If Dismas isn't running, `--add` and
+Folders are read with their subfolders, and an M3U playlist gives its tracks,
+found as when it's imported. If Dismas isn't running, `--add` and
 `--play` start it and open the selected playlist first, as at any startup:
 `--add` then adds to that playlist, and the Undo of `--play` puts it back.
 

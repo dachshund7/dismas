@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Opening an M3U playlist with Dismas, from a file manager or on the
+  command line, opens its tracks, as it does a folder; it said it found
+  none. They're found as when the playlist is imported
 - Play Next, in the menu of a track, puts it after the playing track, or
   after the last movement of the work that's playing, so that the work
   isn't cut; tracks played next one after the other play in the order they

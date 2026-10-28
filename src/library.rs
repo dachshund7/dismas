@@ -241,6 +241,14 @@ pub fn music_folders(settings: &gio::Settings) -> Vec<MusicFolder> {
     )
 }
 
+// The paths of the music folders, to look for tracks in
+pub fn music_folder_paths() -> Vec<PathBuf> {
+    music_folders(&utils::settings_manager())
+        .into_iter()
+        .map(|folder| folder.path)
+        .collect()
+}
+
 fn folders_from_entries(entries: Vec<(String, String)>, excluded: Vec<String>) -> Vec<MusicFolder> {
     let mut folders: Vec<MusicFolder> = if entries.is_empty() {
         vec![MusicFolder::new(default_music_dir())]

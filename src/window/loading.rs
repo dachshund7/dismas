@@ -3,7 +3,7 @@
 
 use super::selected_playlist::start_in_music_folder;
 use super::*;
-use crate::{cue_sheet, library};
+use crate::{cue_sheet, library, playlists};
 
 impl Window {
     // Called once the queue of the last session, or the files the
@@ -370,7 +370,8 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             async move {
-                match gio::spawn_blocking(move || audio_files(files)).await {
+                let music_folders = library::music_folder_paths();
+                match gio::spawn_blocking(move || audio_files(files, &music_folders)).await {
                     Ok(queue) => win.load_into_queue(
                         queue,
                         mode,
@@ -393,7 +394,10 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             async move {
-                let Ok(queue) = gio::spawn_blocking(move || audio_files(files)).await else {
+                let music_folders = library::music_folder_paths();
+                let Ok(queue) =
+                    gio::spawn_blocking(move || audio_files(files, &music_folders)).await
+                else {
                     return;
                 };
                 if queue.is_empty() {
@@ -1017,11 +1021,12 @@ enum FileDrop {
     Zones,
 }
 
-// The audio files, and the ones in the folders and their subfolders. The
-// files and folders given can be symbolic links, which were picked or
-// dropped on purpose; the ones inside the folders aren't followed, as
-// they could make a loop
-fn audio_files(files: Vec<gio::File>) -> Vec<gio::File> {
+// The audio files, the ones in the folders and their subfolders, and the
+// tracks of the M3U playlists, as a file manager opens a playlist with
+// Dismas, which are looked for in the music folders too, as for an
+// imported one. The files and folders given, and the ones inside the
+// folders, can be symbolic links, see `utils::read_folder_tree()`
+fn audio_files(files: Vec<gio::File>, music_folders: &[std::path::PathBuf]) -> Vec<gio::File> {
     let mut queue = Vec::new();
 
     for file in files {
@@ -1038,10 +1043,20 @@ fn audio_files(files: Vec<gio::File>) -> Vec<gio::File> {
         ) {
             match info.file_type() {
                 gio::FileType::Regular => {
+                    let Some(content_type) = info.content_type() else {
+                        continue;
+                    };
+                    if gio::content_type_is_mime_type(&content_type, "audio/x-mpegurl") {
+                        debug!("Adding the tracks of the playlist '{}'", file.uri());
+                        if let Some(tracks) = file
+                            .path()
+                            .and_then(|path| playlists::import_m3u(&path, music_folders))
+                        {
+                            queue.extend(tracks);
+                        }
                     // CUE sheets split audio files into tracks
-                    if let Some(content_type) = info.content_type()
-                        && (gio::content_type_is_mime_type(&content_type, "audio/*")
-                            || gio::content_type_is_mime_type(&content_type, "application/x-cue"))
+                    } else if gio::content_type_is_mime_type(&content_type, "audio/*")
+                        || gio::content_type_is_mime_type(&content_type, "application/x-cue")
                     {
                         debug!("Adding file '{}' to the queue", file.uri());
                         queue.push(file);
