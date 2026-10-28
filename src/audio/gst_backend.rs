@@ -596,7 +596,7 @@ impl GstBackend {
                 {
                     return None;
                 }
-                let next = gapless.next.clone()?;
+                let next = gapless.next.as_ref()?;
                 if !next.start.is_zero() {
                     return None;
                 }
@@ -613,6 +613,7 @@ impl GstBackend {
                 if !gio::File::for_uri(&next.uri).query_exists(gio::Cancellable::NONE) {
                     return None;
                 }
+                let next = next.clone();
                 gapless.handed = Some(next.clone());
                 next
             };
@@ -722,20 +723,21 @@ impl GstBackend {
         ));
     }
 
-    pub fn set_track(&self, source: Option<&TrackSource>) {
-        self.start_position.set(source.map(|_| 0));
+    pub fn set_track(&self, source: Option<TrackSource>) {
+        self.start_position.set(source.as_ref().map(|_| 0));
         self.play_requested.set(false);
+        let uri = source.as_ref().map(|source| source.uri.clone());
         {
             let mut gapless = self.gapless();
             gapless.generation += 1;
             gapless.handed = None;
             gapless.started = false;
-            gapless.current = source.cloned();
+            gapless.current = source;
             gapless.advanced = None;
             gapless.cut = false;
             gapless.start_seek = false;
             gapless.played = false;
-            if source.is_some() {
+            if uri.is_some() {
                 gapless.pending_loads += 1;
                 gapless.loaded_at = Some(Instant::now());
             }
@@ -743,15 +745,15 @@ impl GstBackend {
         // Without a track, playbin is only stopped: given no URI, it
         // checks it anyway, and GLib warns about it. As GstPlay isn't
         // loading anything, no load is counted
-        match source {
-            Some(source) => self.gst_player.set_uri(Some(&source.uri)),
+        match uri {
+            Some(uri) => self.gst_player.set_uri(Some(&uri)),
             None => self.gst_player.stop(),
         }
     }
 
     // The track that playbin gets once this one is about to finish
-    pub fn set_next(&self, source: Option<&TrackSource>) {
-        self.gapless().next = source.cloned();
+    pub fn set_next(&self, source: Option<TrackSource>) {
+        self.gapless().next = source;
     }
 
     pub fn generation(&self) -> u64 {
@@ -760,11 +762,11 @@ impl GstBackend {
 
     // The player follows the track that was handed over, or that the
     // pipeline went on to in the same file
-    pub fn confirm_switch(&self, source: &TrackSource) {
+    pub fn confirm_switch(&self, source: TrackSource) {
         let mut gapless = self.gapless();
         gapless.handed = None;
         gapless.started = false;
-        gapless.current = Some(source.clone());
+        gapless.current = Some(source);
         gapless.advanced = None;
     }
 
@@ -870,13 +872,17 @@ impl GstBackend {
         if self.start_position.get().is_some() {
             return;
         }
-        let (current, played) = {
+        let unplayed = {
             let gapless = self.gapless();
-            (gapless.current.clone(), gapless.played)
+            gapless
+                .current
+                .as_ref()
+                .filter(|_| !gapless.played)
+                .cloned()
         };
-        if current.is_some() && !played {
+        if let Some(current) = unplayed {
             let position = self.starting_at.get();
-            self.set_track(current.as_ref());
+            self.set_track(Some(current));
             self.start_position.set(Some(position));
             return;
         }
@@ -888,7 +894,7 @@ impl GstBackend {
     pub fn stop(&self) {
         let current = self.gapless().current.clone();
         if current.is_some() {
-            self.set_track(current.as_ref());
+            self.set_track(current);
         } else {
             self.start_position.take();
             self.gst_player.stop();

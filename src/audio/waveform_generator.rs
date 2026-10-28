@@ -188,10 +188,10 @@ impl WaveformGenerator {
             return;
         }
 
-        if let Some(peaks) = self.peaks()
-            && let Some(uuid) = self.imp().track.borrow().as_ref().and_then(Track::uuid)
+        if let Some(uuid) = self.imp().track.borrow().as_ref().and_then(Track::uuid)
+            && let Some(peaks) = self.imp().peaks.borrow().as_ref()
         {
-            save_peaks(&cache_path(&uuid), &peaks);
+            save_peaks(&cache_path(&uuid), peaks);
         }
 
         self.notify_has_peaks();

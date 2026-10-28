@@ -342,7 +342,7 @@ impl AudioPlayer {
 
         let next_track = next_track.filter(|_| !self.stops_at_track_end());
         self.backend
-            .set_next(next_track.map(|t| TrackSource::of(&t)).as_ref());
+            .set_next(next_track.map(|t| TrackSource::of(&t)));
     }
 
     // Whether the music stops at the end of the current track, for the
@@ -418,7 +418,7 @@ impl AudioPlayer {
                 return;
             };
             debug!("Next track: {}", next_track.uri());
-            self.backend.set_track(Some(&TrackSource::of(&next_track)));
+            self.backend.set_track(Some(TrackSource::of(&next_track)));
             self.show_track(next_track);
         }
 
@@ -446,7 +446,7 @@ impl AudioPlayer {
             self.set_playback_state(PlaybackState::Paused);
         }
 
-        self.backend.set_track(Some(&TrackSource::of(&track)));
+        self.backend.set_track(Some(TrackSource::of(&track)));
         self.show_track(track);
 
         if was_playing {
@@ -529,7 +529,7 @@ impl AudioPlayer {
         }
         if let Some(next_track) = self.queue.next_track() {
             debug!("Playing next (gapless): {}", next_track.uri());
-            self.backend.confirm_switch(&TrackSource::of(&next_track));
+            self.backend.confirm_switch(TrackSource::of(&next_track));
             self.show_track(next_track);
         }
     }
@@ -557,7 +557,7 @@ impl AudioPlayer {
                 if let Some(current_track) = self.state.track() {
                     current_track.set_playing(false);
                 }
-                self.backend.set_track(Some(&TrackSource::of(&next_track)));
+                self.backend.set_track(Some(TrackSource::of(&next_track)));
                 self.show_track(next_track);
             }
         }

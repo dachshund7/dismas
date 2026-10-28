@@ -313,7 +313,12 @@ fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
             continue;
         };
         let ext = ext.to_lowercase();
-        let image = *images.entry(ext.clone()).or_insert_with(|| {
+        let ext_rank = match ext.as_str() {
+            "jpg" | "jpeg" => 0,
+            "png" => 1,
+            _ => 2,
+        };
+        let image = *images.entry(ext).or_insert_with(|| {
             gio::content_type_guess(Some(&path), None)
                 .0
                 .starts_with("image/")
@@ -336,11 +341,6 @@ fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
                 others.push(path);
                 continue;
             }
-        };
-        let ext_rank = match ext.as_str() {
-            "jpg" | "jpeg" => 0,
-            "png" => 1,
-            _ => 2,
         };
         named.push((name_rank, ext_rank, path));
     }

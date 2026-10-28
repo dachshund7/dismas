@@ -114,7 +114,10 @@ impl CoverImage {
 
     // A copy of the cover, scaled down to fit in `max_size`
     pub fn thumbnail(&self, max_size: u32) -> Option<Self> {
-        self.clone().scaled(max_size)
+        match self.size_within(max_size) {
+            Some((width, height)) => self.resized(width, height),
+            None => Some(self.clone()),
+        }
     }
 
     // A small blurred copy of the cover, to fill the screen behind the
@@ -130,20 +133,31 @@ impl CoverImage {
     }
 
     fn scaled(self, max_size: u32) -> Option<Self> {
-        if self.width <= max_size && self.height <= max_size {
-            return Some(self);
+        match self.size_within(max_size) {
+            Some((width, height)) => self.resized(width, height),
+            None => Some(self),
         }
+    }
 
-        let (width, height) = if self.width > self.height {
+    // The size of the cover scaled down to fit in `max_size`, if it doesn't
+    fn size_within(&self, max_size: u32) -> Option<(u32, u32)> {
+        if self.width <= max_size && self.height <= max_size {
+            return None;
+        }
+        Some(if self.width > self.height {
             (max_size, (max_size * self.height / self.width).max(1))
         } else {
             ((max_size * self.width / self.height).max(1), max_size)
-        };
+        })
+    }
 
+    // The pixels are read where they are, as copying them first would copy
+    // a whole cover to make a small one
+    fn resized(&self, width: u32, height: u32) -> Option<Self> {
         let pixels = if self.has_alpha {
-            resize::<Rgba<u8>>(self.width, self.height, self.pixels, width, height)?
+            resize::<Rgba<u8>>(self.width, self.height, &self.pixels, width, height)?
         } else {
-            resize::<Rgb<u8>>(self.width, self.height, self.pixels, width, height)?
+            resize::<Rgb<u8>>(self.width, self.height, &self.pixels, width, height)?
         };
 
         Some(CoverImage {
@@ -364,14 +378,14 @@ fn decode_frame(data: glib::Bytes) -> Result<glycin::Frame, glycin::Error> {
 fn resize<P>(
     width: u32,
     height: u32,
-    pixels: Vec<u8>,
+    pixels: &[u8],
     new_width: u32,
     new_height: u32,
 ) -> Option<Vec<u8>>
 where
     P: Pixel<Subpixel = u8> + 'static,
 {
-    let image = ImageBuffer::<P, Vec<u8>>::from_raw(width, height, pixels)?;
+    let image = ImageBuffer::<P, &[u8]>::from_raw(width, height, pixels)?;
     Some(image::imageops::resize(&image, new_width, new_height, FilterType::CatmullRom).into_raw())
 }
 
