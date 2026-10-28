@@ -59,6 +59,24 @@ const GROUP_ROLES: [&str; 6] = [
     "choir vocals",
 ];
 
+// Who a performer the credits name is, which the list of performers is
+// divided by, in this order
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PerformerKind {
+    Conductor,
+    Ensemble,
+    Soloist,
+}
+
+// A performer the credits name, with the role the tags give them, e.g.
+// "piano" or "orchestra"
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListedPerformer {
+    pub kind: PerformerKind,
+    pub name: String,
+    pub role: Option<String>,
+}
+
 // The additional credits and release information in the tags, mostly
 // relevant for classical music
 #[derive(Debug, Clone, Default)]
@@ -68,6 +86,19 @@ pub struct TrackCredits {
     // "The Well-Tempered Clavier, Book I: Prelude and Fugue no. 1 in C
     // major, BWV 846"
     pub work_title: Option<String>,
+    // The MusicBrainz id of the work, from the "Work Hierarchy" plugin
+    pub work_id: Option<String>,
+    // The work it's part of, or the collection it's in, from the "Work
+    // Hierarchy" plugin
+    pub work_collection: Option<String>,
+    // Where the movement is in the work, which tells two recordings of a
+    // work on one album apart: the positions in each level below the work,
+    // empty if they aren't known, and `None` if the track performs the
+    // whole work or isn't part of one
+    pub movement_order: Option<Vec<u32>>,
+    // The names of the works in the tag of the "Work Hierarchy" plugin,
+    // which lofty doesn't search, see `WorkHierarchy::search_text()`
+    pub work_search: String,
     pub movement: Option<String>,
     pub movement_number: Option<String>,
     // The levels of the work above the movement, and the movement, when
@@ -151,13 +182,17 @@ impl MusicBrainzIds {
 impl TrackCredits {
     // The credits in the tags; lofty leaves the tags it doesn't know out of
     // `tag`, so `extra` has the ones we need
-    pub(super) fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
+    pub fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
         let mut credits = Self::from_tag_items(tag);
         let hierarchy = extra
             .work_hierarchy
             .as_deref()
             .and_then(WorkHierarchy::parse);
         credits.composer_ids = hierarchy.as_ref().and_then(WorkHierarchy::composer_ids);
+        credits.work_search = hierarchy
+            .as_ref()
+            .map(WorkHierarchy::search_text)
+            .unwrap_or_default();
         // The hierarchy has the numbers of every level, so the movement
         // includes them where they belong, whatever the work and movement
         // tags say. A track of a whole part with a catalogue number of its
@@ -167,11 +202,17 @@ impl TrackCredits {
             title,
             movement,
             composers,
+            id,
+            collection,
+            order,
         }) = hierarchy.as_ref().and_then(WorkHierarchy::labels)
         {
             credits.work_title = (title != work).then_some(title);
             credits.work = Some(work);
             credits.work_composers = composers;
+            credits.work_id = Some(id);
+            credits.work_collection = collection;
+            credits.movement_order = order;
             credits.movement = movement.as_ref().map(MovementName::full);
             credits.movement_number = None;
             credits.movement_levels =
@@ -182,13 +223,27 @@ impl TrackCredits {
     }
 
     fn from_tag_items(tag: &Tag) -> Self {
+        let work = tag.get_string(ItemKey::Work).map(ToString::to_string);
+        let movement = tag.get_string(ItemKey::Movement).map(ToString::to_string);
+        let movement_number = tag
+            .get_string(ItemKey::MovementNumber)
+            .map(ToString::to_string);
+        let movement_order = (work.is_some() && movement.is_some()).then(|| {
+            movement_number
+                .as_deref()
+                .and_then(|n| n.trim().parse().ok())
+                .into_iter()
+                .collect()
+        });
         TrackCredits {
-            work: tag.get_string(ItemKey::Work).map(ToString::to_string),
+            work,
             work_title: None,
-            movement: tag.get_string(ItemKey::Movement).map(ToString::to_string),
-            movement_number: tag
-                .get_string(ItemKey::MovementNumber)
-                .map(ToString::to_string),
+            work_id: None,
+            work_collection: None,
+            movement_order,
+            work_search: String::new(),
+            movement,
+            movement_number,
             movement_levels: None,
             composers: tag_strings(tag, ItemKey::Composer),
             work_composers: Vec::new(),
@@ -444,6 +499,61 @@ impl TrackCredits {
             .iter()
             .filter(|s| !s.is_empty())
             .join(" · ")
+    }
+
+    // The conductors and performers that the credits line names, for the
+    // list of performers: the same ones as `summary()`, and not the
+    // players of a group, which Picard lists with it. Unlike there, the
+    // artist is kept, as it's one of the performers
+    pub fn listed_performers(&self) -> Vec<ListedPerformer> {
+        let mut listed = self
+            .conductors
+            .iter()
+            .map(|name| ListedPerformer {
+                kind: PerformerKind::Conductor,
+                name: name.clone(),
+                role: None,
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(ensemble) = self.ensemble_in_album_artist() {
+            // The names in the album artist that the tags credit are the
+            // conductors and players they say; the others are taken to be
+            // groups, although they can be players that the tags of other
+            // tracks credit, which the list of performers puts right
+            for name in ensemble.split(", ").flat_map(|part| part.split(" & ")) {
+                let name = name.trim();
+                if name.is_empty() || self.conductors.iter().any(|c| c == name) {
+                    continue;
+                }
+                let performer = self.performers.iter().find(|p| p.name == name);
+                listed.push(ListedPerformer {
+                    kind: if performer.is_some() {
+                        PerformerKind::Soloist
+                    } else {
+                        PerformerKind::Ensemble
+                    },
+                    name: name.to_string(),
+                    role: performer.and_then(|p| p.role.clone()),
+                });
+            }
+            return listed;
+        }
+
+        listed.extend(
+            self.featured_performers()
+                .into_iter()
+                .map(|performer| ListedPerformer {
+                    kind: if self.is_group(performer) {
+                        PerformerKind::Ensemble
+                    } else {
+                        PerformerKind::Soloist
+                    },
+                    name: performer.name.clone(),
+                    role: performer.role.clone(),
+                }),
+        );
+        listed
     }
 }
 

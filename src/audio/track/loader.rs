@@ -418,9 +418,10 @@ impl TrackData {
             String::new()
         };
 
+        let credits = TrackCredits::from_tag(tag, extra);
         TrackData {
-            credits: TrackCredits::from_tag(tag, extra),
-            tag_text: tag_search_text(tag),
+            tag_text: track_search_text(tag, &credits),
+            credits,
             cover: Some(CoverCache::cover_art(path, tag)),
             uuid,
             duration: sane_duration(tagged_file.properties().duration()),
@@ -457,9 +458,10 @@ impl TrackData {
         let mut details = cue_file.details.clone();
         details.replay_gain = ReplayGain::from_tag(&tag);
 
+        let credits = TrackCredits::from_tag(&tag, &extra);
         TrackData {
-            credits: TrackCredits::from_tag(&tag, &extra),
-            tag_text: tag_search_text(&tag),
+            tag_text: track_search_text(&tag, &credits),
+            credits,
             cover: Some(cue_file.cover.clone()),
             uuid,
             duration: sane_duration(end.saturating_sub(track.start)),

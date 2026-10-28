@@ -72,9 +72,9 @@ pub use queue::Queue;
 pub use sleep_timer::SleepTimer;
 pub use state::PlayerState;
 pub use track::{
-    ExtraComments, FileDetails, Gains, Missing, MusicBrainzIds, Track, TrackCredits, file_tag,
-    load_tracks, normalize_search_text, plain_commas, read_file_tags, search_key, tag_search_text,
-    title_from_file_name, track_title,
+    ExtraComments, FileDetails, Gains, ListedPerformer, Missing, MusicBrainzIds, PerformerKind,
+    Track, TrackCredits, file_tag, load_tracks, normalize_search_text, plain_commas,
+    read_file_tags, search_key, title_from_file_name, track_search_text, track_title,
 };
 pub use waveform_generator::WaveformGenerator;
 

@@ -37,7 +37,7 @@ pub fn normalize_search_text(s: &str) -> String {
 // The text that searching the queue and the album grid looks into for a
 // track, made the same way in both, so that they find the same tracks:
 // its artists, its title, or else the title its file name gives it, the
-// text of its tags (`tag_search_text()`), and the folder its album is
+// text of its tags (`track_search_text()`), and the folder its album is
 // named after when it has no album tag. What the queue shows in place of
 // what's missing, like "Unknown artist" or "Track 3", isn't searched, as
 // the library can't keep it in the language of the moment
@@ -57,10 +57,22 @@ pub fn search_key(
     normalize_search_text(&text)
 }
 
+// The text of the tags of a track that searching looks into: the text of
+// its tags, and the names of the works the "Work Hierarchy" plugin gives,
+// which lofty leaves out of `tag`
+pub fn track_search_text(tag: &Tag, credits: &TrackCredits) -> String {
+    let mut text = tag_search_text(tag);
+    if !credits.work_search.is_empty() {
+        text.push(' ');
+        text.push_str(text_start(&credits.work_search, MAX_SEARCHED_TEXT));
+    }
+    text
+}
+
 // The text of all the tags of a track, for searching the queue; this
 // leaves out the tags that only contain identifiers, numbers or technical
 // data, as they would make short searches, like "op 29", match by accident
-pub fn tag_search_text(tag: &Tag) -> String {
+fn tag_search_text(tag: &Tag) -> String {
     let mut text = tag
         .items()
         .filter(|item| {

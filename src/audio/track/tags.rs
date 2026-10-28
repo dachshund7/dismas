@@ -32,6 +32,16 @@ pub struct ExtraComments {
 const WORK_HIERARCHY: &str = "work_hierarchy";
 
 impl ExtraComments {
+    // The items of a file with a "Work Hierarchy" tag, for the tests of
+    // other modules
+    #[cfg(test)]
+    pub fn with_work_hierarchy(json: &str) -> Self {
+        ExtraComments {
+            work_hierarchy: Some(json.to_string()),
+            ..Default::default()
+        }
+    }
+
     pub(super) fn from_vorbis(comments: Option<&VorbisComments>) -> Self {
         let get = |key| comments.and_then(|c| c.get(key)).map(ToString::to_string);
         ExtraComments {

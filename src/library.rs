@@ -35,8 +35,9 @@ pub use watch::FolderWatch;
 
 use crate::{
     audio::{
-        CoverCache, ExtraComments, file_tag, normalize_search_text, plain_commas, read_file_tags,
-        search_key, tag_search_text, title_from_file_name, track_title,
+        CoverCache, ExtraComments, ListedPerformer, PerformerKind, TrackCredits, file_tag,
+        normalize_search_text, plain_commas, read_file_tags, search_key, title_from_file_name,
+        track_search_text, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
@@ -45,7 +46,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 14;
+const SCHEMA_VERSION: i32 = 15;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -69,10 +70,18 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         track INTEGER,
         title TEXT,
         search TEXT,
-        composers TEXT
+        composers TEXT,
+        work_key TEXT,
+        work TEXT,
+        work_title TEXT,
+        work_collection TEXT,
+        work_composers TEXT,
+        movement_order TEXT,
+        performers TEXT
     );
     CREATE INDEX tracks_album ON tracks (album_id);
     CREATE INDEX tracks_file ON tracks (file);
+    CREATE INDEX tracks_work ON tracks (work_key);
     CREATE TABLE IF NOT EXISTS covers (
         album_id TEXT PRIMARY KEY,
         path TEXT
@@ -144,6 +153,29 @@ struct TrackTags {
     search: Option<String>,
     // The composers, see `composer_entries()`
     composers: Option<String>,
+    // The work the track performs, or a movement of, see `WorkEntry`
+    work: Option<WorkEntry>,
+    // The conductors and performers, see `performer_entries()`
+    performers: Option<String>,
+}
+
+// The work of a track, as the library keeps it
+#[derive(Debug, PartialEq)]
+struct WorkEntry {
+    // What tells the work apart from others across albums: its MusicBrainz
+    // id, or else its name and its composers, see `work_entry()`
+    key: String,
+    // The name the queue shows it by
+    name: String,
+    // The full title, when it's not the name
+    title: Option<String>,
+    // The work it's part of, or the collection it's in
+    collection: Option<String>,
+    // Its composers, as in `composer_entries()`
+    composers: Option<String>,
+    // Where the movement is in the work, e.g. "1.3.3", or "" if that isn't
+    // known; `None` if the track performs the whole work
+    order: Option<String>,
 }
 
 // A folder whose albums are in the grid: the path that's read, and the
@@ -1096,9 +1128,10 @@ fn scan_with(
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO tracks
                  (path, file, mtime, ctime, size, album_id, album, album_artist, artist,
-                  artist_sort, year, disc, track, title, search, added, composers)
+                  artist_sort, year, disc, track, title, search, added, composers, work_key,
+                  work, work_title, work_collection, work_composers, movement_order, performers)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17)",
+                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             )?;
             for source in chunk {
                 let key = path_bytes(&source.path);
@@ -1143,6 +1176,7 @@ fn scan_with(
                         stale_albums.insert(id.clone());
                     }
 
+                    let work = tags.work.as_ref();
                     insert.execute(params![
                         path_bytes(&path),
                         key,
@@ -1161,6 +1195,13 @@ fn scan_with(
                         tags.search,
                         added,
                         tags.composers,
+                        work.map(|w| &w.key),
+                        work.map(|w| &w.name),
+                        work.and_then(|w| w.title.as_ref()),
+                        work.and_then(|w| w.collection.as_ref()),
+                        work.and_then(|w| w.composers.as_ref()),
+                        work.and_then(|w| w.order.as_ref()),
+                        tags.performers,
                     ])?;
                     n_changed += 1;
                     if was_known {
@@ -1464,12 +1505,7 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
 
     // A file without tags is in the album of its folder too
     let empty = Tag::new(tagged_file.primary_tag_type());
-    let tags = TrackTags::from_tag(
-        tag.as_deref().unwrap_or(&empty),
-        path,
-        Some(path),
-        &extra.composer_sort,
-    );
+    let tags = TrackTags::from_tag(tag.as_deref().unwrap_or(&empty), path, Some(path), &extra);
     vec![(path.to_path_buf(), tags)]
 }
 
@@ -1494,8 +1530,9 @@ fn read_sheet_tags(
 
 fn cue_track_tags(sheet: &SplitSheet, album_tag: &Tag, track: &CueTrack) -> (PathBuf, TrackTags) {
     let tag = cue_sheet::track_tag(album_tag, &sheet.sheet, track);
-    // The album is in the folder of the sheet
-    let tags = TrackTags::from_tag(&tag, &sheet.path, None, &[]);
+    // The album is in the folder of the sheet, and the items that lofty
+    // doesn't read are about the whole audio file
+    let tags = TrackTags::from_tag(&tag, &sheet.path, None, &ExtraComments::default());
     (sheet.location(track), tags)
 }
 
@@ -1534,9 +1571,9 @@ pub fn folder_album_title(path: &Path) -> Option<String> {
 impl TrackTags {
     // The title of a track without one is the name of its `file`, which
     // is searched like the queue searches it; the tracks of CUE sheets
-    // have none. The sort names of the composers that lofty doesn't read
-    // are in `composer_sort`
-    fn from_tag(tag: &Tag, path: &Path, file: Option<&Path>, composer_sort: &[String]) -> Self {
+    // have none. The items that lofty doesn't read, like the sort names of
+    // the composers and the "Work Hierarchy" tag, are in `extra`
+    fn from_tag(tag: &Tag, path: &Path, file: Option<&Path>, extra: &ExtraComments) -> Self {
         let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
 
         let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
@@ -1580,6 +1617,8 @@ impl TrackTags {
         // in the grid as in the queue
         let folder_album = album.is_none().then(|| folder_album_title(path)).flatten();
 
+        let credits = TrackCredits::from_tag(tag, extra);
+
         // As `Track::with_search_key()` makes it, so that searching the albums
         // matches the same tracks as searching the queue
         let title = track_title(tag);
@@ -1590,15 +1629,15 @@ impl TrackTags {
                 .clone()
                 .or_else(|| file.map(title_from_file_name))
                 .as_deref(),
-            &tag_search_text(tag),
+            &track_search_text(tag, &credits),
             folder_album.as_deref(),
         );
 
         let names = split_names(tag.get_strings(ItemKey::Composer));
-        let sorts = if composer_sort.is_empty() {
+        let sorts = if extra.composer_sort.is_empty() {
             split_names(tag.get_strings(ItemKey::ComposerSortOrder))
         } else {
-            split_names(composer_sort.iter().map(String::as_str))
+            split_names(extra.composer_sort.iter().map(String::as_str))
         };
 
         TrackTags {
@@ -1614,7 +1653,112 @@ impl TrackTags {
             title,
             search: Some(search),
             composers: composer_entries(&names, &sorts),
+            work: work_entry(&credits, artist.as_deref(), &names, &sorts),
+            performers: performer_entries(&credits.listed_performers()),
         }
+    }
+}
+
+// The work a track performs, or a movement of. The work is told apart by
+// its MusicBrainz id: the one the "Work Hierarchy" plugin picks, or else,
+// for a track of a whole work, the work it's linked to, which for a
+// movement would be the movement's. Without one, works with the same name
+// and composers are the same, as the queue's headers take them to be
+fn work_entry(
+    credits: &TrackCredits,
+    artist: Option<&str>,
+    names: &[String],
+    sorts: &[String],
+) -> Option<WorkEntry> {
+    let name = credits.work.as_deref()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let is_movement = credits.movement_label().is_some();
+
+    // The composers of the work, as `Track::work_composers()` finds them,
+    // sorted by their own sort names if the tags have them
+    let mut work_names = if credits.work_composers.is_empty() {
+        credits.composers.clone()
+    } else {
+        credits.work_composers.clone()
+    };
+    if work_names.is_empty() {
+        work_names.extend(artist.map(ToString::to_string));
+    }
+    let sort_of = |composer: &String| {
+        names
+            .iter()
+            .position(|name| composer_key(name) == composer_key(composer))
+            .and_then(|i| sorts.get(i))
+            .filter(|_| sorts.len() == names.len())
+            .cloned()
+            .unwrap_or_else(|| sort_name(composer))
+    };
+    let work_sorts = work_names.iter().map(sort_of).collect::<Vec<_>>();
+
+    let key = credits
+        .work_id
+        .clone()
+        .or_else(|| credits.musicbrainz.work.clone().filter(|_| !is_movement))
+        .unwrap_or_else(|| {
+            let composers = work_names
+                .iter()
+                .map(|name| composer_key(name))
+                .sorted()
+                .join("\x1f");
+            format!("t:{}\x1f{composers}", composer_key(name))
+        });
+    let order = credits
+        .movement_order
+        .as_ref()
+        .filter(|_| is_movement)
+        .map(|order| order.iter().join("."));
+    Some(WorkEntry {
+        key,
+        name: name.to_string(),
+        title: credits.work_title.clone(),
+        collection: credits.work_collection.clone(),
+        composers: composer_entries(&work_names, &work_sorts),
+        order,
+    })
+}
+
+// The conductors and performers of a track, as the library keeps them: a
+// line for each, with its kind ("c", "e" or "s", see `PerformerKind`), its
+// key, as for composers, its name, the name it's sorted by, and its role,
+// separated by tabs, between line breaks, so that a filter finds a
+// performer by "\t{key}\t", whatever its kind (`TrackFilter`). People are
+// sorted by their last names, and groups by their names
+fn performer_entries(performers: &[ListedPerformer]) -> Option<String> {
+    if performers.is_empty() {
+        return None;
+    }
+    let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
+    let mut entries = String::from("\n");
+    for performer in performers {
+        let sort = match performer.kind {
+            PerformerKind::Ensemble => performer.name.clone(),
+            PerformerKind::Conductor | PerformerKind::Soloist => sort_name(&performer.name),
+        };
+        entries.push_str(&format!(
+            "{}\t{}\t{}\t{}\t{}\n",
+            performer_kind_code(performer.kind),
+            composer_key(&performer.name),
+            clean(&performer.name),
+            clean(&sort),
+            clean(performer.role.as_deref().unwrap_or_default()),
+        ));
+    }
+    Some(entries)
+}
+
+// How the library writes the kind of a performer
+fn performer_kind_code(kind: PerformerKind) -> char {
+    match kind {
+        PerformerKind::Conductor => 'c',
+        PerformerKind::Ensemble => 'e',
+        PerformerKind::Soloist => 's',
     }
 }
 
@@ -1754,24 +1898,145 @@ mod tests {
 
         let path = Path::new("/music/Some Folder/01 - Intro.flac");
         let mut tag = Tag::new(TagType::VorbisComments);
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &[]);
+        let tags =
+            super::TrackTags::from_tag(&tag, path, Some(path), &super::ExtraComments::default());
         assert_eq!(tags.album.as_deref(), Some("Some Folder"));
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(search.contains("some folder"));
 
         tag.insert_text(ItemKey::AlbumTitle, "Album".to_string());
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &[]);
+        let tags =
+            super::TrackTags::from_tag(&tag, path, Some(path), &super::ExtraComments::default());
         assert_eq!(tags.title, None);
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(!search.contains("some folder"));
 
         tag.insert_text(ItemKey::TrackTitle, "Overture".to_string());
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &[]);
+        let tags =
+            super::TrackTags::from_tag(&tag, path, Some(path), &super::ExtraComments::default());
         let search = tags.search.unwrap();
         assert!(search.contains("overture"));
         assert!(!search.contains("intro"));
+    }
+
+    #[test]
+    fn works_are_told_apart_by_their_ids_or_names_and_composers() {
+        use lofty::tag::{ItemKey, Tag, TagType};
+
+        use super::ExtraComments;
+
+        let path = Path::new("/music/Requiem/01.flac");
+        let work = |work: &str, composers: &[&str], extra: &ExtraComments| {
+            let mut tag = Tag::new(TagType::VorbisComments);
+            tag.insert_text(ItemKey::Work, work.to_string());
+            for composer in composers {
+                tag.push(lofty::tag::TagItem::new(
+                    ItemKey::Composer,
+                    lofty::tag::ItemValue::Text((*composer).to_string()),
+                ));
+            }
+            super::TrackTags::from_tag(&tag, path, Some(path), extra)
+                .work
+                .unwrap()
+        };
+        let none = ExtraComments::default();
+
+        // Without an id, the same name and composers, ignoring case and
+        // accents, are the same work, and other composers make another
+        let requiem = work("Requiem, op. 89", &["Antonín Dvořák"], &none);
+        assert_eq!(
+            requiem.key,
+            work("requiem, Op. 89", &["Antonin Dvorak"], &none).key
+        );
+        assert_ne!(
+            requiem.key,
+            work("Requiem, op. 89", &["Someone Else"], &none).key
+        );
+        assert_eq!(requiem.name, "Requiem, op. 89");
+        assert_eq!(
+            requiem.composers.as_deref(),
+            Some("\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\n")
+        );
+        // A whole work has no order
+        assert_eq!(requiem.order, None);
+
+        // The hierarchy's id, whatever the work tag says, and the place of
+        // the movement
+        let hierarchy = serde_json::json!({ "version": 1, "segments": [{ "work_index": 0,
+            "path": [
+                { "id": "1d6a0d5c-0000-0000-0000-000000000000", "title": "Requiem in B-flat minor",
+                  "name": "Requiem in B-flat minor",
+                  "composers": [{ "id": "a", "name": "Antonín Dvořák" }] },
+                { "id": "s", "title": "…: Sequentia", "name": "Sequentia", "position": 3 },
+                { "id": "d", "title": "…: Dies irae", "name": "Dies irae", "position": 1 },
+            ] }] });
+        let extra = ExtraComments::with_work_hierarchy(&hierarchy.to_string());
+        let movement = work("Requiem v B-moll, op. 89", &["Antonín Dvořák"], &extra);
+        assert_eq!(movement.key, "1d6a0d5c-0000-0000-0000-000000000000");
+        assert_eq!(movement.name, "Requiem in B-flat minor");
+        assert_eq!(movement.order.as_deref(), Some("3.1"));
+    }
+
+    #[test]
+    fn performers_are_kept_with_their_kinds_and_roles() {
+        use crate::audio::{ListedPerformer, PerformerKind};
+
+        let performer = |kind, name: &str, role: Option<&str>| ListedPerformer {
+            kind,
+            name: name.to_string(),
+            role: role.map(ToString::to_string),
+        };
+        assert_eq!(super::performer_entries(&[]), None);
+        assert_eq!(
+            super::performer_entries(&[
+                performer(PerformerKind::Conductor, "Philippe Herreweghe", None),
+                performer(
+                    PerformerKind::Ensemble,
+                    "Collegium Vocale Gent",
+                    Some("choir vocals")
+                ),
+                performer(
+                    PerformerKind::Soloist,
+                    "Ilse Eerens",
+                    Some("soprano vocals")
+                ),
+            ])
+            .as_deref(),
+            Some(
+                "\nc\tphilippe herreweghe\tPhilippe Herreweghe\tHerreweghe, Philippe\t\n\
+                 e\tcollegium vocale gent\tCollegium Vocale Gent\tCollegium Vocale Gent\t\
+                 choir vocals\n\
+                 s\tilse eerens\tIlse Eerens\tEerens, Ilse\tsoprano vocals\n"
+            )
+        );
+    }
+
+    #[test]
+    fn tracks_are_searched_by_the_names_in_the_work_hierarchy() {
+        use lofty::tag::{ItemKey, Tag, TagType};
+
+        let path = Path::new("/music/WTC/01.flac");
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(
+            ItemKey::Work,
+            "Präludium und Fuge C-Dur, BWV 846".to_string(),
+        );
+        let hierarchy = serde_json::json!({ "version": 1, "segments": [{ "work_index": 1,
+            "path": [
+                { "id": "b", "title": "The Well-Tempered Clavier, Book I", "name": "Book I" },
+                { "id": "p", "title": "…: Prelude and Fugue in C major, BWV 846",
+                  "name": "Prelude and Fugue in C major, BWV 846", "number": 1 },
+                { "id": "f", "title": "…: Fugue", "name": "Fugue", "number": 2 },
+            ] }] });
+        let extra = super::ExtraComments::with_work_hierarchy(&hierarchy.to_string());
+        let search = super::TrackTags::from_tag(&tag, path, Some(path), &extra)
+            .search
+            .unwrap();
+        assert!(search.contains("praludium und fuge"));
+        assert!(search.contains("well-tempered clavier"));
+        assert!(search.contains("prelude and fugue in c major"));
     }
 
     #[test]

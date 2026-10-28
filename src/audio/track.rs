@@ -54,11 +54,11 @@ mod tags;
 mod work_hierarchy;
 
 use credits::is_composer;
-pub use credits::{MusicBrainzIds, TrackCredits};
+pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
-pub use search::{normalize_search_text, search_key, tag_search_text};
+pub use search::{normalize_search_text, search_key, track_search_text};
 pub use tags::{ExtraComments, file_tag, plain_commas, read_file_tags, track_title};
 use tags::{track_album, track_artist};
 use work_hierarchy::{MovementName, WorkHierarchy, WorkLabels};
@@ -848,11 +848,12 @@ impl Track {
 #[cfg(test)]
 mod tests {
     use gtk::gio::prelude::*;
+    use itertools::Itertools;
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::{
-        Missing, MusicBrainzIds, Track, TrackCredits, TrackData, credits::Credit, track_album,
-        track_title,
+        Missing, MusicBrainzIds, PerformerKind, Track, TrackCredits, TrackData, credits::Credit,
+        track_album, track_title,
     };
 
     #[test]
@@ -1393,6 +1394,37 @@ mod tests {
             "Elin Fleischer, Jörgen Ådvall, Simon Fröh, Bo Åhgren, Per Fastrup"
         );
 
+        // The list of performers has the same ones, the artist included
+        for credits in [
+            &concerto,
+            &horns,
+            &cello,
+            &quartet,
+            &sextet,
+            &stabat_mater,
+            &motet,
+            &sonata,
+            &march,
+            &quintet,
+        ] {
+            let listed = credits
+                .listed_performers()
+                .into_iter()
+                .map(|p| p.name)
+                .unique()
+                .sorted()
+                .collect::<Vec<_>>();
+            let named = credits
+                .summary(None)
+                .split(" · ")
+                .flat_map(|s| s.split(", "))
+                .map(ToString::to_string)
+                .unique()
+                .sorted()
+                .collect::<Vec<_>>();
+            assert_eq!(listed, named);
+        }
+
         // Copy names the same performers
         let allegro = TrackData {
             title: Some(
@@ -1410,6 +1442,82 @@ mod tests {
             allegro.copied_details(),
             "Concerto VII for Violin, Strings and Continuo in D minor, RV 242: Allegro — \
              Antonio Vivaldi; Adrian Chandler · La Serenissima"
+        );
+    }
+
+    #[test]
+    fn listed_performers_are_conductors_ensembles_and_soloists() {
+        let listed = |album_artist: &str, conductors: &[&str], performers: &[&str]| {
+            TrackCredits {
+                album_artist: Some(album_artist.to_string()),
+                conductors: conductors.iter().map(ToString::to_string).collect(),
+                performers: performers.iter().map(|p| Credit::parse(p)).collect(),
+                ..Default::default()
+            }
+            .listed_performers()
+            .into_iter()
+            .map(|p| (p.kind, p.name, p.role))
+            .collect::<Vec<_>>()
+        };
+        let performer = |kind, name: &str, role: Option<&str>| {
+            (kind, name.to_string(), role.map(ToString::to_string))
+        };
+
+        // A soloist who conducts is both, and the players of the orchestra
+        // aren't listed
+        assert_eq!(
+            listed(
+                "Antonio Vivaldi; La Serenissima, Adrian Chandler",
+                &["Adrian Chandler"],
+                &[
+                    "Robin Bigwood (harpsichord)",
+                    "Adrian Chandler (solo violin)",
+                    "La Serenissima (orchestra)",
+                ],
+            ),
+            vec![
+                performer(PerformerKind::Conductor, "Adrian Chandler", None),
+                performer(
+                    PerformerKind::Soloist,
+                    "Adrian Chandler",
+                    Some("solo violin")
+                ),
+                performer(PerformerKind::Ensemble, "La Serenissima", Some("orchestra")),
+            ]
+        );
+
+        // Without a group in the tags, the groups in the album artist
+        let players = [
+            "Elin Fleischer (concertmaster)",
+            "Jörgen Ådvall (tuba)",
+            "Simon Fröh (tuba)",
+            "Bo Åhgren (wind instruments)",
+            "Per Fastrup (wind instruments)",
+            "Ebba Eriksson (clarinet)",
+        ];
+        assert_eq!(
+            listed(
+                "Sergei Taneyev; Moscow Trio, Moscow String Quartet, Ivor Bolton",
+                &["Ivor Bolton"],
+                &players,
+            ),
+            vec![
+                performer(PerformerKind::Conductor, "Ivor Bolton", None),
+                performer(PerformerKind::Ensemble, "Moscow Trio", None),
+                performer(PerformerKind::Ensemble, "Moscow String Quartet", None),
+            ]
+        );
+        // And the players it names
+        assert_eq!(
+            listed(
+                "Wolfgang Amadeus Mozart; Ensemble Zefiro & Simon Fröh",
+                &[],
+                &players,
+            ),
+            vec![
+                performer(PerformerKind::Ensemble, "Ensemble Zefiro", None),
+                performer(PerformerKind::Soloist, "Simon Fröh", Some("tuba")),
+            ]
         );
     }
 

@@ -20,11 +20,17 @@ struct PathWork<'a> {
     // The number the plugin gives it: its position in the parent work, or
     // else the number its title starts with
     number: Option<u32>,
+    // Its position in the parent work, which the number can leave out, as
+    // for the acts of an opera
+    position: Option<u32>,
     // The number the plugin removed from the title to give the name, as the
     // title writes it, e.g. "V"
     numeral: Option<&'a str>,
     // The names of its composers; `None` if the plugin didn't record them
     composers: Option<Vec<&'a str>>,
+    // The title of the first collection it's in, e.g. a song cycle that
+    // MusicBrainz doesn't link it to as a part
+    collection: Option<&'a str>,
     // For the work the track performs, when the track has only part of it,
     // the name the recording's title gives that part, e.g. "Ia. Overture –
     // Adagio" for the Ouverture of the Royal Fireworks, which MusicBrainz
@@ -80,6 +86,17 @@ pub(super) struct WorkLabels {
     // The composers of the work, or of the nearest work above it with
     // some; empty if none has any
     pub(super) composers: Vec<String>,
+    // The MusicBrainz id of the work, which tells its recordings apart from
+    // those of other works across albums, whatever their tags call it
+    pub(super) id: String,
+    // The work it's part of, e.g. "The Well-Tempered Clavier, Book I" for
+    // a Prelude and Fugue, or else the collection it's in
+    pub(super) collection: Option<String>,
+    // The positions of the movement in the levels below the work, e.g.
+    // [1, 3, 3] for the third part of the third section of the first part;
+    // `None` if the track performs the whole work, and empty if a level
+    // has none
+    pub(super) order: Option<Vec<u32>>,
 }
 
 // The JSON of the "WORK_HIERARCHY" tag, written by the "Work Hierarchy"
@@ -113,11 +130,22 @@ struct HierarchyWork {
     #[serde(default, deserialize_with = "lenient_number")]
     number: Option<u64>,
     numeral: Option<String>,
+    #[serde(default, deserialize_with = "lenient_number")]
+    position: Option<u64>,
     // `None` if the plugin didn't record them
     composers: Option<Vec<HierarchyComposer>>,
     // How MusicBrainz links the work to its parent, e.g. "act"
     #[serde(default)]
     part_attributes: Vec<String>,
+    // The collections MusicBrainz puts the work in, without making it a
+    // part of them
+    #[serde(default)]
+    collections: Option<Vec<HierarchyLink>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HierarchyLink {
+    title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +206,7 @@ impl WorkHierarchy {
                             title: work.title.as_deref()?,
                             name: work.name.as_deref()?,
                             number: work.number.and_then(|n| u32::try_from(n).ok()),
+                            position: work.position.and_then(|n| u32::try_from(n).ok()),
                             numeral: work.numeral.as_deref(),
                             composers: work.composers.as_ref().map(|composers| {
                                 composers
@@ -185,6 +214,11 @@ impl WorkHierarchy {
                                     .filter_map(|composer| composer.name.as_deref())
                                     .collect()
                             }),
+                            collection: work
+                                .collections
+                                .iter()
+                                .flatten()
+                                .find_map(|link| link.title.as_deref()),
                             excerpt: None,
                         })
                     })
@@ -235,12 +269,58 @@ impl WorkHierarchy {
             .find(|composers| !composers.is_empty())
             .map(|composers| composers.iter().map(ToString::to_string).collect())
             .unwrap_or_default();
+        let collection = depth
+            .checked_sub(1)
+            .map(|parent| first[parent].title)
+            .or(work.collection)
+            .map(ToString::to_string);
+        // The place of the first movement, as the tracks of a recording go
+        // from one movement to the next
+        let order = parts.first().map(|parts| {
+            parts
+                .iter()
+                .map(|part| part.position.or(part.number))
+                .collect::<Option<Vec<_>>>()
+                .unwrap_or_default()
+        });
         Some(WorkLabels {
             work: work.name.to_string(),
             title: work.title.to_string(),
             movement: (!parts.is_empty()).then(|| movement_name(&parts)),
             composers,
+            id: work.id.to_string(),
+            collection,
+            order,
         })
+    }
+
+    // The names of all the works in the tag, and of the collections they
+    // are in, so that searching finds a track by them, e.g. by "Well-
+    // Tempered" for a Prelude and Fugue, or by its English name when its
+    // work tag has the original one. Their types are left out, as "Song"
+    // would match every song
+    pub(super) fn search_text(&self) -> String {
+        self.segments
+            .iter()
+            .flat_map(|segment| {
+                segment
+                    .path
+                    .iter()
+                    .flat_map(|work| {
+                        [work.title.as_deref(), work.name.as_deref()]
+                            .into_iter()
+                            .chain(
+                                work.collections
+                                    .iter()
+                                    .flatten()
+                                    .map(|link| link.title.as_deref()),
+                            )
+                    })
+                    .chain([segment.excerpt.as_deref()])
+            })
+            .flatten()
+            .unique()
+            .join(" ")
     }
 
     // The ids of the composers of the works a track performs, the last in
@@ -753,6 +833,9 @@ mod tests {
                     movement: "2. Fugue".to_string(),
                 }),
                 composers: Vec::new(),
+                id: "bwv846".to_string(),
+                collection: Some("The Well-Tempered Clavier, Book I".to_string()),
+                order: Some(vec![2]),
             })
         );
 
@@ -1045,6 +1128,107 @@ mod tests {
                 ]
             ),
             Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn the_order_of_a_movement_is_its_place_in_each_level() {
+        let order = |path: serde_json::Value| {
+            let json = serde_json::json!({ "version": 1, "segments": [
+                { "path": path, "work_index": 0 },
+            ] });
+            work_hierarchy_labels(&json.to_string()).and_then(|labels| labels.order)
+        };
+        // An act has no number, but its position still orders it
+        assert_eq!(
+            order(serde_json::json!([
+                { "id": "carmen", "title": "Carmen", "name": "Carmen" },
+                { "id": "act2", "title": "Carmen: Acte II", "name": "Acte II",
+                  "number": 2, "position": 2, "part_attributes": ["act"] },
+                { "id": "no12", "title": "…", "name": "Chanson bohème", "number": 12,
+                  "position": 1 },
+            ])),
+            Some(vec![2, 1])
+        );
+        // Without a position, the number
+        assert_eq!(
+            order(serde_json::json!([
+                { "id": "s", "title": "Suite", "name": "Suite" },
+                { "id": "p", "title": "Suite: III. Sarabande", "name": "Sarabande", "number": 3 },
+            ])),
+            Some(vec![3])
+        );
+        // A level with neither leaves the order unknown
+        assert_eq!(
+            order(serde_json::json!([
+                { "id": "s", "title": "Suite", "name": "Suite" },
+                { "id": "p", "title": "Suite: Sarabande", "name": "Sarabande" },
+            ])),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn a_work_is_in_the_collection_it_is_part_of() {
+        let labels = |path: serde_json::Value, work_index: usize| {
+            let json = serde_json::json!({ "version": 1, "segments": [
+                { "path": path, "work_index": work_index },
+            ] });
+            work_hierarchy_labels(&json.to_string()).unwrap()
+        };
+        // The work above it
+        let labels_of_fugue = labels(
+            serde_json::json!([
+                { "id": "book1", "title": "The Well-Tempered Clavier, Book I", "name": "Book I" },
+                { "id": "bwv846", "title": "…: Prelude and Fugue no. 1 in C major, BWV 846",
+                  "name": "Prelude and Fugue no. 1 in C major, BWV 846", "number": 1,
+                  "collections": [{ "id": "c", "title": "Not this one" }] },
+                { "id": "f", "title": "…: Fugue", "name": "Fugue", "number": 2 },
+            ]),
+            1,
+        );
+        assert_eq!(labels_of_fugue.id, "bwv846");
+        assert_eq!(
+            labels_of_fugue.collection.as_deref(),
+            Some("The Well-Tempered Clavier, Book I")
+        );
+        // Or else the first collection it's in
+        let labels_of_song = labels(
+            serde_json::json!([
+                { "id": "song", "title": "Ständchen", "name": "Ständchen",
+                  "collections": [
+                      { "id": "sg", "title": "Schwanengesang, D 957", "position": 4 },
+                      { "id": "x", "title": "Another" },
+                  ] },
+                { "id": "v", "title": "Ständchen: Verse 1", "name": "Verse 1", "number": 1 },
+            ]),
+            0,
+        );
+        assert_eq!(
+            labels_of_song.collection.as_deref(),
+            Some("Schwanengesang, D 957")
+        );
+        assert_eq!(labels_of_song.order, Some(vec![1]));
+    }
+
+    #[test]
+    fn the_names_of_all_the_works_are_searched() {
+        let json = serde_json::json!({ "version": 1, "segments": [{ "work_index": 2,
+            "excerpt": "Ia. Overture",
+            "path": [
+                { "id": "wtc", "title": "The Well-Tempered Clavier",
+                  "name": "The Well-Tempered Clavier", "type": "Song",
+                  "collections": [{ "id": "c", "title": "Keyboard Works" }] },
+                { "id": "book1", "title": "The Well-Tempered Clavier, Book I", "name": "Book I" },
+                { "id": "f", "title": "Fugue", "name": "Fugue" },
+            ] }] });
+        let text = WorkHierarchy::parse(&json.to_string())
+            .unwrap()
+            .search_text();
+        assert_eq!(
+            text,
+            "The Well-Tempered Clavier Keyboard Works The Well-Tempered Clavier, Book I \
+             Book I Fugue Ia. Overture"
         );
     }
 }

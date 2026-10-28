@@ -37,11 +37,16 @@ All notable changes to this project will be documented in this file.
 - Composers, the button next to the album search, lists the composers of
   the albums by their last names, with the number of their albums; picking
   one shows only their albums, taking only the tracks that are theirs, as
-  a search does, and it combines with the search. The music folders are
-  read again once, after updating, to find the composers
+  a search does, and it combines with the search
+- Searching the queue and the albums also finds tracks by the names that
+  the Work Hierarchy plugin gives their works, the works those are part
+  of and the collections they're in, such as "Well-Tempered" for the
+  Preludes and Fugues
 
 ### Changed
 
+- The music folders are read again once after updating, as the library
+  now keeps the composers, the works and the performers of each track
 - Scan the Music Folders moved from the main menu to Preferences, as Scan
   Now, as the music folders are watched
 - Whole Albums is filled with the accent color while it's on, like the
