@@ -67,14 +67,24 @@ pub fn setup_primary_menu_button(button: &gtk::MenuButton) {
 }
 
 // The row or the cell of a list or a grid that has the focus. The focus is
-// on the list's item, whose child is the row, or on a widget in the row
+// on a widget in the row, or on the list's item, whose child is the row or
+// a widget around it, like the SlideBin of the queue's rows
 pub fn focused_child<W: IsA<gtk::Widget>>(list: &impl IsA<gtk::Widget>) -> Option<W> {
     let focus = list.root()?.focus()?;
-    focus
-        .ancestor(W::static_type())
-        .or_else(|| focus.first_child())
-        .filter(|child| child.is_ancestor(list))
-        .and_downcast::<W>()
+    if !focus.is_ancestor(list) {
+        return None;
+    }
+    if let Some(row) = focus.ancestor(W::static_type()) {
+        return row.downcast().ok();
+    }
+    let mut child = focus.first_child();
+    while let Some(widget) = child {
+        match widget.downcast::<W>() {
+            Ok(row) => return Some(row),
+            Err(widget) => child = widget.first_child(),
+        }
+    }
+    None
 }
 
 // The Menu key and Shift+F10 open the menu of the row or the cell of a
