@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::path::PathBuf;
+
 use super::{adding::Tracks, albums::popup_menu, *};
 
 impl Window {
@@ -105,13 +107,14 @@ impl Window {
                 }
             ));
             actions.add_action(&go_to_album);
+            let hidden = self.imp().library_view.hidden_folders();
             glib::spawn_future_local(clone!(
                 #[weak]
                 go_to_album,
                 #[strong]
                 track,
                 async move {
-                    if let Some(id) = track_album(&track.file()).await {
+                    if let Some(id) = track_album(&track.file(), hidden).await {
                         album_id.replace(Some(id));
                         go_to_album.set_enabled(true);
                     }
@@ -233,7 +236,8 @@ impl Window {
 
     async fn playing_album(&self) -> Option<(String, gio::File)> {
         let file = self.player().state().track()?.file();
-        let album_id = track_album(&file).await?;
+        let hidden = self.imp().library_view.hidden_folders();
+        let album_id = track_album(&file, hidden).await?;
         Some((album_id, file))
     }
 
@@ -366,11 +370,11 @@ impl Window {
     }
 }
 
-// The album of a track in the album grid; the database is read in a
-// separate thread
-async fn track_album(file: &gio::File) -> Option<String> {
+// The album of a track in the album grid, unless it's in one of the
+// `hidden` folders; the database is read in a separate thread
+async fn track_album(file: &gio::File, hidden: Vec<PathBuf>) -> Option<String> {
     let path = file.path()?;
-    gio::spawn_blocking(move || library::track_album(&path))
+    gio::spawn_blocking(move || library::track_album(&path, &hidden))
         .await
         .ok()
         .flatten()

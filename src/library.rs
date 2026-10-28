@@ -1552,40 +1552,64 @@ fn performers_line<'a>(entries: impl Iterator<Item = &'a str>) -> String {
 }
 
 // The files of the tracks of an album, in order; with a filter, only the
-// tracks it matches, as in `search_albums()`
-pub fn album_tracks(album_id: &str, filter: &TrackFilter) -> Vec<PathBuf> {
-    let query = |conn: &Connection| -> rusqlite::Result<Vec<PathBuf>> {
-        let (conditions, values) = filter.conditions();
-        let mut stmt = conn.prepare(&format!(
-            "SELECT path, disc, track FROM tracks
-             WHERE album_id = ?{conditions}"
-        ))?;
-        let params = std::iter::once(album_id).chain(values.iter().map(String::as_str));
-        let mut tracks = stmt
-            .query_map(rusqlite::params_from_iter(params), |row| {
-                let path = path_from_bytes(row.get(0)?);
-                Ok((TrackOrder::new(&path, row.get(1)?, row.get(2)?), path))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        tracks.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(tracks.into_iter().map(|(_, path)| path).collect())
-    };
+// tracks it matches, as in `search_albums()`. The tracks in the `hidden`
+// folders are left out, as in `albums()`
+pub fn album_tracks(album_id: &str, filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<PathBuf> {
     query_or_default(
         format_args!("load the tracks of album {album_id}"),
-        |conn| query(conn),
+        |conn| query_album_tracks(conn, album_id, filter, hidden),
     )
 }
 
-// The album of a track, if it's part of the library
-pub fn track_album(path: &Path) -> Option<String> {
+fn query_album_tracks(
+    conn: &Connection,
+    album_id: &str,
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<Vec<PathBuf>> {
+    let (conditions, _) = filter.conditions();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT path, disc, track FROM tracks
+         WHERE album_id = ?{conditions}{}",
+        hidden_condition("file", hidden).0
+    ))?;
+    let params = std::iter::once(rusqlite::types::Value::Text(album_id.to_string()))
+        .chain(filter_values(filter, hidden));
+    let mut tracks = stmt
+        .query_map(rusqlite::params_from_iter(params), |row| {
+            let path = path_from_bytes(row.get(0)?);
+            Ok((TrackOrder::new(&path, row.get(1)?, row.get(2)?), path))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    tracks.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(tracks.into_iter().map(|(_, path)| path).collect())
+}
+
+// The album of a track, if it's part of the library and not in one of the
+// `hidden` folders
+pub fn track_album(path: &Path, hidden: &[PathBuf]) -> Option<String> {
     query_or_default(format_args!("look up the album of {path:?}"), |conn| {
-        conn.query_row(
-            "SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL",
-            [path_bytes(path)],
-            |row| row.get(0),
-        )
-        .optional()
+        query_track_album(conn, path, hidden)
     })
+}
+
+fn query_track_album(
+    conn: &Connection,
+    path: &Path,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<Option<String>> {
+    use rusqlite::types::Value;
+
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    conn.query_row(
+        &format!("SELECT album_id FROM tracks WHERE path = ? AND album_id IS NOT NULL{hidden_sql}"),
+        rusqlite::params_from_iter(
+            std::iter::once(Value::Blob(path_bytes(path).to_vec()))
+                .chain(hidden_params.into_iter().map(Value::Blob)),
+        ),
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 // Updates the database with the tracks in the music folders, and makes the
@@ -3445,6 +3469,26 @@ mod tests {
             ids(&[PathBuf::from("/m/A"), PathBuf::from("/m/Bb/")]),
             vec!["b"]
         );
+
+        // An album's tracks, and the album of a track, leave them out too
+        let all = super::TrackFilter::default();
+        let sub = [PathBuf::from("/m/B/sub")];
+        let three = Path::new("/m/B/sub/Three.flac");
+        assert_eq!(
+            super::query_album_tracks(&conn, "b", &all, &[]).unwrap(),
+            [PathBuf::from("/m/B/Two.flac"), three.to_path_buf()]
+        );
+        assert_eq!(
+            super::query_album_tracks(&conn, "b", &all, &sub).unwrap(),
+            [PathBuf::from("/m/B/Two.flac")]
+        );
+        assert_eq!(
+            super::query_track_album(&conn, three, &[])
+                .unwrap()
+                .as_deref(),
+            Some("b")
+        );
+        assert_eq!(super::query_track_album(&conn, three, &sub).unwrap(), None);
     }
 
     #[test]

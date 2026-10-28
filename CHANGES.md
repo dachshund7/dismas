@@ -175,6 +175,9 @@ All notable changes to this project will be documented in this file.
 - An imported playlist written by a Windows player in its legacy encoding,
   as Winamp and foobar2000 write `.m3u` files, lost the tracks with accents
   in their names, and one with the line endings of old Macs lost them all
+- An album with tracks in a folder left out, or on a drive that wasn't
+  there, listed and counted them among its tracks, and played the ones
+  left out until the next scan
 
 ### Removed
 

@@ -16,11 +16,15 @@ pub(super) enum Tracks {
 }
 
 impl Tracks {
-    async fn files(self) -> Option<Vec<gio::File>> {
+    // The files of the tracks; those of albums leave out the tracks in the
+    // folders the grid hides
+    async fn files(self, win: &Window) -> Option<Vec<gio::File>> {
         match self {
             Tracks::InQueue(tracks) => Some(tracks.iter().map(Track::file).collect()),
             Tracks::ShownAlbum(files) => Some(files),
-            Tracks::Albums(albums) => album_files(albums).await,
+            Tracks::Albums(albums) => {
+                album_files(albums, win.imp().library_view.hidden_folders()).await
+            }
         }
     }
 }
@@ -48,7 +52,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             async move {
-                let Some(files) = tracks.files().await else {
+                let Some(files) = tracks.files(&win).await else {
                     return;
                 };
                 win.load_into_queue(
@@ -116,7 +120,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             async move {
-                let Some(files) = tracks.files().await else {
+                let Some(files) = tracks.files(&win).await else {
                     return;
                 };
                 if to_queue {
@@ -165,7 +169,7 @@ impl Window {
                     #[weak]
                     win,
                     async move {
-                        let Some(files) = tracks.files().await else {
+                        let Some(files) = tracks.files(&win).await else {
                             return;
                         };
                         win.create_playlist_with(&name, &files);

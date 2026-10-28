@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::path::PathBuf;
+
 use super::{adding::Tracks, *};
 
 impl Window {
@@ -14,7 +16,10 @@ impl Window {
         picks: &PickNames,
         reveal: Option<&gio::File>,
     ) {
-        self.show_album_pane(|album_tracks| album_tracks.show_album(album, filter, picks, reveal));
+        let hidden = self.imp().library_view.hidden_folders();
+        self.show_album_pane(|album_tracks| {
+            album_tracks.show_album(album, filter, picks, hidden, reveal);
+        });
     }
 
     // Shows the recordings of a work in the sidebar, those the filter
@@ -115,7 +120,8 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             async move {
-                let Some(files) = album_files(albums).await else {
+                let hidden = win.imp().library_view.hidden_folders();
+                let Some(files) = album_files(albums, hidden).await else {
                     return;
                 };
 
@@ -384,7 +390,8 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             async move {
-                if let Some(files) = album_files(drag.albums).await {
+                let hidden = win.imp().library_view.hidden_folders();
+                if let Some(files) = album_files(drag.albums, hidden).await {
                     win.load_into_queue(
                         files,
                         QueueMode::Add,
@@ -598,13 +605,16 @@ impl Window {
 
 // The files of the tracks of albums, each with what its tracks have to
 // match: the search and the composer picked, or nothing for the whole
-// album; reading them from the library takes a while, so it's done in a
-// separate thread
-pub(super) async fn album_files(albums: Vec<(String, TrackFilter)>) -> Option<Vec<gio::File>> {
+// album, without the tracks in the `hidden` folders; reading them from the
+// library takes a while, so it's done in a separate thread
+pub(super) async fn album_files(
+    albums: Vec<(String, TrackFilter)>,
+    hidden: Vec<PathBuf>,
+) -> Option<Vec<gio::File>> {
     let paths = gio::spawn_blocking(move || {
         albums
             .iter()
-            .flat_map(|(id, filter)| library::album_tracks(id, filter))
+            .flat_map(|(id, filter)| library::album_tracks(id, filter, &hidden))
             .collect::<Vec<_>>()
     })
     .await

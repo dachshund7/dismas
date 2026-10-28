@@ -82,11 +82,11 @@ mod imp {
 
         pub tracks: RefCell<Option<gio::ListStore>>,
         pub files: RefCell<Vec<gio::File>>,
-        // The work whose recordings are showing, in place of an album, the
-        // folders whose tracks are hidden, and its recordings, with the
-        // recording each track is in, by its URI
-        pub work: RefCell<Option<library::WorkInfo>>,
+        // The folders whose tracks are hidden, as in the album grid
         pub hidden: RefCell<Vec<PathBuf>>,
+        // The work whose recordings are showing, in place of an album, and
+        // its recordings, with the recording each track is in, by its URI
+        pub work: RefCell<Option<library::WorkInfo>>,
         pub recordings: RefCell<Vec<library::WorkRecording>>,
         pub recording_of: Rc<RefCell<HashMap<String, usize>>>,
         // The sections of the list, and the headers of the works of an
@@ -646,14 +646,16 @@ impl AlbumTracks {
     }
 
     // Shows the tracks of an album that the filter matches, or all of them
-    // with an empty one; `picks` names the composer and the performer the
-    // filter picks, if any. The track of `reveal`, if any, is scrolled to
-    // and flashes once it's read
+    // with an empty one, leaving out the tracks in the `hidden` folders;
+    // `picks` names the composer and the performer the filter picks, if
+    // any. The track of `reveal`, if any, is scrolled to and flashes once
+    // it's read
     pub fn show_album(
         &self,
         album: &Album,
         filter: &TrackFilter,
         picks: &PickNames,
+        hidden: Vec<PathBuf>,
         reveal: Option<&gio::File>,
     ) {
         let imp = self.imp();
@@ -672,6 +674,7 @@ impl AlbumTracks {
         imp.work.replace(None);
         imp.filter.replace(filter.clone());
         imp.picks.replace(picks.clone());
+        imp.hidden.replace(hidden);
         self.load(reveal);
     }
 
@@ -929,9 +932,10 @@ impl AlbumTracks {
                     // All the tracks are shown, and with a search, those it
                     // matches are taken, and the others dimmed
                     let (all, matching) = gio::spawn_blocking(move || {
-                        let all = library::album_tracks(&album_id, &TrackFilter::default());
-                        let matching =
-                            (!filter.is_empty()).then(|| library::album_tracks(&album_id, &filter));
+                        let all =
+                            library::album_tracks(&album_id, &TrackFilter::default(), &hidden);
+                        let matching = (!filter.is_empty())
+                            .then(|| library::album_tracks(&album_id, &filter, &hidden));
                         (all, matching)
                     })
                     .await
