@@ -1056,6 +1056,12 @@ impl LibraryView {
 
         let settings = self.app_settings();
         settings.bind("library-view", self, "view").build();
+        // Only once the setting gave the view a name, as the toggles have
+        // none for the empty one before it
+        self.bind_property("view", &*imp.view_toggle, "active-name")
+            .bidirectional()
+            .sync_create()
+            .build();
     }
 
     // The music folders that aren't there or are left out, whose tracks
