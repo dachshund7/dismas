@@ -66,6 +66,38 @@ pub fn setup_primary_menu_button(button: &gtk::MenuButton) {
     }
 }
 
+// The Menu key and Shift+F10 open the menu of the row or the cell of a
+// list or a grid that has the focus, as a right click on it does. The
+// focus is on the list's item, whose child is the row, or on a widget in
+// the row
+pub fn setup_menu_key<W: IsA<gtk::Widget>>(
+    list: &impl IsA<gtk::Widget>,
+    open: impl Fn(&W) + 'static,
+) {
+    let controller = gtk::ShortcutController::new();
+    controller.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("Menu|<Shift>F10"),
+        Some(gtk::CallbackAction::new(move |list, _| {
+            let Some(focus) = list.root().and_then(|root| root.focus()) else {
+                return glib::Propagation::Proceed;
+            };
+            let child = focus
+                .ancestor(W::static_type())
+                .or_else(|| focus.first_child())
+                .filter(|child| child.is_ancestor(list))
+                .and_downcast::<W>();
+            match child {
+                Some(child) => {
+                    open(&child);
+                    glib::Propagation::Stop
+                }
+                None => glib::Propagation::Proceed,
+            }
+        })),
+    ));
+    list.add_controller(controller);
+}
+
 // Sets the label of a button that names the selected playlist, which can
 // have a long name
 pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {

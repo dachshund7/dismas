@@ -683,6 +683,14 @@ impl QueueRow {
         )
     }
 
+    // Asks for the menu of the row from the keyboard, in the middle of the
+    // row, as a long press would
+    pub fn request_menu(&self) {
+        let x = f64::from(self.width()) / 2.0;
+        let y = f64::from(self.height()) / 2.0;
+        self.emit_by_name::<()>("menu-requested", &[&x, &y]);
+    }
+
     pub fn connect_menu_requested<F: Fn(&Self, f64, f64) + 'static>(
         &self,
         f: F,

@@ -156,6 +156,7 @@ impl Window {
         imp.playlist_view
             .queue_view()
             .set_model(Some(selection.upcast_ref::<gtk::SelectionModel>()));
+        utils::setup_menu_key(&imp.playlist_view.queue_view(), QueueRow::request_menu);
         imp.playlist_view.queue_view().connect_activate(clone!(
             #[weak(rename_to = win)]
             self,

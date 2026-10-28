@@ -384,6 +384,7 @@ impl AlbumTracks {
         imp.tracks_view
             .set_model(Some(&gtk::NoSelection::new(Some(sections.clone()))));
         imp.tracks_view.set_factory(Some(&factory));
+        utils::setup_menu_key(&*imp.tracks_view, QueueRow::request_menu);
         let work_headers = work_header_factory(
             clone!(
                 #[weak(rename_to = this)]

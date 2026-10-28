@@ -65,6 +65,8 @@ All notable changes to this project will be documented in this file.
 - The tracks of an album show when it was made under its title, with its
   record label and catalogue number
 - The player shows the year after the album, as in "Cello Suites · 1961"
+- The Menu key and Shift+F10 open the menu of the track or the album
+  that has the focus, as a right click does
 
 ### Changed
 

@@ -490,6 +490,21 @@ impl LibraryView {
 
         imp.grid_view.set_model(Some(&selection));
         imp.grid_view.set_factory(Some(&self.album_factory()));
+        utils::setup_menu_key(
+            &*imp.grid_view,
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |cell: &AlbumCell| {
+                    if let Some(album) = cell.album() {
+                        let x = f64::from(cell.width()) / 2.0;
+                        let y = f64::from(cell.height()) / 2.0;
+                        let cell = cell.upcast_ref::<gtk::Widget>();
+                        this.emit_by_name::<()>("album-menu-requested", &[&album, cell, &x, &y]);
+                    }
+                }
+            ),
+        );
 
         // Past the width of the most columns with the largest covers, the
         // grid stays centered, rather than spreading the covers apart
