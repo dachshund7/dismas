@@ -98,10 +98,14 @@ What Dismas adds
   work above its movements, and the player and the queue show the composers
   and the performers, naming an orchestra or a choir and its soloists rather
   than every player. Track Information shows the work, the performers and
-  the production credits. Dismas reads the tags written by the [Work
+  the production credits. Albums and recordings go by the year they were
+  recorded, or else first released, rather than the year of a reissue, and
+  the tracks of an album show it with the record label and catalogue
+  number. Dismas reads the tags written by the [Work
   Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for
   Picard, in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio, WavPack
-  and Musepack files. MusicBrainz names some composers in the script of
+  and Musepack files; from version 0.4, it also writes when each recording
+  was made. MusicBrainz names some composers in the script of
   their language, such as Валентин Сильвестров; to have their names in Latin
   letters, turn on "Translate artist names" and "Use artist sort name for
   translation" in Picard's Metadata options before tagging.
