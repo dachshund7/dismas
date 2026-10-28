@@ -2124,6 +2124,12 @@ fn composer_factory() -> gtk::SignalListItemFactory {
         let row = gtk::Box::builder().spacing(12).margin_end(12).build();
         row.append(&name);
         row.append(&count);
+        // The name it's known by, as the row has the one it's sorted by
+        utils::set_row_tooltip(&row, item, |object| {
+            let composer = object.downcast_ref::<glib::BoxedAnyObject>()?;
+            let composer = composer.borrow::<Option<library::ComposerInfo>>();
+            composer.as_ref().map(|composer| composer.name.clone())
+        });
         item.set_child(Some(&row));
     });
     factory.connect_bind(|_, item| {
@@ -2142,11 +2148,9 @@ fn composer_factory() -> gtk::SignalListItemFactory {
         };
         if let Some(composer) = composer.borrow::<Option<library::ComposerInfo>>().as_ref() {
             name.set_label(&composer.sort);
-            name.set_tooltip_text(Some(&composer.name));
             count.set_label(&composer.albums.to_string());
         } else {
             name.set_label(&i18n("All Composers"));
-            name.set_tooltip_text(None);
             count.set_label("");
         }
     });
@@ -2172,6 +2176,18 @@ fn performer_factory() -> gtk::SignalListItemFactory {
         let row = gtk::Box::builder().spacing(12).margin_end(12).build();
         row.append(&name);
         row.append(&count);
+        // The name they're known by, and all they play or sing
+        utils::set_row_tooltip(&row, item, |object| {
+            let performer = object.downcast_ref::<glib::BoxedAnyObject>()?;
+            let performer = performer.borrow::<Option<library::PerformerInfo>>();
+            let performer = performer.as_ref()?;
+            let text = [performer.name.clone(), performer.roles.join(", ")]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(text)
+        });
         item.set_child(Some(&row));
     });
     factory.connect_bind(|_, item| {
@@ -2199,16 +2215,9 @@ fn performer_factory() -> gtk::SignalListItemFactory {
             } else {
                 name.set_markup(&format!("{sort}  <span alpha=\"55%\">{roles}</span>"));
             }
-            let tooltip = [performer.name.as_str(), &performer.roles.join(", ")]
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n");
-            name.set_tooltip_text(Some(&tooltip));
             count.set_label(&performer.albums.to_string());
         } else {
             name.set_label(&i18n("All Performers"));
-            name.set_tooltip_text(None);
             count.set_label("");
         }
     });
@@ -2261,9 +2270,8 @@ struct WorkItem {
 // The rows of the list of works: the name of the work, then, dimmed, the
 // work or the collection it's part of, if any, which the end of a long row
 // cuts off first, and the number of its recordings. The rows are all one
-// line high, as a list with rows of different heights guesses where the
-// rows it hasn't measured are, and keeps moving them while it scrolls; the
-// tooltip has the full title, and it's only made when it shows
+// line high, as measuring wrapped text made scrolling slow; the tooltip has
+// the full title
 fn work_factory() -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
@@ -2277,45 +2285,32 @@ fn work_factory() -> gtk::SignalListItemFactory {
             .css_classes(["dim-label", "numeric"])
             .build();
         // The scrollbar is drawn over the right edge of the list
-        let row = gtk::Box::builder()
-            .spacing(12)
-            .margin_end(12)
-            .has_tooltip(true)
-            .build();
+        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
         row.append(&name);
         row.append(&count);
-        row.connect_query_tooltip(glib::clone!(
-            #[weak]
-            item,
-            #[upgrade_or]
-            false,
-            move |_, _, _, _, tooltip| {
-                let Some(work) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
-                    return false;
-                };
-                let work = &work.borrow::<WorkItem>().info;
-                let recordings = ni18n_f(
-                    // Translators: The '{}' must be left unmodified, and it
-                    // is expanded to the number of recordings of a work in
-                    // the music folders
-                    "{} recording",
-                    "{} recordings",
-                    work.recordings,
-                    &[&work.recordings.to_string()],
-                );
-                let text = [
-                    Some(work.title.as_deref().unwrap_or(&work.name)),
-                    work.collection.as_deref(),
-                    Some(&recordings),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join("\n");
-                tooltip.set_text(Some(&text));
-                true
-            }
-        ));
+        utils::set_row_tooltip(&row, item, |object| {
+            let work = object.downcast_ref::<glib::BoxedAnyObject>()?;
+            let work = &work.borrow::<WorkItem>().info;
+            let recordings = ni18n_f(
+                // Translators: The '{}' must be left unmodified, and it is
+                // expanded to the number of recordings of a work in the
+                // music folders
+                "{} recording",
+                "{} recordings",
+                work.recordings,
+                &[&work.recordings.to_string()],
+            );
+            let text = [
+                Some(work.title.as_deref().unwrap_or(&work.name)),
+                work.collection.as_deref(),
+                Some(&recordings),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n");
+            Some(text)
+        });
         item.set_child(Some(&row));
     });
     factory.connect_bind(|_, item| {

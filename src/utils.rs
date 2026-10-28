@@ -78,6 +78,32 @@ pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
     }
 }
 
+// Gives a row of a list the tooltip that `text` makes from the item it's
+// bound to, made only when it shows. Setting the tooltip as the row is bound
+// makes GTK look for the window under the pointer, which grabs the X
+// server, for each row bound, and lists bind many rows a frame while they
+// scroll, which stalls the whole display
+pub fn set_row_tooltip(
+    row: &impl IsA<gtk::Widget>,
+    item: &gtk::ListItem,
+    text: impl Fn(&glib::Object) -> Option<String> + 'static,
+) {
+    row.set_has_tooltip(true);
+    row.connect_query_tooltip(glib::clone!(
+        #[weak]
+        item,
+        #[upgrade_or]
+        false,
+        move |_, _, _, _, tooltip| {
+            let Some(text) = item.item().and_then(|object| text(&object)) else {
+                return false;
+            };
+            tooltip.set_text(Some(&text));
+            true
+        }
+    ));
+}
+
 // Shows the tooltip of the widget on several lines when it's long, e.g.
 // with the name of a long playlist, which GTK shows on a single line, as
 // wide as the screen. Connected once; it shows whatever tooltip the widget
