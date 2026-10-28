@@ -76,6 +76,7 @@ All notable changes to this project will be documented in this file.
 - Show the Playing Track, Show in Playlist, Go to Album and Other
   Recordings put the focus on the track they show, so that the keys go on
   from there
+- Fullscreen, in the main menu, for tablets and phones without F11
 
 ### Changed
 

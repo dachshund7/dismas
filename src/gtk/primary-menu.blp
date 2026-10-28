@@ -8,6 +8,15 @@ using Gtk 4.0;
 menu primary_menu {
   section {
     item {
+      label: _("_Fullscreen");
+      action: "win.enter-fullscreen";
+      // F11 is `win.fullscreen`'s
+      accel: "F11";
+    }
+  }
+
+  section {
+    item {
       label: _("_Preferences");
       action: "win.preferences";
     }

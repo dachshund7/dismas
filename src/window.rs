@@ -471,6 +471,11 @@ mod imp {
             // GtkWindow's own property, which also follows the window
             // manager's fullscreen
             klass.install_property_action("win.fullscreen", "fullscreened");
+            // For the main menu, which would show `win.fullscreen` with a
+            // check box; it's hidden in fullscreen
+            klass.install_action("win.enter-fullscreen", None, |win, _, _| {
+                win.fullscreen();
+            });
             klass.install_property_action("queue.toggle", "user-playlist-visible");
             klass.install_property_action("queue.shuffle", "queue-shuffled");
             klass.install_property_action("win.favorite", "track-favorite");
