@@ -40,9 +40,11 @@ All notable changes to this project will be documented in this file.
   place of the queue, with an Undo; an album not heard lately is more
   likely, and choosing it again plays another
 - Composers, the button next to the album search, lists the composers of
-  the albums by their last names, with the number of their albums; picking
-  one shows only their albums, taking only the tracks that are theirs, as
-  a search does, and it combines with the search
+  the albums, sorted by their last names, with the number of their albums;
+  the names are shown last name first only where the tags give them so,
+  as a band can be a composer too. Picking one shows only their albums,
+  taking only the tracks that are theirs, as a search does, and it
+  combines with the search
 - Performers, the button next to Composers, lists the conductors, the
   ensembles and the soloists of the albums, with what they play or sing
   and the number of their albums; picking one shows only their albums,

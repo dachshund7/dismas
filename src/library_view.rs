@@ -2168,7 +2168,7 @@ fn composer_factory() -> gtk::SignalListItemFactory {
             return;
         };
         if let Some(composer) = composer.borrow::<Option<library::ComposerInfo>>().as_ref() {
-            name.set_label(&composer.sort);
+            name.set_label(&composer.label);
             count.set_label(&composer.albums.to_string());
         } else {
             name.set_label(&i18n("All Composers"));

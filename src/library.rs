@@ -45,7 +45,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 20;
+const SCHEMA_VERSION: i32 = 21;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -857,6 +857,11 @@ pub struct ComposerInfo {
     // The name its tracks give it the most, and the name it's sorted by
     pub name: String,
     pub sort: String,
+    // What the list shows: the sort name, as in "Bach, Johann Sebastian",
+    // when the tags give one, and otherwise the name, as the sort name
+    // worked out from it would turn a band's name around, or a name whose
+    // family name is first already
+    pub label: String,
     // Both names, normalized with `normalize_search_text()`, which
     // searching the list looks into
     pub search: String,
@@ -944,7 +949,9 @@ fn query_composers(
                 composer.albums.insert(album.clone());
             }
             *composer.names.entry(name.to_string()).or_default() += 1;
-            *composer.sorts.entry(sort.to_string()).or_default() += 1;
+            if !sort.is_empty() {
+                *composer.sorts.entry(sort.to_string()).or_default() += 1;
+            }
         }
     }
 
@@ -953,12 +960,19 @@ fn query_composers(
         .filter(|(_, seen)| !seen.albums.is_empty())
         .map(|(key, seen)| {
             let name = most_common(seen.names);
-            let sort = most_common(seen.sorts);
+            let tagged = most_common(seen.sorts);
+            let sort = composer_sort(&name, &tagged);
+            let label = if tagged.is_empty() {
+                name.clone()
+            } else {
+                tagged
+            };
             let info = ComposerInfo {
                 key,
                 search: normalize_search_text(&format!("{name} {sort}")),
                 name,
                 sort: sort.clone(),
+                label,
                 albums: seen.albums.len() as u32,
             };
             (glib::CollationKey::from(sort.as_str()), info)
@@ -1554,11 +1568,10 @@ fn work_composers(entries: &str) -> Vec<WorkComposer> {
         .lines()
         .filter_map(|line| {
             let mut fields = line.split('\t');
-            Some(WorkComposer {
-                key: fields.next()?.to_string(),
-                name: fields.next()?.to_string(),
-                sort: fields.next()?.to_string(),
-            })
+            let key = fields.next()?.to_string();
+            let name = fields.next()?.to_string();
+            let sort = composer_sort(&name, fields.next()?);
+            Some(WorkComposer { key, name, sort })
         })
         .collect()
 }
@@ -2556,7 +2569,8 @@ fn split_names<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
 // name and the name it's sorted by, separated by tabs, between line
 // breaks, so that a filter finds a composer by "\n{key}\t" (`TrackFilter`).
 // The sort names go with the names in their order, when there are as many;
-// otherwise each is worked out from its name
+// otherwise each is left empty, and worked out from its name when the
+// composers are sorted, see `composer_sort()`
 fn composer_entries(names: &[String], sorts: &[String]) -> Option<String> {
     if names.is_empty() {
         return None;
@@ -2567,13 +2581,12 @@ fn composer_entries(names: &[String], sorts: &[String]) -> Option<String> {
         let sort = sorts
             .get(i)
             .filter(|_| sorts.len() == names.len())
-            .cloned()
-            .unwrap_or_else(|| sort_name(name));
+            .map_or("", String::as_str);
         entries.push_str(&format!(
             "{}\t{}\t{}\n",
             composer_key(name),
             clean(name),
-            clean(&sort)
+            clean(sort)
         ));
     }
     Some(entries)
@@ -2586,6 +2599,16 @@ pub fn composer_key(name: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+// The name a composer is sorted by: the sort name of their tags, or else
+// one worked out from their name
+fn composer_sort(name: &str, sort: &str) -> String {
+    if sort.is_empty() {
+        sort_name(name)
+    } else {
+        sort.to_string()
+    }
 }
 
 // The name a composer without a sort name is sorted by: the last name
@@ -3684,16 +3707,52 @@ mod tests {
                 "\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\njosef suk\tJosef Suk\tSuk, Josef\n"
             )
         );
-        // Without as many sort names, they're worked out
+        // Without as many sort names, they're left out, to be worked out
         assert_eq!(
             composer_entries(
                 &names(&["Antonín Dvořák", "Josef Suk"]),
                 &names(&["Suk, Josef"])
             )
             .as_deref(),
-            Some(
-                "\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\njosef suk\tJosef Suk\tSuk, Josef\n"
+            Some("\nantonin dvorak\tAntonín Dvořák\t\njosef suk\tJosef Suk\t\n")
+        );
+    }
+
+    #[test]
+    fn composers_without_a_sort_tag_are_listed_by_their_name() {
+        let conn = test_db();
+        for (path, album, composers) in [
+            ("/m/A/01.flac", "a", "\npink floyd\tPink Floyd\t\n"),
+            ("/m/B/01.flac", "b", "\ntan dun\tTan Dun\t\n"),
+            (
+                "/m/C/01.flac",
+                "c",
+                "\nbela bartok\tBéla Bartók\tBartók, Béla\n",
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, composers)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3)",
+                rusqlite::params![path.as_bytes(), album, composers],
             )
+            .unwrap();
+        }
+        // Sorted by the last name all the same, but a sort name worked out
+        // isn't shown, as it would turn a band's name around; one from the
+        // tags is
+        let listed: Vec<(String, String)> =
+            super::query_composers(&conn, &[], &super::TrackFilter::default())
+                .unwrap()
+                .into_iter()
+                .map(|composer| (composer.sort, composer.label))
+                .collect();
+        assert_eq!(
+            listed,
+            [
+                ("Bartók, Béla".to_string(), "Bartók, Béla".to_string()),
+                ("Dun, Tan".to_string(), "Tan Dun".to_string()),
+                ("Floyd, Pink".to_string(), "Pink Floyd".to_string()),
+            ]
         );
     }
 
