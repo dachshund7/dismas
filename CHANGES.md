@@ -79,6 +79,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The tracks of a long album could open below the name of their first
+  work
+
 ### Removed
 
 ## [2026.11] - 2026-11-01

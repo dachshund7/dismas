@@ -935,7 +935,8 @@ impl AlbumTracks {
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
-        let mut revealed = false;
+        // A track to reveal stays in view, rather than the top
+        let revealed = Rc::new(Cell::new(false));
         let receiver = load_tracks(files, false);
         while let Ok(data) = receiver.recv().await {
             if imp.generation.get() != generation {
@@ -953,20 +954,30 @@ impl AlbumTracks {
             let start = tracks.n_items();
             tracks.extend_from_slice(&batch);
 
-            let found = reveal.as_ref().filter(|_| !revealed).and_then(|file| {
-                let i = batch.iter().position(|track| track.file().equal(file))?;
-                Some((start + i as u32, &batch[i]))
-            });
+            let found = reveal
+                .as_ref()
+                .filter(|_| !revealed.get())
+                .and_then(|file| {
+                    let i = batch.iter().position(|track| track.file().equal(file))?;
+                    Some((start + i as u32, &batch[i]))
+                });
             if let Some((pos, track)) = found {
-                revealed = true;
+                revealed.set(true);
                 crate::queue_row::flash_track(&imp.tracks_view, pos, track);
-            } else if !revealed {
+            } else if !revealed.get() {
                 // The list keeps its first track at the top as tracks are
-                // added, which hides the header of its work above it; once
-                // a track is revealed, it stays in view
-                if let Some(adjustment) = imp.tracks_view.vadjustment() {
-                    adjustment.set_value(0.0);
-                }
+                // added, which hides the header of its work above it, unless
+                // another album is shown by then
+                let still_wanted = clone!(
+                    #[weak(rename_to = this)]
+                    self,
+                    #[strong]
+                    revealed,
+                    #[upgrade_or]
+                    false,
+                    move || this.imp().generation.get() == generation && !revealed.get()
+                );
+                utils::scroll_to_top_when_laid_out(&imp.tracks_view, still_wanted);
             }
         }
     }

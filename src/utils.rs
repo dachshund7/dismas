@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use core::cmp::Ordering;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use gtk::{gdk, gio, glib, prelude::*};
 use log::{debug, warn};
@@ -76,6 +76,29 @@ pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_max_width_chars(16);
     }
+}
+
+// Scrolls a list to its very top, with the header of its first section,
+// once it's laid out, if it's `still_wanted` then. GTK keeps a list's place
+// by an item: once the items change, it shows the first one at the top,
+// with its header out of view, and setting the top in the same frame does
+// nothing, or makes a long list go to its end (GTK 4.22)
+pub fn scroll_to_top_when_laid_out(
+    list: &gtk::ListView,
+    still_wanted: impl Fn() -> bool + 'static,
+) {
+    let laid_out = Cell::new(false);
+    list.add_tick_callback(move |list, _| {
+        if !laid_out.replace(true) {
+            return glib::ControlFlow::Continue;
+        }
+        if still_wanted()
+            && let Some(adjustment) = list.vadjustment()
+        {
+            adjustment.set_value(0.0);
+        }
+        glib::ControlFlow::Break
+    });
 }
 
 // Gives a row of a list the tooltip that `text` makes from the item it's

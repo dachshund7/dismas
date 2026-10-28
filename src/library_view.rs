@@ -1181,22 +1181,11 @@ impl LibraryView {
             .collect();
         // A new search shows what it found from the top, with the header of
         // the first work. The list keeps its place by an item, so it's given
-        // a new model, which it shows from the first work, with the header
-        // above it out of view; once it's laid out there, it's scrolled to
-        // the top. Scrolling it to the top as the works change makes it go
-        // to the end
+        // a new model, which it shows from the first work, and then it's
+        // scrolled to the top
         let store = if new_search {
             let store = self.set_works_model();
-            let laid_out = Cell::new(false);
-            imp.works_list.add_tick_callback(move |list, _| {
-                if !laid_out.replace(true) {
-                    return glib::ControlFlow::Continue;
-                }
-                if let Some(adjustment) = list.vadjustment() {
-                    adjustment.set_value(0.0);
-                }
-                glib::ControlFlow::Break
-            });
+            utils::scroll_to_top_when_laid_out(&imp.works_list, || true);
             store
         } else {
             let Some(store) = imp.works.borrow().clone() else {
