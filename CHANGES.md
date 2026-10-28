@@ -81,6 +81,8 @@ All notable changes to this project will be documented in this file.
   add tracks from outside the music folders to the selected playlist, as a
   phone has nothing to drag them from. They're back from before 2026.10,
   under new names and shortcuts
+- On a touchscreen, a swipe to the right on the tracks of an album or a
+  work goes back to the playlist
 
 ### Changed
 
