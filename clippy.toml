@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026  John Hamilton
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Dismas never writes to music files. Every lofty method that writes to a
+# file takes `WriteOptions`, so banning the type catches the methods a new
+# version of lofty adds too; the methods are listed as well, for calls that
+# pass `Default::default()` and so never name the type. Tests write their
+# tags through `utils::write_test_id3v2`, the only exception
+disallowed-types = [
+    { path = "lofty::config::WriteOptions", reason = "Dismas never writes to music files" },
+]
+disallowed-methods = [
+    { path = "lofty::tag::TagExt::save_to", reason = "Dismas never writes to music files" },
+    { path = "lofty::tag::TagExt::save_to_path", reason = "Dismas never writes to music files" },
+    { path = "lofty::tag::TagExt::remove_from", reason = "Dismas never writes to music files" },
+    { path = "lofty::tag::TagExt::remove_from_path", reason = "Dismas never writes to music files" },
+    { path = "lofty::file::AudioFile::save_to", reason = "Dismas never writes to music files" },
+    { path = "lofty::file::AudioFile::save_to_path", reason = "Dismas never writes to music files" },
+    { path = "lofty::tag::TagType::remove_from", reason = "Dismas never writes to music files" },
+    { path = "lofty::tag::TagType::remove_from_path", reason = "Dismas never writes to music files" },
+    { path = "lofty::file::BoundTaggedFile::save", reason = "Dismas never writes to music files" },
+]

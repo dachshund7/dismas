@@ -331,8 +331,6 @@ mod tests {
 
     #[test]
     fn work_hierarchy_is_read_from_wav_files() {
-        use lofty::{config::WriteOptions, tag::TagExt};
-
         let dir = std::env::temp_dir().join(format!("dismas-tags-wav-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("Track.wav");
@@ -341,7 +339,7 @@ mod tests {
         let json = r#"{"version":1,"segments":[]}"#;
         let mut id3v2 = Id3v2Tag::new();
         let _ = id3v2.insert_user_text(WORK_HIERARCHY.to_string(), json.to_string());
-        id3v2.save_to_path(&path, WriteOptions::default()).unwrap();
+        crate::utils::write_test_id3v2(&path, &id3v2);
 
         let read = read_file_tags(&path, ParseOptions::new());
         let _ = std::fs::remove_dir_all(&dir);
