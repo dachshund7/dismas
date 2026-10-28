@@ -12,7 +12,7 @@
 //! what to delete: after upgrading lofty, `cargo test lofty_gaps` lists
 //! what it now does itself.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, io::Read};
 
 use lofty::{
     ape::ApeItem,
@@ -92,6 +92,24 @@ impl Fills {
             }
         }
     }
+}
+
+// lofty 0.25.4 takes a file whose start it doesn't know, like an Ogg FLAC
+// file, for MPEG or AAC audio after some junk, as soon as it finds what looks
+// like a frame sync in its first kilobyte. When the properties aren't read,
+// as in the library's scans, nothing checks that guess, and the file is read
+// as one without tags. Such a guess is the only one that comes from neither
+// the start of the file nor what follows an ID3v2 tag there
+pub(super) fn guessed_from_junk(path: &Path, file_type: Option<FileType>) -> bool {
+    if !matches!(file_type, Some(FileType::Mpeg | FileType::Aac)) {
+        return false;
+    }
+    let mut start = [0; 36];
+    let Ok(read) = File::open(path).and_then(|mut file| file.read(&mut start)) else {
+        return false;
+    };
+    let start = &start[..read];
+    FileType::from_buffer(start).is_none() && !start.starts_with(b"ID3")
 }
 
 // lofty 0.25.4 leaves the performers of an ID3v2 tag out of the tag: it
@@ -179,6 +197,52 @@ mod tests {
             "lofty now reads Ogg FLAC, rather than GStreamer: give its FileType an arm in \
              read_tagged_file and a name in format_name"
         );
+    }
+
+    // Some junk, then the header of an MP3 frame
+    fn junk_then_frame_sync() -> Vec<u8> {
+        let mut bytes = b"JUNK".repeat(16);
+        bytes.extend([0xFF, 0xFB, 0x90, 0x64]);
+        bytes.resize(2048, 0);
+        bytes
+    }
+
+    #[test]
+    fn still_takes_junk_for_mpeg_audio() {
+        let probe = lofty::probe::Probe::new(std::io::Cursor::new(junk_then_frame_sync()))
+            .guess_file_type()
+            .unwrap();
+        assert_eq!(
+            probe.file_type(),
+            Some(FileType::Mpeg),
+            "lofty no longer takes a file it doesn't know for MPEG audio after junk: delete \
+             guessed_from_junk and its use in read_file_tags"
+        );
+    }
+
+    #[test]
+    fn only_a_guess_from_junk_is_one() {
+        let dir = std::env::temp_dir().join(format!("dismas-junk-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let junk = dir.join("junk");
+        std::fs::write(&junk, junk_then_frame_sync()).unwrap();
+        let frame = dir.join("frame");
+        std::fs::write(&frame, &junk_then_frame_sync()[64..]).unwrap();
+        let id3 = dir.join("id3");
+        let mut bytes = b"ID3\x04\0\0\0\0\0\0".to_vec();
+        bytes.extend(&junk_then_frame_sync()[64..]);
+        std::fs::write(&id3, bytes).unwrap();
+
+        let guessed = |path: &Path, file_type| guessed_from_junk(path, Some(file_type));
+        let results = [
+            guessed(&junk, FileType::Mpeg),
+            guessed(&junk, FileType::Aac),
+            guessed(&junk, FileType::Flac),
+            guessed(&frame, FileType::Mpeg),
+            guessed(&id3, FileType::Mpeg),
+        ];
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(results, [true, true, false, false, false]);
     }
 
     #[test]

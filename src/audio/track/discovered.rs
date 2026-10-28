@@ -511,7 +511,10 @@ mod tests {
         // picture is compared
         assert_eq!(read.tag.pictures().len(), 1);
         assert_eq!(read.tag.pictures()[0].data(), PNG);
-        assert!(without_covers.unwrap().tag.pictures().is_empty());
+        // The library reads the tags without the covers and the properties
+        let without_covers = without_covers.unwrap();
+        assert_eq!(without_covers.tag.title().as_deref(), Some("Nimrod"));
+        assert!(without_covers.tag.pictures().is_empty());
     }
 
     #[test]

@@ -241,6 +241,12 @@ pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
             return None;
         }
     };
+    if lofty_gaps::guessed_from_junk(path, probe.file_type())
+        && let Some(tags) = discovered::discover(path, read_options)
+    {
+        debug!("Read {path:?} with GStreamer, as lofty only guessed it was MPEG audio");
+        return Some(tags);
+    }
     match read_tagged_file(probe, options) {
         Ok((file, left_out)) => Some(FileTags::new(file, left_out)),
         Err(e) => {
