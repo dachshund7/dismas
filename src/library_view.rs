@@ -1017,24 +1017,10 @@ impl LibraryView {
     // under the search; activating one shows its recordings
     fn setup_works(&self) {
         let imp = self.imp();
-        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
-        // Each item has the index of its composers' section, as the works
-        // are already in the order of their composers
-        let sections = gtk::CustomSorter::new(|a, b| {
-            let section = |item: &glib::Object| {
-                let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
-                item.borrow::<WorkItem>().section
-            };
-            section(a).cmp(&section(b)).into()
-        });
-        let model = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
-        model.set_section_sorter(Some(&sections));
-        imp.works_list
-            .set_model(Some(&gtk::NoSelection::new(Some(model))));
         imp.works_list.set_factory(Some(&work_factory()));
         imp.works_list
             .set_header_factory(Some(&work_section_factory()));
-        imp.works.replace(Some(store));
+        self.set_works_model();
 
         imp.works_list.connect_activate(clone!(
             #[weak(rename_to = this)]
@@ -1068,6 +1054,27 @@ impl LibraryView {
     // are hidden
     pub fn hidden_folders(&self) -> Vec<PathBuf> {
         self.imp().hidden_folders.borrow().clone()
+    }
+
+    // Gives the list of works a new model, which it shows from the top; each
+    // item has the index of its composers' section, as the works are already
+    // in the order of their composers
+    fn set_works_model(&self) -> gio::ListStore {
+        let imp = self.imp();
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let sections = gtk::CustomSorter::new(|a, b| {
+            let section = |item: &glib::Object| {
+                let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
+                item.borrow::<WorkItem>().section
+            };
+            section(a).cmp(&section(b)).into()
+        });
+        let model = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
+        model.set_section_sorter(Some(&sections));
+        imp.works_list
+            .set_model(Some(&gtk::NoSelection::new(Some(model))));
+        imp.works.replace(Some(store.clone()));
+        store
     }
 
     // Whether the page shows the works, rather than the albums
@@ -1146,9 +1153,6 @@ impl LibraryView {
     // and a soloist found in one movement plays in the others too
     fn show_works(&self, filter: TrackFilter, works: Vec<library::WorkInfo>) {
         let imp = self.imp();
-        let Some(store) = imp.works.borrow().clone() else {
-            return;
-        };
         let new_search = imp
             .works_filter
             .replace(Some(filter.clone()))
@@ -1170,12 +1174,32 @@ impl LibraryView {
                 glib::BoxedAnyObject::new(WorkItem { info, section })
             })
             .collect();
+        // A new search shows what it found from the top, with the header of
+        // the first work. The list keeps its place by an item, so it's given
+        // a new model, which it shows from the first work, with the header
+        // above it out of view; once it's laid out there, it's scrolled to
+        // the top. Scrolling it to the top as the works change makes it go
+        // to the end
+        let store = if new_search {
+            let store = self.set_works_model();
+            let laid_out = Cell::new(false);
+            imp.works_list.add_tick_callback(move |list, _| {
+                if !laid_out.replace(true) {
+                    return glib::ControlFlow::Continue;
+                }
+                if let Some(adjustment) = list.vadjustment() {
+                    adjustment.set_value(0.0);
+                }
+                glib::ControlFlow::Break
+            });
+            store
+        } else {
+            let Some(store) = imp.works.borrow().clone() else {
+                return;
+            };
+            store
+        };
         store.splice(0, store.n_items(), &items);
-        // A new search shows what it found from the top
-        if new_search && store.n_items() > 0 {
-            imp.works_list
-                .scroll_to(0, gtk::ListScrollFlags::NONE, None);
-        }
     }
 
     // The lists of composers and of performers next to the search:
