@@ -219,9 +219,11 @@ pub fn work_header_factory(
         title.append(&composer_label);
 
         // Headers are reused for other sections, so the positions are
-        // only read on click
+        // only read on click. The click is taken when it's let go of, like
+        // a button's: claiming a touch as it's pressed would take it from
+        // the list, which scrolls with it, and from the long press
         let click = gtk::GestureClick::new();
-        click.connect_pressed(glib::clone!(
+        click.connect_released(glib::clone!(
             #[weak]
             header,
             #[strong]

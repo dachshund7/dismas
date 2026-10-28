@@ -107,6 +107,8 @@ All notable changes to this project will be documented in this file.
   work
 - Ctrl+C in a search copied the details of the playing track, rather than
   the text selected
+- On a touchscreen, a flick that started on the name of a work, over its
+  movements, didn't scroll the list
 
 ### Removed
 

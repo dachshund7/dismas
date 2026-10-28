@@ -1117,7 +1117,9 @@ impl AlbumTracks {
                 row.append(&more);
 
                 // A right click or a long press opens the menu, and a click
-                // selects the tracks in selection mode
+                // selects the tracks in selection mode, once it's let go of,
+                // like a button's: a flick from the header scrolls the list,
+                // and a long press opens the menu, rather than selecting
                 let click = gtk::GestureClick::builder().button(0).build();
                 click.connect_pressed(clone!(
                     #[weak]
@@ -1139,7 +1141,16 @@ impl AlbumTracks {
                                     &header.end(),
                                 ],
                             );
-                        } else if gesture.current_button() == gdk::BUTTON_PRIMARY {
+                        }
+                    }
+                ));
+                click.connect_released(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    header,
+                    move |gesture, _, _, _| {
+                        if gesture.current_button() == gdk::BUTTON_PRIMARY {
                             let ctrl = gesture
                                 .current_event_state()
                                 .contains(gdk::ModifierType::CONTROL_MASK);
