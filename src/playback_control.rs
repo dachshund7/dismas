@@ -48,6 +48,9 @@ mod imp {
         pub track_info_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub more_button: TemplateChild<gtk::MenuButton>,
+
+        // What the sleep timer is waiting for, which its tooltip says
+        pub sleep_timer_status: std::cell::RefCell<Option<String>>,
     }
 
     #[glib::object_subclass]
@@ -79,6 +82,23 @@ mod imp {
 
         fn constructed(&self) {
             self.parent_constructed();
+
+            // The tooltip says the time left, which changes every second
+            // while the timer counts down, so it's made when it shows:
+            // setting a tooltip makes GTK look for the window under the
+            // pointer, which grabs the X server
+            self.sleep_timer_button.connect_query_tooltip(glib::clone!(
+                #[weak(rename_to = imp)]
+                self,
+                #[upgrade_or]
+                false,
+                move |_, _, _, _, tooltip| {
+                    let status = imp.sleep_timer_status.borrow();
+                    let text = status.clone().unwrap_or_else(|| i18n("Sleep Timer"));
+                    tooltip.set_text(Some(&text));
+                    true
+                }
+            ));
 
             // Clicking the button again restores the order of the tracks,
             // so the tooltip says what the next click does
@@ -176,12 +196,13 @@ impl PlaybackControl {
     // Shows what the sleep timer is waiting for, or None when it's off:
     // its button is highlighted, and its tooltip says it
     pub fn set_sleep_timer(&self, status: Option<&str>) {
-        let button = self.imp().sleep_timer_button.get();
-        if let Some(status) = status {
-            button.set_tooltip_text(Some(status));
+        let imp = self.imp();
+        imp.sleep_timer_status
+            .replace(status.map(ToString::to_string));
+        let button = imp.sleep_timer_button.get();
+        if status.is_some() {
             button.add_css_class("sleep-timer-on");
         } else {
-            button.set_tooltip_text(Some(&i18n("Sleep Timer")));
             button.remove_css_class("sleep-timer-on");
         }
     }
