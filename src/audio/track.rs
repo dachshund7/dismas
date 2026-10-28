@@ -793,9 +793,22 @@ impl Track {
         self.imp().movement_work()
     }
 
+    // Whether the track is part of a work, or the whole of one
+    pub fn has_work(&self) -> bool {
+        self.imp().data.borrow().credits().work.is_some()
+    }
+
     // Whether the track is a movement of a work
     pub fn is_movement(&self) -> bool {
         self.imp().data.borrow().credits().is_movement()
+    }
+
+    // Whether the track is a movement whose levels in the work are shown
+    // on a line of their own, see `movement_levels()`
+    pub fn has_movement_levels(&self) -> bool {
+        let data = self.imp().data.borrow();
+        let credits = data.credits();
+        credits.is_movement() && credits.movement_levels.is_some()
     }
 
     // The levels of the work above the movement, and the movement, if the

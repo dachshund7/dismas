@@ -666,14 +666,12 @@ impl Window {
 
     // Adds files from the command line to the end of the selected playlist,
     // leaving the page and the pane as they are
-    pub fn add_files(&self, files: &[gio::File]) {
-        let files = files.to_vec();
+    pub fn add_files(&self, files: Vec<gio::File>) {
         self.after_startup(move |win| win.add_files_to_queue(files, QueueMode::Quiet, None));
     }
 
     // Plays files from the command line in place of the queue
-    pub fn play_files(&self, files: &[gio::File]) {
-        let files = files.to_vec();
+    pub fn play_files(&self, files: Vec<gio::File>) {
         self.after_startup(move |win| win.play_dropped_files(files));
     }
 

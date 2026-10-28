@@ -100,9 +100,8 @@ impl Window {
                 #[strong]
                 album_id,
                 move |_, _| {
-                    let album_id = album_id.borrow().clone();
-                    if let Some(album_id) = album_id {
-                        win.go_to_album(&album_id, &track.file());
+                    if let Some(album_id) = album_id.borrow().as_deref() {
+                        win.go_to_album(album_id, &track.file());
                     }
                 }
             ));
@@ -124,7 +123,7 @@ impl Window {
         }
 
         // A track of a work, unless the work's recordings are showing
-        if track.credit_details().work.is_some() && (in_queue || !album_tracks.shows_work()) {
+        if track.has_work() && (in_queue || !album_tracks.shows_work()) {
             self.add_other_recordings_item(&section, &actions, "track", &track);
         }
 

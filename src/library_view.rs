@@ -2233,7 +2233,8 @@ fn performer_factory() -> gtk::SignalListItemFactory {
         // The name they're known by, and all they play or sing
         |performer| {
             let performer = performer.as_ref()?;
-            let text = [performer.name.clone(), performer.roles.join(", ")]
+            let roles = performer.roles.join(", ");
+            let text = [performer.name.as_str(), roles.as_str()]
                 .into_iter()
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()

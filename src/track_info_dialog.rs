@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{collections::HashMap, path::PathBuf, sync::OnceLock};
+use std::{collections::HashMap, mem::take, path::PathBuf, sync::OnceLock};
 
 use adw::{prelude::*, subclass::prelude::*};
 use gtk::{CompositeTemplate, gdk, gio, glib};
@@ -82,7 +82,9 @@ impl TrackInfoDialog {
     fn set_track(&self, track: &Track) {
         let imp = self.imp();
         imp.track.set(Some(track));
-        let credits = track.credit_details();
+        // A copy of the track's, so its values are taken, rather than copied
+        // again
+        let mut credits = track.credit_details();
 
         // For movements of a larger work, the title just repeats the work
         // and the movement, so only show it for other tracks
@@ -102,26 +104,26 @@ impl TrackInfoDialog {
                 i18n("Work"),
                 credits
                     .work_title
-                    .clone()
-                    .or_else(|| credits.work.clone())
+                    .take()
+                    .or_else(|| credits.work.take())
                     .into_iter()
                     .collect(),
             ),
             (i18n("Movement"), movement.into_iter().collect()),
-            (i18n("Composer"), credits.composers.clone()),
-            (i18n("Lyricist"), credits.lyricists.clone()),
-            (i18n("Arranger"), credits.arrangers.clone()),
+            (i18n("Composer"), take(&mut credits.composers)),
+            (i18n("Lyricist"), take(&mut credits.lyricists)),
+            (i18n("Arranger"), take(&mut credits.arrangers)),
         ];
         fill_group(&imp.work_group, &work);
 
         let mut performance: Vec<(String, Vec<String>)> =
-            vec![(i18n("Conductor"), credits.conductors.clone())];
-        for performer in &credits.performers {
+            vec![(i18n("Conductor"), take(&mut credits.conductors))];
+        for performer in take(&mut credits.performers) {
             let role = match &performer.role {
                 Some(role) => capitalize(role),
                 None => i18n("Performer"),
             };
-            performance.push((role, vec![performer.name.clone()]));
+            performance.push((role, vec![performer.name]));
         }
         // From when to when, if the sessions took several days
         let recorded = credits
@@ -132,30 +134,32 @@ impl TrackInfoDialog {
         fill_group(&imp.performance_group, &performance);
 
         let production = [
-            (i18n("Producer"), credits.producers.clone()),
-            (i18n("Engineer"), credits.engineers.clone()),
-            (i18n("Mixer"), credits.mixers.clone()),
-            (i18n("Remixer"), credits.remixers.clone()),
-            (i18n("DJ-Mixer"), credits.dj_mixers.clone()),
+            (i18n("Producer"), take(&mut credits.producers)),
+            (i18n("Engineer"), take(&mut credits.engineers)),
+            (i18n("Mixer"), take(&mut credits.mixers)),
+            (i18n("Remixer"), take(&mut credits.remixers)),
+            (i18n("DJ-Mixer"), take(&mut credits.dj_mixers)),
         ];
         fill_group(&imp.production_group, &production);
 
-        fill_group(&imp.release_group, &release_fields(track, &credits));
         fill_musicbrainz_group(&imp.musicbrainz_group, &credits.musicbrainz);
-        fill_group(&imp.file_group, &file_fields(&track.file_details()));
+        fill_group(&imp.release_group, &release_fields(track, credits));
+        fill_group(&imp.file_group, &file_fields(track.file_details()));
     }
 }
 
-fn release_fields(track: &Track, credits: &TrackCredits) -> Vec<(String, Vec<String>)> {
+fn release_fields(track: &Track, credits: TrackCredits) -> Vec<(String, Vec<String>)> {
     // Only show the album artist if it adds anything
     let album_artist = credits
         .album_artist
-        .clone()
-        .filter(|a| *a != track.artist());
+        .as_ref()
+        .filter(|a| **a != track.artist())
+        .cloned();
 
     // Only show the disc for albums with more than one
     let disc = position(credits.disc_number, credits.disc_total)
         .filter(|_| credits.disc_number > Some(1) || credits.disc_total > Some(1));
+    let original_date = credits.distinct_original_date().map(str::to_string);
 
     vec![
         (i18n("Album"), track.tag_album().into_iter().collect()),
@@ -163,7 +167,7 @@ fn release_fields(track: &Track, credits: &TrackCredits) -> Vec<(String, Vec<Str
         (i18n("Disc"), disc.into_iter().collect()),
         (
             i18n("Disc Subtitle"),
-            credits.disc_subtitle.clone().into_iter().collect(),
+            credits.disc_subtitle.into_iter().collect(),
         ),
         (
             i18n("Track"),
@@ -171,15 +175,8 @@ fn release_fields(track: &Track, credits: &TrackCredits) -> Vec<(String, Vec<Str
                 .into_iter()
                 .collect(),
         ),
-        (i18n("Date"), credits.date.clone().into_iter().collect()),
-        (
-            i18n("Original Date"),
-            credits
-                .distinct_original_date()
-                .map(str::to_string)
-                .into_iter()
-                .collect(),
-        ),
+        (i18n("Date"), credits.date.into_iter().collect()),
+        (i18n("Original Date"), original_date.into_iter().collect()),
         (
             i18n("Release Type"),
             credits
@@ -188,7 +185,7 @@ fn release_fields(track: &Track, credits: &TrackCredits) -> Vec<(String, Vec<Str
                 .map(|t| release_type_name(t))
                 .collect(),
         ),
-        (i18n("Medium"), credits.media.clone()),
+        (i18n("Medium"), credits.media),
         (
             i18n("Country"),
             credits
@@ -198,16 +195,16 @@ fn release_fields(track: &Track, credits: &TrackCredits) -> Vec<(String, Vec<Str
                 .into_iter()
                 .collect(),
         ),
-        (i18n("Label"), credits.labels.clone()),
-        (i18n("Catalog Number"), credits.catalog_numbers.clone()),
-        (i18n("Barcode"), credits.barcodes.clone()),
-        (i18n("ISRC"), credits.isrcs.clone()),
-        (i18n("Genre"), credits.genres.clone()),
-        (i18n("Copyright"), credits.copyright.clone()),
+        (i18n("Label"), credits.labels),
+        (i18n("Catalog Number"), credits.catalog_numbers),
+        (i18n("Barcode"), credits.barcodes),
+        (i18n("ISRC"), credits.isrcs),
+        (i18n("Genre"), credits.genres),
+        (i18n("Copyright"), credits.copyright),
     ]
 }
 
-fn file_fields(details: &FileDetails) -> Vec<(String, Vec<String>)> {
+fn file_fields(details: FileDetails) -> Vec<(String, Vec<String>)> {
     let channels = details.channels.map(|channels| match channels {
         1 => i18n("Mono"),
         2 => i18n("Stereo"),
@@ -219,7 +216,7 @@ fn file_fields(details: &FileDetails) -> Vec<(String, Vec<String>)> {
         .sample_rate
         .map(|rate| i18n_f("{} kHz", &[&(f64::from(rate) / 1000.0).to_string()]));
 
-    let gain = |gain: &Option<String>| gain.clone().into_iter().collect();
+    let gain = |gain: Option<String>| gain.into_iter().collect();
 
     vec![
         (
@@ -261,8 +258,8 @@ fn file_fields(details: &FileDetails) -> Vec<(String, Vec<String>)> {
                 .into_iter()
                 .collect(),
         ),
-        (i18n("Track Gain"), gain(&details.replay_gain.track)),
-        (i18n("Album Gain"), gain(&details.replay_gain.album)),
+        (i18n("Track Gain"), gain(details.replay_gain.track)),
+        (i18n("Album Gain"), gain(details.replay_gain.album)),
     ]
 }
 

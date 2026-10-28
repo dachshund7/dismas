@@ -51,7 +51,10 @@ impl Window {
                     let player = win.player();
                     let timer = player.sleep_timer();
                     // The one that's waiting turns off again
-                    if action.state().and_then(|s| s.get::<String>()) == Some(end.clone()) {
+                    if action
+                        .state()
+                        .is_some_and(|s| s.str() == Some(end.as_str()))
+                    {
                         timer.cancel();
                     } else {
                         match end.as_str() {

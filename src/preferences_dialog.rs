@@ -185,11 +185,14 @@ impl PreferencesDialog {
         let item = item
             .downcast_ref::<glib::BoxedAnyObject>()
             .expect("The folders are boxed");
-        let folder = item.borrow::<MusicFolder>().clone();
+        let (title, path) = {
+            let folder = item.borrow::<MusicFolder>();
+            (folder_name(folder.shown_path()), folder.path.clone())
+        };
         // The folders it leaves out are listed when it's expanded, so they
         // don't make the page longer
         let row = adw::ExpanderRow::builder()
-            .title(folder_name(folder.shown_path()))
+            .title(title)
             .use_markup(false)
             .build();
 
@@ -253,15 +256,15 @@ impl PreferencesDialog {
             #[weak]
             row,
             async move {
-                let path = folder.path.clone();
-                let available = gio::spawn_blocking(move || library::is_available(&path))
+                let checked = path.clone();
+                let available = gio::spawn_blocking(move || library::is_available(&checked))
                     .await
                     .unwrap_or(true);
                 let unavailable = &dialog.imp().unavailable;
                 if available {
-                    unavailable.borrow_mut().remove(&folder.path);
+                    unavailable.borrow_mut().remove(&path);
                 } else {
-                    unavailable.borrow_mut().insert(folder.path.clone());
+                    unavailable.borrow_mut().insert(path);
                     row.add_prefix(
                         &gtk::Image::builder()
                             .icon_name("dialog-warning-symbolic")

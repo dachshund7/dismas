@@ -41,7 +41,7 @@ impl Window {
 
         match tracks {
             Tracks::InQueue(tracks) => {
-                self.move_to_play_next(&tracks);
+                self.move_to_play_next(tracks);
                 return;
             }
             Tracks::ShownAlbum(_) => self.show_playlist_view(),
@@ -69,15 +69,11 @@ impl Window {
 
     // Tracks of the queue are moved, without the playing one, which
     // stays where it is
-    fn move_to_play_next(&self, tracks: &[Track]) {
+    fn move_to_play_next(&self, mut moved: Vec<Track>) {
         let player = self.player();
         let queue = player.queue();
         let current = queue.current();
-        let moved: Vec<Track> = tracks
-            .iter()
-            .filter(|t| Some(*t) != current.as_ref())
-            .cloned()
-            .collect();
+        moved.retain(|t| Some(t) != current.as_ref());
         if moved.is_empty() {
             return;
         }

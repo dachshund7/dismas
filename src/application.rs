@@ -195,9 +195,9 @@ mod imp {
             if files.is_empty() {
                 obj.activate();
             } else if options.contains("add") {
-                obj.add_files(&files);
+                obj.add_files(files);
             } else if options.contains("play") {
-                obj.play_files(&files);
+                obj.play_files(files);
             } else {
                 obj.open(&files, "");
             }
@@ -478,7 +478,7 @@ impl Application {
     // A window that's there already isn't brought up, also when it's hidden
     // while playing in the background, so that a script can add tracks
     // while the user does something else
-    fn add_files(&self, files: &[gio::File]) {
+    fn add_files(&self, files: Vec<gio::File>) {
         let window = match self.active_window().and_downcast::<Window>() {
             Some(window) => window,
             None => self.present_main_window(true, None),
@@ -488,7 +488,7 @@ impl Application {
 
     // Plays files from the command line in place of the queue. Starting
     // Dismas restores the selected playlist first, for the Undo to put back
-    fn play_files(&self, files: &[gio::File]) {
+    fn play_files(&self, files: Vec<gio::File>) {
         self.present_main_window(true, None).play_files(files);
     }
 

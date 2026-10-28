@@ -12,8 +12,8 @@ impl Window {
     fn show_album_tracks(
         &self,
         album: &Album,
-        filter: &TrackFilter,
-        picks: &PickNames,
+        filter: TrackFilter,
+        picks: PickNames,
         reveal: Option<&gio::File>,
     ) {
         let hidden = self.imp().library_view.hidden_folders();
@@ -62,8 +62,8 @@ impl Window {
         };
         self.show_album_tracks(
             &album,
-            &TrackFilter::default(),
-            &PickNames::default(),
+            TrackFilter::default(),
+            PickNames::default(),
             Some(track),
         );
     }
@@ -483,8 +483,8 @@ impl Window {
                 let library_view = win.imp().library_view.get();
                 win.show_album_tracks(
                     album,
-                    &library_view.search_filter(),
-                    &library_view.search_pick_names(),
+                    library_view.search_filter(),
+                    library_view.search_pick_names(),
                     None,
                 );
             }

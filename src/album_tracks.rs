@@ -653,8 +653,8 @@ impl AlbumTracks {
     pub fn show_album(
         &self,
         album: &Album,
-        filter: &TrackFilter,
-        picks: &PickNames,
+        filter: TrackFilter,
+        picks: PickNames,
         hidden: Vec<PathBuf>,
         reveal: Option<&gio::File>,
     ) {
@@ -672,8 +672,8 @@ impl AlbumTracks {
 
         imp.album.replace(Some(album.clone()));
         imp.work.replace(None);
-        imp.filter.replace(filter.clone());
-        imp.picks.replace(picks.clone());
+        imp.filter.replace(filter);
+        imp.picks.replace(picks);
         imp.hidden.replace(hidden);
         self.load(reveal);
     }
@@ -873,9 +873,9 @@ impl AlbumTracks {
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
-        let work = imp.work.borrow().clone();
+        let work_key = imp.work.borrow().as_ref().map(|work| work.key.clone());
         let album = imp.album.borrow().clone();
-        if work.is_none() && album.is_none() {
+        if work_key.is_none() && album.is_none() {
             return;
         }
         tracks.remove_all();
@@ -886,7 +886,7 @@ impl AlbumTracks {
         imp.recording_of.replace(HashMap::new());
 
         // Each recording of a work is a section, under a header of its own
-        let (same, headers): (Option<SameSection>, _) = if work.is_some() {
+        let (same, headers): (Option<SameSection>, _) = if work_key.is_some() {
             let recording_of = imp.recording_of.clone();
             let same: SameSection = Rc::new(move |previous: &Track, track: &Track| {
                 let recording_of = recording_of.borrow();
@@ -915,9 +915,9 @@ impl AlbumTracks {
             #[weak(rename_to = this)]
             self,
             async move {
-                let files = if let Some(work) = work {
+                let files = if let Some(key) = work_key {
                     let recordings = gio::spawn_blocking(move || {
-                        library::work_recordings(&work.key, &filter, &hidden)
+                        library::work_recordings(&key, &filter, &hidden)
                     })
                     .await
                     .unwrap_or_default();

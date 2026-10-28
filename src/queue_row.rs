@@ -746,32 +746,24 @@ impl QueueRow {
     fn tooltip(&self) -> String {
         let imp = self.imp();
         let track = self.track();
-        let mut lines = vec![
-            imp.track_title_label.text().unwrap_or_default().to_string(),
-            imp.track_artist_label
-                .text()
-                .unwrap_or_default()
-                .to_string(),
-        ];
-
-        if track.as_ref().and_then(Track::movement_levels).is_some() {
-            lines.swap(0, 1);
-        }
-        lines.push(
-            imp.track_credits_label
-                .text()
-                .unwrap_or_default()
-                .to_string(),
-        );
+        let title = imp.track_title_label.text().unwrap_or_default();
+        let artist = imp.track_artist_label.text().unwrap_or_default();
+        let credits = imp.track_credits_label.text().unwrap_or_default();
         // Where the file was looked for
-        if let Some(path) = track
+        let path = track
             .as_ref()
             .filter(|t| t.missing())
             .and_then(|t| t.file().path())
-        {
-            lines.push(path.display().to_string());
+            .map(|path| path.display().to_string());
+        let work = track.as_ref().and_then(Track::movement_work);
+
+        let mut lines = vec![title.as_str(), artist.as_str()];
+        if track.as_ref().is_some_and(Track::has_movement_levels) {
+            lines.swap(0, 1);
         }
-        if let Some(work) = track.and_then(|t| t.movement_work()) {
+        lines.push(&credits);
+        lines.extend(path.as_deref());
+        if let Some(work) = &work {
             lines.insert(0, work);
         }
 
