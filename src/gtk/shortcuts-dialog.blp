@@ -173,6 +173,16 @@ Adw.ShortcutsDialog shortcuts_dialog {
         }
 
         Adw.ShortcutsItem {
+            title: C_("shortcut window", "Mute or unmute");
+            action-name: "win.toggle-mute";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Change the repeat mode");
+            action-name: "queue.repeat-mode";
+        }
+
+        Adw.ShortcutsItem {
             title: C_("shortcut window", "Add the current track to favorites, or remove it");
             action-name: "win.favorite";
         }

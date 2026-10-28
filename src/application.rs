@@ -97,6 +97,9 @@ mod imp {
             // Ctrl+Left and Ctrl+Right seek, see `Window::setup_key_shortcuts()`
             obj.set_accels_for_action("win.volume-up", &["<primary>Up"]);
             obj.set_accels_for_action("win.volume-down", &["<primary>Down"]);
+            obj.set_accels_for_action("win.toggle-mute", &["<primary>m"]);
+            // Ctrl+R is shuffling's
+            obj.set_accels_for_action("queue.repeat-mode", &["<primary>t"]);
             obj.set_accels_for_action("win.previous", &["<Alt>Left"]);
             obj.set_accels_for_action("win.next", &["<Alt>Right"]);
             obj.set_accels_for_action("win.add-tracks", &["<primary>o"]);
