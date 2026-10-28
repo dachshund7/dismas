@@ -115,8 +115,10 @@ template $DismasAlbumTracks: Widget {
       };
     }
 
+    // For a work, only in selection mode, as each recording has its own
+    // Play button
     [bottom]
-    Box {
+    Box buttons {
       halign: center;
       spacing: 12;
       margin-top: 12;

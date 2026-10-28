@@ -2,23 +2,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // The tracks of an album from the library, shown in the sidebar like the
-// queue, so they can be played or added to it
+// queue, so they can be played or added to it; or the recordings of a work,
+// each under a header with its performers
 
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, OnceCell, RefCell},
+    collections::HashMap,
+    path::PathBuf,
+    rc::Rc,
+};
 
 use adw::{prelude::*, subclass::prelude::*};
 use glib::{clone, subclass::Signal};
-use gtk::{CompositeTemplate, gio, glib};
+use gtk::{CompositeTemplate, gdk, gio, glib};
 use std::sync::LazyLock;
 
 use crate::{
     audio::{Track, load_tracks},
-    i18n::{i18n, ni18n_f, ni18n_k},
+    i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album, TrackFilter},
     library_view::PickNames,
     queue_row::QueueRow,
     utils,
-    work_sections::{WorkSectionModel, work_header_factory},
+    work_sections::{SameSection, WorkSectionModel, work_header_factory},
 };
 
 mod imp {
@@ -41,6 +47,8 @@ mod imp {
         #[template_child]
         pub tracks_view: TemplateChild<gtk::ListView>,
         #[template_child]
+        pub buttons: TemplateChild<gtk::Box>,
+        #[template_child]
         pub play_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub add_button: TemplateChild<adw::SplitButton>,
@@ -61,6 +69,18 @@ mod imp {
 
         pub tracks: RefCell<Option<gio::ListStore>>,
         pub files: RefCell<Vec<gio::File>>,
+        // The work whose recordings are showing, in place of an album, the
+        // folders whose tracks are hidden, and its recordings, with the
+        // recording each track is in, by its URI
+        pub work: RefCell<Option<library::WorkInfo>>,
+        pub hidden: RefCell<Vec<PathBuf>>,
+        pub recordings: Rc<RefCell<Vec<library::WorkRecording>>>,
+        pub recording_of: Rc<RefCell<HashMap<String, usize>>>,
+        // The sections of the list, and the headers of the works of an
+        // album and of the recordings of a work
+        pub sections: OnceCell<WorkSectionModel>,
+        pub work_headers: OnceCell<gtk::ListItemFactory>,
+        pub recording_headers: OnceCell<gtk::ListItemFactory>,
         // The album that is showing, and the search, and the composer and
         // performer, it was shown for, with their names
         pub album: RefCell<Option<Album>>,
@@ -112,6 +132,7 @@ mod imp {
             } else {
                 self.tracks_view.remove_css_class("selecting");
             }
+            self.obj().update_buttons();
             self.obj().update_selection();
             self.obj().notify_selection_mode();
         }
@@ -122,7 +143,8 @@ mod imp {
                 return;
             }
             self.obj().notify_whole_albums();
-            if !self.filter.borrow().is_empty() {
+            // A work's recordings are whole anyway
+            if !self.filter.borrow().is_empty() && self.work.borrow().is_none() {
                 self.obj().load(None);
             }
         }
@@ -162,6 +184,18 @@ mod imp {
                             QueueRow::static_type(),
                             f64::static_type(),
                             f64::static_type(),
+                        ])
+                        .build(),
+                    // The menu of a recording of a work, at a point of its
+                    // header, with the positions of its first track and
+                    // past its last one
+                    Signal::builder("recording-menu-requested")
+                        .param_types([
+                            gtk::Widget::static_type(),
+                            f64::static_type(),
+                            f64::static_type(),
+                            u32::static_type(),
+                            u32::static_type(),
                         ])
                         .build(),
                 ]
@@ -223,6 +257,26 @@ impl AlbumTracks {
         )
     }
 
+    pub fn connect_recording_menu_requested<
+        F: Fn(&Self, &gtk::Widget, f64, f64, u32, u32) + 'static,
+    >(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "recording-menu-requested",
+            false,
+            glib::closure_local!(move |view: &Self,
+                                       widget: &gtk::Widget,
+                                       x: f64,
+                                       y: f64,
+                                       start: u32,
+                                       end: u32| f(
+                view, widget, x, y, start, end
+            )),
+        )
+    }
+
     fn setup_list(&self) {
         let imp = self.imp();
 
@@ -278,17 +332,20 @@ impl AlbumTracks {
         let tracks = gio::ListStore::new::<Track>();
         let sections = WorkSectionModel::new(&tracks);
         imp.tracks_view
-            .set_model(Some(&gtk::NoSelection::new(Some(sections))));
+            .set_model(Some(&gtk::NoSelection::new(Some(sections.clone()))));
         imp.tracks_view.set_factory(Some(&factory));
-        imp.tracks_view
-            .set_header_factory(Some(&work_header_factory(
-                clone!(
-                    #[weak(rename_to = this)]
-                    self,
-                    move |start, end, ctrl| this.toggle_work(start, end, ctrl)
-                ),
-                None::<(fn() -> bool, fn(&Track, u32))>,
-            )));
+        let work_headers = work_header_factory(
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |start, end, ctrl| this.toggle_work(start, end, ctrl)
+            ),
+            None::<(fn() -> bool, fn(&Track, u32))>,
+        );
+        imp.tracks_view.set_header_factory(Some(&work_headers));
+        let _ = imp.sections.set(sections);
+        let _ = imp.work_headers.set(work_headers);
+        let _ = imp.recording_headers.set(self.recording_header_factory());
 
         imp.tracks.replace(Some(tracks));
     }
@@ -501,9 +558,93 @@ impl AlbumTracks {
         imp.album_artist.set_label(&album.artist());
 
         imp.album.replace(Some(album.clone()));
+        imp.work.replace(None);
         imp.filter.replace(filter.clone());
         imp.picks.replace(picks.clone());
         self.load(reveal);
+    }
+
+    // Shows the recordings of a work that the filter matches, each whole,
+    // leaving out the tracks in the `hidden` folders. The track of
+    // `reveal`, if any, is scrolled to and flashes once it's read
+    pub fn show_work(
+        &self,
+        work: &library::WorkInfo,
+        filter: &TrackFilter,
+        hidden: Vec<PathBuf>,
+        reveal: Option<&gio::File>,
+    ) {
+        let imp = self.imp();
+        imp.album_title.set_label(&work.name);
+        imp.album_title
+            .set_tooltip_text(Some(work.title.as_deref().unwrap_or(&work.name)));
+        let composers = work
+            .composers
+            .iter()
+            .map(|composer| composer.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        imp.album_artist.set_label(&composers);
+
+        imp.album.replace(None);
+        imp.work.replace(Some(work.clone()));
+        imp.hidden.replace(hidden);
+        imp.filter.replace(filter.clone());
+        imp.picks.replace(PickNames::default());
+        self.load(reveal);
+    }
+
+    // Whether the recordings of a work are showing, rather than an album
+    pub fn shows_work(&self) -> bool {
+        self.imp().work.borrow().is_some()
+    }
+
+    // The files to play from the track at `pos`, and the position to start
+    // at among them: those of the album, or of the selected tracks, or the
+    // recording the track is in
+    pub fn files_to_play(&self, pos: u32) -> (Vec<gio::File>, u32) {
+        let imp = self.imp();
+        if !self.shows_work() || self.selection_mode() {
+            return (self.files(), pos);
+        }
+        let Some(sections) = imp.sections.get() else {
+            return (Vec::new(), 0);
+        };
+        let (start, end) = sections.section(pos);
+        (self.section_files(start, end), pos.saturating_sub(start))
+    }
+
+    // The files of the tracks from `start` to before `end`
+    pub fn section_files(&self, start: u32, end: u32) -> Vec<gio::File> {
+        let tracks = self.imp().tracks.borrow().clone();
+        let Some(tracks) = tracks else {
+            return Vec::new();
+        };
+        (start..end.min(tracks.n_items()))
+            .filter_map(|i| tracks.item(i).and_downcast::<Track>())
+            .map(|track| track.file())
+            .collect()
+    }
+
+    // The album of the recording the track at `pos` is in
+    pub fn recording_album(&self, pos: u32) -> Option<String> {
+        let imp = self.imp();
+        let track = imp
+            .tracks
+            .borrow()
+            .as_ref()?
+            .item(pos)
+            .and_downcast::<Track>()?;
+        let index = *imp.recording_of.borrow().get(&track.uri())?;
+        Some(imp.recordings.borrow().get(index)?.album_id.clone())
+    }
+
+    // The Play and Add buttons play and add the whole album, or the
+    // selected tracks; each recording of a work has its own Play button
+    fn update_buttons(&self) {
+        let imp = self.imp();
+        imp.buttons
+            .set_visible(!self.shows_work() || self.selection_mode());
     }
 
     // Shows all the tracks of the album, though the search leaves some
@@ -597,19 +738,40 @@ impl AlbumTracks {
     }
 
     // Reads the tracks of the album that match the search, or all of them
-    // with Whole Albums
+    // with Whole Albums, or the recordings of the work
     fn load(&self, reveal: Option<&gio::File>) {
         let imp = self.imp();
         self.set_selection_mode(false);
+        self.update_buttons();
 
-        let Some(album) = imp.album.borrow().clone() else {
-            return;
-        };
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
+        let work = imp.work.borrow().clone();
+        let album = imp.album.borrow().clone();
+        if work.is_none() && album.is_none() {
+            return;
+        }
         tracks.remove_all();
         imp.files.replace(Vec::new());
+        imp.recordings.replace(Vec::new());
+        imp.recording_of.replace(HashMap::new());
+
+        // Each recording of a work is a section, under a header of its own
+        let (same, headers): (Option<SameSection>, _) = if work.is_some() {
+            let recording_of = imp.recording_of.clone();
+            let same: SameSection = Rc::new(move |previous: &Track, track: &Track| {
+                let recording_of = recording_of.borrow();
+                recording_of.get(&previous.uri()) == recording_of.get(&track.uri())
+            });
+            (Some(same), imp.recording_headers.get())
+        } else {
+            (None, imp.work_headers.get())
+        };
+        if let Some(sections) = imp.sections.get() {
+            sections.set_same_section(same);
+        }
+        imp.tracks_view.set_header_factory(headers);
 
         // The files are in the database of the library, and reading the
         // tags of the tracks takes a moment, so both are done in separate
@@ -617,75 +779,347 @@ impl AlbumTracks {
         // album stops it
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
-        let album_id = album.id();
         let whole_albums = imp.whole_albums.get();
         let filter = imp.filter.borrow().clone();
+        let hidden = imp.hidden.borrow().clone();
         let reveal = reveal.cloned();
-        let mut revealed = false;
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
-                // With a search, the tracks that match it are counted, to
-                // tell whether it leaves some out, also with Whole Albums,
-                // so that the bar over them stays
-                let (paths, counts) = gio::spawn_blocking(move || {
-                    let all = library::album_tracks(&album_id, &TrackFilter::default());
-                    if filter.is_empty() {
-                        return (all, None);
-                    }
-                    let matching = library::album_tracks(&album_id, &filter);
-                    let counts = (matching.len(), all.len());
-                    (if whole_albums { all } else { matching }, Some(counts))
-                })
-                .await
-                .unwrap_or_default();
-                if this.imp().generation.get() != generation {
-                    return;
-                }
-                let left_out = counts
-                    .filter(|(matching, total)| matching < total)
-                    .map(|(matching, total)| (matching as u32, total as u32));
-                this.imp().left_out.set(left_out);
-                this.update_filter_bar();
-                let files: Vec<gio::File> = paths.into_iter().map(gio::File::for_path).collect();
-                this.imp().files.replace(files.clone());
-
-                let receiver = load_tracks(files, false);
-                while let Ok(data) = receiver.recv().await {
+                let files = if let Some(work) = work {
+                    let recordings = gio::spawn_blocking(move || {
+                        library::work_recordings(&work.key, &filter, &hidden)
+                    })
+                    .await
+                    .unwrap_or_default();
                     if this.imp().generation.get() != generation {
                         return;
                     }
-
-                    // Along with the ones that are already read
-                    let mut batch: Vec<Track> = data.into_iter().map(Track::new).collect();
-                    while let Ok(data) = receiver.try_recv() {
-                        batch.extend(data.into_iter().map(Track::new));
-                    }
-                    if batch.is_empty() {
-                        continue;
-                    }
-                    let start = tracks.n_items();
-                    tracks.extend_from_slice(&batch);
-
-                    let found = reveal.as_ref().filter(|_| !revealed).and_then(|file| {
-                        let i = batch.iter().position(|track| track.file().equal(file))?;
-                        Some((start + i as u32, &batch[i]))
-                    });
-                    if let Some((pos, track)) = found {
-                        revealed = true;
-                        crate::queue_row::flash_track(&this.imp().tracks_view, pos, track);
-                    } else if !revealed {
-                        // The list keeps its first track at the top as
-                        // tracks are added, which hides the header of its
-                        // work above it; once a track is revealed, it stays
-                        // in view
-                        if let Some(adjustment) = this.imp().tracks_view.vadjustment() {
-                            adjustment.set_value(0.0);
+                    this.imp().left_out.set(None);
+                    this.update_filter_bar();
+                    this.show_recordings(recordings)
+                } else {
+                    let album_id = album.map(|album| album.id()).unwrap_or_default();
+                    // With a search, the tracks that match it are counted,
+                    // to tell whether it leaves some out, also with Whole
+                    // Albums, so that the bar over them stays
+                    let (paths, counts) = gio::spawn_blocking(move || {
+                        let all = library::album_tracks(&album_id, &TrackFilter::default());
+                        if filter.is_empty() {
+                            return (all, None);
                         }
+                        let matching = library::album_tracks(&album_id, &filter);
+                        let counts = (matching.len(), all.len());
+                        (if whole_albums { all } else { matching }, Some(counts))
+                    })
+                    .await
+                    .unwrap_or_default();
+                    if this.imp().generation.get() != generation {
+                        return;
                     }
-                }
+                    let left_out = counts
+                        .filter(|(matching, total)| matching < total)
+                        .map(|(matching, total)| (matching as u32, total as u32));
+                    this.imp().left_out.set(left_out);
+                    this.update_filter_bar();
+                    paths.into_iter().map(gio::File::for_path).collect()
+                };
+                this.imp().files.replace(files.clone());
+                this.read_tracks(generation, files, reveal).await;
             }
         ));
+    }
+
+    // Keeps the recordings of the work, and the recording of each of their
+    // tracks, and gives their files, in order
+    fn show_recordings(&self, recordings: Vec<library::WorkRecording>) -> Vec<gio::File> {
+        let imp = self.imp();
+        let mut files = Vec::new();
+        {
+            let mut recording_of = imp.recording_of.borrow_mut();
+            for (i, recording) in recordings.iter().enumerate() {
+                for path in &recording.paths {
+                    let file = gio::File::for_path(path);
+                    recording_of.insert(file.uri().to_string(), i);
+                    files.push(file);
+                }
+            }
+        }
+        let work = imp.work.borrow();
+        if let Some(work) = work.as_ref() {
+            let composers = work
+                .composers
+                .iter()
+                .map(|composer| composer.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let count = recordings.len() as u32;
+            let recordings_label = ni18n_f(
+                // Translators: The '{}' must be left unmodified, and it is
+                // expanded to the number of recordings of a work in the
+                // music folders
+                "{} recording",
+                "{} recordings",
+                count,
+                &[&count.to_string()],
+            );
+            let subtitle = [composers, recordings_label]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            imp.album_artist.set_label(&subtitle);
+        }
+        imp.recordings.replace(recordings);
+        files
+    }
+
+    // Reads the tags of the tracks, which are shown as they come, unless
+    // another album or work is shown meanwhile
+    async fn read_tracks(&self, generation: u32, files: Vec<gio::File>, reveal: Option<gio::File>) {
+        let imp = self.imp();
+        let Some(tracks) = imp.tracks.borrow().clone() else {
+            return;
+        };
+        let mut revealed = false;
+        let receiver = load_tracks(files, false);
+        while let Ok(data) = receiver.recv().await {
+            if imp.generation.get() != generation {
+                return;
+            }
+
+            // Along with the ones that are already read
+            let mut batch: Vec<Track> = data.into_iter().map(Track::new).collect();
+            while let Ok(data) = receiver.try_recv() {
+                batch.extend(data.into_iter().map(Track::new));
+            }
+            if batch.is_empty() {
+                continue;
+            }
+            let start = tracks.n_items();
+            tracks.extend_from_slice(&batch);
+
+            let found = reveal.as_ref().filter(|_| !revealed).and_then(|file| {
+                let i = batch.iter().position(|track| track.file().equal(file))?;
+                Some((start + i as u32, &batch[i]))
+            });
+            if let Some((pos, track)) = found {
+                revealed = true;
+                crate::queue_row::flash_track(&imp.tracks_view, pos, track);
+            } else if !revealed {
+                // The list keeps its first track at the top as tracks are
+                // added, which hides the header of its work above it; once
+                // a track is revealed, it stays in view
+                if let Some(adjustment) = imp.tracks_view.vadjustment() {
+                    adjustment.set_value(0.0);
+                }
+            }
+        }
+    }
+
+    // The headers of the recordings of a work: a line between them, their
+    // conductors and performers, the year and the title of their album, a
+    // button that plays them, and one with their menu, which a right click
+    // or a long press on the header opens too. In selection mode, a click
+    // selects their tracks, like the header of a work
+    fn recording_header_factory(&self) -> gtk::ListItemFactory {
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, item| {
+                let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+                let separator = gtk::Separator::builder()
+                    .orientation(gtk::Orientation::Horizontal)
+                    .css_classes(["work-separator"])
+                    .build();
+                let performers = gtk::Label::builder()
+                    .xalign(0.0)
+                    .wrap(true)
+                    .wrap_mode(gtk::pango::WrapMode::WordChar)
+                    .css_classes(["work-title"])
+                    .build();
+                let album = gtk::Label::builder()
+                    .xalign(0.0)
+                    .wrap(true)
+                    .wrap_mode(gtk::pango::WrapMode::WordChar)
+                    .css_classes(["work-composer", "caption", "dim-label"])
+                    .build();
+                let text = gtk::Box::builder()
+                    .orientation(gtk::Orientation::Vertical)
+                    .hexpand(true)
+                    .valign(gtk::Align::Center)
+                    .build();
+                text.append(&performers);
+                text.append(&album);
+
+                let play = gtk::Button::builder()
+                    .icon_name("media-playback-start-symbolic")
+                    .tooltip_text(i18n("Play"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat", "circular"])
+                    .build();
+                play.connect_clicked(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    header,
+                    move |_| {
+                        if this.adding_enabled() {
+                            this.emit_by_name::<()>("play", &[&header.start()]);
+                        }
+                    }
+                ));
+                let more = gtk::Button::builder()
+                    .icon_name("view-more-symbolic")
+                    .tooltip_text(i18n("More"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat", "circular"])
+                    .build();
+                more.connect_clicked(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    header,
+                    move |button| {
+                        let (x, y) = (f64::from(button.width()) / 2.0, f64::from(button.height()));
+                        this.emit_by_name::<()>(
+                            "recording-menu-requested",
+                            &[
+                                &button.upcast_ref::<gtk::Widget>(),
+                                &x,
+                                &y,
+                                &header.start(),
+                                &header.end(),
+                            ],
+                        );
+                    }
+                ));
+
+                let row = gtk::Box::builder().spacing(6).margin_end(6).build();
+                row.append(&text);
+                row.append(&play);
+                row.append(&more);
+
+                // A right click or a long press opens the menu, and a click
+                // selects the tracks in selection mode
+                let click = gtk::GestureClick::builder().button(0).build();
+                click.connect_pressed(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    header,
+                    #[weak]
+                    text,
+                    move |gesture, _, x, y| {
+                        if gesture.current_button() == gdk::BUTTON_SECONDARY {
+                            gesture.set_state(gtk::EventSequenceState::Claimed);
+                            this.emit_by_name::<()>(
+                                "recording-menu-requested",
+                                &[
+                                    &text.upcast_ref::<gtk::Widget>(),
+                                    &x,
+                                    &y,
+                                    &header.start(),
+                                    &header.end(),
+                                ],
+                            );
+                        } else if gesture.current_button() == gdk::BUTTON_PRIMARY {
+                            let ctrl = gesture
+                                .current_event_state()
+                                .contains(gdk::ModifierType::CONTROL_MASK);
+                            this.toggle_work(header.start(), header.end(), ctrl);
+                        }
+                    }
+                ));
+                text.add_controller(click);
+                let long_press = gtk::GestureLongPress::new();
+                long_press.set_touch_only(true);
+                long_press.connect_pressed(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    header,
+                    #[weak]
+                    text,
+                    move |gesture, x, y| {
+                        gesture.set_state(gtk::EventSequenceState::Claimed);
+                        this.emit_by_name::<()>(
+                            "recording-menu-requested",
+                            &[
+                                &text.upcast_ref::<gtk::Widget>(),
+                                &x,
+                                &y,
+                                &header.start(),
+                                &header.end(),
+                            ],
+                        );
+                    }
+                ));
+                text.add_controller(long_press);
+
+                let content = gtk::Box::builder()
+                    .orientation(gtk::Orientation::Vertical)
+                    .build();
+                content.append(&separator);
+                content.append(&row);
+                header.set_child(Some(&content));
+            }
+        ));
+        factory.connect_bind(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, item| {
+                let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+                let Some(content) = header.child() else {
+                    return;
+                };
+                let (Some(separator), Some(row)) = (content.first_child(), content.last_child())
+                else {
+                    return;
+                };
+                let Some(text) = row.first_child() else {
+                    return;
+                };
+                let (Some(performers), Some(album)) = (
+                    text.first_child().and_downcast::<gtk::Label>(),
+                    text.last_child().and_downcast::<gtk::Label>(),
+                ) else {
+                    return;
+                };
+                // Nothing to separate at the top of the list
+                separator.set_visible(header.start() > 0);
+
+                let imp = this.imp();
+                let track = header.item().and_downcast::<Track>();
+                let recordings = imp.recordings.borrow();
+                let recording = track
+                    .and_then(|track| imp.recording_of.borrow().get(&track.uri()).copied())
+                    .and_then(|i| recordings.get(i));
+                let Some(recording) = recording else {
+                    performers.set_label("");
+                    album.set_label("");
+                    return;
+                };
+                let title = recording
+                    .album
+                    .clone()
+                    .unwrap_or_else(|| i18n("Unknown album"));
+                performers.set_label(&recording.performers);
+                performers.set_visible(!recording.performers.is_empty());
+                album.set_label(&match &recording.year {
+                    Some(year) => i18n_k(
+                        // Translators: `{year}` and `{album}` must be left
+                        // unmodified; they are expanded to the year of an
+                        // album with a recording of a work, and its title
+                        "{year} · {album}",
+                        &[("year", year), ("album", &title)],
+                    ),
+                    None => title,
+                });
+            }
+        ));
+        factory.upcast()
     }
 }

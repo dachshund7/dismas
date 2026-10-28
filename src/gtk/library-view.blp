@@ -57,98 +57,123 @@ template $DismasLibraryView: Widget {
         hexpand: true;
 
         child: Box {
-          SearchEntry search_entry {
-            hexpand: true;
-            placeholder-text: _("Search albums");
-          }
+          orientation: vertical;
 
-          // The composers of the albums, to show only the albums of one;
-          // it's highlighted while it does, and hidden while no track has
-          // a composer
-          MenuButton composer_button {
-            visible: false;
-            margin-start: 6;
-            icon-name: "avatar-default-symbolic";
-            tooltip-text: _("Composers");
+          Box {
+            SearchEntry search_entry {
+              hexpand: true;
+              placeholder-text: _("Search albums");
+            }
 
-            popover: Popover composer_popover {
-              child: Box {
-                orientation: vertical;
-                spacing: 6;
-
-                SearchEntry composer_search {
-                  placeholder-text: _("Search composers");
-                }
-
-                ScrolledWindow {
-                  hscrollbar-policy: never;
-                  propagate-natural-height: true;
-                  min-content-width: 260;
-                  max-content-height: 400;
-
-                  child: ListView composer_list {
-                    single-click-activate: true;
-
-                    styles [
-                      "navigation-sidebar",
-                    ]
-                  };
-                }
-              };
-            };
-          }
-
-          // The conductors, groups and players of the albums, divided into
-          // those, to show only the albums of one; like the composers
-          MenuButton performer_button {
-            visible: false;
-            margin-start: 6;
-            icon-name: "system-users-symbolic";
-            tooltip-text: _("Performers");
-
-            popover: Popover performer_popover {
-              child: Box {
-                orientation: vertical;
-                spacing: 6;
-
-                SearchEntry performer_search {
-                  placeholder-text: _("Search performers");
-                }
-
-                ScrolledWindow {
-                  hscrollbar-policy: never;
-                  propagate-natural-height: true;
-                  min-content-width: 300;
-                  max-content-height: 400;
-
-                  child: ListView performer_list {
-                    single-click-activate: true;
-
-                    styles [
-                      "navigation-sidebar",
-                    ]
-                  };
-                }
-              };
-            };
-          }
-
-          // While the search matches only some of the tracks of albums,
-          // takes the whole albums instead; it slides in, as the entry
-          // gives it room
-          Revealer whole_albums_revealer {
-            transition-type: slide_left;
-
-            child: ToggleButton whole_albums_button {
+            // The composers of the albums, to show only the albums of one;
+            // it's highlighted while it does, and hidden while no track has
+            // a composer
+            MenuButton composer_button {
+              visible: false;
               margin-start: 6;
-              active: bind template.whole-albums bidirectional;
-              label: _("Whole Albums");
-              tooltip-text: _("Add, Play and Show the Whole Albums");
+              icon-name: "avatar-default-symbolic";
+              tooltip-text: _("Composers");
 
-              styles [
-                "whole-albums",
-              ]
-            };
+              popover: Popover composer_popover {
+                child: Box {
+                  orientation: vertical;
+                  spacing: 6;
+
+                  SearchEntry composer_search {
+                    placeholder-text: _("Search composers");
+                  }
+
+                  ScrolledWindow {
+                    hscrollbar-policy: never;
+                    propagate-natural-height: true;
+                    min-content-width: 260;
+                    max-content-height: 400;
+
+                    child: ListView composer_list {
+                      single-click-activate: true;
+
+                      styles [
+                        "navigation-sidebar",
+                      ]
+                    };
+                  }
+                };
+              };
+            }
+
+            // The conductors, groups and players of the albums, divided into
+            // those, to show only the albums of one; like the composers
+            MenuButton performer_button {
+              visible: false;
+              margin-start: 6;
+              icon-name: "system-users-symbolic";
+              tooltip-text: _("Performers");
+
+              popover: Popover performer_popover {
+                child: Box {
+                  orientation: vertical;
+                  spacing: 6;
+
+                  SearchEntry performer_search {
+                    placeholder-text: _("Search performers");
+                  }
+
+                  ScrolledWindow {
+                    hscrollbar-policy: never;
+                    propagate-natural-height: true;
+                    min-content-width: 300;
+                    max-content-height: 400;
+
+                    child: ListView performer_list {
+                      single-click-activate: true;
+
+                      styles [
+                        "navigation-sidebar",
+                      ]
+                    };
+                  }
+                };
+              };
+            }
+
+            // While the search matches only some of the tracks of albums,
+            // takes the whole albums instead; it slides in, as the entry
+            // gives it room
+            Revealer whole_albums_revealer {
+              transition-type: slide_left;
+
+              child: ToggleButton whole_albums_button {
+                margin-start: 6;
+                active: bind template.whole-albums bidirectional;
+                label: _("Whole Albums");
+                tooltip-text: _("Add, Play and Show the Whole Albums");
+
+                styles [
+                  "whole-albums",
+                ]
+              };
+            }
+          }
+
+          // The albums, or the works of their tracks, in a row of its own,
+          // as the search's row has no room left in a narrow window; it's
+          // hidden while no track is part of a work
+          Adw.ToggleGroup view_toggle {
+            visible: false;
+            halign: center;
+            margin-top: 6;
+            homogeneous: true;
+            active-name: bind template.view bidirectional;
+
+            Adw.Toggle {
+              name: "albums";
+              label: _("Albums");
+            }
+
+            Adw.Toggle {
+              name: "works";
+              label: _("Works");
+            }
           }
         };
       };
@@ -211,6 +236,32 @@ template $DismasLibraryView: Widget {
 
               styles [
                 "album-grid",
+              ]
+            };
+          };
+        };
+      }
+
+      StackPage {
+        name: "works";
+
+        child: ScrolledWindow {
+          hscrollbar-policy: never;
+          vexpand: true;
+
+          styles [
+            "album-scroller",
+          ]
+
+          child: Adw.ClampScrollable {
+            maximum-size: 720;
+
+            child: ListView works_list {
+              single-click-activate: true;
+
+              styles [
+                "navigation-sidebar",
+                "work-list",
               ]
             };
           };

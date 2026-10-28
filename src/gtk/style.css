@@ -521,6 +521,11 @@ listview.navigation-sidebar > header label.work-composer {
   margin: 0 12px 2px 12px;
 }
 
+/* The composers in the list of works */
+listview.navigation-sidebar > header label.works-composer {
+  margin: 18px 12px 6px 12px;
+}
+
 /* The kinds of performers in the list of them */
 listview.navigation-sidebar > header label.picker-section {
   margin: 12px 12px 3px 12px;

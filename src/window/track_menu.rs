@@ -96,8 +96,9 @@ impl Window {
 
         // The album is looked up while the menu opens, and the item stays
         // off for the tracks that are not in the album grid; the tracks of
-        // an album show all of them, scrolled to the track
-        if in_queue {
+        // an album show all of them, scrolled to the track, and those of a
+        // work's recordings show their album
+        if in_queue || album_tracks.shows_work() {
             let album_id: Rc<RefCell<Option<String>>> = Rc::default();
             let go_to_album = gio::SimpleAction::new("go-to-album", None);
             go_to_album.set_enabled(false);

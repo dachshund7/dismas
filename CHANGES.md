@@ -43,6 +43,11 @@ All notable changes to this project will be documented in this file.
   and the number of their albums; picking one shows only their albums,
   taking only the tracks they're on, and it combines with a composer and
   with the search
+- Works, under the album search, lists the works of the albums under the
+  names of their composers, with the number of their recordings, and
+  follows the search and the composer and performer picked. A work shows
+  its recordings, each with its performers, the year and the album, to
+  play one, add it, or go to its album
 - Searching the queue and the albums also finds tracks by the names that
   the Work Hierarchy plugin gives their works, the works those are part
   of and the collections they're in, such as "Well-Tempered" for the

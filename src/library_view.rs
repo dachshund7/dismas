@@ -116,6 +116,8 @@ mod imp {
         #[template_child]
         pub sort_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub select_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
         pub composer_button: TemplateChild<gtk::MenuButton>,
@@ -137,6 +139,10 @@ mod imp {
         pub page_title: TemplateChild<adw::WindowTitle>,
         #[template_child]
         pub whole_albums_revealer: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub view_toggle: TemplateChild<adw::ToggleGroup>,
+        #[template_child]
+        pub works_list: TemplateChild<gtk::ListView>,
         #[template_child]
         pub whole_albums_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
@@ -161,6 +167,16 @@ mod imp {
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
         pub selection_mode: Cell<bool>,
+        // What the page shows, "albums" or "works", as in the
+        // "library-view" setting, which it's bound to; the works are only
+        // shown while a track is part of one (`has_works`)
+        #[property(get, set = Self::set_view, explicit_notify)]
+        pub view: RefCell<String>,
+        pub has_works: Cell<bool>,
+        // The works the search finds, and the filter they were read for;
+        // `None` until they're read, and again once the tracks changed
+        pub works: RefCell<Option<gio::ListStore>>,
+        pub works_filter: RefCell<Option<TrackFilter>>,
         // The ids of the selected albums; a new search clears them, so
         // they're all among the albums it shows
         pub selected: RefCell<HashSet<String>>,
@@ -259,6 +275,15 @@ mod imp {
             self.obj().notify_selection_mode();
         }
 
+        fn set_view(&self, view: String) {
+            if *self.view.borrow() == view {
+                return;
+            }
+            self.view.replace(view);
+            self.obj().update_view();
+            self.obj().notify_view();
+        }
+
         // The covers no longer say how many of their tracks the search
         // matches while the whole albums are taken
         fn set_whole_albums(&self, whole_albums: bool) {
@@ -288,6 +313,7 @@ mod imp {
             obj.setup_actions();
             obj.setup_watch();
             obj.setup_pickers();
+            obj.setup_works();
             obj.connect_signals();
             // It names the selected playlist
             crate::utils::wrap_tooltip(&*self.add_albums_button);
@@ -298,6 +324,12 @@ mod imp {
                 vec![
                     Signal::builder("album-activated")
                         .param_types([Album::static_type()])
+                        .build(),
+                    // A work of the list was activated; the object holds
+                    // its `library::WorkInfo`, and the filter its
+                    // recordings were found with
+                    Signal::builder("work-activated")
+                        .param_types([glib::BoxedAnyObject::static_type()])
                         .build(),
                     // Add or play the tracks of the selected albums
                     Signal::builder("add-albums").build(),
@@ -354,6 +386,20 @@ impl LibraryView {
             "album-activated",
             false,
             glib::closure_local!(move |view: &Self, album: &Album| f(view, album)),
+        )
+    }
+
+    pub fn connect_work_activated<F: Fn(&Self, &library::WorkInfo, &TrackFilter) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "work-activated",
+            false,
+            glib::closure_local!(move |view: &Self, item: &glib::BoxedAnyObject| {
+                let item = item.borrow::<(library::WorkInfo, TrackFilter)>();
+                f(view, &item.0, &item.1);
+            }),
         )
     }
 
@@ -966,6 +1012,166 @@ impl LibraryView {
         self.update_selection();
     }
 
+    // The list of the works the search finds, under the names of their
+    // composers, which takes the place of the grid with the Works toggle
+    // under the search; activating one shows its recordings
+    fn setup_works(&self) {
+        let imp = self.imp();
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        // Each item has the index of its composers' section, as the works
+        // are already in the order of their composers
+        let sections = gtk::CustomSorter::new(|a, b| {
+            let section = |item: &glib::Object| {
+                let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
+                item.borrow::<WorkItem>().section
+            };
+            section(a).cmp(&section(b)).into()
+        });
+        let model = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
+        model.set_section_sorter(Some(&sections));
+        imp.works_list
+            .set_model(Some(&gtk::NoSelection::new(Some(model))));
+        imp.works_list.set_factory(Some(&work_factory()));
+        imp.works_list
+            .set_header_factory(Some(&work_section_factory()));
+        imp.works.replace(Some(store));
+
+        imp.works_list.connect_activate(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |list, pos| {
+                let Some(item) = list
+                    .model()
+                    .and_then(|model| model.item(pos))
+                    .and_downcast::<glib::BoxedAnyObject>()
+                else {
+                    return;
+                };
+                let work = item.borrow::<WorkItem>().info.clone();
+                let filter = this.search_filter_for_works();
+                let item = glib::BoxedAnyObject::new((work, filter));
+                this.emit_by_name::<()>("work-activated", &[&item]);
+            }
+        ));
+
+        let settings = self.app_settings();
+        settings.bind("library-view", self, "view").build();
+    }
+
+    // The music folders that aren't there or are left out, whose tracks
+    // are hidden
+    pub fn hidden_folders(&self) -> Vec<PathBuf> {
+        self.imp().hidden_folders.borrow().clone()
+    }
+
+    // Whether the page shows the works, rather than the albums
+    pub fn shows_works(&self) -> bool {
+        let imp = self.imp();
+        imp.has_works.get() && *imp.view.borrow() == "works"
+    }
+
+    // The Works toggle is only there while a track is part of a work
+    fn set_works_available(&self, available: bool) {
+        let imp = self.imp();
+        imp.view_toggle.set_visible(available);
+        imp.has_works.set(available);
+        self.update_view();
+    }
+
+    // The works take the place of the grid, without its sorting and
+    // selecting, and its title
+    fn update_view(&self) {
+        let imp = self.imp();
+        let works = self.shows_works();
+        if works {
+            self.set_selection_mode(false);
+        }
+        imp.page_title
+            .set_title(&if works { i18n("Works") } else { i18n("Albums") });
+        imp.sort_button.set_visible(!works);
+        imp.select_button.set_visible(!works);
+        self.update_whole_albums_button();
+        self.update_stack();
+        self.update_works();
+    }
+
+    // The filter the works shown were read with, which their recordings
+    // are found with
+    fn search_filter_for_works(&self) -> TrackFilter {
+        self.imp().works_filter.borrow().clone().unwrap_or_default()
+    }
+
+    // Reads the works the search finds again, if they're shown and it
+    // changed since they were read, or the tracks did
+    fn update_works(&self) {
+        let imp = self.imp();
+        if !self.shows_works() {
+            return;
+        }
+        let filter = self.wanted_filter();
+        if imp.works_filter.borrow().as_ref() == Some(&filter) {
+            return;
+        }
+
+        let hidden = imp.hidden_folders.borrow().clone();
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = this)]
+            self,
+            async move {
+                let Ok((filter, works)) = gio::spawn_blocking(move || {
+                    let works = library::works(&filter, &hidden);
+                    (filter, works)
+                })
+                .await
+                else {
+                    return;
+                };
+                // Results for an older search arriving late
+                if this.wanted_filter() != filter || !this.shows_works() {
+                    return;
+                }
+                this.show_works(filter, works);
+            }
+        ));
+    }
+
+    // A work's recordings are found with the filter, as albums are, but
+    // they're shown and played whole: a recording is one piece of music,
+    // and a soloist found in one movement plays in the others too
+    fn show_works(&self, filter: TrackFilter, works: Vec<library::WorkInfo>) {
+        let imp = self.imp();
+        let Some(store) = imp.works.borrow().clone() else {
+            return;
+        };
+        let new_search = imp
+            .works_filter
+            .replace(Some(filter.clone()))
+            .is_none_or(|before| before != filter);
+
+        let mut section = 0;
+        let mut previous: Option<Vec<String>> = None;
+        let items: Vec<glib::BoxedAnyObject> = works
+            .into_iter()
+            .map(|info| {
+                let composers: Vec<String> = info.composers.iter().map(|c| c.key.clone()).collect();
+                if previous
+                    .as_ref()
+                    .is_some_and(|previous| *previous != composers)
+                {
+                    section += 1;
+                }
+                previous = Some(composers);
+                glib::BoxedAnyObject::new(WorkItem { info, section })
+            })
+            .collect();
+        store.splice(0, store.n_items(), &items);
+        // A new search shows what it found from the top
+        if new_search && store.n_items() > 0 {
+            imp.works_list
+                .scroll_to(0, gtk::ListScrollFlags::NONE, None);
+        }
+    }
+
     // The lists of composers and of performers next to the search:
     // choosing one shows only their albums, with the tracks that are
     // theirs, like a search, and names them under the title of the page;
@@ -1268,6 +1474,7 @@ impl LibraryView {
     // search, in any of its tags, like searching the queue, and that's by
     // the composer picked, with the performer picked, if any
     fn update_search(&self) {
+        self.update_works();
         let filter = self.wanted_filter();
         if filter.is_empty() {
             self.set_search_matches(TrackFilter::default(), None);
@@ -1354,7 +1561,9 @@ impl LibraryView {
             .borrow()
             .as_ref()
             .is_some_and(|matches| matches.values().any(|(matching, total)| matching < total));
-        imp.whole_albums_revealer.set_reveal_child(partial);
+        // A work's recordings are taken whole, see `show_works()`
+        imp.whole_albums_revealer
+            .set_reveal_child(partial && !self.shows_works());
     }
 
     // What the tracks of an album the search found match: its words, and
@@ -1494,6 +1703,10 @@ impl LibraryView {
 
     // Selects all the albums shown by the search
     pub fn select_all(&self) {
+        // The albums can't be seen
+        if self.shows_works() {
+            return;
+        }
         self.set_selection_mode(true);
         let Some(model) = self.imp().grid_view.model() else {
             return;
@@ -1593,14 +1806,15 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let (hidden, albums, has_composers, has_performers) =
+                let (hidden, albums, has_composers, has_performers, has_works) =
                     gio::spawn_blocking(move || {
                         let roots = library::roots(&folders);
                         let hidden = [roots.unavailable, roots.excluded].concat();
                         let albums = library::albums(&hidden);
                         let has_composers = library::has_composers(&hidden);
                         let has_performers = library::has_performers(&hidden);
-                        (hidden, albums, has_composers, has_performers)
+                        let has_works = library::has_works(&hidden);
+                        (hidden, albums, has_composers, has_performers, has_works)
                     })
                     .await
                     .unwrap_or_default();
@@ -1608,6 +1822,10 @@ impl LibraryView {
                     this.imp().hidden_folders.replace(hidden);
                     this.show_albums(albums);
                     this.set_pickers_available(has_composers, has_performers);
+                    // The works are read again, as the tracks or the hidden
+                    // folders can have changed
+                    this.imp().works_filter.replace(None);
+                    this.set_works_available(has_works);
                 }
             }
         ));
@@ -1665,7 +1883,9 @@ impl LibraryView {
     fn update_stack(&self) {
         let imp = self.imp();
         let n_albums = imp.model.borrow().as_ref().map_or(0, ListModelExt::n_items);
-        let page = if n_albums > 0 {
+        let page = if n_albums > 0 && self.shows_works() {
+            "works"
+        } else if n_albums > 0 {
             "albums"
         } else if imp.scanning.get() {
             "scanning"
@@ -1677,7 +1897,7 @@ impl LibraryView {
         // When the grid is already showing, a thin bar at the bottom is
         // enough
         imp.update_progress
-            .set_visible(page == "albums" && imp.scanning.get());
+            .set_visible(n_albums > 0 && imp.scanning.get());
     }
 
     // Files that come, go or change in the music folders are read once
@@ -1996,6 +2216,124 @@ fn performer_section_factory() -> gtk::SignalListItemFactory {
             Some(PerformerKind::Ensemble) => i18n("Ensembles"),
             Some(PerformerKind::Soloist) => i18n("Soloists"),
             None => String::new(),
+        });
+    });
+    factory
+}
+
+// A work in the list of works, with the index of the section of its
+// composers
+struct WorkItem {
+    info: library::WorkInfo,
+    section: u32,
+}
+
+// The rows of the list of works: the name of the work, and under it, dimmed,
+// the work or the collection it's part of, if any, and the number of its
+// recordings
+fn work_factory() -> gtk::SignalListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let name = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .build();
+        let collection = gtk::Label::builder()
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .css_classes(["caption", "dim-label"])
+            .build();
+        let text = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .hexpand(true)
+            .valign(gtk::Align::Center)
+            .build();
+        text.append(&name);
+        text.append(&collection);
+        let count = gtk::Label::builder()
+            .css_classes(["dim-label", "numeric"])
+            .build();
+        // The scrollbar is drawn over the right edge of the list
+        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
+        row.append(&text);
+        row.append(&count);
+        item.set_child(Some(&row));
+    });
+    factory.connect_bind(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let Some(row) = item.child() else {
+            return;
+        };
+        let (Some(text), Some(count)) = (
+            row.first_child(),
+            row.last_child().and_downcast::<gtk::Label>(),
+        ) else {
+            return;
+        };
+        let (Some(name), Some(collection)) = (
+            text.first_child().and_downcast::<gtk::Label>(),
+            text.last_child().and_downcast::<gtk::Label>(),
+        ) else {
+            return;
+        };
+        let Some(work) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
+            return;
+        };
+        let work = &work.borrow::<WorkItem>().info;
+        name.set_label(&work.name);
+        collection.set_label(work.collection.as_deref().unwrap_or_default());
+        collection.set_visible(work.collection.is_some());
+        count.set_label(&work.recordings.to_string());
+        let recordings = ni18n_f(
+            // Translators: The '{}' must be left unmodified, and it is
+            // expanded to the number of recordings of a work in the
+            // music folders
+            "{} recording",
+            "{} recordings",
+            work.recordings,
+            &[&work.recordings.to_string()],
+        );
+        row.set_tooltip_text(Some(&format!(
+            "{}\n{recordings}",
+            work.title.as_deref().unwrap_or(&work.name)
+        )));
+    });
+    factory
+}
+
+// The headers of the list of works: the names of the composers
+fn work_section_factory() -> gtk::SignalListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        let label = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .css_classes(["heading", "works-composer"])
+            .build();
+        header.set_child(Some(&label));
+    });
+    factory.connect_bind(|_, item| {
+        let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        let Some(label) = header.child().and_downcast::<gtk::Label>() else {
+            return;
+        };
+        let Some(work) = header.item().and_downcast::<glib::BoxedAnyObject>() else {
+            return;
+        };
+        let work = &work.borrow::<WorkItem>().info;
+        let names = work
+            .composers
+            .iter()
+            .map(|composer| composer.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        label.set_label(&if names.is_empty() {
+            i18n("Unknown composer")
+        } else {
+            names
         });
     });
     factory

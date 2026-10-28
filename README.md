@@ -61,7 +61,10 @@ What Dismas adds
   their albums, with only the tracks that are theirs. The Performers button
   next to it does the same for the conductors, the ensembles and the
   soloists, with what they play or sing, and picking a composer and a
-  performer shows the albums where they meet.
+  performer shows the albums where they meet. Works, under the search,
+  lists the works instead of the albums, by composer, with the number of
+  their recordings; open one to compare its recordings, with their
+  performers and years, and play one.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
   the Playlists page. Add to Playlist, in the menu of a track, adds it to

@@ -23,6 +23,24 @@ impl Window {
         self.set_playlist_visible(true);
     }
 
+    // Shows the recordings of a work in the sidebar, those the filter
+    // matches, like the tracks of an album
+    fn show_work_recordings(
+        &self,
+        work: &library::WorkInfo,
+        filter: &TrackFilter,
+        reveal: Option<&gio::File>,
+    ) {
+        let imp = self.imp();
+        if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
+            imp.sidebar_was_visible.set(self.playlist_visible());
+        }
+        let hidden = imp.library_view.hidden_folders();
+        imp.album_tracks.show_work(work, filter, hidden, reveal);
+        imp.sidebar_stack.set_visible_child_name("album");
+        self.set_playlist_visible(true);
+    }
+
     // Shows all the tracks of an album in the sidebar, scrolled to one of
     // them, which flashes; the page stays, and the grid only scrolls to the
     // album when it's showing
@@ -114,6 +132,74 @@ impl Window {
         ));
     }
 
+    // Plays tracks of the sidebar in place of the queue, from the one at
+    // `start`, as an album's Play button does
+    fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
+        self.select_queue_to_play();
+        self.clear_queue();
+        self.show_playlist_view();
+        self.queue_tracks(files, QueueMode::Play(start));
+    }
+
+    // The menu of a recording of a work in the sidebar, at a point of its
+    // header: its tracks are played, added, or shown on their album
+    fn show_recording_menu(&self, widget: &gtk::Widget, x: f64, y: f64, start: u32, end: u32) {
+        let album_tracks = self.imp().album_tracks.get();
+        let files = album_tracks.section_files(start, end);
+        let Some(first) = files.first().cloned() else {
+            return;
+        };
+        let album_id = album_tracks.recording_album(start);
+
+        let enabled = self.imp().loads.get() == 0;
+        let actions = gio::SimpleActionGroup::new();
+        let play = gio::SimpleAction::new("play", None);
+        play.set_enabled(enabled);
+        play.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            files,
+            move |_, _| win.play_shown_tracks(files.clone(), 0)
+        ));
+        actions.add_action(&play);
+        self.add_adding_actions(&actions, enabled, move |_| {
+            Some(Tracks::ShownAlbum(files.clone()))
+        });
+        let go_to_album = gio::SimpleAction::new("go-to-album", None);
+        go_to_album.set_enabled(album_id.is_some());
+        go_to_album.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, _| {
+                if let Some(album_id) = &album_id {
+                    win.go_to_album(album_id, &first);
+                }
+            }
+        ));
+        actions.add_action(&go_to_album);
+
+        let menu = gio::Menu::new();
+        let section = gio::Menu::new();
+        section.append(Some(&i18n("Play")), Some("recording.play"));
+        section.append(Some(&i18n("Play Next")), Some("recording.play-next"));
+        let item = gio::MenuItem::new(Some(&self.add_to_selected_label()), None);
+        item.set_action_and_target_value(
+            Some("recording.add-to"),
+            Some(&self.selected_playlist().to_variant()),
+        );
+        section.append_item(&item);
+        section.append_submenu(
+            Some(&i18n("Add to Playlist")),
+            &self.add_to_menu("recording"),
+        );
+        menu.append_section(None, &section);
+        let section = gio::Menu::new();
+        section.append(Some(&i18n("Go to Album")), Some("recording.go-to-album"));
+        menu.append_section(None, &section);
+        popup_menu(&menu, "recording", &actions, widget, x, y);
+    }
+
     // The menu of an album, at a point of its cell. On an album selected in
     // selection mode, its items take all the selected ones, and leave
     // selection mode like the buttons of its bar; on another, only that
@@ -161,20 +247,7 @@ impl Window {
         );
         section.append_item(&item);
         section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu("album"));
-
-        let popover = gtk::PopoverMenu::from_model(Some(&section));
-        popover.insert_action_group("album", Some(&actions));
-        popover.set_parent(cell);
-        popover.set_has_arrow(false);
-        popover.set_halign(gtk::Align::Start);
-        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-        // The menu item is activated after the popover closes, so it can
-        // only go once the action ran
-        popover.connect_closed(|popover| {
-            let popover = popover.clone();
-            glib::idle_add_local_once(move || popover.unparent());
-        });
-        popover.popup();
+        popup_menu(&section, "album", &actions, cell, x, y);
     }
 
     // Adds the tracks of albums dragged from the grid to the queue, before
@@ -295,15 +368,24 @@ impl Window {
                 win.queue_tracks(album_tracks.files(), QueueMode::Add);
             }
         ));
+        // A track of a work's recordings plays that recording
         album_tracks.connect_play(clone!(
             #[weak(rename_to = win)]
             self,
-            move |album_tracks, start| {
-                win.select_queue_to_play();
-                win.clear_queue();
-                win.show_playlist_view();
-                win.queue_tracks(album_tracks.files(), QueueMode::Play(start));
+            move |album_tracks, pos| {
+                let (files, start) = album_tracks.files_to_play(pos);
+                win.play_shown_tracks(files, start);
             }
+        ));
+        album_tracks.connect_recording_menu_requested(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, widget, x, y, start, end| win.show_recording_menu(widget, x, y, start, end)
+        ));
+        library_view.connect_work_activated(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, work, filter| win.show_work_recordings(work, filter, None)
         ));
 
         library_view.connect_add_albums(clone!(
@@ -380,4 +462,28 @@ pub(super) async fn album_files(albums: Vec<(String, TrackFilter)>) -> Option<Ve
     .await
     .ok()?;
     Some(paths.into_iter().map(gio::File::for_path).collect())
+}
+
+// Opens a menu at a point of a widget, with its actions in a group
+fn popup_menu(
+    menu: &gio::Menu,
+    group: &str,
+    actions: &gio::SimpleActionGroup,
+    parent: &gtk::Widget,
+    x: f64,
+    y: f64,
+) {
+    let popover = gtk::PopoverMenu::from_model(Some(menu));
+    popover.insert_action_group(group, Some(actions));
+    popover.set_parent(parent);
+    popover.set_has_arrow(false);
+    popover.set_halign(gtk::Align::Start);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    // The menu item is activated after the popover closes, so it can only
+    // go once the action ran
+    popover.connect_closed(|popover| {
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || popover.unparent());
+    });
+    popover.popup();
 }
