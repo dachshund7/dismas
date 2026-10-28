@@ -620,8 +620,11 @@ impl Window {
         let filter = gtk::FileFilter::new();
         filter.set_name(Some(&i18n("Audio files")));
         filter.add_mime_type("audio/*");
+        // CUE sheets split audio files into tracks, and WebM files are
+        // often audio alone
         filter.add_mime_type("application/x-cue");
         filter.add_suffix("cue");
+        filter.add_mime_type("video/webm");
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
         let dialog = gtk::FileDialog::builder()
