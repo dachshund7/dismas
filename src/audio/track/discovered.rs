@@ -60,6 +60,8 @@ struct Discovered {
     bit_depth: Option<u8>,
     channels: Option<u8>,
     format: Option<String>,
+    // Whether the file has a video stream too, as a WebM file can
+    video: bool,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -87,6 +89,7 @@ impl Discovered {
             None,
         );
         let mut tags = FileTags::from_comments(comments, properties, self.format.map(Cow::Owned));
+        tags.video = self.video;
         for picture in self.pictures {
             let mut builder = Picture::unchecked(glib::base64_decode(&picture.data))
                 .pic_type(PictureType::from_u8(picture.kind));
@@ -196,9 +199,10 @@ fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
     }
 
     let duration_ms = info.duration().map_or(0, gst::ClockTime::mseconds);
+    let video = !info.video_streams().is_empty();
     // The size of a file with a video counts the video too
     let size_bitrate = || {
-        if !info.video_streams().is_empty() {
+        if video {
             return None;
         }
         let size = std::fs::metadata(path).ok()?.len();
@@ -220,6 +224,7 @@ fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
         bit_depth: u8::try_from(audio.depth()).ok().filter(|d| *d > 0),
         channels: u8::try_from(audio.channels()).ok().filter(|c| *c > 0),
         format: format_name(&info, &caps),
+        video,
     })
 }
 
@@ -437,9 +442,10 @@ mod tests {
             video.display()
         ));
         if wrote {
-            assert!(discover_file(&audio, false).is_some());
+            assert!(!discover_file(&audio, false).unwrap().video);
             let video = discover_file(&video, false).unwrap();
             assert!(video.duration_ms > 0);
+            assert!(video.video);
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -459,6 +465,7 @@ mod tests {
             bit_depth: Some(16),
             channels: Some(2),
             format: Some("Ogg FLAC".to_string()),
+            video: true,
         };
         let json = serde_json::to_vec(&Some(&discovered)).unwrap();
         let read: Option<Discovered> = serde_json::from_slice(&json).unwrap();
@@ -472,6 +479,7 @@ mod tests {
         assert_eq!(&tags.tag.pictures()[0].data()[..4], &PNG[..4]);
         assert_eq!(tags.properties.audio_bitrate(), Some(320));
         assert_eq!(tags.format.as_deref(), Some("Ogg FLAC"));
+        assert!(tags.video);
     }
 
     #[test]

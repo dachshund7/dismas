@@ -182,6 +182,8 @@ pub struct FileTags {
     pub extra: ExtraComments,
     pub properties: FileProperties,
     pub format: Option<Cow<'static, str>>,
+    // Whether the file has a video stream too, which only GStreamer tells
+    pub video: bool,
 }
 
 impl FileTags {
@@ -200,6 +202,7 @@ impl FileTags {
             extra,
             properties: file.properties().clone(),
             format: format_name(file.file_type()).map(Cow::Borrowed),
+            video: false,
         }
     }
 }
@@ -220,6 +223,7 @@ impl FileTags {
             extra,
             properties,
             format,
+            video: false,
         }
     }
 }

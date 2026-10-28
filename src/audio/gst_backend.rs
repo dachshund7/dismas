@@ -55,6 +55,8 @@ pub struct TrackSource {
     pub end: Option<gst::ClockTime>,
     // For a part of a file, as the stream has the gains of all of it
     pub gains: Option<Gains>,
+    // Whether the file has a video stream, which GstPlay turns off
+    pub video: bool,
 }
 
 impl TrackSource {
@@ -67,6 +69,7 @@ impl TrackSource {
             start: clock_time(start),
             end: end.map(clock_time),
             gains: track.gains(),
+            video: track.has_video(),
         }
     }
 }
@@ -597,6 +600,14 @@ impl GstBackend {
                 if !next.start.is_zero() {
                     return None;
                 }
+                // GstPlay leaves the video out by selecting the streams of
+                // each file, and decodebin3 (GStreamer 1.28) never applies
+                // the selection of a file handed over: the pipeline would
+                // stop for good before its audio. It's loaded at the end of
+                // this one instead
+                if next.video {
+                    return None;
+                }
 
                 // A missing track would stop the pipeline before this one ends
                 if !gio::File::for_uri(&next.uri).query_exists(gio::Cancellable::NONE) {
@@ -980,6 +991,7 @@ mod tests {
             start: gst::ClockTime::from_mseconds(start_ms),
             end: end_ms.map(gst::ClockTime::from_mseconds),
             gains: None,
+            video: false,
         }
     }
 

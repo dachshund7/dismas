@@ -154,6 +154,8 @@ pub struct FileDetails {
     pub bit_depth: Option<u8>,
     pub channels: Option<u8>,
     pub replay_gain: ReplayGain,
+    // Whether the file has a video stream, which is never shown
+    pub video: bool,
 }
 
 // The gains as written in the tags, e.g. "-6.20 dB"
@@ -852,6 +854,10 @@ impl Track {
 
     pub fn gains(&self) -> Option<Gains> {
         self.imp().data.borrow().gains()
+    }
+
+    pub fn has_video(&self) -> bool {
+        self.imp().data.borrow().details().video
     }
 }
 

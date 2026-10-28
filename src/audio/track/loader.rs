@@ -83,6 +83,7 @@ impl FileRead {
             bit_depth: properties.bit_depth().filter(|d| *d > 0),
             channels: properties.channels().filter(|c| *c > 0),
             replay_gain,
+            video: self.tags.video,
         }
     }
 }
