@@ -101,20 +101,22 @@ struct CueFile {
 }
 
 impl CueFile {
-    fn new(sheet: &cue_sheet::CueSheet, read: &FileRead) -> Self {
+    fn new(sheet: &cue_sheet::CueSheet, read: FileRead) -> Self {
         let mut tag = cue_sheet::album_tag(Some(&read.tags.tag), sheet);
         // All the tracks have the same album, so they share the cover
         let cover = CoverCache::cover_art(&read.path, &tag);
         while !tag.pictures().is_empty() {
             tag.remove_picture(0);
         }
+        let duration = read.tags.properties.duration();
+        let details = read.details(ReplayGain::default());
         Self {
-            path: read.path.clone(),
+            path: read.path,
             tag,
             cover,
-            duration: read.tags.properties.duration(),
-            display_name: read.display_name.clone(),
-            details: read.details(ReplayGain::default()),
+            duration,
+            display_name: read.display_name,
+            details,
         }
     }
 }
@@ -175,7 +177,7 @@ impl FileCache {
             // Its tracks take the rest from the file that was just read
             let key = (path.to_path_buf(), path.to_path_buf());
             self.cue_files
-                .get(key, || Some(Arc::new(CueFile::new(&sheet.sheet, &read))));
+                .get(key, || Some(Arc::new(CueFile::new(&sheet.sheet, read))));
             Some(sheet)
         })
     }
@@ -184,7 +186,7 @@ impl FileCache {
         let key = (sheet.path.clone(), audio.to_path_buf());
         self.cue_files.get(key, || {
             let read = FileRead::read(audio)?;
-            Some(Arc::new(CueFile::new(&sheet.sheet, &read)))
+            Some(Arc::new(CueFile::new(&sheet.sheet, read)))
         })
     }
 
@@ -361,7 +363,7 @@ impl TrackData {
             .and_then(|text| SplitSheet::embedded(path, text));
         match embedded {
             Some(sheet) => {
-                let cue_file = CueFile::new(&sheet.sheet, &read);
+                let cue_file = CueFile::new(&sheet.sheet, read);
                 sheet
                     .tracks()
                     .map(|(track, _)| Self::cue_track(&sheet, track, &cue_file))

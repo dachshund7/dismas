@@ -364,10 +364,15 @@ pub(super) struct MovementName {
 }
 
 impl MovementName {
-    pub(super) fn full(&self) -> String {
-        match &self.levels {
-            Some(levels) => format!("{levels}: {}", self.movement),
-            None => self.movement.clone(),
+    // The full name of the movement, and its levels and its own name when
+    // it has levels
+    pub(super) fn into_names(self) -> (String, Option<(String, String)>) {
+        match self.levels {
+            Some(levels) => (
+                format!("{levels}: {}", self.movement),
+                Some((levels, self.movement)),
+            ),
+            None => (self.movement, None),
         }
     }
 }
@@ -516,8 +521,10 @@ mod tests {
     }
 
     fn labels_at(paths: &[&[Work]], work_index: usize) -> Option<(String, String)> {
-        work_hierarchy_labels(&hierarchy_at(paths, work_index))
-            .map(|l| (l.work, l.movement.map_or_else(String::new, |m| m.full())))
+        work_hierarchy_labels(&hierarchy_at(paths, work_index)).map(|l| {
+            let movement = l.movement.map(|m| m.into_names().0);
+            (l.work, movement.unwrap_or_default())
+        })
     }
 
     fn labels(paths: &[&[Work]]) -> Option<(String, String)> {
@@ -532,7 +539,7 @@ mod tests {
     fn movement_of(json: &serde_json::Value) -> Option<String> {
         work_hierarchy_labels(&json.to_string())
             .and_then(|l| l.movement)
-            .map(|m| m.full())
+            .map(|m| m.into_names().0)
     }
 
     const SUITE: Work = ("bwv831", "Ouvertüre, BWV 831", None);

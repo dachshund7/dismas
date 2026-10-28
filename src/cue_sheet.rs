@@ -21,6 +21,7 @@
 //! folder lists them, or else the sheet in its tags.
 
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     collections::{HashMap, HashSet},
     io::Read,
@@ -248,16 +249,14 @@ pub fn parse(text: &str) -> Option<CueSheet> {
 }
 
 // Sheets are often in the legacy encoding of the system they were written
-// on, e.g. Windows-1251 or Shift JIS, which is guessed from the text
-pub fn decode(bytes: &[u8]) -> String {
+// on, e.g. Windows-1251 or Shift JIS, which is guessed from the text. Text
+// in UTF-8 is the bytes themselves
+pub fn decode(bytes: &[u8]) -> Cow<'_, str> {
     if let Some((encoding, bom_length)) = encoding_rs::Encoding::for_bom(bytes) {
-        return encoding
-            .decode_without_bom_handling(&bytes[bom_length..])
-            .0
-            .into_owned();
+        return encoding.decode_without_bom_handling(&bytes[bom_length..]).0;
     }
     if let Ok(text) = std::str::from_utf8(bytes) {
-        return text.to_string();
+        return text.into();
     }
     let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
     detector.feed(bytes, true);
@@ -265,7 +264,6 @@ pub fn decode(bytes: &[u8]) -> String {
         .guess(None, Utf8Detection::Deny)
         .decode_without_bom_handling(bytes)
         .0
-        .into_owned()
 }
 
 pub fn is_cue_path(path: &Path) -> bool {

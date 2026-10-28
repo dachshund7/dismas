@@ -65,16 +65,15 @@ impl Fills {
         if let Some(labels) = tag.get_texts(&TPUB) {
             fills.add(ItemKey::Label, labels);
         }
-        let performers = performers(tag);
-        fills.add(ItemKey::Performer, performers.iter().map(String::as_str));
+        fills.add(ItemKey::Performer, performers(tag));
         fills
     }
 
-    fn add<'a>(&mut self, key: ItemKey, values: impl IntoIterator<Item = &'a str>) {
+    fn add(&mut self, key: ItemKey, values: impl IntoIterator<Item = impl Into<String>>) {
         self.0.extend(
             values
                 .into_iter()
-                .map(|value| TagItem::new(key, ItemValue::Text(value.to_string()))),
+                .map(|value| TagItem::new(key, ItemValue::Text(value.into()))),
         );
     }
 

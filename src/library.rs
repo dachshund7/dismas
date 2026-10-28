@@ -13,6 +13,7 @@ mod album;
 mod watch;
 
 use std::{
+    borrow::Cow,
     cell::RefCell,
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -571,15 +572,15 @@ fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
 }
 
 // The path of bytes as `path_from_bytes()` gives it, without copying them
-fn path_of_bytes(bytes: &[u8]) -> std::borrow::Cow<'_, Path> {
+fn path_of_bytes(bytes: &[u8]) -> Cow<'_, Path> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
-        std::borrow::Cow::Borrowed(Path::new(std::ffi::OsStr::from_bytes(bytes)))
+        Cow::Borrowed(Path::new(std::ffi::OsStr::from_bytes(bytes)))
     }
     #[cfg(not(unix))]
     {
-        std::borrow::Cow::Owned(path_from_bytes(bytes.to_vec()))
+        Cow::Owned(path_from_bytes(bytes.to_vec()))
     }
 }
 
@@ -1867,8 +1868,9 @@ fn scan_with(
             let audio: Vec<PathBuf> = claims
                 .tracks_of(&path)
                 .into_iter()
-                .map(|(_, audio)| audio.to_path_buf())
+                .map(|(_, audio)| audio)
                 .unique()
+                .map(Path::to_path_buf)
                 .collect();
             if audio.is_empty() {
                 continue;
@@ -1954,13 +1956,6 @@ fn scan_with(
                     vec![(source.path.clone(), TrackTags::default())]
                 });
                 for (path, tags) in tracks {
-                    // A changed track might have new cover art; new tracks
-                    // don't make the cover of their album stale, so that the
-                    // covers are kept when the whole library is read again
-                    if let Some(id) = tags.album_id.as_ref().filter(|_| was_known) {
-                        stale_albums.insert(id.clone());
-                    }
-
                     let work = tags.work.as_ref();
                     insert.execute(params![
                         path_bytes(&path),
@@ -1991,7 +1986,11 @@ fn scan_with(
                         tags.catalog_number,
                     ])?;
                     n_changed += 1;
+                    // A changed track might have new cover art; new tracks
+                    // don't make the cover of their album stale, so that the
+                    // covers are kept when the whole library is read again
                     if was_known {
+                        stale_albums.extend(tags.album_id);
                         updated.push(path);
                     }
                 }
@@ -2371,11 +2370,12 @@ impl TrackTags {
         let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
 
         let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
-        let album_artist = get(ItemKey::AlbumArtist).filter(|s| !s.is_empty());
-        let artist = tag
-            .artist()
-            .map(|s| s.trim().to_string())
+        let album_artist = tag
+            .get_string(ItemKey::AlbumArtist)
+            .map(str::trim)
             .filter(|s| !s.is_empty());
+        let artist = tag.artist();
+        let artist = artist.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let artist_sort = get(ItemKey::AlbumArtistSortOrder).filter(|s| !s.is_empty());
 
         // The release id from MusicBrainz tells apart albums with the same
@@ -2390,10 +2390,7 @@ impl TrackTags {
             let mut hasher = Sha256::new();
             hasher.update(album.as_deref().unwrap_or_default());
             hasher.update([0]);
-            match (
-                album.as_ref().and(album_artist.as_ref()),
-                album_folder(path),
-            ) {
+            match (album.as_ref().and(album_artist), album_folder(path)) {
                 (Some(artist), _) => hasher.update(artist),
                 (None, Some(folder)) => {
                     hasher.update(folder.as_os_str().as_encoded_bytes());
@@ -2415,8 +2412,9 @@ impl TrackTags {
         let search = search_key(
             Some(&artists),
             title
-                .clone()
-                .or_else(|| file.map(title_from_file_name))
+                .as_deref()
+                .map(Cow::Borrowed)
+                .or_else(|| file.map(|file| title_from_file_name(file).into()))
                 .as_deref(),
             &track_search_text(tag, &credits),
             folder_album.as_deref(),
@@ -2429,8 +2427,8 @@ impl TrackTags {
             album_id: Some(album_id),
             album: album.or(folder_album),
             // After the id, which must not change
-            album_artist: album_artist.as_deref().map(plain_commas),
-            artist: artist.as_deref().map(plain_commas),
+            album_artist: album_artist.map(plain_commas),
+            artist: artist.map(plain_commas),
             artist_sort,
             year: credits.year(),
             disc: tag.disk(),
@@ -2438,10 +2436,10 @@ impl TrackTags {
             title,
             search: Some(search),
             composers: composer_entries(names, &sorts),
-            work: work_entry(&credits, artist.as_deref(), names, &sorts),
+            work: work_entry(&credits, artist, names, &sorts),
             performers: performer_entries(&credits.listed_performers()),
-            label: credits.labels.first().cloned(),
-            catalog_number: credits.catalog_numbers.first().cloned(),
+            label: credits.labels.into_iter().next(),
+            catalog_number: credits.catalog_numbers.into_iter().next(),
         }
     }
 }
@@ -2465,14 +2463,15 @@ fn work_entry(
 
     // The composers of the work, as `Track::work_composers()` finds them,
     // sorted by their own sort names if the tags have them
-    let mut work_names = if credits.work_composers.is_empty() {
-        credits.composers.clone()
+    let only_artist;
+    let work_names: &[String] = if !credits.work_composers.is_empty() {
+        &credits.work_composers
+    } else if !credits.composers.is_empty() {
+        &credits.composers
     } else {
-        credits.work_composers.clone()
+        only_artist = artist.map(ToString::to_string);
+        only_artist.as_slice()
     };
-    if work_names.is_empty() {
-        work_names.extend(artist.map(ToString::to_string));
-    }
     let sort_of = |composer: &String| {
         names
             .iter()
@@ -2487,7 +2486,14 @@ fn work_entry(
     let key = credits
         .work_id
         .clone()
-        .or_else(|| credits.musicbrainz.work.clone().filter(|_| !is_movement))
+        .or_else(|| {
+            credits
+                .musicbrainz
+                .work
+                .as_ref()
+                .filter(|_| !is_movement)
+                .cloned()
+        })
         .unwrap_or_else(|| {
             let composers = work_names
                 .iter()
@@ -2506,7 +2512,7 @@ fn work_entry(
         name: name.to_string(),
         title: credits.work_title.clone(),
         collection: credits.work_collection.clone(),
-        composers: composer_entries(&work_names, &work_sorts),
+        composers: composer_entries(work_names, &work_sorts),
         order,
     })
 }
@@ -2525,8 +2531,8 @@ fn performer_entries(performers: &[ListedPerformer]) -> Option<String> {
     let mut entries = String::from("\n");
     for performer in performers {
         let sort = match performer.kind {
-            PerformerKind::Ensemble => performer.name.clone(),
-            PerformerKind::Conductor | PerformerKind::Soloist => sort_name(&performer.name),
+            PerformerKind::Ensemble => Cow::Borrowed(performer.name.as_str()),
+            PerformerKind::Conductor | PerformerKind::Soloist => sort_name(&performer.name).into(),
         };
         entries.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\n",

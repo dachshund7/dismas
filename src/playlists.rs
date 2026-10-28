@@ -8,6 +8,7 @@
 // restore it, in a file of the same name in the unshuffled directory
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     path::{Path, PathBuf},
 };
@@ -495,14 +496,14 @@ fn format_m3u(files: &[gio::File], relative_to: Option<&Path>) -> (String, usize
             }
             _ => None,
         };
-        let line = match relative.or(path.as_deref()).and_then(Path::to_str) {
+        let line: Cow<str> = match relative.or(path.as_deref()).and_then(Path::to_str) {
             // Players take a line starting with "#" for a comment, and drop
             // the spaces in front of a path
             Some(path) if relative.is_some() && path.starts_with(['#', ' ', '\t']) => {
-                format!("./{path}")
+                format!("./{path}").into()
             }
-            Some(path) => path.to_string(),
-            None => file.uri().to_string(),
+            Some(path) => path.into(),
+            None => String::from(file.uri()).into(),
         };
         // A line break would split the entry in two
         if line.contains(['\n', '\r']) {
@@ -540,15 +541,15 @@ fn m3u_entry(line: &str, base: &gio::File) -> gio::File {
     }
     // Players on Windows, or set to be compatible with it, use
     // backslashes
-    let line = if line.contains('/') {
-        line.to_string()
+    let line: Cow<str> = if line.contains('/') {
+        line.into()
     } else {
-        line.replace('\\', "/")
+        line.replace('\\', "/").into()
     };
-    if Path::new(&line).is_absolute() {
-        gio::File::for_path(&line)
+    if Path::new(&*line).is_absolute() {
+        gio::File::for_path(&*line)
     } else {
-        base.resolve_relative_path(&line)
+        base.resolve_relative_path(&*line)
     }
 }
 

@@ -225,10 +225,10 @@ impl TrackCredits {
             credits.work_id = Some(id);
             credits.work_collection = collection;
             credits.movement_order = order;
-            credits.movement = movement.as_ref().map(MovementName::full);
+            let (movement, levels) = movement.map(MovementName::into_names).unzip();
+            credits.movement = movement;
             credits.movement_number = None;
-            credits.movement_levels =
-                movement.and_then(|movement| Some((movement.levels?, movement.movement)));
+            credits.movement_levels = levels.flatten();
         }
 
         credits
@@ -262,9 +262,8 @@ impl TrackCredits {
             lyricists: tag_strings(tag, ItemKey::Lyricist),
             arrangers: tag_strings(tag, ItemKey::Arranger),
             conductors: tag_strings(tag, ItemKey::Conductor),
-            performers: tag_strings(tag, ItemKey::Performer)
-                .iter()
-                .map(|s| Credit::parse(s))
+            performers: tag_strs(tag, ItemKey::Performer)
+                .map(Credit::parse)
                 .collect(),
             producers: tag_strings(tag, ItemKey::Producer),
             engineers: tag_strings(tag, ItemKey::Engineer),
@@ -638,11 +637,13 @@ pub fn split_composers<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String>
 // All the values for a key, including the ones that were stored as a
 // single value separated by semicolons
 fn tag_strings(tag: &Tag, key: ItemKey) -> Vec<String> {
+    tag_strs(tag, key).map(ToString::to_string).collect()
+}
+
+fn tag_strs(tag: &Tag, key: ItemKey) -> impl Iterator<Item = &str> {
     tag.get_strings(key)
         .flat_map(|s| s.split(';'))
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unique()
-        .map(ToString::to_string)
-        .collect()
 }
