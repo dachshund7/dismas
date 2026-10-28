@@ -354,7 +354,20 @@ pub fn guarded<T>(
 // much faster than looking at its contents when scanning a whole library
 pub fn is_audio_path(path: &std::path::Path) -> bool {
     let (mime_type, _) = gio::content_type_guess(Some(path), None);
-    mime_type.starts_with("audio") && !mime_type.ends_with("x-mpegurl")
+    is_audio_type(&mime_type)
+}
+
+// Playlists have audio types too, and WebM files are often audio alone, as
+// yt-dlp downloads them; one with a video is turned down when it's read
+pub fn is_audio_type(mime_type: &str) -> bool {
+    const PLAYLISTS: [&str; 4] = [
+        "audio/x-mpegurl",
+        "audio/mpegurl",
+        "audio/x-scpls",
+        "audio/x-ms-asx",
+    ];
+    (mime_type.starts_with("audio/") && !PLAYLISTS.contains(&mime_type))
+        || mime_type == "video/webm"
 }
 
 // What a walk through a folder found, in no order
@@ -670,6 +683,19 @@ mod tests {
             ]
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn playlists_are_not_audio_but_webm_files_can_be() {
+        use std::path::Path;
+        for name in ["a.flac", "b.MP3", "c.opus", "d.m4a", "e.mka", "f.webm"] {
+            assert!(is_audio_path(Path::new(name)), "{name}");
+        }
+        for name in [
+            "a.m3u", "b.m3u8", "c.pls", "d.asx", "e.wax", "f.wvx", "g.mp4", "h.txt",
+        ] {
+            assert!(!is_audio_path(Path::new(name)), "{name}");
+        }
     }
 
     #[test]

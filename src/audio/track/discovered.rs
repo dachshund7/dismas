@@ -159,7 +159,9 @@ pub fn child_main(args: &[OsString]) -> glib::ExitCode {
 }
 
 // What GStreamer finds in a file: nothing unless it has an audio stream
-// that can be decoded, as the file couldn't play otherwise
+// that can be decoded, as the file couldn't play otherwise, nor if it has
+// a video, as a WebM file can: those of yt-dlp's audio are audio alone,
+// but other WebM files are films. A cover can be a stream of one image
 fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
     gst::init().ok()?;
     let uri = glib::filename_to_uri(path, None).ok()?;
@@ -176,6 +178,10 @@ fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
         }
     };
     let audio = info.audio_streams().into_iter().next()?;
+    if info.video_streams().iter().any(|video| !video.is_image()) {
+        debug!("{path:?} is a video");
+        return None;
+    }
     let caps = audio.caps()?;
     if !can_decode(&caps) {
         debug!("No decoder for the {caps} of {path:?}");
@@ -399,6 +405,43 @@ mod tests {
             std::env::temp_dir().join(format!("dismas-discovered-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    // Writes a file through a pipeline; false if an element is missing
+    fn write_pipeline(description: &str) -> bool {
+        gst::init().unwrap();
+        let Ok(pipeline) = gst::parse::launch(description) else {
+            return false;
+        };
+        pipeline.set_state(gst::State::Playing).unwrap();
+        let done = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(10),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        pipeline.set_state(gst::State::Null).unwrap();
+        done.is_some_and(|message| message.type_() == gst::MessageType::Eos)
+    }
+
+    #[test]
+    fn webm_files_count_without_a_video() {
+        let dir = test_dir("webm");
+        let audio = dir.join("audio.webm");
+        let video = dir.join("video.webm");
+        // vp8enc and webmmux come with the good plugins, opusenc with base
+        let sound = "audiotestsrc num-buffers=10 samplesperbuffer=4800 ! audioconvert ! opusenc";
+        let wrote = write_pipeline(&format!(
+            "{sound} ! webmmux ! filesink location=\"{}\"",
+            audio.display()
+        )) && write_pipeline(&format!(
+            "{sound} ! mux. videotestsrc num-buffers=10 ! vp8enc ! webmmux name=mux \
+             ! filesink location=\"{}\"",
+            video.display()
+        ));
+        if wrote {
+            assert!(discover_file(&audio, false).is_some());
+            assert!(discover_file(&video, false).is_none());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

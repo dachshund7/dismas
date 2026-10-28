@@ -1054,9 +1054,11 @@ fn audio_files(files: Vec<gio::File>, music_folders: &[std::path::PathBuf]) -> V
                         {
                             queue.extend(tracks);
                         }
-                    // CUE sheets split audio files into tracks
+                    // CUE sheets split audio files into tracks, and WebM
+                    // files are often audio alone
                     } else if gio::content_type_is_mime_type(&content_type, "audio/*")
                         || gio::content_type_is_mime_type(&content_type, "application/x-cue")
+                        || gio::content_type_is_mime_type(&content_type, "video/webm")
                     {
                         debug!("Adding file '{}' to the queue", file.uri());
                         queue.push(file);
