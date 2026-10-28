@@ -238,7 +238,7 @@ And it fixes these bugs of Amberol's:
   shuffle off changed the tracks after it.
 - The Play button of the "Added a new track" toast didn't play that track.
 - Symbolic links to tracks and folders that were opened or dropped weren't
-  followed.
+  followed, nor those inside a folder that was.
 - Ctrl+Left and Ctrl+Right seeked instead of moving the cursor in the search
   entry.
 - Searching the queue for "unknown" found every track missing an artist,

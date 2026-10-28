@@ -138,6 +138,9 @@ All notable changes to this project will be documented in this file.
   plugin writes
 - MP3, AIFF, WAV and AAC files tagged by MusicBrainz Picard didn't show
   their soloists and other performers, only their conductor
+- Tracks and folders behind symbolic links in the music folders, as in a
+  library that beets links to, or in a folder that was opened or dropped,
+  were left out
 
 ### Removed
 

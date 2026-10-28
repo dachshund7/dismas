@@ -357,36 +357,127 @@ pub fn is_audio_path(path: &std::path::Path) -> bool {
     mime_type.starts_with("audio") && !mime_type.ends_with("x-mpegurl")
 }
 
-// The files of a folder and its subfolders, in no order
-fn load_files_from_folder_internal(
-    folder: &gio::File,
-    recursive: bool,
-    keep: &dyn Fn(&std::path::Path) -> bool,
-) -> Vec<gio::File> {
-    let Ok(mut enumerator) = folder.enumerate_children(
-        "standard::name,standard::type",
-        gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
-        None::<&gio::Cancellable>,
-    ) else {
-        warn!("Unable to enumerate {}", folder.uri());
-        return Vec::new();
-    };
+// What a walk through a folder found, in no order
+#[derive(Default)]
+pub struct FolderTree {
+    pub files: Vec<gio::File>,
+    // The folders read, the first one included
+    pub folders: Vec<gio::File>,
+    // The symbolic links to folders that were followed
+    pub links: Vec<gio::File>,
+    // Whether a symbolic link leads nowhere, as one to a drive that isn't
+    // mounted does
+    pub broken_links: bool,
+}
 
-    let mut files = Vec::new();
-    while let Some(info) = enumerator.next().and_then(Result::ok) {
-        let child = enumerator.child(&info);
-        if child.path().is_some_and(|path| !keep(&path)) {
-            continue;
-        }
-        if recursive && info.file_type() == gio::FileType::Directory {
-            let mut res = load_files_from_folder_internal(&child, recursive, keep);
-            files.append(&mut res);
-        } else if info.file_type() == gio::FileType::Regular {
-            files.push(child.clone());
+// Following symbolic links, the type is that of what they lead to
+const WALK_ATTRIBUTES: &str = "standard::name,standard::type,standard::is-symlink,\
+                               unix::device,unix::inode";
+
+struct FolderWalk<'a> {
+    recursive: bool,
+    keep: &'a dyn Fn(&std::path::Path) -> bool,
+    // The device and inode of the folders and files read, which are the
+    // same however they're reached
+    read: std::collections::HashSet<(u32, u64)>,
+    // The links found, which are followed once the folders are read
+    links: Vec<(gio::File, gio::FileInfo)>,
+    tree: FolderTree,
+}
+
+impl FolderWalk<'_> {
+    fn read_folder(&mut self, folder: &gio::File) {
+        self.tree.folders.push(folder.clone());
+        let Ok(mut enumerator) = folder.enumerate_children(
+            WALK_ATTRIBUTES,
+            gio::FileQueryInfoFlags::NONE,
+            None::<&gio::Cancellable>,
+        ) else {
+            warn!("Unable to enumerate {}", folder.uri());
+            return;
+        };
+        while let Some(info) = enumerator.next().and_then(Result::ok) {
+            let child = enumerator.child(&info);
+            if child.path().is_some_and(|path| !(self.keep)(&path)) {
+                continue;
+            }
+            if info.is_symlink() {
+                self.links.push((child, info));
+            } else {
+                self.add(child, &info, false);
+            }
         }
     }
 
-    files
+    // A folder is read once, so a link can't make a loop; a file a link
+    // leads to is only kept if it wasn't read already, but the files
+    // themselves are all kept, as hard links to one file can be meant
+    fn add(&mut self, file: gio::File, info: &gio::FileInfo, linked: bool) {
+        match info.file_type() {
+            gio::FileType::Directory if self.recursive => {
+                if self.first_read(info) {
+                    if linked {
+                        self.tree.links.push(file.clone());
+                    }
+                    self.read_folder(&file);
+                }
+            }
+            gio::FileType::Regular => {
+                if self.first_read(info) || !linked {
+                    self.tree.files.push(file);
+                }
+            }
+            // A link that leads nowhere keeps its own type
+            gio::FileType::SymbolicLink => self.tree.broken_links = true,
+            _ => (),
+        }
+    }
+
+    // Files that aren't local have no inode, and can't be told apart
+    fn first_read(&mut self, info: &gio::FileInfo) -> bool {
+        let inode = info.attribute_uint64(gio::FILE_ATTRIBUTE_UNIX_INODE);
+        inode == 0
+            || self.read.insert((
+                info.attribute_uint32(gio::FILE_ATTRIBUTE_UNIX_DEVICE),
+                inode,
+            ))
+    }
+}
+
+// The files and folders in a folder, without the ones whose paths `keep`
+// turns down. Symbolic links are followed once the folders without them
+// are read, so that one leading back into the folder adds nothing: each
+// round follows the links found the round before, in the order of their
+// paths, so that of two links to one folder, the same one is read at
+// each scan
+pub fn read_folder_tree(
+    folder: &gio::File,
+    recursive: bool,
+    keep: &dyn Fn(&std::path::Path) -> bool,
+) -> FolderTree {
+    let mut walk = FolderWalk {
+        recursive,
+        keep,
+        read: std::collections::HashSet::new(),
+        links: Vec::new(),
+        tree: FolderTree::default(),
+    };
+    if let Ok(info) = folder.query_info(
+        WALK_ATTRIBUTES,
+        gio::FileQueryInfoFlags::NONE,
+        None::<&gio::Cancellable>,
+    ) {
+        walk.first_read(&info);
+    }
+    walk.read_folder(folder);
+    while !walk.links.is_empty() {
+        let mut links = std::mem::take(&mut walk.links);
+        links.sort_by_cached_key(|(file, _)| file.path());
+        for (file, info) in links {
+            walk.add(file, &info, true);
+        }
+    }
+    walk.tree
 }
 
 // What files are sorted by, in the order a file manager shows them: the
@@ -452,7 +543,7 @@ pub fn load_files_from_folder_filtered(
     use std::time::Instant;
 
     let now = Instant::now();
-    let mut res = load_files_from_folder_internal(folder, recursive, keep);
+    let mut res = read_folder_tree(folder, recursive, keep).files;
     // gio::FileEnumerator has no guaranteed order. The files are sorted
     // once, with the keys made once for each file: a library of thousands
     // of files was sorted again at each level of its folders, with the keys

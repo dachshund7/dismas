@@ -116,10 +116,12 @@ pub struct WatchList {
     // Whether a music folder that's there can't be watched, so that it's
     // read again when the albums are shown
     pub unwatched: bool,
-    // The music folders that are there, without symbolic links: a drive
-    // unmounted can take one away, and a drive mounted in one adds to it.
-    // While one isn't there, a drive mounted anywhere can bring it back,
-    // as the folder a symbolic link leads to is only known once it's there
+    // The music folders that are there, and the folders that symbolic
+    // links in them lead to, without symbolic links: a drive unmounted can
+    // take one away, and a drive mounted in one adds to it. While one
+    // isn't there, or a link leads nowhere, a drive mounted anywhere can
+    // bring it back, as the folder a link leads to is only known once
+    // it's there
     pub available: Vec<PathBuf>,
     pub unavailable: bool,
 }
@@ -1594,20 +1596,21 @@ fn scan_internal(
 
 // The folders of the library to watch for files that come, go or change:
 // those in the music folders on this computer's disks, with the folders in
-// them, but not those that are hidden or left out, or behind symbolic
-// links, which the scan doesn't read either. Changes in a folder on a
-// network share can be made from other computers, which aren't told
-// about, and the folders that came through the document portal aren't
-// watched either. Also the music folders, for the drives mounted and
-// unmounted, see `WatchList`. This blocks
+// them and those that symbolic links in them lead to, as the scan reads
+// them, but not those that are hidden or left out, which it doesn't.
+// Changes in a folder on a network share can be made from other
+// computers, which aren't told about, and the folders that came through
+// the document portal aren't watched either. Also the music folders and
+// the folders that links lead to, for the drives mounted and unmounted,
+// see `WatchList`. This blocks
 fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> WatchList {
     let mut list = WatchList {
         unavailable: !roots.unavailable.is_empty(),
         ..WatchList::default()
     };
+    let canonical = |path: PathBuf| std::fs::canonicalize(&path).unwrap_or(path);
     for root in &roots.available {
-        list.available
-            .push(std::fs::canonicalize(root).unwrap_or_else(|_| root.clone()));
+        list.available.push(canonical(root.clone()));
         let portal = folders
             .iter()
             .any(|folder| folder.path == *root && folder.host.is_some());
@@ -1616,7 +1619,26 @@ fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> WatchList {
             list.unwatched = true;
             continue;
         }
-        add_folders(root, roots, &mut list.folders);
+        let tree = utils::read_folder_tree(&gio::File::for_path(root), true, &|path| {
+            scan_reads(path, roots)
+        });
+        // A link to a drive that isn't mounted leads nowhere until it is
+        list.unavailable |= tree.broken_links;
+        let mut remote = Vec::new();
+        for link in tree.links.iter().filter_map(gio::File::path) {
+            if is_remote(&link) {
+                debug!("Library: not watching {link:?}");
+                list.unwatched = true;
+                remote.push(link.clone());
+            }
+            list.available.push(canonical(link));
+        }
+        list.folders.extend(
+            tree.folders
+                .iter()
+                .filter_map(gio::File::path)
+                .filter(|folder| !remote.iter().any(|link| folder.starts_with(link))),
+        );
     }
     list
 }
@@ -1628,20 +1650,6 @@ fn is_remote(path: &Path) -> bool {
             None::<&gio::Cancellable>,
         )
         .is_ok_and(|info| info.boolean(gio::FILE_ATTRIBUTE_FILESYSTEM_REMOTE))
-}
-
-// A folder, and the folders in it that the scan reads
-fn add_folders(folder: &Path, roots: &Roots, folders: &mut Vec<PathBuf>) {
-    folders.push(folder.to_path_buf());
-    let Ok(entries) = std::fs::read_dir(folder) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if entry.file_type().is_ok_and(|t| t.is_dir()) && scan_reads(&path, roots) {
-            add_folders(&path, roots, folders);
-        }
-    }
 }
 
 // Whether the scan reads a file or a folder it comes to in the music
@@ -3235,6 +3243,46 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    // As in a library that beets makes of links, or with a folder on
+    // another drive linked into the music folder
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_links_in_a_music_folder_are_followed_once() {
+        use std::os::unix::fs::symlink;
+
+        use super::scan_with;
+        use crate::utils::write_test_wav;
+
+        let music = test_dir("links");
+        std::fs::create_dir_all(music.join("Real")).unwrap();
+        write_test_wav(&music.join("Real/One.wav"), 1);
+        let elsewhere = test_dir("links-elsewhere");
+        write_test_wav(&elsewhere.join("Two.wav"), 1);
+        symlink(&elsewhere, music.join("Linked")).unwrap();
+        let other = test_dir("links-other");
+        write_test_wav(&other.join("Three.wav"), 1);
+        symlink(other.join("Three.wav"), music.join("Single.wav")).unwrap();
+        // Links to what the folder has already, and a loop, add nothing
+        symlink(music.join("Real"), music.join("Again")).unwrap();
+        symlink(music.join("Real/One.wav"), music.join("Real/Copy.wav")).unwrap();
+        symlink(&music, music.join("Real/Loop")).unwrap();
+        // Nor does a link to nothing
+        symlink(music.join("Nothing"), music.join("Gone")).unwrap();
+
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        let found: Vec<String> = tracks(&conn, &music)
+            .into_iter()
+            .map(|row| row.path)
+            .collect();
+        assert_eq!(found, ["Linked/Two.wav", "Real/One.wav", "Single.wav"]);
+
+        std::fs::remove_dir_all(&music).unwrap();
+        std::fs::remove_dir_all(&elsewhere).unwrap();
+        std::fs::remove_dir_all(&other).unwrap();
+    }
+
     #[test]
     fn trash_and_hidden_folders_are_not_read() {
         use super::scan_with;
@@ -3309,8 +3357,12 @@ mod tests {
             std::fs::create_dir_all(music.join(folder)).unwrap();
         }
         std::fs::write(music.join("Bach/Partitas/CD1/01.opus"), b"").unwrap();
+        // A link to a folder elsewhere is watched as the scan reads it, and
+        // one back into the music folder adds nothing
         let elsewhere = test_dir("watch-elsewhere");
+        std::fs::create_dir_all(elsewhere.join("Jazz")).unwrap();
         std::os::unix::fs::symlink(&elsewhere, music.join("Linked")).unwrap();
+        std::os::unix::fs::symlink(&music, music.join("Bach/Partitas/Back")).unwrap();
 
         let mut folder = MusicFolder::new(music.clone());
         folder.excluded.push(PathBuf::from("Audiobooks"));
@@ -3330,11 +3382,26 @@ mod tests {
                 Path::new("Bach/Partitas"),
                 Path::new("Bach/Partitas/CD1"),
                 Path::new("Bach/Partitas/CD2"),
+                Path::new("Linked"),
+                Path::new("Linked/Jazz"),
             ]
         );
         assert!(!list.unwatched);
-        assert_eq!(list.available, [music.canonicalize().unwrap()]);
+        assert_eq!(
+            list.available,
+            [
+                music.canonicalize().unwrap(),
+                elsewhere.canonicalize().unwrap()
+            ]
+        );
         assert!(!list.unavailable);
+
+        // A link that leads nowhere can be to a drive that isn't mounted
+        let gone = music.join("Gone");
+        std::os::unix::fs::symlink(music.join("Nothing"), &gone).unwrap();
+        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        assert!(list.unavailable);
+        std::fs::remove_file(gone).unwrap();
 
         // A folder that came through the document portal isn't watched
         let folders = [MusicFolder {
