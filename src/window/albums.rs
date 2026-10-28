@@ -640,7 +640,7 @@ pub(super) async fn album_files(albums: Vec<(String, TrackFilter)>) -> Option<Ve
 }
 
 // Opens a menu at a point of a widget, with its actions in a group
-fn popup_menu(
+pub(super) fn popup_menu(
     menu: &gio::Menu,
     group: &str,
     actions: &gio::SimpleActionGroup,
@@ -655,10 +655,17 @@ fn popup_menu(
     popover.set_halign(gtk::Align::Start);
     popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
     // The menu item is activated after the popover closes, so it can only
-    // go once the action ran
+    // go once the action ran. The widget it's on is kept until then, as the
+    // action can take it away: Go to Album does with the header of a work's
+    // recording. A button freed with the popover still on it leaves the
+    // popover with a parent that's gone, and letting go of it then crashed
     popover.connect_closed(|popover| {
         let popover = popover.clone();
-        glib::idle_add_local_once(move || popover.unparent());
+        let parent = popover.parent();
+        glib::idle_add_local_once(move || {
+            popover.unparent();
+            drop(parent);
+        });
     });
     popover.popup();
 }

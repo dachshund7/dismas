@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::{adding::Tracks, *};
+use super::{adding::Tracks, albums::popup_menu, *};
 
 impl Window {
     // The menu of a track, at the given point of its row; a row of the
     // queue, rather than of an album's tracks, can be removed. Both can be
-    // played next, added to a playlist, marked as favorites, and go to the
-    // album, the tracks of an album only while the search leaves some of
-    // them out
+    // played next, added to a playlist, and marked as favorites; a row of
+    // the queue or of a work's recordings goes to its album
     pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, in_queue: bool) {
         let Some(track) = row.track() else {
             return;
@@ -201,19 +200,7 @@ impl Window {
             menu.append_section(None, &section);
         }
 
-        let popover = gtk::PopoverMenu::from_model(Some(&menu));
-        popover.insert_action_group("track", Some(&actions));
-        popover.set_parent(row);
-        popover.set_has_arrow(false);
-        popover.set_halign(gtk::Align::Start);
-        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-        // The menu item is activated after the popover closes, so it can
-        // only go once the action ran
-        popover.connect_closed(|popover| {
-            let popover = popover.clone();
-            glib::idle_add_local_once(move || popover.unparent());
-        });
-        popover.popup();
+        popup_menu(&menu, "track", &actions, row.upcast_ref(), x, y);
     }
 
     pub(super) fn copy_track(&self) {
