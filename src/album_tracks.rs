@@ -7,7 +7,7 @@
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     rc::Rc,
 };
@@ -91,11 +91,12 @@ mod imp {
         // While the search leaves out some of the tracks, the number of
         // the tracks that match it and the number of all of them
         pub left_out: Cell<Option<(u32, u32)>>,
-        // All the tracks are showing, though the search leaves some out:
-        // the album grid's Whole Albums, which the window binds this to,
-        // and which the toggle on the bar over the tracks switches
-        #[property(get, set = Self::set_whole_albums, explicit_notify)]
-        pub whole_albums: Cell<bool>,
+        // Then, the URIs of the tracks it matches, which are the ones taken;
+        // the others are dimmed. The menu next to the Add button offers to
+        // take them all
+        pub matching: Rc<RefCell<Option<HashSet<String>>>>,
+        #[property(get)]
+        pub partial: Cell<bool>,
         // Bumped for each album, to stop loading the tracks of the
         // previous one
         pub generation: Cell<u32>,
@@ -138,18 +139,6 @@ mod imp {
             self.obj().update_selection();
             self.obj().notify_selection_mode();
         }
-
-        // The tracks the search leaves out come or go
-        fn set_whole_albums(&self, whole_albums: bool) {
-            if self.whole_albums.replace(whole_albums) == whole_albums {
-                return;
-            }
-            self.obj().notify_whole_albums();
-            // A work's recordings are whole anyway
-            if !self.filter.borrow().is_empty() && self.work.borrow().is_none() {
-                self.obj().load(None);
-            }
-        }
     }
 
     #[glib::derived_properties]
@@ -176,6 +165,9 @@ mod imp {
                 vec![
                     Signal::builder("back").build(),
                     Signal::builder("add").build(),
+                    // The Play button: the tracks it takes play, see
+                    // `files()`
+                    Signal::builder("play-shown").build(),
                     // The position of the track to start playing from
                     Signal::builder("play")
                         .param_types([u32::static_type()])
@@ -243,6 +235,14 @@ impl AlbumTracks {
     pub fn connect_add<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "add",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_play_shown<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "play-shown",
             false,
             glib::closure_local!(move |view: &Self| f(view)),
         )
@@ -357,6 +357,27 @@ impl AlbumTracks {
                 row.bind_list_item(list_item);
             }
         ));
+        // The tracks the search doesn't match are dimmed
+        factory.connect_bind(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, item| {
+                let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+                let (Some(row), Some(track)) = (item.child(), item.item().and_downcast::<Track>())
+                else {
+                    return;
+                };
+                let matching = this.imp().matching.borrow();
+                if matching
+                    .as_ref()
+                    .is_some_and(|matching| !matching.contains(&track.uri()))
+                {
+                    row.add_css_class("unmatched");
+                } else {
+                    row.remove_css_class("unmatched");
+                }
+            }
+        ));
 
         let tracks = gio::ListStore::new::<Track>();
         let sections = WorkSectionModel::new(&tracks);
@@ -413,7 +434,7 @@ impl AlbumTracks {
         imp.play_button.connect_clicked(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.emit_by_name::<()>("play", &[&0u32])
+            move |_| this.emit_by_name::<()>("play-shown", &[])
         ));
 
         imp.select_all_button.connect_clicked(clone!(
@@ -463,8 +484,8 @@ impl AlbumTracks {
         }
     }
 
-    // The files of the tracks, in order; in selection mode, only the
-    // selected ones
+    // The files of the tracks the Play and Add buttons take, in order: the
+    // ones the search matches; in selection mode, only the selected ones
     pub fn files(&self) -> Vec<gio::File> {
         if self.selection_mode() {
             self.tracks()
@@ -653,12 +674,36 @@ impl AlbumTracks {
     }
 
     // The files to play from the track at `pos`, and the position to start
-    // at among them: those of the album, or of the selected tracks, or the
-    // recording the track is in
+    // at among them: those of the album that the search matches, or all of
+    // them from a track it doesn't match, which is dimmed, or the selected
+    // tracks, or the recording the track is in
     pub fn files_to_play(&self, pos: u32) -> (Vec<gio::File>, u32) {
         let imp = self.imp();
-        if !self.shows_work() || self.selection_mode() {
+        if self.selection_mode() {
             return (self.files(), pos);
+        }
+        if !self.shows_work() {
+            let tracks = self.tracks();
+            let matching = imp.matching.borrow();
+            let Some(matching) = matching.as_ref() else {
+                return (self.files(), pos);
+            };
+            let clicked = tracks.get(pos as usize);
+            if clicked.is_some_and(|track| !matching.contains(&track.uri())) {
+                return (tracks.iter().map(Track::file).collect(), pos);
+            }
+            let matched: Vec<&Track> = tracks
+                .iter()
+                .filter(|track| matching.contains(&track.uri()))
+                .collect();
+            let start = matched
+                .iter()
+                .position(|track| Some(*track) == clicked)
+                .unwrap_or_default();
+            return (
+                matched.iter().map(|track| track.file()).collect(),
+                start as u32,
+            );
         }
         let Some(sections) = imp.sections.get() else {
             return (Vec::new(), 0);
@@ -700,26 +745,14 @@ impl AlbumTracks {
             .set_visible(!self.shows_work() || self.selection_mode());
     }
 
-    // Shows all the tracks of the album, though the search leaves some
-    // out, scrolled to the track of `reveal`, if any: Whole Albums goes on
-    pub fn show_all_tracks(&self, reveal: Option<&gio::File>) {
-        if !self.imp().whole_albums.replace(true) {
-            self.notify_whole_albums();
-        }
-        self.load(reveal);
-    }
-
-    // Whether the search leaves out some of the tracks of the album, and
-    // they aren't showing
-    pub fn leaves_out_tracks(&self) -> bool {
-        let imp = self.imp();
-        imp.left_out.get().is_some() && !imp.whole_albums.get()
+    // The files of all the tracks, though the search leaves some out
+    pub fn all_files(&self) -> Vec<gio::File> {
+        self.tracks().iter().map(Track::file).collect()
     }
 
     // Says how many of the tracks the search matches while it leaves out
-    // some, with or without Whole Albums, whose toggle shows which. With
-    // only a composer or a performer picked, and no words to search for, it
-    // says how many are theirs
+    // some, which are dimmed. With only a composer or a performer picked,
+    // and no words to search for, it says how many are theirs
     fn update_filter_bar(&self) {
         let imp = self.imp();
         let Some((matching, total)) = imp.left_out.get() else {
@@ -790,8 +823,8 @@ impl AlbumTracks {
         imp.filter_bar.set_reveal_child(true);
     }
 
-    // Reads the tracks of the album that match the search, or all of them
-    // with Whole Albums, or the recordings of the work
+    // Reads the tracks of the album, keeping the ones that match the
+    // search, or the recordings of the work
     fn load(&self, reveal: Option<&gio::File>) {
         let imp = self.imp();
         self.set_selection_mode(false);
@@ -807,6 +840,9 @@ impl AlbumTracks {
         }
         tracks.remove_all();
         imp.files.replace(Vec::new());
+        imp.matching.replace(None);
+        imp.left_out.set(None);
+        self.set_partial(false);
         imp.recordings.replace(Vec::new());
         imp.recording_of.replace(HashMap::new());
 
@@ -832,7 +868,6 @@ impl AlbumTracks {
         // album stops it
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
-        let whole_albums = imp.whole_albums.get();
         let filter = imp.filter.borrow().clone();
         let hidden = imp.hidden.borrow().clone();
         let reveal = reveal.cloned();
@@ -849,39 +884,53 @@ impl AlbumTracks {
                     if this.imp().generation.get() != generation {
                         return;
                     }
-                    this.imp().left_out.set(None);
                     this.update_filter_bar();
-                    this.show_recordings(recordings)
+                    let files = this.show_recordings(recordings);
+                    this.imp().files.replace(files.clone());
+                    files
                 } else {
                     let album_id = album.map(|album| album.id()).unwrap_or_default();
-                    // With a search, the tracks that match it are counted,
-                    // to tell whether it leaves some out, also with Whole
-                    // Albums, so that the bar over them stays
-                    let (paths, counts) = gio::spawn_blocking(move || {
+                    // All the tracks are shown, and with a search, those it
+                    // matches are taken, and the others dimmed
+                    let (all, matching) = gio::spawn_blocking(move || {
                         let all = library::album_tracks(&album_id, &TrackFilter::default());
-                        if filter.is_empty() {
-                            return (all, None);
-                        }
-                        let matching = library::album_tracks(&album_id, &filter);
-                        let counts = (matching.len(), all.len());
-                        (if whole_albums { all } else { matching }, Some(counts))
+                        let matching =
+                            (!filter.is_empty()).then(|| library::album_tracks(&album_id, &filter));
+                        (all, matching)
                     })
                     .await
                     .unwrap_or_default();
                     if this.imp().generation.get() != generation {
                         return;
                     }
-                    let left_out = counts
-                        .filter(|(matching, total)| matching < total)
-                        .map(|(matching, total)| (matching as u32, total as u32));
-                    this.imp().left_out.set(left_out);
+                    let all: Vec<gio::File> = all.into_iter().map(gio::File::for_path).collect();
+                    let matching = matching.filter(|matching| matching.len() < all.len());
+                    let imp = this.imp();
+                    if let Some(matching) = matching {
+                        imp.left_out
+                            .set(Some((matching.len() as u32, all.len() as u32)));
+                        let files: Vec<gio::File> =
+                            matching.into_iter().map(gio::File::for_path).collect();
+                        imp.matching.replace(Some(
+                            files.iter().map(|file| file.uri().to_string()).collect(),
+                        ));
+                        imp.files.replace(files);
+                        this.set_partial(true);
+                    } else {
+                        imp.files.replace(all.clone());
+                    }
                     this.update_filter_bar();
-                    paths.into_iter().map(gio::File::for_path).collect()
+                    all
                 };
-                this.imp().files.replace(files.clone());
                 this.read_tracks(generation, files, reveal).await;
             }
         ));
+    }
+
+    fn set_partial(&self, partial: bool) {
+        if self.imp().partial.replace(partial) != partial {
+            self.notify_partial();
+        }
     }
 
     // Keeps the recordings of the work, and the recording of each of their

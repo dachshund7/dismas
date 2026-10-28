@@ -80,10 +80,9 @@ playbackcontrol {
 
 /* The sleep timer button is filled while the timer is on, the shuffle
  * button while the playlist is shuffled, the composers button while the
- * grid shows the albums of one, and Whole Albums while it's on, as the
- * grey of a checked button hardly differs from the one of the others, and
- * a colored icon alone would hardly show */
-button.whole-albums:checked,
+ * grid shows the albums of one, as the grey of a checked button hardly
+ * differs from the one of the others, and a colored icon alone would
+ * hardly show */
 libraryview menubutton.filtering > button,
 playbackcontrol menubutton.sleep-timer-on > button,
 playbackcontrol button.stop-after:checked,
@@ -92,7 +91,6 @@ playbackcontrol button.shuffle:checked {
   color: var(--accent-fg-color);
 }
 
-button.whole-albums:checked:hover,
 libraryview menubutton.filtering > button:hover,
 playbackcontrol menubutton.sleep-timer-on > button:hover,
 playbackcontrol button.stop-after:checked:hover,
@@ -100,7 +98,6 @@ playbackcontrol button.shuffle:checked:hover {
   background-image: image(color-mix(in srgb, currentColor 10%, transparent));
 }
 
-button.whole-albums:checked:active,
 libraryview menubutton.filtering > button:active,
 libraryview menubutton.filtering > button:checked,
 playbackcontrol menubutton.sleep-timer-on > button:active,
@@ -203,6 +200,12 @@ queuerow {
 /* A track whose file wasn't found when its playlist loaded */
 queuerow.missing label,
 queuerow.missing stack {
+  opacity: 0.55;
+}
+
+/* A track of an album that the search doesn't match */
+queuerow.unmatched label,
+queuerow.unmatched stack {
   opacity: 0.55;
 }
 

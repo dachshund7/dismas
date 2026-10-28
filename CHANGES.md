@@ -73,9 +73,14 @@ All notable changes to this project will be documented in this file.
   and when it was made
 - Scan the Music Folders moved from the main menu to Preferences, as Scan
   Now, as the music folders are watched
-- Whole Albums is filled with the accent color while it's on, like the
-  shuffle and sleep timer buttons, as the grey of a pressed button hardly
-  showed
+- Whole Albums, next to the album search, is gone, as it made the search
+  narrow. Adding or playing albums during a search still takes only the
+  tracks it matches, and an album it matches only in part has Play Whole
+  Album and Add Whole Album in its menu and in the menu next to the Add
+  button. Opening it lists all its tracks, with the ones the search doesn't
+  match dimmed, and clicking one of those plays the whole album from it.
+  While albums are selected during a search, the bar says how many of their
+  tracks the buttons take
 
 ### Fixed
 

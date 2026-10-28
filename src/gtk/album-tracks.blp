@@ -61,9 +61,8 @@ template $DismasAlbumTracks: Widget {
     }
 
     // While the search leaves out some of the album's tracks, how many it
-    // matches, with the same Whole Albums toggle as next to the search of
-    // the album grid; it's in the colors of a banner, which can't hold a
-    // toggle
+    // matches; the others are dimmed, and the menu next to the Add button
+    // takes them all
     [top]
     Revealer filter_bar {
       child: Box {
@@ -78,17 +77,6 @@ template $DismasAlbumTracks: Widget {
           wrap: true;
           xalign: 0;
           margin-start: 6;
-        }
-
-        ToggleButton {
-          label: _("Whole Albums");
-          tooltip-text: _("Add, Play and Show the Whole Albums");
-          valign: center;
-          active: bind template.whole-albums bidirectional;
-
-          styles [
-            "whole-albums",
-          ]
         }
       };
     }

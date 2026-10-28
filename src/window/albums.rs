@@ -102,7 +102,7 @@ impl Window {
 
     // Adds the tracks of the albums selected in the grid to the queue,
     // or plays them in its place; for the albums selected in a search, only
-    // the tracks that match it, unless the whole albums are taken
+    // the tracks that match it
     fn queue_selected_albums(&self, play: bool) {
         let library_view = self.imp().library_view.get();
         let albums = library_view.selected_albums();
@@ -289,10 +289,17 @@ impl Window {
                 library_view.set_selection_mode(false);
                 albums
             } else {
-                vec![(album_id.clone(), library_view.track_filter())]
+                vec![(album_id.clone(), library_view.search_filter())]
             }
         };
         let albums = Rc::new(albums);
+        // While the search matches only some of the tracks of the albums,
+        // they can be taken whole too
+        let partial = if selection {
+            library_view.selection_partly_matched()
+        } else {
+            library_view.partly_matches(&album.id())
+        };
 
         // Off while tracks are read, like the other ways to add them
         let enabled = self.imp().loads.get() == 0;
@@ -307,9 +314,15 @@ impl Window {
             move |_, _| win.queue_albums(albums(&win), true)
         ));
         actions.add_action(&play);
-        self.add_adding_actions(&actions, enabled, move |win| {
-            Some(Tracks::Albums(albums(win)))
-        });
+        self.add_adding_actions(
+            &actions,
+            enabled,
+            clone!(
+                #[strong]
+                albums,
+                move |win| Some(Tracks::Albums(albums(win)))
+            ),
+        );
 
         let section = gio::Menu::new();
         section.append(Some(&i18n("Play")), Some("album.play"));
@@ -321,7 +334,66 @@ impl Window {
         );
         section.append_item(&item);
         section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu("album"));
-        popup_menu(&section, "album", &actions, cell, x, y);
+        let menu = gio::Menu::new();
+        menu.append_section(None, &section);
+        if partial {
+            let whole = self.add_whole_actions(&actions, move |win| {
+                Some(Tracks::Albums(whole_albums(albums(win))))
+            });
+            for action in whole {
+                action.set_enabled(enabled);
+            }
+            let several = selection && library_view.selected_albums().len() > 1;
+            let section = gio::Menu::new();
+            let (play, add) = if several {
+                (i18n("Play Whole Albums"), i18n("Add Whole Albums"))
+            } else {
+                (i18n("Play Whole Album"), i18n("Add Whole Album"))
+            };
+            section.append(Some(&play), Some("album.play-whole"));
+            section.append(Some(&add), Some("album.add-whole"));
+            menu.append_section(None, &section);
+        }
+        popup_menu(&menu, "album", &actions, cell, x, y);
+    }
+
+    // The actions that play the tracks `source` gives in place of the queue,
+    // and add them to the selected playlist, as their Play and Add buttons
+    // do: the whole albums, while a search takes only some of their tracks
+    pub(super) fn add_whole_actions(
+        &self,
+        group: &gio::SimpleActionGroup,
+        source: impl Fn(&Self) -> Option<Tracks> + 'static,
+    ) -> [gio::SimpleAction; 2] {
+        let source = Rc::new(source);
+        let play = gio::SimpleAction::new("play-whole", None);
+        play.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            source,
+            move |_, _| match source(&win) {
+                Some(Tracks::Albums(albums)) => win.queue_albums(albums, true),
+                Some(Tracks::ShownAlbum(files)) => win.play_shown_tracks(files, 0),
+                _ => {}
+            }
+        ));
+        let add = gio::SimpleAction::new("add-whole", None);
+        add.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, _| match source(&win) {
+                Some(Tracks::Albums(albums)) => win.queue_albums(albums, false),
+                Some(Tracks::ShownAlbum(files)) => {
+                    win.show_playlist_view();
+                    win.queue_tracks(files, QueueMode::Add);
+                }
+                _ => {}
+            }
+        ));
+        group.add_action(&play);
+        group.add_action(&add);
+        [play, add]
     }
 
     // Adds the tracks of albums dragged from the grid to the queue, before
@@ -384,15 +456,39 @@ impl Window {
             library_view.set_selection_mode(false);
             (!albums.is_empty()).then_some(Tracks::Albums(albums))
         });
+        // The selected albums whole, while a search takes only some of the
+        // tracks of one of them
+        let whole = self.add_whole_actions(&actions, |win| {
+            let library_view = win.imp().library_view.get();
+            let albums = library_view.selected_albums();
+            library_view.set_selection_mode(false);
+            (!albums.is_empty()).then(|| Tracks::Albums(whole_albums(albums)))
+        });
+        for action in whole {
+            library_view
+                .bind_property("selection-partly-matched", &action, "enabled")
+                .sync_create()
+                .build();
+        }
         library_view.insert_action_group("albums", Some(&actions));
         let actions = gio::SimpleActionGroup::new();
         self.add_adding_actions(&actions, true, |win| {
             let files = win.imp().album_tracks.files();
             (!files.is_empty()).then_some(Tracks::ShownAlbum(files))
         });
-        self.imp()
-            .album_tracks
-            .insert_action_group("album-tracks", Some(&actions));
+        // All the tracks of the album, while a search takes only some
+        let album_tracks = self.imp().album_tracks.get();
+        let whole = self.add_whole_actions(&actions, |win| {
+            let files = win.imp().album_tracks.all_files();
+            (!files.is_empty()).then_some(Tracks::ShownAlbum(files))
+        });
+        for action in whole {
+            album_tracks
+                .bind_property("partial", &action, "enabled")
+                .sync_create()
+                .build();
+        }
+        album_tracks.insert_action_group("album-tracks", Some(&actions));
 
         library_view.connect_album_menu_requested(clone!(
             #[weak(rename_to = win)]
@@ -414,14 +510,6 @@ impl Window {
             }
         ));
 
-        // Whole Albums is one setting, which the album's tracks follow, and
-        // which their banner switches too
-        let album_tracks = self.imp().album_tracks.get();
-        library_view
-            .bind_property("whole-albums", &album_tracks, "whole-albums")
-            .bidirectional()
-            .sync_create()
-            .build();
         album_tracks.connect_menu_requested(clone!(
             #[weak(rename_to = win)]
             self,
@@ -442,7 +530,15 @@ impl Window {
                 win.queue_tracks(album_tracks.files(), QueueMode::Add);
             }
         ));
-        // A track of a work's recordings plays that recording
+        // The Play button plays the tracks it takes from their start
+        album_tracks.connect_play_shown(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |album_tracks| win.play_shown_tracks(album_tracks.files(), 0)
+        ));
+        // A track plays the tracks the Play button would take from it, or
+        // the whole album from one the search doesn't match, or, in a
+        // work's recordings, its recording
         album_tracks.connect_play(clone!(
             #[weak(rename_to = win)]
             self,
@@ -565,4 +661,12 @@ fn popup_menu(
         glib::idle_add_local_once(move || popover.unparent());
     });
     popover.popup();
+}
+
+// Albums with all their tracks, whatever they had to match
+fn whole_albums(albums: Vec<(String, TrackFilter)>) -> Vec<(String, TrackFilter)> {
+    albums
+        .into_iter()
+        .map(|(id, _)| (id, TrackFilter::default()))
+        .collect()
 }

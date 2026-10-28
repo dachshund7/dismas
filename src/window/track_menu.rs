@@ -130,17 +130,6 @@ impl Window {
                 }
             ));
             section.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
-        } else if album_tracks.leaves_out_tracks() {
-            let go_to_album = gio::SimpleAction::new("go-to-album", None);
-            go_to_album.connect_activate(clone!(
-                #[weak]
-                album_tracks,
-                #[strong]
-                track,
-                move |_, _| album_tracks.show_all_tracks(Some(&track.file()))
-            ));
-            actions.add_action(&go_to_album);
-            section.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
         }
 
         // A track of a work, unless the work's recordings are showing

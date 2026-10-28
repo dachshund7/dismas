@@ -137,24 +137,6 @@ template $DismasLibraryView: Widget {
                 };
               };
             }
-
-            // While the search matches only some of the tracks of albums,
-            // takes the whole albums instead; it slides in, as the entry
-            // gives it room
-            Revealer whole_albums_revealer {
-              transition-type: slide_left;
-
-              child: ToggleButton whole_albums_button {
-                margin-start: 6;
-                active: bind template.whole-albums bidirectional;
-                label: _("Whole Albums");
-                tooltip-text: _("Add, Play and Show the Whole Albums");
-
-                styles [
-                  "whole-albums",
-                ]
-              };
-            }
           }
 
           // The albums, or the works of their tracks, in a row of its own,

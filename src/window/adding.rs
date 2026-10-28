@@ -274,15 +274,25 @@ impl Window {
         menu
     }
 
-    // The menu of an Add button, with the other ways to add the tracks
-    pub(super) fn add_button_menu(&self, prefix: &str) -> gio::Menu {
+    // The menu of an Add button, with the other ways to add the tracks,
+    // and the items that play and add the whole albums, named by `whole`,
+    // which show while a search takes only some of their tracks, as their
+    // actions are on then (see `add_whole_actions()`)
+    pub(super) fn add_button_menu(&self, prefix: &str, whole: [String; 2]) -> gio::Menu {
         let play_next = gio::Menu::new();
         play_next.append(
             Some(&i18n("Play Next")),
             Some(&format!("{prefix}.play-next")),
         );
+        let whole_albums = gio::Menu::new();
+        for (label, action) in whole.iter().zip(["play-whole", "add-whole"]) {
+            let item = gio::MenuItem::new(Some(label), Some(&format!("{prefix}.{action}")));
+            item.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
+            whole_albums.append_item(&item);
+        }
         let menu = gio::Menu::new();
         menu.append_section(None, &play_next);
+        menu.append_section(None, &whole_albums);
         menu.append_section(Some(&i18n("Add to Playlist")), &self.add_to_menu(prefix));
         menu
     }

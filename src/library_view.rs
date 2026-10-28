@@ -138,13 +138,9 @@ mod imp {
         #[template_child]
         pub page_title: TemplateChild<adw::WindowTitle>,
         #[template_child]
-        pub whole_albums_revealer: TemplateChild<gtk::Revealer>,
-        #[template_child]
         pub view_toggle: TemplateChild<adw::ToggleGroup>,
         #[template_child]
         pub works_list: TemplateChild<gtk::ListView>,
-        #[template_child]
-        pub whole_albums_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
         #[template_child]
@@ -202,12 +198,10 @@ mod imp {
         // picked from the lists next to the search
         pub composer: RefCell<Option<library::ComposerInfo>>,
         pub performer: RefCell<Option<library::PerformerInfo>>,
-        // The albums the search matches are added, played, dragged and
-        // shown with all their tracks, rather than those that match it;
-        // the toggle next to the search and the banner of the album's
-        // tracks are bound to it
-        #[property(get, set = Self::set_whole_albums, explicit_notify)]
-        pub whole_albums: Cell<bool>,
+        // A selected album matches the search only in part, so the menu
+        // of the Add button offers to take the whole albums
+        #[property(get)]
+        pub selection_partly_matched: Cell<bool>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
         // The cells of the grid that are mapped, which are about the ones
@@ -282,16 +276,6 @@ mod imp {
             self.view.replace(view);
             self.obj().update_view();
             self.obj().notify_view();
-        }
-
-        // The covers no longer say how many of their tracks the search
-        // matches while the whole albums are taken
-        fn set_whole_albums(&self, whole_albums: bool) {
-            if self.whole_albums.replace(whole_albums) == whole_albums {
-                return;
-            }
-            self.obj().update_match_counts();
-            self.obj().notify_whole_albums();
         }
     }
 
@@ -793,7 +777,7 @@ impl LibraryView {
                 let albums = if selection {
                     this.selected_albums()
                 } else {
-                    vec![(album.id(), this.track_filter())]
+                    vec![(album.id(), this.search_filter())]
                 };
                 let drag = AlbumDrag { albums, selection };
                 Some(gdk::ContentProvider::for_value(&drag.to_value()))
@@ -1108,7 +1092,6 @@ impl LibraryView {
         }));
         imp.sort_button.set_visible(!works);
         imp.select_button.set_visible(!works);
-        self.update_whole_albums_button();
         self.update_stack();
         self.update_works();
     }
@@ -1534,36 +1517,26 @@ impl LibraryView {
         matches: Option<HashMap<String, (u32, u32)>>,
     ) {
         let imp = self.imp();
-        // A new search starts again from the tracks that match it, as the
-        // albums it finds might not need whole albums. That's once its
-        // matches are in, as Whole Albums can still be pressed for the
-        // search before while they're read
-        let new_search = *imp.search_filter.borrow() != filter;
         imp.search_filter.replace(filter);
         imp.search_matches.replace(matches);
-        if new_search {
-            self.set_whole_albums(false);
-        }
         self.update_match_counts();
-        self.update_whole_albums_button();
+        self.update_selection();
         if let Some(filter) = self.imp().filter.borrow().as_ref() {
             filter.changed(gtk::FilterChange::Different);
         }
     }
 
     // The covers of the albums the search matches only partly say how many
-    // of their tracks it does, unless the whole albums are taken
+    // of their tracks it does
     fn update_match_counts(&self) {
         let imp = self.imp();
         let matches = imp.search_matches.borrow();
-        let whole_albums = imp.whole_albums.get();
         let Some(model) = imp.model.borrow().clone() else {
             return;
         };
         for album in model.iter::<Album>().flatten() {
             let (matching, total) = matches
                 .as_ref()
-                .filter(|_| !whole_albums)
                 .and_then(|matches| matches.get(&album.id()).copied())
                 .filter(|(matching, total)| matching < total)
                 .unwrap_or_default();
@@ -1576,22 +1549,21 @@ impl LibraryView {
         }
     }
 
-    // Whole Albums is only offered while the search matches only some of
-    // the tracks of albums
-    fn update_whole_albums_button(&self) {
-        let imp = self.imp();
-        let partial = imp
+    // Whether the search matches only some of the tracks of an album, so
+    // that taking the album takes only those, and its whole tracks are
+    // offered too
+    pub fn partly_matches(&self, album_id: &str) -> bool {
+        self.imp()
             .search_matches
             .borrow()
             .as_ref()
-            .is_some_and(|matches| matches.values().any(|(matching, total)| matching < total));
-        // A work's recordings are taken whole, see `show_works()`
-        imp.whole_albums_revealer
-            .set_reveal_child(partial && !self.shows_works());
+            .and_then(|matches| matches.get(album_id))
+            .is_some_and(|(matching, total)| matching < total)
     }
 
-    // What the tracks of an album the search found match: its words, and
-    // the composer and the performer picked
+    // What the tracks taken from an album have to match, to be added,
+    // played, dragged or shown: its words, and the composer and the
+    // performer picked
     pub fn search_filter(&self) -> TrackFilter {
         self.imp().search_filter.borrow().clone()
     }
@@ -1615,18 +1587,6 @@ impl LibraryView {
                 .as_ref()
                 .filter(|performer| filter.performer.as_ref() == Some(&performer.key))
                 .map(|performer| performer.name.clone()),
-        }
-    }
-
-    // What the tracks taken from an album have to match, to be added,
-    // played, dragged or shown: the search and the composer and performer
-    // picked, or nothing when the whole albums are taken
-    pub fn track_filter(&self) -> TrackFilter {
-        let imp = self.imp();
-        if imp.whole_albums.get() {
-            TrackFilter::default()
-        } else {
-            imp.search_filter.borrow().clone()
         }
     }
 
@@ -1762,7 +1722,7 @@ impl LibraryView {
     pub fn selected_albums(&self) -> Vec<(String, TrackFilter)> {
         let imp = self.imp();
         let selected = imp.selected.borrow();
-        let filter = self.track_filter();
+        let filter = self.search_filter();
         let Some(model) = imp.grid_view.model() else {
             return Vec::new();
         };
@@ -1796,19 +1756,53 @@ impl LibraryView {
     fn update_selection(&self) {
         let imp = self.imp();
         let n_selected = imp.selected.borrow().len() as u32;
+        // During a search, the number of tracks the buttons take, as they
+        // take only those that match it
+        let matching = imp.search_matches.borrow().as_ref().map(|matches| {
+            imp.selected
+                .borrow()
+                .iter()
+                .filter_map(|id| matches.get(id))
+                .map(|(matching, _)| matching)
+                .sum::<u32>()
+        });
         let label = if n_selected == 0 {
             i18n("No album selected")
         } else {
-            ni18n_f(
+            let albums = ni18n_f(
                 // Translators: The '{}' must be left unmodified, and
                 // it is expanded to the number of albums selected
                 "{} album selected",
                 "{} albums selected",
                 n_selected,
                 &[&n_selected.to_string()],
-            )
+            );
+            match matching {
+                Some(n) => {
+                    let tracks = ni18n_f(
+                        // Translators: The '{}' must be left unmodified, and
+                        // it is expanded to the number of tracks of the
+                        // albums selected that the search matches
+                        "{} track",
+                        "{} tracks",
+                        n,
+                        &[&n.to_string()],
+                    );
+                    format!("{albums} · {tracks}")
+                }
+                None => albums,
+            }
         };
         imp.selected_label.set_label(&label);
+
+        let partial = imp
+            .selected
+            .borrow()
+            .iter()
+            .any(|id| self.partly_matches(id));
+        if imp.selection_partly_matched.replace(partial) != partial {
+            self.notify_selection_partly_matched();
+        }
 
         let can_add = n_selected > 0 && !imp.loading.get();
         imp.play_albums_button.set_sensitive(can_add);
