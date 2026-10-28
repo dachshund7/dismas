@@ -397,7 +397,9 @@ impl PreferencesDialog {
                 .and_downcast::<glib::BoxedAnyObject>();
             // It leaves out the same folders as before
             if let Some(old) = &old {
-                folder.excluded = old.borrow::<MusicFolder>().excluded.clone();
+                folder
+                    .excluded
+                    .clone_from(&old.borrow::<MusicFolder>().excluded);
             }
             let same = old.is_some_and(|old| *old.borrow::<MusicFolder>() == folder);
             store.splice(pos as u32, 1, &[glib::BoxedAnyObject::new(folder)]);

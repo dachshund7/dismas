@@ -570,6 +570,19 @@ fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
     }
 }
 
+// The path of bytes as `path_from_bytes()` gives it, without copying them
+fn path_of_bytes(bytes: &[u8]) -> std::borrow::Cow<'_, Path> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        std::borrow::Cow::Borrowed(Path::new(std::ffi::OsStr::from_bytes(bytes)))
+    }
+    #[cfg(not(unix))]
+    {
+        std::borrow::Cow::Owned(path_from_bytes(bytes.to_vec()))
+    }
+}
+
 // A condition that leaves out the tracks whose file is in one of the
 // folders, and its parameters: the paths in a folder sort between its path
 // with a slash, and with the character after the slash, '0'
@@ -1957,14 +1970,16 @@ fn scan_with(
     // Forget the files that are gone, or left out, but not those of the
     // folders that aren't there, e.g. on a drive that isn't plugged in, which
     // aren't read again once they're back
-    let gone: Vec<Vec<u8>> = known
+    let gone: Vec<&[u8]> = known
         .keys()
         .filter(|file| !present.contains(*file))
+        .map(Vec::as_slice)
         .filter(|file| {
-            let path = path_from_bytes(file.to_vec());
-            !roots.unavailable.iter().any(|root| path.starts_with(root))
+            roots.unavailable.is_empty() || {
+                let path = path_of_bytes(file);
+                !roots.unavailable.iter().any(|root| path.starts_with(root))
+            }
         })
-        .cloned()
         .collect();
     if !gone.is_empty() {
         debug!("Library: {} files of tracks removed", gone.len());
@@ -1974,11 +1989,11 @@ fn scan_with(
                 "SELECT DISTINCT album_id FROM tracks WHERE file = ?1 AND album_id IS NOT NULL",
             )?;
             let mut delete = tx.prepare("DELETE FROM tracks WHERE file = ?1")?;
-            for file in &gone {
-                for id in old_albums.query_map([file.as_slice()], |row| row.get::<_, String>(0))? {
+            for file in gone {
+                for id in old_albums.query_map([file], |row| row.get::<_, String>(0))? {
                     stale_albums.insert(id?);
                 }
-                n_changed += delete.execute([file.as_slice()])?;
+                n_changed += delete.execute([file])?;
             }
         }
         tx.commit()?;
@@ -3262,10 +3277,7 @@ mod tests {
             relative_to(&folder(music.clone()), &folder(music.clone())),
             None
         );
-        assert_eq!(
-            relative_to(&folder(dir.clone()), &folder(music.clone())),
-            None
-        );
+        assert_eq!(relative_to(&folder(dir.clone()), &folder(music)), None);
         // Through the document portal, by the paths outside the sandbox
         let portal = |path: &str, host: &str| MusicFolder {
             host: Some(PathBuf::from(host)),

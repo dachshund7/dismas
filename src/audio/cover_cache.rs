@@ -217,17 +217,10 @@ impl CoverCache {
         let mut album_artist = None;
         let mut album = None;
 
-        fn get_text_value(value: &lofty::tag::ItemValue) -> Option<String> {
-            match value {
-                lofty::tag::ItemValue::Text(s) => Some(s.to_string()),
-                _ => None,
-            }
-        }
-
         for item in tag.items() {
             match item.key() {
-                lofty::prelude::ItemKey::AlbumTitle => album = get_text_value(item.value()),
-                lofty::prelude::ItemKey::AlbumArtist => album_artist = get_text_value(item.value()),
+                lofty::prelude::ItemKey::AlbumTitle => album = item.value().text(),
+                lofty::prelude::ItemKey::AlbumArtist => album_artist = item.value().text(),
                 _ => (),
             }
         }
@@ -248,10 +241,10 @@ impl CoverCache {
             hasher.update([0]);
             hasher.update(parent.as_os_str().as_encoded_bytes());
         } else if let Some(album) = album {
-            hasher.update(&album);
+            hasher.update(album);
 
             if let Some(artist) = album_artist {
-                hasher.update(&artist);
+                hasher.update(artist);
             }
 
             if let Some(parent) = path.parent() {

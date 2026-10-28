@@ -403,7 +403,7 @@ impl Finder {
             if matching.next().is_some() {
                 return None;
             }
-            path = found.clone();
+            path.clone_from(found);
         }
         cue_sheet::location_exists(&path).then_some(path)
     }

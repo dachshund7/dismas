@@ -80,3 +80,7 @@ if_not_else = "warn"
 single_match_else = "warn"
 map_unwrap_or = "warn"
 cast_lossless = "warn"
+implicit_clone = "warn"
+assigning_clones = "warn"
+# From the nursery group, for the clones of values that are not used again
+redundant_clone = "warn"
