@@ -570,6 +570,18 @@ fn set(tag: &mut Tag, key: ItemKey, value: Option<&String>) {
     }
 }
 
+// Sets a name from the sheet. The file's sort names for the name it
+// replaces would be another's, e.g. the album's composer for the track a
+// SONGWRITER of its own wrote, so they go, unless the name is the same
+fn set_name(tag: &mut Tag, key: ItemKey, sort_key: ItemKey, value: Option<&String>) {
+    if let Some(value) = value {
+        if !tag.get_strings(key).eq([value.as_str()]) {
+            tag.remove_key(sort_key);
+        }
+        tag.insert_text(key, value.clone());
+    }
+}
+
 // The tags of an album that a sheet splits from an audio file: the file's,
 // with the album's from the sheet over them. The tag is a Vorbis comment,
 // which takes any item, whatever the file has
@@ -588,7 +600,12 @@ pub fn album_tag(file_tag: Option<&Tag>, sheet: &CueSheet) -> Tag {
     }
 
     set(&mut tag, ItemKey::AlbumTitle, sheet.title.as_ref());
-    set(&mut tag, ItemKey::AlbumArtist, sheet.performer.as_ref());
+    set_name(
+        &mut tag,
+        ItemKey::AlbumArtist,
+        ItemKey::AlbumArtistSortOrder,
+        sheet.performer.as_ref(),
+    );
     set(&mut tag, ItemKey::Genre, sheet.genre.as_ref());
     set(&mut tag, ItemKey::RecordingDate, sheet.date.as_ref());
     set(&mut tag, ItemKey::DiscNumber, sheet.disc_number.as_ref());
@@ -616,14 +633,16 @@ pub fn track_tag(album_tag: &Tag, sheet: &CueSheet, track: &CueTrack) -> Tag {
     }
 
     set(&mut tag, ItemKey::TrackTitle, track.title.as_ref());
-    set(
+    set_name(
         &mut tag,
         ItemKey::TrackArtist,
+        ItemKey::TrackArtistSortOrder,
         track.performer.as_ref().or(sheet.performer.as_ref()),
     );
-    set(
+    set_name(
         &mut tag,
         ItemKey::Composer,
+        ItemKey::ComposerSortOrder,
         track
             .songwriter
             .as_ref()
@@ -640,7 +659,10 @@ pub fn track_tag(album_tag: &Tag, sheet: &CueSheet, track: &CueTrack) -> Tag {
 
 #[cfg(test)]
 mod tests {
-    use lofty::prelude::Accessor;
+    use lofty::{
+        prelude::Accessor,
+        tag::{ItemValue, TagItem},
+    };
 
     use super::*;
 
@@ -927,5 +949,51 @@ FILE "Elgar - Enigma Variations.wav" WAVE
             first.get_string(ItemKey::ReplayGainTrackGain),
             Some("-6.00 dB")
         );
+    }
+
+    #[test]
+    fn a_name_the_sheet_replaces_loses_its_sort_name() {
+        let sheet = parse(
+            r#"PERFORMER "Philharmonia Orchestra"
+TITLE "English Music for Strings"
+FILE "Strings.flac" WAVE
+  TRACK 01 AUDIO
+    TITLE "Introduction and Allegro"
+    SONGWRITER "Edward Elgar"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "An English Suite"
+    SONGWRITER "Hubert Parry"
+    INDEX 01 14:00:00
+"#,
+        )
+        .unwrap();
+        let mut file_tag = Tag::new(TagType::VorbisComments);
+        for (key, value) in [
+            (ItemKey::AlbumArtist, "Sir John Barbirolli"),
+            (ItemKey::AlbumArtistSortOrder, "Barbirolli, Sir John"),
+            (ItemKey::Composer, "Edward Elgar"),
+            (ItemKey::ComposerSortOrder, "Elgar, Edward"),
+        ] {
+            file_tag.push_unchecked(TagItem::new(key, ItemValue::Text(value.to_string())));
+        }
+
+        // The sheet's performer isn't the file's album artist
+        let album = album_tag(Some(&file_tag), &sheet);
+        assert_eq!(
+            album.get_string(ItemKey::AlbumArtist),
+            Some("Philharmonia Orchestra")
+        );
+        assert_eq!(album.get_string(ItemKey::AlbumArtistSortOrder), None);
+
+        // The first track's composer is the file's, the second's isn't
+        let elgar = track_tag(&album, &sheet, &sheet.tracks[0]);
+        assert_eq!(
+            elgar.get_string(ItemKey::ComposerSortOrder),
+            Some("Elgar, Edward")
+        );
+        let parry = track_tag(&album, &sheet, &sheet.tracks[1]);
+        assert_eq!(parry.get_string(ItemKey::Composer), Some("Hubert Parry"));
+        assert_eq!(parry.get_string(ItemKey::ComposerSortOrder), None);
     }
 }

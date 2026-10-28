@@ -50,6 +50,7 @@ use crate::{
 mod credits;
 mod file_name;
 mod loader;
+mod lofty_gaps;
 mod search;
 mod tags;
 mod work_hierarchy;
@@ -59,6 +60,7 @@ pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
+use lofty_gaps::Fills;
 pub use search::{normalize_search_text, search_key, track_search_text};
 pub use tags::{ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_title};
 use tags::{track_album, track_artist};

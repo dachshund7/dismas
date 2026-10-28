@@ -22,10 +22,6 @@ pub struct ExtraComments {
     pub(super) recording_date: Option<String>,
     // A CUE sheet that splits the file into tracks
     pub cue_sheet: Option<String>,
-    // The names of the composers to sort them by, e.g. "Bach, Johann
-    // Sebastian", which lofty doesn't read from Vorbis comments and APE
-    // tags; it does from ID3v2 and MP4 tags
-    pub composer_sort: Vec<String>,
 }
 
 // The name of the tag of the "Work Hierarchy" plugin; MusicBrainz Picard
@@ -66,9 +62,6 @@ impl ExtraComments {
             work_hierarchy: get("WORK_HIERARCHY"),
             recording_date: get("RECORDINGDATE"),
             cue_sheet: get("CUESHEET"),
-            composer_sort: comments
-                .map(|c| c.get_all("COMPOSERSORT").map(ToString::to_string).collect())
-                .unwrap_or_default(),
         }
     }
 
@@ -86,10 +79,6 @@ impl ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
             recording_date: get(RECORDING_DATE),
             cue_sheet: get("Cuesheet"),
-            // Several values are separated by nul characters
-            composer_sort: get("ComposerSort")
-                .map(|text| text.split('\0').map(ToString::to_string).collect())
-                .unwrap_or_default(),
         }
     }
 
@@ -129,6 +118,31 @@ impl ExtraComments {
             recording_date: get(RECORDING_DATE),
             ..Default::default()
         }
+    }
+}
+
+// What lofty leaves out of a file's tag: the items it has no `ItemKey` for,
+// and those it has one for but doesn't read
+struct LeftOut(ExtraComments, Fills);
+
+impl LeftOut {
+    fn vorbis(comments: Option<&VorbisComments>) -> Self {
+        Self(
+            ExtraComments::from_vorbis(comments),
+            Fills::from_vorbis(comments),
+        )
+    }
+
+    fn ape(tag: Option<&ApeTag>) -> Self {
+        Self(ExtraComments::from_ape(tag), Fills::from_ape(tag))
+    }
+
+    fn id3v2(tag: Option<&Id3v2Tag>) -> Self {
+        Self(ExtraComments::from_id3v2(tag), Fills::default())
+    }
+
+    fn mp4(ilst: Option<&Ilst>) -> Self {
+        Self(ExtraComments::from_mp4(ilst), Fills::default())
     }
 }
 
@@ -173,13 +187,14 @@ pub struct FileTags {
 impl FileTags {
     // The tags are taken out of the file rather than copied, as they hold
     // the covers
-    fn new(mut file: TaggedFile, extra: ExtraComments) -> Self {
+    fn new(mut file: TaggedFile, LeftOut(extra, fills): LeftOut) -> Self {
         let primary = file.primary_tag_type();
-        let tag = file.remove(primary).unwrap_or_else(|| {
+        let mut tag = file.remove(primary).unwrap_or_else(|| {
             let types: Vec<TagType> = file.tags().iter().map(Tag::tag_type).collect();
             let tags = types.into_iter().filter_map(|t| file.remove(t)).collect();
             merged_tag(tags).unwrap_or_else(|| Tag::new(primary))
         });
+        fills.apply(&mut tag);
         Self {
             tag,
             extra,
@@ -205,7 +220,7 @@ pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
         }
     };
     match read_tagged_file(probe, options) {
-        Ok((file, extra)) => Some(FileTags::new(file, extra)),
+        Ok((file, left_out)) => Some(FileTags::new(file, left_out)),
         Err(e) => {
             warn!("Unable to read file {path:?}: {e}");
             None
@@ -234,59 +249,45 @@ fn merged_tag(tags: Vec<Tag>) -> Option<Tag> {
     Some(merged)
 }
 
-// Reads a file, and the items in `ExtraComments` if it has them
+// Reads a file, and what lofty leaves out of its tag
 fn read_tagged_file(
     probe: Probe<BufReader<File>>,
     options: ParseOptions,
-) -> Result<(TaggedFile, ExtraComments), FileParseError> {
+) -> Result<(TaggedFile, LeftOut), FileParseError> {
     fn read<F: AudioFile + Into<TaggedFile>>(
         probe: Probe<BufReader<File>>,
         options: ParseOptions,
-        extra: fn(&F) -> ExtraComments,
-    ) -> Result<(TaggedFile, ExtraComments), FileParseError> {
+        left_out: fn(&F) -> LeftOut,
+    ) -> Result<(TaggedFile, LeftOut), FileParseError> {
         let file = F::read_from(&mut probe.into_inner(), options)?;
-        let extra = extra(&file);
-        Ok((file.into(), extra))
+        let left_out = left_out(&file);
+        Ok((file.into(), left_out))
     }
 
     match probe.file_type() {
         Some(FileType::Opus) => read(probe, options, |f: &OpusFile| {
-            ExtraComments::from_vorbis(Some(f.vorbis_comments()))
+            LeftOut::vorbis(Some(f.vorbis_comments()))
         }),
         Some(FileType::Vorbis) => read(probe, options, |f: &VorbisFile| {
-            ExtraComments::from_vorbis(Some(f.vorbis_comments()))
+            LeftOut::vorbis(Some(f.vorbis_comments()))
         }),
         Some(FileType::Speex) => read(probe, options, |f: &SpeexFile| {
-            ExtraComments::from_vorbis(Some(f.vorbis_comments()))
+            LeftOut::vorbis(Some(f.vorbis_comments()))
         }),
         Some(FileType::Flac) => read(probe, options, |f: &FlacFile| {
-            ExtraComments::from_vorbis(f.vorbis_comments())
+            LeftOut::vorbis(f.vorbis_comments())
         }),
-        Some(FileType::Ape) => read(probe, options, |f: &ApeFile| {
-            ExtraComments::from_ape(f.ape())
+        Some(FileType::Ape) => read(probe, options, |f: &ApeFile| LeftOut::ape(f.ape())),
+        Some(FileType::WavPack) => read(probe, options, |f: &WavPackFile| LeftOut::ape(f.ape())),
+        Some(FileType::Mpc) => read(probe, options, |f: &MpcFile| LeftOut::ape(f.ape())),
+        Some(FileType::Mpeg) => read(probe, options, |f: &MpegFile| LeftOut::id3v2(f.id3v2())),
+        Some(FileType::Aiff) => read(probe, options, |f: &AiffFile| LeftOut::id3v2(f.id3v2())),
+        Some(FileType::Wav) => read(probe, options, |f: &WavFile| LeftOut::id3v2(f.id3v2())),
+        Some(FileType::Mp4) => read(probe, options, |f: &Mp4File| LeftOut::mp4(f.ilst())),
+        _ => probe.options(options).read().map(|f| {
+            let left_out = LeftOut(ExtraComments::default(), Fills::default());
+            (f, left_out)
         }),
-        Some(FileType::WavPack) => read(probe, options, |f: &WavPackFile| {
-            ExtraComments::from_ape(f.ape())
-        }),
-        Some(FileType::Mpc) => read(probe, options, |f: &MpcFile| {
-            ExtraComments::from_ape(f.ape())
-        }),
-        Some(FileType::Mpeg) => read(probe, options, |f: &MpegFile| {
-            ExtraComments::from_id3v2(f.id3v2())
-        }),
-        Some(FileType::Aiff) => read(probe, options, |f: &AiffFile| {
-            ExtraComments::from_id3v2(f.id3v2())
-        }),
-        Some(FileType::Wav) => read(probe, options, |f: &WavFile| {
-            ExtraComments::from_id3v2(f.id3v2())
-        }),
-        Some(FileType::Mp4) => read(probe, options, |f: &Mp4File| {
-            ExtraComments::from_mp4(f.ilst())
-        }),
-        _ => probe
-            .options(options)
-            .read()
-            .map(|f| (f, ExtraComments::default())),
     }
 }
 

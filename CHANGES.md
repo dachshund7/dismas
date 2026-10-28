@@ -127,6 +127,9 @@ All notable changes to this project will be documented in this file.
 - Screen readers found no name for the seek bar, the volume slider or the
   album search, read the time played as "Elapsed time" rather than the time,
   and read a playing icon on every track of the playlist
+- An album that a CUE sheet splits from one file, whose sheet names another
+  performer than the file's album artist, sorted in the grid by the name of
+  the file's album artist
 
 ### Removed
 

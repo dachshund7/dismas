@@ -45,7 +45,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 16;
+const SCHEMA_VERSION: i32 = 17;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -2297,11 +2297,7 @@ impl TrackTags {
         );
 
         let names = split_names(tag.get_strings(ItemKey::Composer));
-        let sorts = if extra.composer_sort.is_empty() {
-            split_names(tag.get_strings(ItemKey::ComposerSortOrder))
-        } else {
-            split_names(extra.composer_sort.iter().map(String::as_str))
-        };
+        let sorts = split_names(tag.get_strings(ItemKey::ComposerSortOrder));
 
         TrackTags {
             album_id: Some(album_id),
