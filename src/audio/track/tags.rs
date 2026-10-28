@@ -232,9 +232,9 @@ impl FileTags {
 // has them; the options can leave out the covers and the properties. A
 // file that lofty can't read, GStreamer may
 pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
-    let read_options = options;
-    let options = options.parse_options();
-    let probe = match Probe::open(path).map(|probe| probe.options(options).guess_file_type()) {
+    let parse_options = options.parse_options();
+    let probe = match Probe::open(path).map(|probe| probe.options(parse_options).guess_file_type())
+    {
         Ok(Ok(probe)) => probe,
         Ok(Err(e)) => {
             warn!("Unable to parse file type {path:?}: {e}");
@@ -246,15 +246,15 @@ pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
         }
     };
     if lofty_gaps::guessed_from_junk(path, probe.file_type())
-        && let Some(tags) = discovered::discover(path, read_options)
+        && let Some(tags) = discovered::discover(path, options)
     {
         debug!("Read {path:?} with GStreamer, as lofty only guessed it was MPEG audio");
         return Some(tags);
     }
-    match read_tagged_file(probe, options) {
+    match read_tagged_file(probe, parse_options) {
         Ok((file, left_out)) => Some(FileTags::new(file, left_out)),
         Err(e) => {
-            let tags = discovered::discover(path, read_options);
+            let tags = discovered::discover(path, options);
             match tags {
                 Some(_) => debug!("Read {path:?} with GStreamer, as lofty couldn't: {e}"),
                 None => warn!("Unable to read file {path:?}: {e}"),

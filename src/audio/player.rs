@@ -20,7 +20,7 @@ use crate::{
     application::ApplicationAction,
     audio::{
         Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, SleepTimer,
-        Track, TrackSource, WaveformGenerator,
+        TimerEnd, Track, TrackSource, WaveformGenerator,
     },
     play_stats::{self, Listen, ListenTracker},
     utils,
@@ -325,12 +325,7 @@ impl AudioPlayer {
                 }
             }
         ));
-        self.sleep_timer.connect_finishing_track_notify(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |_| this.update_next_track()
-        ));
-        self.sleep_timer.connect_finishing_work_notify(clone!(
+        self.sleep_timer.connect_waiting_for_notify(clone!(
             #[weak(rename_to = this)]
             self,
             move |_| this.update_next_track()
@@ -356,14 +351,15 @@ impl AudioPlayer {
     // doesn't continue it either. The tracks are the queue's, as it goes
     // on to the next one before the state shows it
     fn stops_at_track_end(&self) -> bool {
-        let timer = &self.sleep_timer;
-        timer.finishing_track()
-            || (timer.finishing_work()
-                && !self
-                    .queue
-                    .current()
-                    .zip(self.queue.peek_next_track())
-                    .is_some_and(|(current, next)| continues_work(&current, &next)))
+        match self.sleep_timer.waiting_for() {
+            TimerEnd::None => false,
+            TimerEnd::Track => true,
+            TimerEnd::Work => !self
+                .queue
+                .current()
+                .zip(self.queue.peek_next_track())
+                .is_some_and(|(current, next)| continues_work(&current, &next)),
+        }
     }
 
     fn setup_channel(self: Rc<Self>) {

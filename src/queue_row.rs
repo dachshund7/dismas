@@ -316,29 +316,14 @@ impl QueueRow {
             true
         });
 
-        let click = gtk::GestureClick::builder()
-            .button(gdk::BUTTON_SECONDARY)
-            .build();
-        click.connect_pressed(clone!(
-            #[weak(rename_to = this)]
+        utils::setup_context_menu(
             self,
-            move |gesture, _, x, y| {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-                this.emit_by_name::<()>("menu-requested", &[&x, &y]);
-            }
-        ));
-        self.add_controller(click);
-
-        let long_press = gtk::GestureLongPress::builder().touch_only(true).build();
-        long_press.connect_pressed(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |gesture, x, y| {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-                this.emit_by_name::<()>("menu-requested", &[&x, &y]);
-            }
-        ));
-        self.add_controller(long_press);
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |x, y| this.emit_by_name::<()>("menu-requested", &[&x, &y])
+            ),
+        );
 
         let modifier_click = gtk::GestureClick::new();
         modifier_click.connect_pressed(clone!(

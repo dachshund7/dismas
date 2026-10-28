@@ -308,6 +308,9 @@ impl CoverCache {
 fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
     let mut named: Vec<(u8, u8, PathBuf)> = Vec::new();
     let mut others = Vec::new();
+    // The type is guessed from the name, so once for each extension, as
+    // a folder has many tracks
+    let mut images: HashMap<String, bool> = HashMap::new();
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
         let (Some(stem), Some(ext)) = (
@@ -316,8 +319,13 @@ fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
         ) else {
             continue;
         };
-        let (mime_type, _) = gio::content_type_guess(Some(&path), None);
-        if !mime_type.starts_with("image/") {
+        let ext = ext.to_lowercase();
+        let image = *images.entry(ext.clone()).or_insert_with(|| {
+            gio::content_type_guess(Some(&path), None)
+                .0
+                .starts_with("image/")
+        });
+        if !image {
             continue;
         }
         let stem = stem.to_lowercase();
@@ -336,7 +344,7 @@ fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
                 continue;
             }
         };
-        let ext_rank = match ext.to_lowercase().as_str() {
+        let ext_rank = match ext.as_str() {
             "jpg" | "jpeg" => 0,
             "png" => 1,
             _ => 2,

@@ -62,15 +62,10 @@ pub fn shuffled_order(
         .map(|pos| units.remove(pos));
 
     // A random order where each unit is more likely to come before another
-    // the more weight it has: a unit of weight a comes before one of weight
-    // b with a probability of a / (a + b). Efraimidis and Spirakis's key,
-    // u^(1/w) for a random u in (0, 1], is compared through its logarithm
+    // the more weight it has
     let mut keyed: Vec<(f64, Unit)> = units
         .into_iter()
-        .map(|unit| {
-            let u: f64 = rng.random();
-            ((1.0 - u).ln() / unit.weight, unit)
-        })
+        .map(|unit| (weighted_key(unit.weight, rng), unit))
         .collect();
     keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
     let weighted: Vec<Unit> = keyed.into_iter().map(|(_, unit)| unit).collect();
@@ -125,18 +120,24 @@ pub fn weight(stats: impl Iterator<Item = TrackStats> + Clone, now: i64) -> f64 
 }
 
 // The position of one of the weights, picked at random, each the more
-// likely the more weight it has: the one whose key, as in
-// `shuffled_order()`, would come first
+// likely the more weight it has: the one whose key would come first in
+// `shuffled_order()`
 pub fn weighted_pick(weights: &[f64], rng: &mut (impl Rng + ?Sized)) -> Option<usize> {
     weights
         .iter()
-        .map(|weight| {
-            let u: f64 = rng.random();
-            (1.0 - u).ln() / weight
-        })
+        .map(|weight| weighted_key(*weight, rng))
         .enumerate()
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(pos, _)| pos)
+}
+
+// A random key for a weight, larger the more weight it has: of weights a
+// and b, a's key is the larger with a probability of a / (a + b). It's
+// Efraimidis and Spirakis's key, u^(1/w) for a random u in (0, 1],
+// through its logarithm
+fn weighted_key(weight: f64, rng: &mut (impl Rng + ?Sized)) -> f64 {
+    let u: f64 = rng.random();
+    (1.0 - u).ln() / weight
 }
 
 // From a tenth, for a track heard just now, to 1, for a track not heard

@@ -14,13 +14,7 @@ impl Window {
         picks: &PickNames,
         reveal: Option<&gio::File>,
     ) {
-        let imp = self.imp();
-        if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
-            imp.sidebar_was_visible.set(self.playlist_visible());
-        }
-        imp.album_tracks.show_album(album, filter, picks, reveal);
-        imp.sidebar_stack.set_visible_child_name("album");
-        self.set_playlist_visible(true);
+        self.show_album_pane(|album_tracks| album_tracks.show_album(album, filter, picks, reveal));
     }
 
     // Shows the recordings of a work in the sidebar, those the filter
@@ -31,12 +25,19 @@ impl Window {
         filter: &TrackFilter,
         reveal: Option<&gio::File>,
     ) {
+        let hidden = self.imp().library_view.hidden_folders();
+        self.show_album_pane(|album_tracks| album_tracks.show_work(work, filter, hidden, reveal));
+    }
+
+    // Shows the pane of the album's tracks in the sidebar, once `show` has
+    // put them in it; going back shows the queue, and closes the sidebar if
+    // it was opened for them
+    fn show_album_pane(&self, show: impl FnOnce(&AlbumTracks)) {
         let imp = self.imp();
         if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
             imp.sidebar_was_visible.set(self.playlist_visible());
         }
-        let hidden = imp.library_view.hidden_folders();
-        imp.album_tracks.show_work(work, filter, hidden, reveal);
+        show(&imp.album_tracks);
         imp.sidebar_stack.set_visible_child_name("album");
         self.set_playlist_visible(true);
     }
@@ -104,9 +105,7 @@ impl Window {
     // or plays them in its place; for the albums selected in a search, only
     // the tracks that match it
     fn queue_selected_albums(&self, play: bool) {
-        let library_view = self.imp().library_view.get();
-        let albums = library_view.selected_albums();
-        library_view.set_selection_mode(false);
+        let albums = self.imp().library_view.take_selected_albums();
         self.queue_albums(albums, play);
     }
 
@@ -121,10 +120,7 @@ impl Window {
                 };
 
                 if play {
-                    win.select_queue_to_play();
-                    win.clear_queue();
-                    win.show_playlist_view();
-                    win.queue_tracks(files, QueueMode::Play(0));
+                    win.play_shown_tracks(files, 0);
                 } else {
                     win.queue_tracks(files, QueueMode::Add);
                 }
@@ -206,8 +202,8 @@ impl Window {
         popup_menu(&section, "work", &actions, widget, x, y);
     }
 
-    // Plays tracks of the sidebar in place of the queue, from the one at
-    // `start`, as an album's Play button does
+    // Plays tracks in place of the queue, from the one at `start`, as an
+    // album's Play button does
     fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
         self.select_queue_to_play();
         self.clear_queue();
@@ -256,17 +252,7 @@ impl Window {
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
         section.append(Some(&i18n("Play")), Some("recording.play"));
-        section.append(Some(&i18n("Play Next")), Some("recording.play-next"));
-        let item = gio::MenuItem::new(Some(&self.add_to_selected_label()), None);
-        item.set_action_and_target_value(
-            Some("recording.add-to"),
-            Some(&self.selected_playlist().to_variant()),
-        );
-        section.append_item(&item);
-        section.append_submenu(
-            Some(&i18n("Add to Playlist")),
-            &self.add_to_menu("recording"),
-        );
+        self.append_adding_items(&section, "recording", true, true);
         menu.append_section(None, &section);
         let section = gio::Menu::new();
         section.append(Some(&i18n("Go to Album")), Some("recording.go-to-album"));
@@ -285,9 +271,7 @@ impl Window {
         let albums = move |win: &Self| {
             let library_view = win.imp().library_view.get();
             if selection {
-                let albums = library_view.selected_albums();
-                library_view.set_selection_mode(false);
-                albums
+                library_view.take_selected_albums()
             } else {
                 vec![(album_id.clone(), library_view.search_filter())]
             }
@@ -326,14 +310,7 @@ impl Window {
 
         let section = gio::Menu::new();
         section.append(Some(&i18n("Play")), Some("album.play"));
-        section.append(Some(&i18n("Play Next")), Some("album.play-next"));
-        let item = gio::MenuItem::new(Some(&self.add_to_selected_label()), None);
-        item.set_action_and_target_value(
-            Some("album.add-to"),
-            Some(&self.selected_playlist().to_variant()),
-        );
-        section.append_item(&item);
-        section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu("album"));
+        self.append_adding_items(&section, "album", true, true);
         let menu = gio::Menu::new();
         menu.append_section(None, &section);
         if partial {
@@ -451,17 +428,13 @@ impl Window {
         // can be added
         let actions = gio::SimpleActionGroup::new();
         self.add_adding_actions(&actions, true, |win| {
-            let library_view = win.imp().library_view.get();
-            let albums = library_view.selected_albums();
-            library_view.set_selection_mode(false);
+            let albums = win.imp().library_view.take_selected_albums();
             (!albums.is_empty()).then_some(Tracks::Albums(albums))
         });
         // The selected albums whole, while a search takes only some of the
         // tracks of one of them
         let whole = self.add_whole_actions(&actions, |win| {
-            let library_view = win.imp().library_view.get();
-            let albums = library_view.selected_albums();
-            library_view.set_selection_mode(false);
+            let albums = win.imp().library_view.take_selected_albums();
             (!albums.is_empty()).then(|| Tracks::Albums(whole_albums(albums)))
         });
         for action in whole {

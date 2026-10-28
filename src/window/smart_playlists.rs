@@ -6,7 +6,7 @@ use std::{collections::HashMap, path::PathBuf};
 use adw::prelude::*;
 
 use super::*;
-use crate::{audio::shuffle, library::MusicFolder};
+use crate::audio::shuffle;
 
 impl Window {
     // Plays the tracks of a smart playlist in place of the queue, like
@@ -55,14 +55,14 @@ impl Window {
     fn play_random_album(&self) {
         // What was heard of the track playing counts, as for the lists
         self.player().save_listen();
-        let folders = library::music_folders(&self.imp().settings);
+        let hidden = self.imp().library_view.hidden_folders();
         let last = self.imp().last_random_album.borrow().clone();
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
             self,
             async move {
-                let picked = gio::spawn_blocking(move || pick_album(&folders, last.as_deref()))
+                let picked = gio::spawn_blocking(move || pick_album(&hidden, last.as_deref()))
                     .await
                     .ok()
                     .flatten();
@@ -130,18 +130,17 @@ impl Window {
     }
 }
 
-// An album of the grid, without the one played `last` unless it's the only
-// one, picked at random by what was heard of its tracks, with the paths of
-// its tracks; this blocks
+// An album of the grid, without the tracks in the `hidden` folders and
+// without the one played `last` unless it's the only one, picked at random
+// by what was heard of its tracks, with the paths of its tracks; this
+// blocks
 fn pick_album(
-    folders: &[MusicFolder],
+    hidden: &[PathBuf],
     last: Option<&str>,
 ) -> Option<(library::AlbumInfo, Vec<PathBuf>)> {
-    let roots = library::roots(folders);
-    let hidden = [roots.unavailable, roots.excluded].concat();
     let mut tracks: HashMap<String, Vec<PathBuf>> =
-        library::album_track_paths(&hidden).into_iter().collect();
-    let mut albums: Vec<(library::AlbumInfo, Vec<PathBuf>)> = library::albums(&hidden)
+        library::album_track_paths(hidden).into_iter().collect();
+    let mut albums: Vec<(library::AlbumInfo, Vec<PathBuf>)> = library::albums(hidden)
         .into_iter()
         .filter_map(|album| {
             let paths = tracks.remove(&album.id)?;

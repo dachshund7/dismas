@@ -69,7 +69,7 @@ pub use player::{
     VOLUME_STEP,
 };
 pub use queue::Queue;
-pub use sleep_timer::SleepTimer;
+pub use sleep_timer::{SleepTimer, TimerEnd};
 pub use state::PlayerState;
 pub use track::{
     ExtraComments, FileDetails, FileTags, Gains, ListedPerformer, Missing, MusicBrainzIds,

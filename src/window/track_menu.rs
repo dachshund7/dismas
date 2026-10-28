@@ -37,21 +37,10 @@ impl Window {
         self.add_adding_actions(&actions, enabled, move |_| Some(tracks.clone()));
 
         let section = gio::Menu::new();
-        // The playing track is where it would go
+        // The playing track is where Play Next would put it, and the tracks
+        // of the queue are in the selected playlist already
         let playing = !selection && in_queue && queue.current().as_ref() == Some(&track);
-        if !playing {
-            section.append(Some(&i18n("Play Next")), Some("track.play-next"));
-        }
-        // The tracks of the queue are in the selected playlist already
-        if !in_queue {
-            let item = gio::MenuItem::new(Some(&self.add_to_selected_label()), None);
-            item.set_action_and_target_value(
-                Some("track.add-to"),
-                Some(&self.selected_playlist().to_variant()),
-            );
-            section.append_item(&item);
-        }
-        section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu("track"));
+        self.append_adding_items(&section, "track", !playing, !in_queue);
         menu.append_section(None, &section);
 
         let section = gio::Menu::new();

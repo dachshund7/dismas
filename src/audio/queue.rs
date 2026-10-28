@@ -316,6 +316,7 @@ impl Queue {
     // so that they play in the order they were chosen; the tracks moved
     // there don't count
     pub fn play_next_before(&self, moving: &[Track]) -> Option<Track> {
+        let moving: HashSet<&Track> = moving.iter().collect();
         let tracks: Vec<Track> = self
             .tracks()
             .into_iter()
@@ -324,7 +325,7 @@ impl Queue {
         let current = self
             .current()
             .and_then(|current| tracks.iter().position(|t| *t == current));
-        let played_next: Vec<Track> = self
+        let played_next: HashSet<Track> = self
             .imp()
             .played_next
             .borrow()
@@ -344,7 +345,8 @@ impl Queue {
     // nothing else comes in between
     pub fn mark_played_next(&self, tracks: &[Track]) {
         let mut played_next = self.imp().played_next.borrow_mut();
-        played_next.retain(|t| t.upgrade().is_some_and(|t| !tracks.contains(&t)));
+        let marked: HashSet<&Track> = tracks.iter().collect();
+        played_next.retain(|t| t.upgrade().is_some_and(|t| !marked.contains(&t)));
         played_next.extend(tracks.iter().map(ObjectExt::downgrade));
     }
 

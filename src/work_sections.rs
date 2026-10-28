@@ -14,7 +14,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
 
-use crate::audio::Track;
+use crate::{audio::Track, utils};
 
 mod imp {
     use super::*;
@@ -174,7 +174,7 @@ pub fn continues_work(previous: &Track, track: &Track) -> bool {
 // a work; a click on the name calls `on_work_clicked` with the positions of the first
 // movement and past the last one, and whether Ctrl was held, and a right
 // click or a long press calls `on_work_menu` with the name, the point of
-// it, and the position of the first movement. In lists
+// it, and the first movement. In lists
 // whose tracks can be moved, `drop_before_work` says whether they can be
 // now, as the rows do, and a track dropped on the header of a work at the
 // top of the list is given to it with the position of the first movement;
@@ -182,7 +182,7 @@ pub fn continues_work(previous: &Track, track: &Track) -> bool {
 // its header
 pub fn work_header_factory(
     on_work_clicked: impl Fn(u32, u32, bool) + 'static,
-    on_work_menu: impl Fn(&gtk::Widget, f64, f64, u32) + 'static,
+    on_work_menu: impl Fn(&gtk::Widget, f64, f64, &Track) + 'static,
     drop_before_work: Option<(impl Fn() -> bool + 'static, impl Fn(&Track, u32) + 'static)>,
 ) -> gtk::ListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
@@ -238,36 +238,22 @@ pub fn work_header_factory(
         ));
         title.add_controller(click);
 
-        let menu_click = gtk::GestureClick::builder()
-            .button(gdk::BUTTON_SECONDARY)
-            .build();
-        menu_click.connect_pressed(glib::clone!(
-            #[weak]
-            header,
-            #[weak]
-            title,
-            #[strong]
-            on_work_menu,
-            move |gesture, _, x, y| {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-                on_work_menu(title.upcast_ref(), x, y, header.start());
-            }
-        ));
-        title.add_controller(menu_click);
-        let long_press = gtk::GestureLongPress::builder().touch_only(true).build();
-        long_press.connect_pressed(glib::clone!(
-            #[weak]
-            header,
-            #[weak]
-            title,
-            #[strong]
-            on_work_menu,
-            move |gesture, x, y| {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-                on_work_menu(title.upcast_ref(), x, y, header.start());
-            }
-        ));
-        title.add_controller(long_press);
+        utils::setup_context_menu(
+            &title,
+            glib::clone!(
+                #[weak]
+                header,
+                #[weak]
+                title,
+                #[strong]
+                on_work_menu,
+                move |x, y| {
+                    if let Some(track) = header.item().and_downcast::<Track>() {
+                        on_work_menu(title.upcast_ref(), x, y, &track);
+                    }
+                }
+            ),
+        );
 
         // A click selects the work only in selection mode, so that's when
         // the title shows it can be clicked

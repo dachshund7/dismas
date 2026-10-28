@@ -480,6 +480,18 @@ fn with_connection<T>(
     })
 }
 
+// A query of the UI, which gives nothing when it fails, as being unable to
+// do `what`
+fn query_or_default<T: Default>(
+    what: impl std::fmt::Display,
+    query: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
+) -> T {
+    with_connection(query).unwrap_or_else(|e| {
+        warn!("Unable to {what}: {e}");
+        T::default()
+    })
+}
+
 fn open() -> rusqlite::Result<Connection> {
     let dir = data_dir();
     glib::mkdir_with_parents(&dir, 0o700);
@@ -584,13 +596,7 @@ fn hidden_condition(column: &str, hidden: &[PathBuf]) -> (String, Vec<Vec<u8>>) 
 // again in the order the user picked. The tracks in the `hidden` folders,
 // which aren't there, are left out
 pub fn albums(hidden: &[PathBuf]) -> Vec<AlbumInfo> {
-    match with_connection(|conn| query_albums(conn, hidden)) {
-        Ok(albums) => albums,
-        Err(e) => {
-            warn!("Unable to load the albums: {e}");
-            Vec::new()
-        }
-    }
+    query_or_default("load the albums", |conn| query_albums(conn, hidden))
 }
 
 fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<AlbumInfo>> {
@@ -720,21 +726,16 @@ impl TrackFilter {
 
 // The values of a statement that has the filter's `matches_sql()` before
 // the condition on the `hidden` folders, see `hidden_condition()`
-fn filter_params(
-    filter: &TrackFilter,
-    hidden: &[PathBuf],
-) -> rusqlite::ParamsFromIter<Vec<rusqlite::types::Value>> {
+fn filter_values(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<rusqlite::types::Value> {
     use rusqlite::types::Value;
 
     let (_, values) = filter.conditions();
     let (_, hidden_params) = hidden_condition("file", hidden);
-    rusqlite::params_from_iter(
-        values
-            .into_iter()
-            .map(Value::Text)
-            .chain(hidden_params.into_iter().map(Value::Blob))
-            .collect(),
-    )
+    values
+        .into_iter()
+        .map(Value::Text)
+        .chain(hidden_params.into_iter().map(Value::Blob))
+        .collect()
 }
 
 // The albums with a track that the filter matches, like searching the
@@ -742,13 +743,9 @@ fn filter_params(
 // their tracks; the tracks in the `hidden` folders are left out, as in
 // `albums()`
 pub fn search_albums(filter: &TrackFilter, hidden: &[PathBuf]) -> HashMap<String, (u32, u32)> {
-    match with_connection(|conn| query_search_albums(conn, filter, hidden)) {
-        Ok(albums) => albums,
-        Err(e) => {
-            warn!("Unable to search the albums: {e}");
-            HashMap::new()
-        }
-    }
+    query_or_default("search the albums", |conn| {
+        query_search_albums(conn, filter, hidden)
+    })
 }
 
 fn query_search_albums(
@@ -756,39 +753,28 @@ fn query_search_albums(
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<HashMap<String, (u32, u32)>> {
-    use rusqlite::types::Value;
-
-    let (conditions, values) = filter.conditions();
-    let conditions = format!("1{conditions}");
-    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
     let mut stmt = conn.prepare(&format!(
-        "SELECT album_id, SUM(CASE WHEN {conditions} THEN 1 ELSE 0 END) AS matching,
-                COUNT(*)
+        "SELECT album_id, SUM({}) AS matching, COUNT(*)
          FROM tracks
-         WHERE album_id IS NOT NULL{hidden_sql}
+         WHERE album_id IS NOT NULL{}
          GROUP BY album_id
-         HAVING matching > 0"
+         HAVING matching > 0",
+        filter.matches_sql(),
+        hidden_condition("file", hidden).0
     ))?;
-    let params = values
-        .into_iter()
-        .map(Value::Text)
-        .chain(hidden_params.into_iter().map(Value::Blob));
-    stmt.query_map(rusqlite::params_from_iter(params), |row| {
-        Ok((row.get(0)?, (row.get(1)?, row.get(2)?)))
-    })?
+    stmt.query_map(
+        rusqlite::params_from_iter(filter_values(filter, hidden)),
+        |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))),
+    )?
     .collect()
 }
 
 // The albums of the grid, by their ids, with the paths of their tracks in
 // their order, without the tracks in the hidden folders
 pub fn album_track_paths(hidden: &[PathBuf]) -> Vec<(String, Vec<PathBuf>)> {
-    match with_connection(|conn| query_album_track_paths(conn, hidden)) {
-        Ok(albums) => albums,
-        Err(e) => {
-            warn!("Unable to load the tracks of the albums: {e}");
-            Vec::new()
-        }
-    }
+    query_or_default("load the tracks of the albums", |conn| {
+        query_album_track_paths(conn, hidden)
+    })
 }
 
 fn query_album_track_paths(
@@ -869,41 +855,63 @@ pub struct ComposerInfo {
     pub albums: u32,
 }
 
-// Whether a track of the albums of the grid has a composer, without the
-// tracks in the `hidden` folders
-pub fn has_composers(hidden: &[PathBuf]) -> bool {
-    match with_connection(|conn| query_has_composers(conn, hidden)) {
-        Ok(has) => has,
-        Err(e) => {
-            warn!("Unable to look for composers: {e}");
-            false
-        }
-    }
-}
-
-fn query_has_composers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<bool> {
+// Whether a track of the albums of the grid has a value in `column`, e.g.
+// a composer, without the tracks in the `hidden` folders
+fn query_tracks_have(
+    conn: &Connection,
+    column: &str,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<bool> {
     let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
     conn.query_row(
         &format!(
             "SELECT EXISTS (SELECT 1 FROM tracks
-             WHERE album_id IS NOT NULL AND composers IS NOT NULL{hidden_sql})"
+             WHERE album_id IS NOT NULL AND {column} IS NOT NULL{hidden_sql})"
         ),
         rusqlite::params_from_iter(hidden_params),
         |row| row.get(0),
     )
 }
 
+// The album, the lines of `column` (see `composer_entries()` and
+// `performer_entries()`) and whether the filter matches, of each track of
+// the albums of the grid with some, without the tracks in the `hidden`
+// folders
+fn read_entries(
+    conn: &Connection,
+    column: &str,
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+    mut read: impl FnMut(String, String, bool),
+) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT album_id, {column}, {} FROM tracks
+         WHERE album_id IS NOT NULL AND {column} IS NOT NULL{}",
+        filter.matches_sql(),
+        hidden_condition("file", hidden).0
+    ))?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(filter_values(filter, hidden)))?;
+    while let Some(row) = rows.next()? {
+        read(row.get(0)?, row.get(1)?, row.get(2)?);
+    }
+    Ok(())
+}
+
+// Whether a track of the albums of the grid has a composer, without the
+// tracks in the `hidden` folders
+pub fn has_composers(hidden: &[PathBuf]) -> bool {
+    query_or_default("look for composers", |conn| {
+        query_tracks_have(conn, "composers", hidden)
+    })
+}
+
 // The composers of the tracks of the albums of the grid that the filter
 // matches, by their sort names, without the tracks in the `hidden` folders,
 // with the number of the albums of those tracks
 pub fn composers(hidden: &[PathBuf], filter: &TrackFilter) -> Vec<ComposerInfo> {
-    match with_connection(|conn| query_composers(conn, hidden, filter)) {
-        Ok(composers) => composers,
-        Err(e) => {
-            warn!("Unable to list the composers: {e}");
-            Vec::new()
-        }
-    }
+    query_or_default("list the composers", |conn| {
+        query_composers(conn, hidden, filter)
+    })
 }
 
 // A composer's names are the ones all their tracks give them the most,
@@ -922,38 +930,31 @@ fn query_composers(
         sorts: HashMap<String, usize>,
     }
 
-    let mut stmt = conn.prepare(&format!(
-        "SELECT album_id, composers, {} FROM tracks
-         WHERE album_id IS NOT NULL AND composers IS NOT NULL{}",
-        filter.matches_sql(),
-        hidden_condition("file", hidden).0
-    ))?;
-    let rows = stmt.query_map(filter_params(filter, hidden), |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, bool>(2)?,
-        ))
-    })?;
     let mut seen: HashMap<String, Seen> = HashMap::new();
-    for row in rows {
-        let (album, entries, matches) = row?;
-        for line in entries.lines() {
-            let mut fields = line.split('\t');
-            let (Some(key), Some(name), Some(sort)) = (fields.next(), fields.next(), fields.next())
-            else {
-                continue;
-            };
-            let composer = seen.entry(key.to_string()).or_default();
-            if matches && !composer.albums.contains(&album) {
-                composer.albums.insert(album.clone());
+    read_entries(
+        conn,
+        "composers",
+        filter,
+        hidden,
+        |album, entries, matches| {
+            for line in entries.lines() {
+                let mut fields = line.split('\t');
+                let (Some(key), Some(name), Some(sort)) =
+                    (fields.next(), fields.next(), fields.next())
+                else {
+                    continue;
+                };
+                let composer = seen.entry(key.to_string()).or_default();
+                if matches && !composer.albums.contains(&album) {
+                    composer.albums.insert(album.clone());
+                }
+                *composer.names.entry(name.to_string()).or_default() += 1;
+                if !sort.is_empty() {
+                    *composer.sorts.entry(sort.to_string()).or_default() += 1;
+                }
             }
-            *composer.names.entry(name.to_string()).or_default() += 1;
-            if !sort.is_empty() {
-                *composer.sorts.entry(sort.to_string()).or_default() += 1;
-            }
-        }
-    }
+        },
+    )?;
 
     let mut composers: Vec<(glib::CollationKey, ComposerInfo)> = seen
         .into_iter()
@@ -1019,25 +1020,9 @@ pub struct PerformerInfo {
 // Whether a track of the albums of the grid has a conductor or performer,
 // without the tracks in the `hidden` folders
 pub fn has_performers(hidden: &[PathBuf]) -> bool {
-    match with_connection(|conn| query_has_performers(conn, hidden)) {
-        Ok(has) => has,
-        Err(e) => {
-            warn!("Unable to look for performers: {e}");
-            false
-        }
-    }
-}
-
-fn query_has_performers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<bool> {
-    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
-    conn.query_row(
-        &format!(
-            "SELECT EXISTS (SELECT 1 FROM tracks
-             WHERE album_id IS NOT NULL AND performers IS NOT NULL{hidden_sql})"
-        ),
-        rusqlite::params_from_iter(hidden_params),
-        |row| row.get(0),
-    )
+    query_or_default("look for performers", |conn| {
+        query_tracks_have(conn, "performers", hidden)
+    })
 }
 
 // The conductors, groups and players of the tracks of the albums of the
@@ -1045,13 +1030,9 @@ fn query_has_performers(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Resu
 // without the tracks in the `hidden` folders, with the number of the
 // albums of those tracks
 pub fn performers(hidden: &[PathBuf], filter: &TrackFilter) -> Vec<PerformerInfo> {
-    match with_connection(|conn| query_performers(conn, hidden, filter)) {
-        Ok(performers) => performers,
-        Err(e) => {
-            warn!("Unable to list the performers: {e}");
-            Vec::new()
-        }
-    }
+    query_or_default("list the performers", |conn| {
+        query_performers(conn, hidden, filter)
+    })
 }
 
 // Each performer is listed once, as what most of their albums have them
@@ -1078,52 +1059,44 @@ fn query_performers(
         roles: HashMap<String, usize>,
     }
 
-    let mut stmt = conn.prepare(&format!(
-        "SELECT album_id, performers, {} FROM tracks
-         WHERE album_id IS NOT NULL AND performers IS NOT NULL{}",
-        filter.matches_sql(),
-        hidden_condition("file", hidden).0
-    ))?;
-    let rows = stmt.query_map(filter_params(filter, hidden), |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, bool>(2)?,
-        ))
-    })?;
     let mut seen: HashMap<String, Seen> = HashMap::new();
-    for row in rows {
-        let (album, entries, matches) = row?;
-        for line in entries.lines() {
-            let mut fields = line.split('\t');
-            let (Some(kind), Some(key), Some(name), Some(sort), Some(role)) = (
-                fields.next().and_then(performer_kind_from_code),
-                fields.next(),
-                fields.next(),
-                fields.next(),
-                fields.next(),
-            ) else {
-                continue;
-            };
-            let performer = seen.entry(key.to_string()).or_default();
-            if matches && !performer.albums.contains(&album) {
-                performer.albums.insert(album.clone());
+    read_entries(
+        conn,
+        "performers",
+        filter,
+        hidden,
+        |album, entries, matches| {
+            for line in entries.lines() {
+                let mut fields = line.split('\t');
+                let (Some(kind), Some(key), Some(name), Some(sort), Some(role)) = (
+                    fields.next().and_then(performer_kind_from_code),
+                    fields.next(),
+                    fields.next(),
+                    fields.next(),
+                    fields.next(),
+                ) else {
+                    continue;
+                };
+                let performer = seen.entry(key.to_string()).or_default();
+                if matches && !performer.albums.contains(&album) {
+                    performer.albums.insert(album.clone());
+                }
+                let guessed = kind == PerformerKind::Ensemble && role.is_empty();
+                if !guessed {
+                    performer
+                        .kinds
+                        .entry(kind)
+                        .or_default()
+                        .insert(album.clone());
+                }
+                *performer.names.entry(name.to_string()).or_default() += 1;
+                *performer.sorts.entry(sort.to_string()).or_default() += 1;
+                if !role.is_empty() {
+                    *performer.roles.entry(role.to_string()).or_default() += 1;
+                }
             }
-            let guessed = kind == PerformerKind::Ensemble && role.is_empty();
-            if !guessed {
-                performer
-                    .kinds
-                    .entry(kind)
-                    .or_default()
-                    .insert(album.clone());
-            }
-            *performer.names.entry(name.to_string()).or_default() += 1;
-            *performer.sorts.entry(sort.to_string()).or_default() += 1;
-            if !role.is_empty() {
-                *performer.roles.entry(role.to_string()).or_default() += 1;
-            }
-        }
-    }
+        },
+    )?;
 
     let mut performers: Vec<(glib::CollationKey, PerformerInfo)> = seen
         .into_iter()
@@ -1192,6 +1165,16 @@ pub struct WorkInfo {
     pub recordings: u32,
 }
 
+impl WorkInfo {
+    // The names of its composers, as a list
+    pub fn composer_names(&self) -> String {
+        self.composers
+            .iter()
+            .map(|composer| &composer.name)
+            .join(", ")
+    }
+}
+
 // A composer of a work, see `composer_entries()`
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkComposer {
@@ -1218,7 +1201,7 @@ pub struct WorkRecording {
 struct WorkRow {
     album_id: String,
     path: PathBuf,
-    work: Option<String>,
+    work: String,
     // See `WorkEntry::order`, with "" as an empty list
     order: Option<Vec<u32>>,
     // Whether the filter matches it
@@ -1235,24 +1218,9 @@ struct WorkRow {
 // Whether a track of the albums of the grid is part of a work, without the
 // tracks in the `hidden` folders
 pub fn has_works(hidden: &[PathBuf]) -> bool {
-    let query = |conn: &Connection| -> rusqlite::Result<bool> {
-        let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
-        conn.query_row(
-            &format!(
-                "SELECT EXISTS (SELECT 1 FROM tracks
-                 WHERE album_id IS NOT NULL AND work_key IS NOT NULL{hidden_sql})"
-            ),
-            rusqlite::params_from_iter(hidden_params),
-            |row| row.get(0),
-        )
-    };
-    match with_connection(|conn| query(conn)) {
-        Ok(has) => has,
-        Err(e) => {
-            warn!("Unable to look for works: {e}");
-            false
-        }
-    }
+    query_or_default("look for works", |conn| {
+        query_tracks_have(conn, "work_key", hidden)
+    })
 }
 
 // The works of the albums of the grid with a recording that the filter
@@ -1261,13 +1229,7 @@ pub fn has_works(hidden: &[PathBuf]) -> bool {
 // without a composer are last. The tracks in the `hidden` folders are left
 // out
 pub fn works(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkInfo> {
-    match with_connection(|conn| query_works(conn, filter, hidden)) {
-        Ok(works) => works,
-        Err(e) => {
-            warn!("Unable to list the works: {e}");
-            Vec::new()
-        }
-    }
+    query_or_default("list the works", |conn| query_works(conn, filter, hidden))
 }
 
 fn query_works(
@@ -1301,10 +1263,7 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
     let mut seen: HashMap<String, Seen> = HashMap::new();
     for recording in recordings_of_works(rows) {
         let rows: Vec<&WorkRow> = recording.into_iter().map(|i| &rows[i]).collect();
-        let Some(key) = &rows[0].work else {
-            continue;
-        };
-        let work = seen.entry(key.clone()).or_default();
+        let work = seen.entry(rows[0].work.clone()).or_default();
         if rows.iter().any(|row| row.matching) {
             work.recordings += 1;
         }
@@ -1350,13 +1309,9 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
 // The work of a track, if it's part of one in the library, and the number
 // of its other recordings, without the tracks in the `hidden` folders
 pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<(WorkInfo, u32)> {
-    match with_connection(|conn| query_track_work(conn, path, hidden)) {
-        Ok(work) => work,
-        Err(e) => {
-            warn!("Unable to look up the work of a track: {e}");
-            None
-        }
-    }
+    query_or_default("look up the work of a track", |conn| {
+        query_track_work(conn, path, hidden)
+    })
 }
 
 fn query_track_work(
@@ -1377,10 +1332,7 @@ fn query_track_work(
     let rows = query_work_rows(conn, &TrackFilter::default(), Some(&key), hidden)?;
     let others = recordings_of_works(&rows)
         .into_iter()
-        .filter(|recording| {
-            rows[recording[0]].work.as_deref() == Some(key.as_str())
-                && !recording.iter().any(|&i| rows[i].path == path)
-        })
+        .filter(|recording| !recording.iter().any(|&i| rows[i].path == path))
         .count();
     let work = works_of_rows(&rows)
         .into_iter()
@@ -1392,13 +1344,9 @@ fn query_track_work(
 // tracks, see `recordings_of_works()`, by the year of their albums, those without one last, and then
 // by the albums' titles. The tracks in the `hidden` folders are left out
 pub fn work_recordings(key: &str, filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkRecording> {
-    match with_connection(|conn| query_work_recordings(conn, key, filter, hidden)) {
-        Ok(recordings) => recordings,
-        Err(e) => {
-            warn!("Unable to list the recordings of a work: {e}");
-            Vec::new()
-        }
-    }
+    query_or_default("list the recordings of a work", |conn| {
+        query_work_recordings(conn, key, filter, hidden)
+    })
 }
 
 fn query_work_recordings(
@@ -1411,7 +1359,7 @@ fn query_work_recordings(
     let mut recordings: Vec<(_, WorkRecording)> = recordings_of_works(&rows)
         .into_iter()
         .map(|recording| recording.into_iter().map(|i| &rows[i]).collect::<Vec<_>>())
-        .filter(|rows| rows[0].work.as_deref() == Some(key) && rows.iter().any(|row| row.matching))
+        .filter(|rows| rows.iter().any(|row| row.matching))
         .map(|rows| {
             let year = rows.iter().filter_map(|row| row.year.clone()).min();
             let album = rows.iter().find_map(|row| row.album.clone());
@@ -1440,38 +1388,31 @@ fn query_work_recordings(
         .collect())
 }
 
-// The tracks of the albums with a work, or with the work of `key`, in the
-// order of their albums. All their tracks are read, as the tracks between
-// the movements of a work split its recordings
+// The tracks of the works, or of the work of `key`, in the order of their
+// albums; the other tracks of the albums don't split the recordings of a
+// work, see `recordings_of_works()`
 fn query_work_rows(
     conn: &Connection,
     filter: &TrackFilter,
     key: Option<&str>,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkRow>> {
-    use rusqlite::types::Value;
-
-    let (conditions, values) = filter.conditions();
     let key_sql = if key.is_some() {
         " AND work_key = ?"
     } else {
         ""
     };
-    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
     let mut stmt = conn.prepare(&format!(
-        "SELECT album_id, path, work_key, movement_order,
-                CASE WHEN work_key IS NOT NULL{conditions} THEN 1 ELSE 0 END,
+        "SELECT album_id, path, work_key, movement_order, {},
                 work, work_title, work_collection, work_composers, album, year, performers,
                 disc, track
          FROM tracks
-         WHERE album_id IN (SELECT album_id FROM tracks WHERE work_key IS NOT NULL{key_sql})
-               {hidden_sql}"
+         WHERE album_id IS NOT NULL AND work_key IS NOT NULL{}{key_sql}",
+        filter.matches_sql(),
+        hidden_condition("file", hidden).0
     ))?;
-    let params = values
-        .into_iter()
-        .map(Value::Text)
-        .chain(key.map(|key| Value::Text(key.to_string())))
-        .chain(hidden_params.into_iter().map(Value::Blob));
+    let mut params = filter_values(filter, hidden);
+    params.extend(key.map(|key| rusqlite::types::Value::Text(key.to_string())));
     let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
         let order = row.get::<_, Option<String>>(3)?.map(|order| {
             order
@@ -1526,9 +1467,7 @@ fn recordings_of_works(rows: &[WorkRow]) -> Vec<Vec<usize>> {
         if i > 0 && rows[i - 1].album_id != row.album_id {
             open.clear();
         }
-        let Some(work) = row.work.as_deref() else {
-            continue;
-        };
+        let work = row.work.as_str();
         let continues = open.get(work).is_some_and(|open| match &row.order {
             Some(place) if !place.is_empty() => {
                 let last = &rows[*recordings[open.recording].last().unwrap()];
@@ -1631,34 +1570,22 @@ pub fn album_tracks(album_id: &str, filter: &TrackFilter) -> Vec<PathBuf> {
         tracks.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(tracks.into_iter().map(|(_, path)| path).collect())
     };
-
-    match with_connection(|conn| query(conn)) {
-        Ok(tracks) => tracks,
-        Err(e) => {
-            warn!("Unable to load the tracks of album {album_id}: {e}");
-            Vec::new()
-        }
-    }
+    query_or_default(
+        format_args!("load the tracks of album {album_id}"),
+        |conn| query(conn),
+    )
 }
 
 // The album of a track, if it's part of the library
 pub fn track_album(path: &Path) -> Option<String> {
-    let query = |conn: &Connection| -> rusqlite::Result<Option<String>> {
+    query_or_default(format_args!("look up the album of {path:?}"), |conn| {
         conn.query_row(
             "SELECT album_id FROM tracks WHERE path = ?1 AND album_id IS NOT NULL",
             [path_bytes(path)],
             |row| row.get(0),
         )
         .optional()
-    };
-
-    match with_connection(|conn| query(conn)) {
-        Ok(album_id) => album_id,
-        Err(e) => {
-            warn!("Unable to look up the album of {path:?}: {e}");
-            None
-        }
-    }
+    })
 }
 
 // Updates the database with the tracks in the music folders, and makes the
@@ -1666,30 +1593,43 @@ pub fn track_album(path: &Path) -> Option<String> {
 // blocks, so it should be called from a separate thread
 pub fn scan(folders: &[MusicFolder], thumbnail_size: u32, sender: &Sender<ScanEvent>) {
     let now = Instant::now();
-    let mut result = scan_internal(folders, thumbnail_size, sender).unwrap_or_else(|e| {
+    let roots = roots(folders);
+    debug!("Library: reading {roots:?}");
+    let mut trees = read_roots(&roots);
+    let paths = trees
+        .iter_mut()
+        .flat_map(|tree| std::mem::take(&mut tree.files))
+        .filter_map(|file| file.path())
+        .collect();
+    let mut result = with_connection(|conn| {
+        let (mut result, stale_albums) = scan_with(conn, &roots, paths, sender)?;
+        result.covers_changed =
+            update_covers(conn, &stale_albums, &roots.unavailable, thumbnail_size)? > 0;
+        Ok(result)
+    })
+    .unwrap_or_else(|e| {
         warn!("Unable to scan the library: {e}");
         ScanResult::default()
     });
     debug!("Library scan: {} ms", now.elapsed().as_millis());
     // Even when the database couldn't be read, the folders are watched
-    result.watch = folders_to_watch(folders, &roots(folders));
+    result.watch = folders_to_watch(folders, &roots, &trees);
 
     let _ = sender.try_send(ScanEvent::Finished(result));
 }
 
-fn scan_internal(
-    folders: &[MusicFolder],
-    thumbnail_size: u32,
-    sender: &Sender<ScanEvent>,
-) -> rusqlite::Result<ScanResult> {
-    let roots = roots(folders);
-    debug!("Library: reading {roots:?}");
-    with_connection(|conn| {
-        let (mut result, stale_albums) = scan_with(conn, &roots, sender)?;
-        result.covers_changed =
-            update_covers(conn, &stale_albums, &roots.unavailable, thumbnail_size)? > 0;
-        Ok(result)
-    })
+// What the scan reads in each music folder that's there, in their order,
+// see `scan_reads()`; this blocks
+fn read_roots(roots: &Roots) -> Vec<utils::FolderTree> {
+    roots
+        .available
+        .iter()
+        .map(|root| {
+            utils::read_folder_tree(&gio::File::for_path(root), true, &|path| {
+                scan_reads(path, roots)
+            })
+        })
+        .collect()
 }
 
 // The folders of the library to watch for files that come, go or change:
@@ -1700,14 +1640,18 @@ fn scan_internal(
 // computers, which aren't told about, and the folders that came through
 // the document portal aren't watched either. Also the music folders and
 // the folders that links lead to, for the drives mounted and unmounted,
-// see `WatchList`. This blocks
-fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> WatchList {
+// see `WatchList`. The `trees` are those of `read_roots()`. This blocks
+fn folders_to_watch(
+    folders: &[MusicFolder],
+    roots: &Roots,
+    trees: &[utils::FolderTree],
+) -> WatchList {
     let mut list = WatchList {
         unavailable: !roots.unavailable.is_empty(),
         ..WatchList::default()
     };
     let canonical = |path: PathBuf| std::fs::canonicalize(&path).unwrap_or(path);
-    for root in &roots.available {
+    for (root, tree) in roots.available.iter().zip(trees) {
         list.available.push(canonical(root.clone()));
         let portal = folders
             .iter()
@@ -1717,9 +1661,6 @@ fn folders_to_watch(folders: &[MusicFolder], roots: &Roots) -> WatchList {
             list.unwatched = true;
             continue;
         }
-        let tree = utils::read_folder_tree(&gio::File::for_path(root), true, &|path| {
-            scan_reads(path, roots)
-        });
         // A link to a drive that isn't mounted leads nowhere until it is
         list.unavailable |= tree.broken_links;
         let mut remote = Vec::new();
@@ -1751,8 +1692,7 @@ fn is_remote(path: &Path) -> bool {
 }
 
 // Whether the scan reads a file or a folder it comes to in the music
-// folders: not a hidden one, nor a folder left out. The folders watched
-// are the ones it reads, so both go by this
+// folders: not a hidden one, nor a folder left out
 fn scan_reads(path: &Path, roots: &Roots) -> bool {
     is_library_entry(path) && !roots.excluded.iter().any(|excluded| excluded == path)
 }
@@ -1810,24 +1750,15 @@ impl Source {
     }
 }
 
-// Updates the tracks, and returns the albums whose cover should be looked
-// for again
+// Updates the tracks from the files of the music folders, the `paths` of
+// `read_roots()`, and returns the albums whose cover should be looked for
+// again
 fn scan_with(
     conn: &mut Connection,
     roots: &Roots,
+    paths: Vec<PathBuf>,
     sender: &Sender<ScanEvent>,
 ) -> rusqlite::Result<(ScanResult, HashSet<String>)> {
-    let paths: Vec<PathBuf> = roots
-        .available
-        .iter()
-        .flat_map(|root| {
-            utils::load_files_from_folder_filtered(&gio::File::for_path(root), true, &|path| {
-                scan_reads(path, roots)
-            })
-        })
-        .filter_map(|file| file.path())
-        .collect();
-
     // The CUE sheets that split audio files have their tracks, in place
     // of the files
     let claims = Claims::new(paths.iter().map(PathBuf::as_path));
@@ -2416,7 +2347,7 @@ impl TrackTags {
             folder_album.as_deref(),
         );
 
-        let names = split_composers(tag.get_strings(ItemKey::Composer));
+        let names = &credits.composers;
         let sorts = split_composers(tag.get_strings(ItemKey::ComposerSortOrder));
 
         TrackTags {
@@ -2431,8 +2362,8 @@ impl TrackTags {
             track: tag.track(),
             title,
             search: Some(search),
-            composers: composer_entries(&names, &sorts),
-            work: work_entry(&credits, artist.as_deref(), &names, &sorts),
+            composers: composer_entries(names, &sorts),
+            work: work_entry(&credits, artist.as_deref(), names, &sorts),
             performers: performer_entries(&credits.listed_performers()),
             label: credits.labels.first().cloned(),
             catalog_number: credits.catalog_numbers.first().cloned(),
@@ -2635,6 +2566,27 @@ mod tests {
             .map(|path| MusicFolder::new(path.to_path_buf()))
             .collect();
         super::roots(&folders)
+    }
+
+    // Reads the music folders, as `scan()` does
+    fn scan_roots(
+        conn: &mut rusqlite::Connection,
+        roots: &Roots,
+        sender: &async_channel::Sender<super::ScanEvent>,
+    ) -> rusqlite::Result<(super::ScanResult, std::collections::HashSet<String>)> {
+        use gtk::gio::prelude::FileExt;
+
+        let paths = super::read_roots(roots)
+            .into_iter()
+            .flat_map(|tree| tree.files)
+            .filter_map(|file| file.path())
+            .collect();
+        super::scan_with(conn, roots, paths, sender)
+    }
+
+    fn watch_list(folders: &[MusicFolder]) -> super::WatchList {
+        let roots = super::roots(folders);
+        super::folders_to_watch(folders, &roots, &super::read_roots(&roots))
     }
 
     fn test_dir(name: &str) -> PathBuf {
@@ -2865,7 +2817,7 @@ mod tests {
 
     #[test]
     fn tracks_without_an_album_are_grouped_by_folder() {
-        use super::{query_albums, scan_with};
+        use super::query_albums;
         use crate::utils::write_test_wav;
 
         let music = test_dir("folder-albums");
@@ -2885,7 +2837,7 @@ mod tests {
 
         let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();
-        scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
 
         // The discs of an album in folders of their own are one album, and
         // the tracks in the music folder itself are named after it
@@ -3059,7 +3011,6 @@ mod tests {
 
     #[test]
     fn the_tracks_of_a_cue_sheet_take_the_place_of_its_file() {
-        use super::scan_with;
         use crate::utils::write_test_wav;
 
         let music = test_dir("cue");
@@ -3079,7 +3030,7 @@ mod tests {
         let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();
 
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
         assert_eq!(result.n_changed, 3);
         let found = tracks(&conn, &music);
         let files: Vec<_> = found
@@ -3105,13 +3056,13 @@ mod tests {
         let added = found[0].added;
 
         // Nothing changed
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
         assert_eq!(result.n_changed, 0);
 
         // Without the sheet, the file is a track again, added when its
         // tracks were
         std::fs::remove_file(&cue).unwrap();
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
         assert_eq!(result.n_changed, 3);
         let found = tracks(&conn, &music);
         assert_eq!(found.len(), 2);
@@ -3207,7 +3158,6 @@ mod tests {
 
     #[test]
     fn left_out_folders_are_not_read() {
-        use super::scan_with;
         use crate::utils::write_test_wav;
 
         let dir = test_dir("excluded");
@@ -3231,7 +3181,7 @@ mod tests {
 
         let roots = super::roots(&[folder(&["Podcasts/Old"])]);
         assert_eq!(roots.excluded, vec![dir.join("Podcasts/Old")]);
-        scan_with(&mut conn, &roots, &sender).unwrap();
+        scan_roots(&mut conn, &roots, &sender).unwrap();
         assert_eq!(
             paths(&conn),
             vec![
@@ -3243,12 +3193,12 @@ mod tests {
 
         // The tracks read before a folder was left out are forgotten
         let roots = super::roots(&[folder(&["Audiobooks", "Podcasts"])]);
-        let (result, _) = scan_with(&mut conn, &roots, &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots, &sender).unwrap();
         assert_eq!(result.n_changed, 2);
         assert_eq!(paths(&conn), vec!["Album/One.wav"]);
 
         // And read again once it's back
-        let (result, _) = scan_with(&mut conn, &super::roots(&[folder(&[])]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &super::roots(&[folder(&[])]), &sender).unwrap();
         assert_eq!(result.n_changed, 3);
 
         // Those of a folder inside another one don't count, as the other
@@ -3310,7 +3260,6 @@ mod tests {
 
     #[test]
     fn tracks_of_several_folders() {
-        use super::scan_with;
         use crate::utils::write_test_wav;
 
         let dir = test_dir("folders");
@@ -3328,7 +3277,7 @@ mod tests {
             tracks(conn, &dir).into_iter().map(|row| row.path).collect()
         };
 
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
         assert_eq!(result.n_changed, 3);
         assert_eq!(
             paths(&conn),
@@ -3337,7 +3286,7 @@ mod tests {
 
         // A folder inside another one is read once, either way round
         for roots in [roots_of(&[&a, &sub, &b]), roots_of(&[&sub, &a, &b])] {
-            let (result, _) = scan_with(&mut conn, &roots, &sender).unwrap();
+            let (result, _) = scan_roots(&mut conn, &roots, &sender).unwrap();
             assert_eq!(result.n_changed, 0);
             assert_eq!(paths(&conn).len(), 3);
         }
@@ -3346,17 +3295,17 @@ mod tests {
         // an empty one, which is often a drive that isn't mounted
         let away = dir.join("B-away");
         std::fs::rename(&b, &away).unwrap();
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
         assert_eq!(result.n_changed, 0);
         assert_eq!(paths(&conn).len(), 3);
         std::fs::rename(&away, &b).unwrap();
         std::fs::rename(b.join("Three.wav"), dir.join("Three.wav")).unwrap();
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
         assert_eq!(result.n_changed, 0);
         assert_eq!(paths(&conn).len(), 3);
 
         // Those of a folder that was removed from the list go
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&a]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&a]), &sender).unwrap();
         assert_eq!(result.n_changed, 1);
         assert_eq!(paths(&conn), vec!["A/One.wav", "A/sub/Two.wav"]);
 
@@ -3366,7 +3315,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_folder_linked_to_another_is_read_once() {
-        use super::scan_with;
         use crate::utils::write_test_wav;
 
         let dir = test_dir("link");
@@ -3378,7 +3326,7 @@ mod tests {
 
         let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();
-        let (result, _) = scan_with(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&a, &b]), &sender).unwrap();
         assert_eq!(result.n_changed, 1);
         let found: Vec<String> = tracks(&conn, &dir)
             .into_iter()
@@ -3396,7 +3344,6 @@ mod tests {
     fn symbolic_links_in_a_music_folder_are_followed_once() {
         use std::os::unix::fs::symlink;
 
-        use super::scan_with;
         use crate::utils::write_test_wav;
 
         let music = test_dir("links");
@@ -3417,7 +3364,7 @@ mod tests {
 
         let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();
-        scan_with(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
         let found: Vec<String> = tracks(&conn, &music)
             .into_iter()
             .map(|row| row.path)
@@ -3431,7 +3378,6 @@ mod tests {
 
     #[test]
     fn trash_and_hidden_folders_are_not_read() {
-        use super::scan_with;
         use crate::utils::write_test_wav;
 
         let dir = test_dir("hidden");
@@ -3455,7 +3401,7 @@ mod tests {
 
         let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();
-        scan_with(&mut conn, &roots_of(&[&dir]), &sender).unwrap();
+        scan_roots(&mut conn, &roots_of(&[&dir]), &sender).unwrap();
         let found: Vec<String> = tracks(&conn, &dir)
             .into_iter()
             .map(|row| row.path)
@@ -3523,7 +3469,7 @@ mod tests {
         let mut folder = MusicFolder::new(music.clone());
         folder.excluded.push(PathBuf::from("Audiobooks"));
         let folders = [folder];
-        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        let list = watch_list(&folders);
         let mut watched = list.folders;
         watched.sort();
         let relative: Vec<&Path> = watched
@@ -3555,7 +3501,7 @@ mod tests {
         // A link that leads nowhere can be to a drive that isn't mounted
         let gone = music.join("Gone");
         std::os::unix::fs::symlink(music.join("Nothing"), &gone).unwrap();
-        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        let list = watch_list(&folders);
         assert!(list.unavailable);
         std::fs::remove_file(gone).unwrap();
 
@@ -3564,13 +3510,13 @@ mod tests {
             host: Some(PathBuf::from("/media/music")),
             ..MusicFolder::new(music.clone())
         }];
-        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        let list = watch_list(&folders);
         assert!(list.folders.is_empty());
         assert!(list.unwatched);
 
         // A drive mounted anywhere can bring back a folder that isn't there
         let folders = [MusicFolder::new(music.join("Unplugged"))];
-        let list = super::folders_to_watch(&folders, &super::roots(&folders));
+        let list = watch_list(&folders);
         assert!(list.folders.is_empty());
         assert!(list.unavailable);
 
@@ -3767,13 +3713,13 @@ mod tests {
             .unwrap();
         }
         let hidden = [PathBuf::from("/m/Gone")];
-        assert!(super::query_has_composers(&conn, &hidden).unwrap());
+        assert!(super::query_tracks_have(&conn, "composers", &hidden).unwrap());
         let only_anonymous = [
             PathBuf::from("/m/A"),
             PathBuf::from("/m/B"),
             PathBuf::from("/m/Gone"),
         ];
-        assert!(!super::query_has_composers(&conn, &only_anonymous).unwrap());
+        assert!(!super::query_tracks_have(&conn, "composers", &only_anonymous).unwrap());
 
         let all = super::TrackFilter::default();
         let composers = super::query_composers(&conn, &hidden, &all).unwrap();
@@ -3894,7 +3840,7 @@ mod tests {
             .unwrap();
         }
         let hidden = [PathBuf::from("/m/Gone")];
-        assert!(super::query_has_performers(&conn, &hidden).unwrap());
+        assert!(super::query_tracks_have(&conn, "performers", &hidden).unwrap());
 
         let all = super::TrackFilter::default();
         let performers = super::query_performers(&conn, &hidden, &all).unwrap();

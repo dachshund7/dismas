@@ -119,6 +119,32 @@ pub fn setup_menu_key<W: IsA<gtk::Widget>>(
     list.add_controller(controller);
 }
 
+// A right click opens a menu at its point, and so does a long press on a
+// touchscreen, but not a mouse held down. Both claim the sequence as it's
+// pressed, so the scrolled window around doesn't take it
+pub fn setup_context_menu(widget: &impl IsA<gtk::Widget>, open: impl Fn(f64, f64) + 'static) {
+    let open = std::rc::Rc::new(open);
+    let click = gtk::GestureClick::builder()
+        .button(gdk::BUTTON_SECONDARY)
+        .build();
+    click.connect_pressed(glib::clone!(
+        #[strong]
+        open,
+        move |gesture, _, x, y| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            open(x, y);
+        }
+    ));
+    widget.add_controller(click);
+
+    let long_press = gtk::GestureLongPress::builder().touch_only(true).build();
+    long_press.connect_pressed(move |gesture, x, y| {
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        open(x, y);
+    });
+    widget.add_controller(long_press);
+}
+
 // Sets the label of a button that names the selected playlist, which can
 // have a long name
 pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
@@ -229,6 +255,12 @@ pub fn short_playlist_name(name: &str) -> String {
     }
     let short: String = name.chars().take(MAX_CHARS - 1).collect();
     format!("{}…", short.trim_end())
+}
+
+// A playlist name in a menu, shortened, as a menu is as wide as its
+// longest item; underscores in names would be taken for mnemonics
+pub fn playlist_menu_label(name: &str) -> String {
+    short_playlist_name(name).replace('_', "__")
 }
 
 // Selects the tracks of a list from `from` to `to`, both included, in the
@@ -371,11 +403,12 @@ pub fn is_audio_type(mime_type: &str) -> bool {
         || mime_type == "video/webm"
 }
 
-// What a walk through a folder found, in no order
+// What a walk through a folder found
 #[derive(Default)]
 pub struct FolderTree {
+    // In the order a file manager shows them
     pub files: Vec<gio::File>,
-    // The folders read, the first one included
+    // The folders read, the first one included, in no order
     pub folders: Vec<gio::File>,
     // The symbolic links to folders that were followed
     pub links: Vec<gio::File>,
@@ -491,6 +524,13 @@ pub fn read_folder_tree(
             walk.add(file, &info, true);
         }
     }
+    // gio::FileEnumerator has no guaranteed order. The files are sorted
+    // once, with the keys made once for each file: a library of thousands
+    // of files was sorted again at each level of its folders, with the keys
+    // made again at each comparison
+    walk.tree
+        .files
+        .sort_by_cached_key(|file| file_sort_key(Some(folder), file));
     walk.tree
 }
 
@@ -558,12 +598,7 @@ pub fn load_files_from_folder_filtered(
     use std::time::Instant;
 
     let now = Instant::now();
-    let mut res = read_folder_tree(folder, recursive, keep).files;
-    // gio::FileEnumerator has no guaranteed order. The files are sorted
-    // once, with the keys made once for each file: a library of thousands
-    // of files was sorted again at each level of its folders, with the keys
-    // made again at each comparison
-    res.sort_by_cached_key(|file| file_sort_key(Some(folder), file));
+    let res = read_folder_tree(folder, recursive, keep).files;
     debug!(
         "Folder enumeration: {} us (recursive: {}), total files: {}",
         now.elapsed().as_micros(),

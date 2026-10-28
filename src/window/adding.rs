@@ -82,8 +82,14 @@ impl Window {
         player.move_tracks(&moved, before.as_ref());
         queue.mark_played_next(&moved);
         self.store_queue();
-        if let Some(first) = moved.iter().min_by_key(|t| queue.position(t)) {
-            self.reveal_queue_track(first);
+        let moved: HashSet<&Track> = moved.iter().collect();
+        let first = queue
+            .model()
+            .iter::<Track>()
+            .flatten()
+            .find(|t| moved.contains(t));
+        if let Some(first) = first {
+            self.reveal_queue_track(&first);
         }
     }
 
@@ -225,18 +231,34 @@ impl Window {
         }
     }
 
-    // The item that adds tracks to the selected playlist, shortened like
-    // the other playlists of a menu
-    pub(super) fn add_to_selected_label(&self) -> String {
-        let name = self.selected_playlist();
-        if name.is_empty() {
-            i18n("Add to Queue")
-        } else {
-            let name = utils::short_playlist_name(&name).replace('_', "__");
-            // Translators: `{playlist}` must be left unmodified; it is
-            // expanded to the name of a playlist
-            i18n_k("Add to {playlist}", &[("playlist", &name)])
+    // The items of a menu that add tracks, for the actions of
+    // `add_adding_actions()`: Play Next, the item that adds them to the
+    // selected playlist, with its name shortened like the other playlists of
+    // a menu, and the other playlists
+    pub(super) fn append_adding_items(
+        &self,
+        section: &gio::Menu,
+        prefix: &str,
+        play_next: bool,
+        to_selected: bool,
+    ) {
+        if play_next {
+            section.append(
+                Some(&i18n("Play Next")),
+                Some(&format!("{prefix}.play-next")),
+            );
         }
+        if to_selected {
+            let selected = self.selected_playlist();
+            let label = add_to_label(&utils::playlist_menu_label(&selected));
+            let item = gio::MenuItem::new(Some(&label), None);
+            item.set_action_and_target_value(
+                Some(&format!("{prefix}.add-to")),
+                Some(&selected.to_variant()),
+            );
+            section.append_item(&item);
+        }
+        section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu(prefix));
     }
 
     // The playlists that tracks can be added to besides the selected one,
@@ -248,11 +270,10 @@ impl Window {
         let names = std::iter::once(String::new()).chain(playlists::names());
         let others = gio::Menu::new();
         for name in names.filter(|name| *name != selected) {
-            // Underscores in names would be taken for mnemonics
             let label = if name.is_empty() {
                 i18n("Queue")
             } else {
-                utils::short_playlist_name(&name).replace('_', "__")
+                utils::playlist_menu_label(&name)
             };
             let item = gio::MenuItem::new(Some(&label), None);
             item.set_action_and_target_value(
@@ -353,5 +374,17 @@ impl Window {
             action.set_enabled(enabled);
             group.add_action(&action);
         }
+    }
+}
+
+// The label of what adds tracks to a playlist, by its name, the queue for
+// an empty one
+pub(super) fn add_to_label(name: &str) -> String {
+    if name.is_empty() {
+        i18n("Add to Queue")
+    } else {
+        // Translators: `{playlist}` must be left unmodified; it is
+        // expanded to the name of a playlist
+        i18n_k("Add to {playlist}", &[("playlist", name)])
     }
 }

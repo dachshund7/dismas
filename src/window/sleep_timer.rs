@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use crate::audio::TimerEnd;
 
 impl Window {
     // win.sleep-timer-start starts the timer for the minutes picked in the
@@ -80,7 +81,7 @@ impl Window {
         self.disconnect_on_close(player.state(), id);
         self.update_stop_after();
 
-        for property in ["active", "remaining", "finishing-track", "finishing-work"] {
+        for property in ["active", "remaining", "waiting-for"] {
             let id = timer.connect_notify_local(
                 Some(property),
                 clone!(
@@ -106,14 +107,10 @@ impl Window {
         }
 
         // The button of the end it waits for is highlighted
-        let end = if !timer.active() {
-            ""
-        } else if timer.finishing_work() {
-            "work"
-        } else if timer.finishing_track() {
-            "track"
-        } else {
-            ""
+        let end = match (timer.active(), timer.waiting_for()) {
+            (true, TimerEnd::Track) => "track",
+            (true, TimerEnd::Work) => "work",
+            _ => "",
         };
         if let Some(action) = self
             .lookup_action("sleep-timer-stop-after")
@@ -126,10 +123,10 @@ impl Window {
             // The timer ran out, or was turned off
             control.set_sleep_timer(None);
             control.set_sleep_timer_remaining(None);
-        } else if timer.finishing_work() {
+        } else if timer.waiting_for() == TimerEnd::Work {
             control.set_sleep_timer(Some(&i18n("Stopping After This Work")));
             control.set_sleep_timer_remaining(None);
-        } else if timer.finishing_track() {
+        } else if timer.waiting_for() == TimerEnd::Track {
             control.set_sleep_timer(Some(&i18n("Stopping After This Track")));
             control.set_sleep_timer_remaining(None);
         } else {

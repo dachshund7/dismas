@@ -602,7 +602,7 @@ mod imp {
                 .sync_create()
                 .build();
             // The works going away shows the albums
-            self.library_view.connect_view_notify(clone!(
+            self.library_view.connect_works_view_notify(clone!(
                 #[weak(rename_to = obj)]
                 self.obj(),
                 move |_| obj.notify_page()
@@ -833,8 +833,8 @@ mod imp {
             }
             // The albums and the works are one page, which shows either
             match page.as_str() {
-                "library" => self.library_view.set_view("albums"),
-                "works" => self.library_view.set_view("works"),
+                "library" => self.library_view.set_works_view(false),
+                "works" => self.library_view.set_works_view(true),
                 _ => {}
             }
             let (library, playlists) = match page.as_str() {

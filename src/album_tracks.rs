@@ -21,7 +21,7 @@ use crate::{
     audio::{Track, load_tracks},
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album, TrackFilter},
-    library_view::PickNames,
+    library_view::{self, PickNames},
     queue_row::QueueRow,
     utils,
     work_sections::{SameSection, WorkSectionModel, work_header_factory},
@@ -29,6 +29,14 @@ use crate::{
 
 // How fast a swipe to the right has to be to go back, in pixels a second
 const SWIPE_BACK_VELOCITY: f64 = 500.0;
+
+// The tracks of an album that a search matches, by their URIs, and the
+// number of all its tracks
+#[derive(Debug)]
+pub struct Matching {
+    uris: HashSet<String>,
+    total: u32,
+}
 
 mod imp {
     use super::*;
@@ -79,7 +87,7 @@ mod imp {
         // recording each track is in, by its URI
         pub work: RefCell<Option<library::WorkInfo>>,
         pub hidden: RefCell<Vec<PathBuf>>,
-        pub recordings: Rc<RefCell<Vec<library::WorkRecording>>>,
+        pub recordings: RefCell<Vec<library::WorkRecording>>,
         pub recording_of: Rc<RefCell<HashMap<String, usize>>>,
         // The sections of the list, and the headers of the works of an
         // album and of the recordings of a work
@@ -91,13 +99,10 @@ mod imp {
         pub album: RefCell<Option<Album>>,
         pub filter: RefCell<TrackFilter>,
         pub picks: RefCell<PickNames>,
-        // While the search leaves out some of the tracks, the number of
-        // the tracks that match it and the number of all of them
-        pub left_out: Cell<Option<(u32, u32)>>,
-        // Then, the URIs of the tracks it matches, which are the ones taken;
-        // the others are dimmed. The menu next to the Add button offers to
-        // take them all
-        pub matching: Rc<RefCell<Option<HashSet<String>>>>,
+        // While the search leaves out some of the tracks, the ones it
+        // matches, which are the ones taken; the others are dimmed. The
+        // menu next to the Add button offers to take them all
+        pub matching: RefCell<Option<super::Matching>>,
         #[property(get)]
         pub partial: Cell<bool>,
         // Bumped for each album, to stop loading the tracks of the
@@ -373,7 +378,7 @@ impl AlbumTracks {
                 let matching = this.imp().matching.borrow();
                 if matching
                     .as_ref()
-                    .is_some_and(|matching| !matching.contains(&track.uri()))
+                    .is_some_and(|matching| !matching.uris.contains(&track.uri()))
                 {
                     row.add_css_class("unmatched");
                 } else {
@@ -397,17 +402,8 @@ impl AlbumTracks {
             clone!(
                 #[weak(rename_to = this)]
                 self,
-                move |widget: &gtk::Widget, x, y, start| {
-                    let track = this
-                        .imp()
-                        .tracks
-                        .borrow()
-                        .as_ref()
-                        .and_then(|tracks| tracks.item(start))
-                        .and_downcast::<Track>();
-                    if let Some(track) = track {
-                        this.emit_by_name::<()>("work-menu-requested", &[widget, &x, &y, &track]);
-                    }
+                move |widget: &gtk::Widget, x, y, track: &Track| {
+                    this.emit_by_name::<()>("work-menu-requested", &[widget, &x, &y, track]);
                 }
             ),
             None::<(fn() -> bool, fn(&Track, u32))>,
@@ -535,6 +531,21 @@ impl AlbumTracks {
         }
         self.imp().selection_anchor.set(Some(track));
         self.update_selection();
+    }
+
+    // Asks for the menu of the recording under a header, at a point of
+    // `widget`
+    fn request_recording_menu(
+        &self,
+        widget: &gtk::Widget,
+        x: f64,
+        y: f64,
+        header: &gtk::ListHeader,
+    ) {
+        self.emit_by_name::<()>(
+            "recording-menu-requested",
+            &[widget, &x, &y, &header.start(), &header.end()],
+        );
     }
 
     // Selects or unselects the movements of a work, from its header: in
@@ -678,13 +689,7 @@ impl AlbumTracks {
         imp.album_title.set_label(&work.name);
         imp.album_title
             .set_tooltip_text(Some(work.title.as_deref().unwrap_or(&work.name)));
-        let composers = work
-            .composers
-            .iter()
-            .map(|composer| composer.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        imp.album_artist.set_label(&composers);
+        imp.album_artist.set_label(&work.composer_names());
         imp.album_info.set_visible(false);
 
         imp.album.replace(None);
@@ -712,7 +717,7 @@ impl AlbumTracks {
         if !self.shows_work() {
             let tracks = self.tracks();
             let matching = imp.matching.borrow();
-            let Some(matching) = matching.as_ref() else {
+            let Some(matching) = matching.as_ref().map(|matching| &matching.uris) else {
                 return (self.files(), pos);
             };
             let clicked = tracks.get(pos as usize);
@@ -782,7 +787,12 @@ impl AlbumTracks {
     // and no words to search for, it says how many are theirs
     fn update_filter_bar(&self) {
         let imp = self.imp();
-        let Some((matching, total)) = imp.left_out.get() else {
+        let Some((matching, total)) = imp
+            .matching
+            .borrow()
+            .as_ref()
+            .map(|matching| (matching.uris.len() as u32, matching.total))
+        else {
             imp.filter_bar.set_reveal_child(false);
             return;
         };
@@ -868,7 +878,6 @@ impl AlbumTracks {
         tracks.remove_all();
         imp.files.replace(Vec::new());
         imp.matching.replace(None);
-        imp.left_out.set(None);
         self.set_partial(false);
         imp.recordings.replace(Vec::new());
         imp.recording_of.replace(HashMap::new());
@@ -934,13 +943,12 @@ impl AlbumTracks {
                     let matching = matching.filter(|matching| matching.len() < all.len());
                     let imp = this.imp();
                     if let Some(matching) = matching {
-                        imp.left_out
-                            .set(Some((matching.len() as u32, all.len() as u32)));
                         let files: Vec<gio::File> =
                             matching.into_iter().map(gio::File::for_path).collect();
-                        imp.matching.replace(Some(
-                            files.iter().map(|file| file.uri().to_string()).collect(),
-                        ));
+                        imp.matching.replace(Some(Matching {
+                            uris: files.iter().map(|file| file.uri().to_string()).collect(),
+                            total: all.len() as u32,
+                        }));
                         imp.files.replace(files);
                         this.set_partial(true);
                     } else {
@@ -977,23 +985,8 @@ impl AlbumTracks {
         }
         let work = imp.work.borrow();
         if let Some(work) = work.as_ref() {
-            let composers = work
-                .composers
-                .iter()
-                .map(|composer| composer.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let count = recordings.len() as u32;
-            let recordings_label = ni18n_f(
-                // Translators: The '{}' must be left unmodified, and it is
-                // expanded to the number of recordings of a work in the
-                // music folders
-                "{} recording",
-                "{} recordings",
-                count,
-                &[&count.to_string()],
-            );
-            let subtitle = [composers, recordings_label]
+            let recordings_label = library_view::recordings_label(recordings.len() as u32);
+            let subtitle = [work.composer_names(), recordings_label]
                 .into_iter()
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()
@@ -1124,16 +1117,7 @@ impl AlbumTracks {
                     header,
                     move |button| {
                         let (x, y) = (f64::from(button.width()) / 2.0, f64::from(button.height()));
-                        this.emit_by_name::<()>(
-                            "recording-menu-requested",
-                            &[
-                                &button.upcast_ref::<gtk::Widget>(),
-                                &x,
-                                &y,
-                                &header.start(),
-                                &header.end(),
-                            ],
-                        );
+                        this.request_recording_menu(button.upcast_ref(), x, y, &header);
                     }
                 ));
 
@@ -1146,69 +1130,32 @@ impl AlbumTracks {
                 // selects the tracks in selection mode, once it's let go of,
                 // like a button's: a flick from the header scrolls the list,
                 // and a long press opens the menu, rather than selecting
-                let click = gtk::GestureClick::builder().button(0).build();
-                click.connect_pressed(clone!(
-                    #[weak]
-                    this,
-                    #[weak]
-                    header,
-                    #[weak]
-                    text,
-                    move |gesture, _, x, y| {
-                        if gesture.current_button() == gdk::BUTTON_SECONDARY {
-                            gesture.set_state(gtk::EventSequenceState::Claimed);
-                            this.emit_by_name::<()>(
-                                "recording-menu-requested",
-                                &[
-                                    &text.upcast_ref::<gtk::Widget>(),
-                                    &x,
-                                    &y,
-                                    &header.start(),
-                                    &header.end(),
-                                ],
-                            );
-                        }
-                    }
-                ));
+                let click = gtk::GestureClick::new();
                 click.connect_released(clone!(
                     #[weak]
                     this,
                     #[weak]
                     header,
                     move |gesture, _, _, _| {
-                        if gesture.current_button() == gdk::BUTTON_PRIMARY {
-                            let ctrl = gesture
-                                .current_event_state()
-                                .contains(gdk::ModifierType::CONTROL_MASK);
-                            this.toggle_work(header.start(), header.end(), ctrl);
-                        }
+                        let ctrl = gesture
+                            .current_event_state()
+                            .contains(gdk::ModifierType::CONTROL_MASK);
+                        this.toggle_work(header.start(), header.end(), ctrl);
                     }
                 ));
                 text.add_controller(click);
-                let long_press = gtk::GestureLongPress::new();
-                long_press.set_touch_only(true);
-                long_press.connect_pressed(clone!(
-                    #[weak]
-                    this,
-                    #[weak]
-                    header,
-                    #[weak]
-                    text,
-                    move |gesture, x, y| {
-                        gesture.set_state(gtk::EventSequenceState::Claimed);
-                        this.emit_by_name::<()>(
-                            "recording-menu-requested",
-                            &[
-                                &text.upcast_ref::<gtk::Widget>(),
-                                &x,
-                                &y,
-                                &header.start(),
-                                &header.end(),
-                            ],
-                        );
-                    }
-                ));
-                text.add_controller(long_press);
+                utils::setup_context_menu(
+                    &text,
+                    clone!(
+                        #[weak]
+                        this,
+                        #[weak]
+                        header,
+                        #[weak]
+                        text,
+                        move |x, y| this.request_recording_menu(text.upcast_ref(), x, y, &header)
+                    ),
+                );
 
                 let content = gtk::Box::builder()
                     .orientation(gtk::Orientation::Vertical)

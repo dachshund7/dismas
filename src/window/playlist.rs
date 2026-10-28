@@ -102,17 +102,8 @@ impl Window {
                 clone!(
                     #[weak(rename_to = win)]
                     self,
-                    move |widget: &gtk::Widget, x, y, start| {
-                        let track = win
-                            .imp()
-                            .playlist_view
-                            .queue_view()
-                            .model()
-                            .and_then(|model| model.item(start))
-                            .and_downcast::<Track>();
-                        if let Some(track) = track {
-                            win.show_work_menu(widget, x, y, &track);
-                        }
+                    move |widget: &gtk::Widget, x, y, track: &Track| {
+                        win.show_work_menu(widget, x, y, track);
                     }
                 ),
                 // While a search hides tracks, they can't be moved, as with
@@ -593,10 +584,10 @@ impl Window {
         let player = self.player();
         let queue = player.queue();
         let positions: Vec<u32> = if self.queue_selection() && track.selected() {
-            queue
-                .selected_tracks()
-                .iter()
-                .filter_map(|track| queue.position(track))
+            (0..)
+                .zip(queue.model().iter::<Track>().flatten())
+                .filter(|(_, track)| track.selected())
+                .map(|(pos, _)| pos)
                 .collect()
         } else {
             queue.position(track).into_iter().collect()

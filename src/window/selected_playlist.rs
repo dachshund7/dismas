@@ -70,10 +70,8 @@ impl Window {
         queue.set_action_and_target_value(Some("win.selected-playlist"), Some(&"".to_variant()));
         playlists.append_item(&queue);
         for name in playlists::names() {
-            // Shortened like where tracks are dropped, as a menu is as
-            // wide as its longest item; underscores in names would be taken
-            // for mnemonics
-            let label = utils::short_playlist_name(&name).replace('_', "__");
+            // Shortened like where tracks are dropped
+            let label = utils::playlist_menu_label(&name);
             let item = gio::MenuItem::new(Some(&label), None);
             item.set_action_and_target_value(
                 Some("win.selected-playlist"),
@@ -106,14 +104,7 @@ impl Window {
 
     // The label of the buttons that add tracks to the selected playlist
     pub(super) fn add_to_playlist_label(&self) -> String {
-        let name = self.selected_playlist();
-        if name.is_empty() {
-            i18n("Add to Queue")
-        } else {
-            // Translators: `{playlist}` must be left unmodified; it is
-            // expanded to the name of a playlist
-            i18n_k("Add to {playlist}", &[("playlist", &name)])
-        }
+        super::adding::add_to_label(&self.selected_playlist())
     }
 
     fn update_playlist_labels(&self) {
@@ -753,16 +744,11 @@ async fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
 // are there is found in another thread, as a network drive that's gone
 // can keep it waiting
 pub(super) async fn start_in_music_folder(dialog: &gtk::FileDialog) {
-    let folders = library::music_folders(&utils::settings_manager());
-    let folder = gio::spawn_blocking(move || {
-        folders
-            .into_iter()
-            .find(|folder| folder.path.is_dir())
-            .map(|folder| folder.path)
-    })
-    .await
-    .ok()
-    .flatten();
+    let folders = library::music_folder_paths();
+    let folder = gio::spawn_blocking(move || folders.into_iter().find(|folder| folder.is_dir()))
+        .await
+        .ok()
+        .flatten();
     if let Some(folder) = folder {
         dialog.set_initial_folder(Some(&gio::File::for_path(folder)));
     }

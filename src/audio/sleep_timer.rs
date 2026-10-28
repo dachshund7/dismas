@@ -13,6 +13,20 @@ use log::error;
 
 use crate::audio::PlaybackAction;
 
+// What the music stops at the end of, rather than when the timer runs out
+#[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Eq, Default)]
+#[enum_type(name = "DismasTimerEnd")]
+pub enum TimerEnd {
+    #[default]
+    None,
+    // The track playing: the timer ran out and it's playing to its end, or
+    // the music was asked to stop at its end
+    Track,
+    // The work playing, which goes on while its movements follow each
+    // other: the music was asked to stop at its end
+    Work,
+}
+
 mod imp {
     use super::*;
 
@@ -30,14 +44,8 @@ mod imp {
         // when the timer runs out, instead of right away
         #[property(get, set)]
         pub finish_track: Cell<bool>,
-        // Whether the timer ran out and the track is playing to its end,
-        // or the music was asked to stop at the end of the track
-        #[property(get)]
-        pub finishing_track: Cell<bool>,
-        // Whether the music was asked to stop at the end of the work that
-        // is playing, which goes on while its movements follow each other
-        #[property(get)]
-        pub finishing_work: Cell<bool>,
+        #[property(get, builder(TimerEnd::default()))]
+        pub waiting_for: Cell<TimerEnd>,
 
         pub deadline: Cell<Option<Instant>>,
         pub source: RefCell<Option<glib::SourceId>>,
@@ -81,8 +89,7 @@ impl SleepTimer {
         imp.deadline.set(Some(
             Instant::now() + Duration::from_secs(u64::from(minutes) * 60),
         ));
-        self.set_finishing_track(false);
-        self.set_finishing_work(false);
+        self.set_waiting_for(TimerEnd::None);
         self.set_active(true);
         self.update_remaining();
 
@@ -104,8 +111,7 @@ impl SleepTimer {
         self.stop_countdown();
         self.imp().deadline.set(None);
         self.set_remaining(0);
-        self.set_finishing_track(false);
-        self.set_finishing_work(false);
+        self.set_waiting_for(TimerEnd::None);
         self.set_active(false);
     }
 
@@ -116,14 +122,17 @@ impl SleepTimer {
         self.stop_countdown();
         self.imp().deadline.set(None);
         self.set_remaining(0);
-        self.set_finishing_track(!work);
-        self.set_finishing_work(work);
+        self.set_waiting_for(if work {
+            TimerEnd::Work
+        } else {
+            TimerEnd::Track
+        });
         self.set_active(true);
     }
 
     // Waits for the end of the track instead of stopping the music now
     pub fn wait_for_track_end(&self) {
-        self.set_finishing_track(true);
+        self.set_waiting_for(TimerEnd::Track);
     }
 
     // There's no track playing any more, as the queue was emptied or
@@ -131,7 +140,7 @@ impl SleepTimer {
     // the work is over, so the timer turns off; a countdown goes on, as it
     // doesn't depend on a track
     pub fn track_gone(&self) {
-        if self.finishing_track() || self.finishing_work() {
+        if self.waiting_for() != TimerEnd::None {
             self.cancel();
         }
     }
@@ -181,15 +190,9 @@ impl SleepTimer {
         }
     }
 
-    fn set_finishing_track(&self, finishing_track: bool) {
-        if self.imp().finishing_track.replace(finishing_track) != finishing_track {
-            self.notify_finishing_track();
-        }
-    }
-
-    fn set_finishing_work(&self, finishing_work: bool) {
-        if self.imp().finishing_work.replace(finishing_work) != finishing_work {
-            self.notify_finishing_work();
+    fn set_waiting_for(&self, end: TimerEnd) {
+        if self.imp().waiting_for.replace(end) != end {
+            self.notify_waiting_for();
         }
     }
 }
@@ -205,20 +208,16 @@ mod tests {
 
         timer.stop_at_end(true);
         assert!(timer.active());
-        assert!(timer.finishing_work());
-        assert!(!timer.finishing_track());
+        assert_eq!(timer.waiting_for(), TimerEnd::Work);
         assert_eq!(timer.remaining(), 0);
 
-        // One or the other
         timer.stop_at_end(false);
-        assert!(timer.finishing_track());
-        assert!(!timer.finishing_work());
+        assert_eq!(timer.waiting_for(), TimerEnd::Track);
 
         timer.stop_at_end(true);
         timer.cancel();
         assert!(!timer.active());
-        assert!(!timer.finishing_work());
-        assert!(!timer.finishing_track());
+        assert_eq!(timer.waiting_for(), TimerEnd::None);
     }
 
     #[test]

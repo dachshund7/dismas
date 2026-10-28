@@ -161,12 +161,12 @@ mod imp {
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
         pub selection_mode: Cell<bool>,
-        // What the page shows, "albums" or "works": the window's Albums
-        // and Works pages are both this one, which keeps the search, the
-        // composer and the performer picked from one to the other. The
-        // works are only shown while a track is part of one
-        #[property(get, set = Self::set_view, explicit_notify)]
-        pub view: RefCell<String>,
+        // Whether the page shows the works rather than the albums: the
+        // window's Albums and Works pages are both this one, which keeps
+        // the search, the composer and the performer picked from one to the
+        // other. The works are only shown while a track is part of one
+        #[property(get, set = Self::set_works_view, explicit_notify)]
+        pub works_view: Cell<bool>,
         #[property(get)]
         pub has_works: Cell<bool>,
         // The works the search finds, and the filter they were read for;
@@ -269,13 +269,12 @@ mod imp {
             self.obj().notify_selection_mode();
         }
 
-        fn set_view(&self, view: String) {
-            if *self.view.borrow() == view {
+        fn set_works_view(&self, works: bool) {
+            if self.works_view.replace(works) == works {
                 return;
             }
-            self.view.replace(view);
             self.obj().update_view();
-            self.obj().notify_view();
+            self.obj().notify_works_view();
         }
     }
 
@@ -744,26 +743,7 @@ impl LibraryView {
                 }
             }
         );
-
-        let click = gtk::GestureClick::builder()
-            .button(gdk::BUTTON_SECONDARY)
-            .build();
-        click.connect_pressed(clone!(
-            #[strong]
-            request,
-            move |gesture, _, x, y| {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-                request(x, y);
-            }
-        ));
-        cell.add_controller(click);
-
-        let long_press = gtk::GestureLongPress::builder().touch_only(true).build();
-        long_press.connect_pressed(move |gesture, x, y| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            request(x, y);
-        });
-        cell.add_controller(long_press);
+        utils::setup_context_menu(cell, request);
     }
 
     // An album is dragged to a place in the playlist pane; in selection
@@ -1038,8 +1018,6 @@ impl LibraryView {
                 this.emit_by_name::<()>("work-activated", &[&item]);
             }
         ));
-
-        imp.view.replace("albums".to_string());
     }
 
     // The music folders that aren't there or are left out, whose tracks
@@ -1072,7 +1050,7 @@ impl LibraryView {
     // Whether the page shows the works, rather than the albums
     pub fn shows_works(&self) -> bool {
         let imp = self.imp();
-        imp.has_works.get() && *imp.view.borrow() == "works"
+        imp.has_works.get() && imp.works_view.get()
     }
 
     // The Works page is only there while a track is part of a work, and
@@ -1083,7 +1061,7 @@ impl LibraryView {
             self.notify_has_works();
         }
         if !available {
-            self.set_view("albums");
+            self.set_works_view(false);
         }
         self.update_view();
     }
@@ -1765,6 +1743,14 @@ impl LibraryView {
             .collect()
     }
 
+    // The selected albums, leaving selection mode, as the buttons of its
+    // bar do once they've taken them
+    pub fn take_selected_albums(&self) -> Vec<(String, TrackFilter)> {
+        let albums = self.selected_albums();
+        self.set_selection_mode(false);
+        albums
+    }
+
     // The menu next to the button that adds the albums, with the other ways
     // to add them
     pub fn set_add_menu(&self, menu: &gio::MenuModel) {
@@ -2127,11 +2113,16 @@ pub struct PickNames {
     pub performer: Option<String>,
 }
 
-// The rows of the list of composers: the name they're sorted by, and the
-// number of their albums
-fn composer_factory() -> gtk::SignalListItemFactory {
+// The rows of the lists of composers, performers and works: a name, which
+// the end of a long row cuts off, and a number, which `bind` sets from the
+// `T` of the item, a `BoxedAnyObject`; `tooltip` makes the row's tooltip
+// from it when it shows
+fn name_count_factory<T: 'static>(
+    tooltip: fn(&T) -> Option<String>,
+    bind: fn(&T, &gtk::Label, &gtk::Label),
+) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
-    factory.connect_setup(|_, item| {
+    factory.connect_setup(move |_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let name = gtk::Label::builder()
             .xalign(0.0)
@@ -2145,15 +2136,12 @@ fn composer_factory() -> gtk::SignalListItemFactory {
         let row = gtk::Box::builder().spacing(12).margin_end(12).build();
         row.append(&name);
         row.append(&count);
-        // The name it's known by, as the row has the one it's sorted by
-        utils::set_row_tooltip(&row, item, |object| {
-            let composer = object.downcast_ref::<glib::BoxedAnyObject>()?;
-            let composer = composer.borrow::<Option<library::ComposerInfo>>();
-            composer.as_ref().map(|composer| composer.name.clone())
+        utils::set_row_tooltip(&row, item, move |object| {
+            tooltip(&object.downcast_ref::<glib::BoxedAnyObject>()?.borrow::<T>())
         });
         item.set_child(Some(&row));
     });
-    factory.connect_bind(|_, item| {
+    factory.connect_bind(move |_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let Some(row) = item.child() else {
             return;
@@ -2164,43 +2152,49 @@ fn composer_factory() -> gtk::SignalListItemFactory {
         ) else {
             return;
         };
-        let Some(composer) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
-            return;
-        };
-        if let Some(composer) = composer.borrow::<Option<library::ComposerInfo>>().as_ref() {
-            name.set_label(&composer.label);
-            count.set_label(&composer.albums.to_string());
-        } else {
-            name.set_label(&i18n("All Composers"));
-            count.set_label("");
+        if let Some(object) = item.item().and_downcast::<glib::BoxedAnyObject>() {
+            bind(&object.borrow::<T>(), &name, &count);
         }
     });
     factory
+}
+
+// A name followed, dimmed, by more about it, if there's more, as markup
+fn with_dimmed(name: &str, more: &str) -> String {
+    let name = glib::markup_escape_text(name);
+    if more.is_empty() {
+        name.to_string()
+    } else {
+        let more = glib::markup_escape_text(more);
+        format!("{name}  <span alpha=\"55%\">{more}</span>")
+    }
+}
+
+// The rows of the list of composers: the name they're sorted by, and the
+// number of their albums
+fn composer_factory() -> gtk::SignalListItemFactory {
+    name_count_factory::<Option<library::ComposerInfo>>(
+        // The name it's known by, as the row has the one it's sorted by
+        |composer| composer.as_ref().map(|composer| composer.name.clone()),
+        |composer, name, count| {
+            if let Some(composer) = composer {
+                name.set_label(&composer.label);
+                count.set_label(&composer.albums.to_string());
+            } else {
+                name.set_label(&i18n("All Composers"));
+                count.set_label("");
+            }
+        },
+    )
 }
 
 // The rows of the list of performers: the name they're sorted by, then,
 // dimmed, what they play or sing, which the end of a long row cuts off
 // first, and the number of their albums
 fn performer_factory() -> gtk::SignalListItemFactory {
-    let factory = gtk::SignalListItemFactory::new();
-    factory.connect_setup(|_, item| {
-        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let name = gtk::Label::builder()
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        let count = gtk::Label::builder()
-            .css_classes(["dim-label", "numeric"])
-            .build();
-        // The scrollbar is drawn over the right edge of the list
-        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
-        row.append(&name);
-        row.append(&count);
+    name_count_factory::<Option<library::PerformerInfo>>(
         // The name they're known by, and all they play or sing
-        utils::set_row_tooltip(&row, item, |object| {
-            let performer = object.downcast_ref::<glib::BoxedAnyObject>()?;
-            let performer = performer.borrow::<Option<library::PerformerInfo>>();
+        |performer| {
             let performer = performer.as_ref()?;
             let text = [performer.name.clone(), performer.roles.join(", ")]
                 .into_iter()
@@ -2208,41 +2202,17 @@ fn performer_factory() -> gtk::SignalListItemFactory {
                 .collect::<Vec<_>>()
                 .join("\n");
             Some(text)
-        });
-        item.set_child(Some(&row));
-    });
-    factory.connect_bind(|_, item| {
-        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let Some(row) = item.child() else {
-            return;
-        };
-        let (Some(name), Some(count)) = (
-            row.first_child().and_downcast::<gtk::Label>(),
-            row.last_child().and_downcast::<gtk::Label>(),
-        ) else {
-            return;
-        };
-        let Some(performer) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
-            return;
-        };
-        if let Some(performer) = performer
-            .borrow::<Option<library::PerformerInfo>>()
-            .as_ref()
-        {
-            let sort = glib::markup_escape_text(&performer.sort);
-            let roles = glib::markup_escape_text(&performer.roles.join(", "));
-            if roles.is_empty() {
-                name.set_markup(&sort);
+        },
+        |performer, name, count| {
+            if let Some(performer) = performer {
+                name.set_markup(&with_dimmed(&performer.sort, &performer.roles.join(", ")));
+                count.set_label(&performer.albums.to_string());
             } else {
-                name.set_markup(&format!("{sort}  <span alpha=\"55%\">{roles}</span>"));
+                name.set_label(&i18n("All Performers"));
+                count.set_label("");
             }
-            count.set_label(&performer.albums.to_string());
-        } else {
-            name.set_label(&i18n("All Performers"));
-            count.set_label("");
-        }
-    });
-    factory
+        },
+    )
 }
 
 // The headers of the sections of the list of performers; All Performers,
@@ -2288,39 +2258,29 @@ struct WorkItem {
     section: u32,
 }
 
+// The number of the recordings of a work, e.g. "3 recordings"
+pub fn recordings_label(n: u32) -> String {
+    ni18n_f(
+        // Translators: The '{}' must be left unmodified, and it is
+        // expanded to the number of recordings of a work in the music
+        // folders
+        "{} recording",
+        "{} recordings",
+        n,
+        &[&n.to_string()],
+    )
+}
+
 // The rows of the list of works: the name of the work, then, dimmed, the
 // work or the collection it's part of, if any, which the end of a long row
 // cuts off first, and the number of its recordings. The rows are all one
 // line high, as measuring wrapped text made scrolling slow; the tooltip has
 // the full title
 fn work_factory() -> gtk::SignalListItemFactory {
-    let factory = gtk::SignalListItemFactory::new();
-    factory.connect_setup(|_, item| {
-        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let name = gtk::Label::builder()
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        let count = gtk::Label::builder()
-            .css_classes(["dim-label", "numeric"])
-            .build();
-        // The scrollbar is drawn over the right edge of the list
-        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
-        row.append(&name);
-        row.append(&count);
-        utils::set_row_tooltip(&row, item, |object| {
-            let work = object.downcast_ref::<glib::BoxedAnyObject>()?;
-            let work = &work.borrow::<WorkItem>().info;
-            let recordings = ni18n_f(
-                // Translators: The '{}' must be left unmodified, and it is
-                // expanded to the number of recordings of a work in the
-                // music folders
-                "{} recording",
-                "{} recordings",
-                work.recordings,
-                &[&work.recordings.to_string()],
-            );
+    name_count_factory::<WorkItem>(
+        |work| {
+            let work = &work.info;
+            let recordings = recordings_label(work.recordings);
             let text = [
                 Some(work.title.as_deref().unwrap_or(&work.name)),
                 work.collection.as_deref(),
@@ -2331,35 +2291,14 @@ fn work_factory() -> gtk::SignalListItemFactory {
             .collect::<Vec<_>>()
             .join("\n");
             Some(text)
-        });
-        item.set_child(Some(&row));
-    });
-    factory.connect_bind(|_, item| {
-        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let Some(row) = item.child() else {
-            return;
-        };
-        let (Some(name), Some(count)) = (
-            row.first_child().and_downcast::<gtk::Label>(),
-            row.last_child().and_downcast::<gtk::Label>(),
-        ) else {
-            return;
-        };
-        let Some(work) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
-            return;
-        };
-        let work = &work.borrow::<WorkItem>().info;
-        let title = glib::markup_escape_text(&work.name);
-        match &work.collection {
-            Some(collection) => {
-                let collection = glib::markup_escape_text(collection);
-                name.set_markup(&format!("{title}  <span alpha=\"55%\">{collection}</span>"));
-            }
-            None => name.set_markup(&title),
-        }
-        count.set_label(&work.recordings.to_string());
-    });
-    factory
+        },
+        |work, name, count| {
+            let work = &work.info;
+            let collection = work.collection.as_deref().unwrap_or_default();
+            name.set_markup(&with_dimmed(&work.name, collection));
+            count.set_label(&work.recordings.to_string());
+        },
+    )
 }
 
 // The headers of the list of works: the names of the composers
@@ -2383,12 +2322,7 @@ fn work_section_factory() -> gtk::SignalListItemFactory {
             return;
         };
         let work = &work.borrow::<WorkItem>().info;
-        let names = work
-            .composers
-            .iter()
-            .map(|composer| composer.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let names = work.composer_names();
         label.set_label(&if names.is_empty() {
             i18n("Unknown composer")
         } else {
