@@ -7,10 +7,15 @@
 // one for the queue. A shuffled playlist keeps its order from before, to
 // restore it, in a file of the same name in the unshuffled directory
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use gtk::{gio, glib, prelude::*};
 use log::{debug, warn};
+
+use crate::cue_sheet;
 
 const EXTENSION: &str = "m3u8";
 
@@ -274,17 +279,133 @@ fn append_in(dir: &Path, name: &str, files: &[gio::File]) -> Result<(), glib::Er
     write_path(&path, &tracks)
 }
 
-// The tracks of an M3U playlist anywhere, like one to import
+// The tracks of an M3U playlist anywhere. Playlists written on Windows
+// are often in its legacy encoding, which is guessed as for CUE sheets
 pub fn read_m3u(path: &Path) -> Option<Vec<gio::File>> {
     match std::fs::read(path) {
         Ok(contents) => {
             let dir = path.parent().map(gio::File::for_path)?;
-            Some(parse_m3u(&String::from_utf8_lossy(&contents), &dir))
+            Some(parse_m3u(&cue_sheet::decode(&contents), &dir))
         }
         Err(e) => {
             warn!("Unable to read the playlist {path:?}: {e}");
             None
         }
+    }
+}
+
+// The tracks of an M3U playlist from elsewhere, like one to import: an
+// entry that isn't where the playlist says is looked for where it can be,
+// as the playlist can come from another computer, or from Windows, see
+// `Finder`; the entries that aren't found are left as they are
+pub fn import_m3u(path: &Path, music_folders: &[PathBuf]) -> Option<Vec<gio::File>> {
+    let contents = std::fs::read(path)
+        .inspect_err(|e| warn!("Unable to read the playlist {path:?}: {e}"))
+        .ok()?;
+    let dir = path.parent()?;
+    let base = gio::File::for_path(dir);
+    let mut finder = Finder::default();
+    Some(
+        m3u_entries(&cue_sheet::decode(&contents))
+            .map(|line| {
+                let file = m3u_entry(line, &base);
+                if file.path().is_some_and(|p| cue_sheet::location_exists(&p)) {
+                    return file;
+                }
+                finder
+                    .find(line, dir, music_folders)
+                    .map_or(file, gio::File::for_path)
+            })
+            .collect(),
+    )
+}
+
+// Looks for the tracks of a playlist from elsewhere: a path that differs
+// in case, as one written on Windows can, or the end of an absolute path,
+// as in "C:\Users\…\Music\Artist\Album\01.flac", in the folder of
+// the playlist and then in the music folders, where the end must have a
+// folder and a file, as a file name alone could be found anywhere. The
+// folders read are kept, as the tracks of a playlist share them
+#[derive(Default)]
+struct Finder {
+    listings: HashMap<PathBuf, Vec<(String, PathBuf)>>,
+}
+
+impl Finder {
+    fn find(&mut self, line: &str, dir: &Path, music_folders: &[PathBuf]) -> Option<PathBuf> {
+        let (absolute, path) = if let Some(uri) = line.strip_prefix("file://") {
+            (
+                true,
+                glib::Uri::unescape_string(uri, None::<&str>)?.to_string(),
+            )
+        } else if line.contains("://") {
+            return None;
+        } else {
+            // A drive, as in "C:\", or a network share, as in "\\server\"
+            let windows = line.as_bytes().get(1) == Some(&b':') || line.starts_with("\\\\");
+            (windows || line.starts_with('/'), line.to_string())
+        };
+        let parts: Vec<&str> = path
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty() && *part != ".")
+            .collect();
+        if parts.is_empty() || parts.contains(&"..") {
+            return None;
+        }
+        if !absolute {
+            return self.find_in(dir, &parts);
+        }
+        (0..parts.len()).find_map(|start| {
+            let end = &parts[start..];
+            self.find_in(dir, end).or_else(|| {
+                (end.len() >= 2)
+                    .then(|| {
+                        music_folders
+                            .iter()
+                            .find_map(|folder| self.find_in(folder, end))
+                    })
+                    .flatten()
+            })
+        })
+    }
+
+    // The path of `parts` in `dir`, matching a part ignoring case when it
+    // isn't there as it's written, if one entry of its folder matches it.
+    // A track of a CUE sheet is a path under the sheet, which is a file
+    fn find_in(&mut self, dir: &Path, parts: &[&str]) -> Option<PathBuf> {
+        let mut path = dir.to_path_buf();
+        for (i, part) in parts.iter().enumerate() {
+            if path.is_file() {
+                path.extend(&parts[i..]);
+                break;
+            }
+            let exact = path.join(part);
+            if exact.exists() {
+                path = exact;
+                continue;
+            }
+            let listing = self.listings.entry(path.clone()).or_insert_with(|| {
+                std::fs::read_dir(&path)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|entry| {
+                        (
+                            entry.file_name().to_string_lossy().to_lowercase(),
+                            entry.path(),
+                        )
+                    })
+                    .collect()
+            });
+            let lower = part.to_lowercase();
+            let mut matching = listing.iter().filter(|(name, _)| *name == lower);
+            let (_, found) = matching.next()?;
+            if matching.next().is_some() {
+                return None;
+            }
+            path = found.clone();
+        }
+        cue_sheet::location_exists(&path).then_some(path)
     }
 }
 
@@ -397,30 +518,38 @@ fn format_m3u(files: &[gio::File], relative_to: Option<&Path>) -> (String, usize
 // The entries of an M3U playlist, which can be URIs, or paths; relative
 // paths are relative to `base`, the directory of the playlist
 fn parse_m3u(text: &str, base: &gio::File) -> Vec<gio::File> {
-    text.lines()
+    m3u_entries(text)
+        .map(|line| m3u_entry(line, base))
+        .collect()
+}
+
+// The lines of an M3U playlist that name tracks. Old Macs ended lines
+// with a carriage return alone
+fn m3u_entries(text: &str) -> impl Iterator<Item = &str> {
+    text.split(['\n', '\r'])
         .map(|line| line.trim_start_matches('\u{feff}').trim())
         // GLib can't take a path with a NUL byte, as in a UTF-16 playlist
-        // read as UTF-8, or a file with a block of zeros
+        // without a byte order mark, or a file with a block of zeros
         .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.contains('\0'))
-        .map(|line| {
-            // A path can have "://" in a file name too
-            if !line.starts_with('/') && line.contains("://") {
-                return gio::File::for_uri(line);
-            }
-            // Players on Windows, or set to be compatible with it, use
-            // backslashes
-            let line = if line.contains('/') {
-                line.to_string()
-            } else {
-                line.replace('\\', "/")
-            };
-            if Path::new(&line).is_absolute() {
-                gio::File::for_path(&line)
-            } else {
-                base.resolve_relative_path(&line)
-            }
-        })
-        .collect()
+}
+
+fn m3u_entry(line: &str, base: &gio::File) -> gio::File {
+    // A path can have "://" in a file name too
+    if !line.starts_with('/') && line.contains("://") {
+        return gio::File::for_uri(line);
+    }
+    // Players on Windows, or set to be compatible with it, use
+    // backslashes
+    let line = if line.contains('/') {
+        line.to_string()
+    } else {
+        line.replace('\\', "/")
+    };
+    if Path::new(&line).is_absolute() {
+        gio::File::for_path(&line)
+    } else {
+        base.resolve_relative_path(&line)
+    }
 }
 
 #[cfg(test)]
@@ -667,5 +796,76 @@ mod tests {
         assert_eq!(check_name(&"x".repeat(243)), Ok(()));
         assert_eq!(check_name(&"x".repeat(244)), Err(NameError::TooLong));
         assert!(is_valid_name("Road trip: 2026 (best)"));
+    }
+
+    #[test]
+    fn playlists_in_legacy_encodings_and_old_line_endings_are_read() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        // Windows-1252, as Winamp and foobar2000 write .m3u files, with the
+        // line endings of old Macs
+        let playlist = dir.join("list.m3u");
+        std::fs::write(
+            &playlist,
+            b"#EXTM3U\r/music/Caf\xe9.flac\r/music/B\xe4r.flac\r",
+        )
+        .unwrap();
+        let files = read_m3u(&playlist).unwrap();
+        assert_eq!(paths(&files), ["/music/Café.flac", "/music/Bär.flac"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn imported_tracks_are_found_where_they_moved() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Artist/Album")).unwrap();
+        std::fs::write(music.join("Artist/Album/01 One.flac"), b"").unwrap();
+        std::fs::write(music.join("Loose.flac"), b"").unwrap();
+        let track = music.join("Artist/Album/01 One.flac");
+        let elsewhere = dir.join("Elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+
+        let import = |folder: &Path, lines: &[&str]| -> Vec<PathBuf> {
+            let playlist = folder.join("list.m3u");
+            std::fs::write(&playlist, lines.join("\n")).unwrap();
+            import_m3u(&playlist, std::slice::from_ref(&music))
+                .unwrap()
+                .iter()
+                .map(|file| file.path().unwrap())
+                .collect()
+        };
+
+        // The end of a path from Windows or from another computer, in the
+        // folder of the playlist, or in the music folders
+        for line in [
+            "C:\\Users\\me\\Music\\Artist\\Album\\01 One.flac",
+            "\\\\server\\music\\Artist\\Album\\01 One.flac",
+            "file:///C:/Users/me/Music/Artist/Album/01%20One.flac",
+            "/home/someone/Music/Artist/Album/01 One.flac",
+        ] {
+            assert_eq!(
+                import(&music, &[line]),
+                std::slice::from_ref(&track),
+                "{line}"
+            );
+            assert_eq!(
+                import(&elsewhere, &[line]),
+                std::slice::from_ref(&track),
+                "{line}"
+            );
+        }
+        // A path written in another case, as on Windows
+        assert_eq!(
+            import(&music, &["artist/ALBUM/01 one.FLAC"]),
+            std::slice::from_ref(&track)
+        );
+        // A file name alone is only looked for next to the playlist
+        assert_eq!(
+            import(&music, &["D:\\Loose.flac"]),
+            [music.join("Loose.flac")]
+        );
+        let missing = import(&elsewhere, &["D:\\Loose.flac"]);
+        assert_ne!(missing, [music.join("Loose.flac")]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

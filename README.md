@@ -78,7 +78,10 @@ What Dismas adds
   in their places in the playlist, greyed out, and playback skips them until
   their files are back. Import and export M3U playlists. Exported paths are
   relative to the playlist's folder, so you can copy a playlist along with
-  the music to another device.
+  the music to another device. Importing also finds the tracks of a
+  playlist made on another computer or on Windows, like
+  `C:\Users\…\Music\Artist\Album\01.flac`, in the playlist's folder or
+  in the music folders, whatever the case of their names.
 - **Smart playlists and favorites:** mark tracks as favorites with the heart
   next to the sleep timer, or with Ctrl+D. On the Playlists page, Favorites
   plays them in the order you marked them, Recently Played plays the last

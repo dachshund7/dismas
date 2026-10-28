@@ -125,6 +125,9 @@ All notable changes to this project will be documented in this file.
   number, as in "Disc 1 - Live" or "CD1 (Bonus)", and in a few other
   languages, as in "Disco 2" or "Disque 1", so that their tracks make one
   album without album tags, and find the cover in the album's folder
+- Importing a playlist finds its tracks when it was made on another
+  computer or on Windows, by the end of their paths, in the playlist's
+  folder or in the music folders, whatever the case of their names
 
 ### Fixed
 
@@ -159,6 +162,9 @@ All notable changes to this project will be documented in this file.
   tracks in its trash and other hidden folders, and the recycle bins and
   snapshots of network drives (`#recycle`, `#snapshot`, `@Recycle`) showed
   in the album grid
+- An imported playlist written by a Windows player in its legacy encoding,
+  as Winamp and foobar2000 write `.m3u` files, lost the tracks with accents
+  in their names, and one with the line endings of old Macs lost them all
 
 ### Removed
 
