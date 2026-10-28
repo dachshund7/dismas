@@ -399,6 +399,14 @@ mod imp {
                     }
                 },
             );
+            klass.install_action_async("win.add-tracks", None, async move |win, _, _| {
+                debug!("Window::win.add-tracks()");
+                win.add_tracks_from_dialog().await;
+            });
+            klass.install_action_async("win.add-folder", None, async move |win, _, _| {
+                debug!("Window::win.add-folder()");
+                win.add_folder_from_dialog().await;
+            });
             klass.install_action_async("win.import-playlist", None, async move |win, _, _| {
                 debug!("Window::win.import-playlist()");
                 win.import_playlist().await;

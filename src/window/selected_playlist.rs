@@ -726,8 +726,7 @@ impl Window {
 }
 
 // A dialog for M3U playlists, starting in the first music folder that's
-// there. Which ones are there is found in another thread, as a network
-// drive that's gone can keep it waiting
+// there
 async fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
     let filter = gtk::FileFilter::new();
     filter.set_name(Some(&i18n("Playlists")));
@@ -744,6 +743,14 @@ async fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
         .filters(&filters)
         .default_filter(&filter)
         .build();
+    start_in_music_folder(&dialog).await;
+    dialog
+}
+
+// Starts a file dialog in the first music folder that's there. Which ones
+// are there is found in another thread, as a network drive that's gone
+// can keep it waiting
+pub(super) async fn start_in_music_folder(dialog: &gtk::FileDialog) {
     let folders = library::music_folders(&utils::settings_manager());
     let folder = gio::spawn_blocking(move || {
         folders
@@ -757,7 +764,6 @@ async fn playlist_file_dialog(title: &str) -> gtk::FileDialog {
     if let Some(folder) = folder {
         dialog.set_initial_folder(Some(&gio::File::for_path(folder)));
     }
-    dialog
 }
 
 // The queue and the playlist that playing dropped tracks replaced

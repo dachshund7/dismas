@@ -77,6 +77,10 @@ All notable changes to this project will be documented in this file.
   Recordings put the focus on the track they show, so that the keys go on
   from there
 - Fullscreen, in the main menu, for tablets and phones without F11
+- Add Tracks… and Add Folder…, in the main menu (Ctrl+O and Ctrl+Shift+O),
+  add tracks from outside the music folders to the selected playlist, as a
+  phone has nothing to drag them from. They're back from before 2026.10,
+  under new names and shortcuts
 
 ### Changed
 

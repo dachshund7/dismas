@@ -6,6 +6,20 @@ using Gtk 4.0;
 // The main menu, shared by the buttons of the player, the album grid and
 // the playlists; see utils::primary_menu()
 menu primary_menu {
+  // For tracks outside the music folders, as a phone has nothing to drag
+  // them from
+  section {
+    item {
+      label: _("Add _Tracks…");
+      action: "win.add-tracks";
+    }
+
+    item {
+      label: _("Add F_older…");
+      action: "win.add-folder";
+    }
+  }
+
   section {
     item {
       label: _("_Fullscreen");

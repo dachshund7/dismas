@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use super::selected_playlist::start_in_music_folder;
 use super::*;
 use crate::cue_sheet;
 
@@ -606,6 +607,54 @@ impl Window {
         }
 
         self.add_files_to_queue(files.to_vec(), QueueMode::Show, None);
+    }
+
+    // Add Tracks… and Add Folder…, in the main menu, add tracks from outside
+    // the music folders to the selected playlist, like opening them from a
+    // file manager, as a phone has nothing to drag them from
+    pub(super) async fn add_tracks_from_dialog(&self) {
+        let filter = gtk::FileFilter::new();
+        filter.set_name(Some(&i18n("Audio files")));
+        filter.add_mime_type("audio/*");
+        filter.add_mime_type("application/x-cue");
+        filter.add_suffix("cue");
+        let filters = gio::ListStore::new::<gtk::FileFilter>();
+        filters.append(&filter);
+        let dialog = gtk::FileDialog::builder()
+            .title(i18n("Open File"))
+            .accept_label(i18n("_Add"))
+            .modal(true)
+            .filters(&filters)
+            .default_filter(&filter)
+            .build();
+        start_in_music_folder(&dialog).await;
+        let files = dialog.open_multiple_future(Some(self)).await;
+        self.add_files_from_dialog(files);
+    }
+
+    pub(super) async fn add_folder_from_dialog(&self) {
+        let dialog = gtk::FileDialog::builder()
+            .title(i18n("Open Folder"))
+            .accept_label(i18n("_Add Folder"))
+            .modal(true)
+            .build();
+        start_in_music_folder(&dialog).await;
+        let folders = dialog.select_multiple_folders_future(Some(self)).await;
+        self.add_files_from_dialog(folders);
+    }
+
+    // The files or the folders picked in a dialog
+    fn add_files_from_dialog(&self, picked: Result<gio::ListModel, glib::Error>) {
+        let Ok(picked) = picked else {
+            // Cancelled
+            return;
+        };
+        let files: Vec<gio::File> = picked.iter::<gio::File>().flatten().collect();
+        if files.is_empty() {
+            self.add_toast(i18n("Unable to access files"));
+            return;
+        }
+        self.add_files_to_queue(files, QueueMode::Show, None);
     }
 
     // Adds files from the command line to the end of the selected playlist,

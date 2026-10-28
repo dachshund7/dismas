@@ -69,6 +69,16 @@ Adw.ShortcutsDialog shortcuts_dialog {
         title: C_("shortcut window", "Playlist");
 
         Adw.ShortcutsItem {
+            title: C_("shortcut window", "Add tracks");
+            action-name: "win.add-tracks";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Add a folder");
+            action-name: "win.add-folder";
+        }
+
+        Adw.ShortcutsItem {
             title: C_("shortcut window", "Remove all tracks");
             action-name: "queue.clear";
         }
