@@ -147,6 +147,10 @@ All notable changes to this project will be documented in this file.
 - An album without an album artist tag showed as by Various Artists as
   soon as one of its tracks had another artist, as with "feat."; it's by
   the artist of most of its tracks, if one has more than half of them
+- The tracks of an album without track numbers played with "10" before
+  "2", and the discs of an album in folders of their own, without disc
+  numbers, played with their tracks mixed together: the first track of
+  each disc, then the second of each
 
 ### Removed
 

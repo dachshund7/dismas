@@ -777,25 +777,56 @@ fn query_album_track_paths(
 ) -> rusqlite::Result<Vec<(String, Vec<PathBuf>)>> {
     let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
     let mut stmt = conn.prepare(&format!(
-        "SELECT album_id, path FROM tracks
+        "SELECT album_id, path, disc, track FROM tracks
          WHERE album_id IS NOT NULL{hidden_sql}
-         ORDER BY album_id, COALESCE(disc, 0), COALESCE(track, 0), path"
+         ORDER BY album_id"
     ))?;
     let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            path_from_bytes(row.get::<_, Vec<u8>>(1)?),
-        ))
+        let path = path_from_bytes(row.get::<_, Vec<u8>>(1)?);
+        let order = TrackOrder::new(&path, row.get(2)?, row.get(3)?);
+        Ok((row.get::<_, String>(0)?, (order, path)))
     })?;
-    let mut albums: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    let mut albums: Vec<(String, Vec<(TrackOrder, PathBuf)>)> = Vec::new();
     for row in rows {
-        let (id, path) = row?;
+        let (id, track) = row?;
         match albums.last_mut() {
-            Some((last, paths)) if *last == id => paths.push(path),
-            _ => albums.push((id, vec![path])),
+            Some((last, tracks)) if *last == id => tracks.push(track),
+            _ => albums.push((id, vec![track])),
         }
     }
-    Ok(albums)
+    Ok(albums
+        .into_iter()
+        .map(|(id, mut tracks)| {
+            tracks.sort_by(|a, b| a.0.cmp(&b.0));
+            (id, tracks.into_iter().map(|(_, path)| path).collect())
+        })
+        .collect())
+}
+
+// The order of the tracks of an album: by disc, and without a disc number
+// by the folder, as the discs of an album are often in folders of their
+// own whose track numbers start again, then by track number, and then by
+// file name in the order a file manager shows them, "2" before "10"
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct TrackOrder {
+    disc: i64,
+    folder: Option<(bool, glib::FilenameCollationKey)>,
+    track: i64,
+    name: (bool, glib::FilenameCollationKey),
+}
+
+impl TrackOrder {
+    fn new(path: &Path, disc: Option<i64>, track: Option<i64>) -> Self {
+        let name = |path: Option<&Path>| {
+            utils::file_name_key(&path.map(Path::to_string_lossy).unwrap_or_default())
+        };
+        Self {
+            disc: disc.unwrap_or(0),
+            folder: disc.is_none().then(|| name(path.parent())),
+            track: track.unwrap_or(0),
+            name: name(path.file_name().map(Path::new)),
+        }
+    }
 }
 
 // A composer of the tracks of the albums of the grid
@@ -1396,11 +1427,11 @@ fn query_work_rows(
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, path, work_key, movement_order,
                 CASE WHEN work_key IS NOT NULL{conditions} THEN 1 ELSE 0 END,
-                work, work_title, work_collection, work_composers, album, year, performers
+                work, work_title, work_collection, work_composers, album, year, performers,
+                disc, track
          FROM tracks
          WHERE album_id IN (SELECT album_id FROM tracks WHERE work_key IS NOT NULL{key_sql})
-               {hidden_sql}
-         ORDER BY album_id, COALESCE(disc, 0), COALESCE(track, 0), path"
+               {hidden_sql}"
     ))?;
     let params = values
         .into_iter()
@@ -1415,9 +1446,11 @@ fn query_work_rows(
                 .collect::<Result<Vec<u32>, _>>()
                 .unwrap_or_default()
         });
-        Ok(WorkRow {
+        let path = path_from_bytes(row.get(1)?);
+        let track_order = TrackOrder::new(&path, row.get(12)?, row.get(13)?);
+        let row = WorkRow {
             album_id: row.get(0)?,
-            path: path_from_bytes(row.get(1)?),
+            path,
             work: row.get(2)?,
             order,
             matching: row.get(4)?,
@@ -1428,9 +1461,12 @@ fn query_work_rows(
             album: row.get(9)?,
             year: row.get(10)?,
             performers: row.get(11)?,
-        })
+        };
+        Ok((track_order, row))
     })?;
-    rows.collect()
+    let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.sort_by(|(a_order, a), (b_order, b)| (&a.album_id, a_order).cmp(&(&b.album_id, b_order)));
+    Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
 // The recordings of the works, as the indices of their rows, which are in
@@ -1549,15 +1585,18 @@ pub fn album_tracks(album_id: &str, filter: &TrackFilter) -> Vec<PathBuf> {
     let query = |conn: &Connection| -> rusqlite::Result<Vec<PathBuf>> {
         let (conditions, values) = filter.conditions();
         let mut stmt = conn.prepare(&format!(
-            "SELECT path FROM tracks
-             WHERE album_id = ?{conditions}
-             ORDER BY COALESCE(disc, 0), COALESCE(track, 0), path"
+            "SELECT path, disc, track FROM tracks
+             WHERE album_id = ?{conditions}"
         ))?;
         let params = std::iter::once(album_id).chain(values.iter().map(String::as_str));
-        stmt.query_map(rusqlite::params_from_iter(params), |row| {
-            row.get::<_, Vec<u8>>(0).map(path_from_bytes)
-        })?
-        .collect()
+        let mut tracks = stmt
+            .query_map(rusqlite::params_from_iter(params), |row| {
+                let path = path_from_bytes(row.get(0)?);
+                Ok((TrackOrder::new(&path, row.get(1)?, row.get(2)?), path))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        tracks.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(tracks.into_iter().map(|(_, path)| path).collect())
     };
 
     match with_connection(|conn| query(conn)) {
@@ -3478,6 +3517,64 @@ mod tests {
                     "b".to_string(),
                     paths(&["/m/B/1-01.flac", "/m/B/2-01.flac"])
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn tracks_without_numbers_are_in_the_order_of_their_names() {
+        let conn = test_db();
+        let add = |path: &str, album: &str, track: Option<i64>| {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, track)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3)",
+                rusqlite::params![path.as_bytes(), album, track],
+            )
+            .unwrap();
+        };
+        // Numbers in their order; case goes by the locale, which is C in
+        // the tests
+        for name in ["10 Ten", "b", "2 Two", "1 One", "a"] {
+            add(&format!("/m/Untagged/{name}.flac"), "untagged", None);
+        }
+        // Discs in folders of their own, without disc numbers
+        for (path, track) in [
+            ("/m/Set/CD2/01.flac", 1),
+            ("/m/Set/CD1/02.flac", 2),
+            ("/m/Set/CD2/02.flac", 2),
+            ("/m/Set/CD1/01.flac", 1),
+        ] {
+            add(path, "set", Some(track));
+        }
+
+        let names = |album: &str| -> Vec<String> {
+            super::query_album_track_paths(&conn, &[])
+                .unwrap()
+                .into_iter()
+                .find(|(id, _)| id == album)
+                .unwrap()
+                .1
+                .iter()
+                .map(|path| path.strip_prefix("/m").unwrap().display().to_string())
+                .collect()
+        };
+        assert_eq!(
+            names("untagged"),
+            [
+                "Untagged/1 One.flac",
+                "Untagged/2 Two.flac",
+                "Untagged/10 Ten.flac",
+                "Untagged/a.flac",
+                "Untagged/b.flac",
+            ]
+        );
+        assert_eq!(
+            names("set"),
+            [
+                "Set/CD1/01.flac",
+                "Set/CD1/02.flac",
+                "Set/CD2/01.flac",
+                "Set/CD2/02.flac",
             ]
         );
     }

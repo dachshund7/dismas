@@ -522,7 +522,7 @@ pub fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
 // The key a name sorts by: the names starting with "." or "#" go last, and
 // the others in the order of file names in the locale, with numbers in
 // their order, e.g. "Disc 2" before "Disc 10"
-fn file_name_key(name: &str) -> (bool, glib::FilenameCollationKey) {
+pub fn file_name_key(name: &str) -> (bool, glib::FilenameCollationKey) {
     (
         name.starts_with(['.', '#']),
         glib::FilenameCollationKey::from(name),
