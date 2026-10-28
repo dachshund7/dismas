@@ -130,6 +130,9 @@ All notable changes to this project will be documented in this file.
 - An album that a CUE sheet splits from one file, whose sheet names another
   performer than the file's album artist, sorted in the grid by the name of
   the file's album artist
+- MP3, AIFF, WAV and AAC files showed no record label, and AAC files
+  (.aac) also lost the work and recording date that the Work Hierarchy
+  plugin writes
 
 ### Removed
 

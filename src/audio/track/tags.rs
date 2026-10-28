@@ -28,7 +28,7 @@ pub struct ExtraComments {
 // writes the tags it has no standard field for as a Vorbis comment of that
 // name in capitals, an APE item of that name capitalized ("Work_Hierarchy")
 // in Monkey's Audio, WavPack and Musepack files, a "TXXX" frame described
-// by it in MP3, AIFF and WAV files, and a "----:com.apple.iTunes:" atom
+// by it in MP3, AIFF, WAV and AAC files, and a "----:com.apple.iTunes:" atom
 // named after it in MP4 files
 const WORK_HIERARCHY: &str = "work_hierarchy";
 
@@ -138,7 +138,7 @@ impl LeftOut {
     }
 
     fn id3v2(tag: Option<&Id3v2Tag>) -> Self {
-        Self(ExtraComments::from_id3v2(tag), Fills::default())
+        Self(ExtraComments::from_id3v2(tag), Fills::from_id3v2(tag))
     }
 
     fn mp4(ilst: Option<&Ilst>) -> Self {
@@ -283,6 +283,7 @@ fn read_tagged_file(
         Some(FileType::Mpeg) => read(probe, options, |f: &MpegFile| LeftOut::id3v2(f.id3v2())),
         Some(FileType::Aiff) => read(probe, options, |f: &AiffFile| LeftOut::id3v2(f.id3v2())),
         Some(FileType::Wav) => read(probe, options, |f: &WavFile| LeftOut::id3v2(f.id3v2())),
+        Some(FileType::Aac) => read(probe, options, |f: &AacFile| LeftOut::id3v2(f.id3v2())),
         Some(FileType::Mp4) => read(probe, options, |f: &Mp4File| LeftOut::mp4(f.ilst())),
         _ => probe.options(options).read().map(|f| {
             let left_out = LeftOut(ExtraComments::default(), Fills::default());
@@ -408,5 +409,50 @@ mod tests {
         let read = read_file_tags(&path, ReadOptions::ALL);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(read.unwrap().extra.work_hierarchy.as_deref(), Some(json));
+    }
+
+    // A raw AAC file, a few ADTS frames of AAC LC at 44.1 kHz in stereo,
+    // each a 7-byte header and 10 bytes of nothing
+    fn write_test_aac(path: &Path) {
+        let frame = [0xFF, 0xF1, 0x50, 0x80, 0x02, 0x3F, 0xFC];
+        let mut bytes = Vec::new();
+        for _ in 0..100 {
+            bytes.extend(frame);
+            bytes.extend([0; 10]);
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn id3v2_tags_give_their_labels_and_aac_files_their_extra_items() {
+        let dir = std::env::temp_dir().join(format!("dismas-tags-label-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("Track.wav");
+        crate::utils::write_test_wav(&wav, 1);
+        let aac = dir.join("Track.aac");
+        write_test_aac(&aac);
+        // As MusicBrainz Picard writes them
+        let mut id3v2 = Id3v2Tag::new();
+        id3v2.set_title("Enigma Variations".to_string());
+        id3v2.insert(lofty::id3::v2::Frame::Text(
+            lofty::id3::v2::TextInformationFrame::new(
+                lofty::id3::v2::FrameId::Valid(Cow::Borrowed("TPUB")),
+                lofty::TextEncoding::UTF8,
+                "EMI".to_string(),
+            ),
+        ));
+        let _ = id3v2.insert_user_text(RECORDING_DATE.to_string(), "1962-05-25".to_string());
+        crate::utils::write_test_id3v2(&wav, &id3v2);
+        crate::utils::write_test_id3v2(&aac, &id3v2);
+
+        let read = [&wav, &aac].map(|path| read_file_tags(path, ReadOptions::ALL));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (read, format) in read.into_iter().zip(["WAV", "AAC"]) {
+            let read = read.unwrap();
+            assert_eq!(read.format.as_deref(), Some(format));
+            assert_eq!(read.tag.title().as_deref(), Some("Enigma Variations"));
+            assert_eq!(read.tag.get_string(ItemKey::Label), Some("EMI"));
+            assert_eq!(read.extra.recording_date.as_deref(), Some("1962-05-25"));
+        }
     }
 }

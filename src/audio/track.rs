@@ -19,6 +19,7 @@ use std::{
 use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
 use itertools::Itertools;
 use lofty::{
+    aac::AacFile,
     ape::{ApeFile, ApeTag},
     config::ParseOptions,
     error::FileParseError,

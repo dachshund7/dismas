@@ -14,9 +14,11 @@
 
 use std::collections::HashSet;
 
-use lofty::ape::ApeItem;
+use lofty::{ape::ApeItem, id3::v2::FrameId};
 
 use super::*;
+
+const TPUB: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TPUB"));
 
 // The items lofty left out of a file's tag, to add to it
 #[derive(Debug, Default)]
@@ -42,6 +44,17 @@ impl Fills {
             tag.and_then(|t| t.get("ComposerSort")).map(ApeItem::value)
         {
             fills.add(ItemKey::ComposerSortOrder, text.split('\0'));
+        }
+        fills
+    }
+
+    // lofty 0.25.4 reads TPUB as `Publisher` only: it's the ID3v2 frame for
+    // both `Publisher` and `Label`, and lofty takes the first key a frame
+    // has. MusicBrainz Picard writes the record label there
+    pub(super) fn from_id3v2(tag: Option<&Id3v2Tag>) -> Self {
+        let mut fills = Self::default();
+        if let Some(labels) = tag.and_then(|tag| tag.get_texts(&TPUB)) {
+            fills.add(ItemKey::Label, labels);
         }
         fills
     }
@@ -72,7 +85,11 @@ impl Fills {
 
 #[cfg(test)]
 mod tests {
-    use lofty::tag::TagType;
+    use lofty::{
+        TextEncoding,
+        id3::v2::{Frame, TextInformationFrame},
+        tag::TagType,
+    };
 
     use super::*;
 
@@ -137,6 +154,41 @@ mod tests {
             Tag::from(ape).get(ItemKey::ComposerSortOrder).is_none(),
             "lofty now maps ComposerSort in APE tags: delete Fills::from_ape"
         );
+    }
+
+    fn id3v2_with_labels(labels: &str) -> Id3v2Tag {
+        let mut id3v2 = Id3v2Tag::new();
+        id3v2.insert(Frame::Text(TextInformationFrame::new(
+            TPUB,
+            TextEncoding::UTF8,
+            labels.to_string(),
+        )));
+        id3v2
+    }
+
+    #[test]
+    fn still_no_label_from_tpub() {
+        assert!(
+            Tag::from(id3v2_with_labels("EMI"))
+                .get(ItemKey::Label)
+                .is_none(),
+            "lofty now reads TPUB as Label: delete the TPUB fill in Fills::from_id3v2"
+        );
+    }
+
+    #[test]
+    fn labels_are_filled_in_from_tpub() {
+        // Two labels, as ID3v2.4 separates them
+        let id3v2 = id3v2_with_labels("EMI\0His Master's Voice");
+        let fills = Fills::from_id3v2(Some(&id3v2));
+        let mut tag = Tag::from(id3v2);
+        fills.apply(&mut tag);
+        assert_eq!(
+            tag.get_strings(ItemKey::Label).collect::<Vec<_>>(),
+            ["EMI", "His Master's Voice"]
+        );
+        // lofty's own reading is kept
+        assert_eq!(tag.get_string(ItemKey::Publisher), Some("EMI"));
     }
 
     #[test]
