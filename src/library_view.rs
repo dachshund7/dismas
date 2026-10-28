@@ -1101,6 +1101,11 @@ impl LibraryView {
         }
         imp.page_title
             .set_title(&if works { i18n("Works") } else { i18n("Albums") });
+        imp.search_entry.set_placeholder_text(Some(&if works {
+            i18n("Search works")
+        } else {
+            i18n("Search albums")
+        }));
         imp.sort_button.set_visible(!works);
         imp.select_button.set_visible(!works);
         self.update_whole_albums_button();
