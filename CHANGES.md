@@ -121,6 +121,10 @@ All notable changes to this project will be documented in this file.
 - Cover files are also found as `front.jpg` and as Windows Media Player's
   `AlbumArt` files, in the album's folder for tracks in a disc folder like
   `CD1`, and as the only image in a folder, whatever its name
+- The folders of an album's discs are also recognised with more after the
+  number, as in "Disc 1 - Live" or "CD1 (Bonus)", and in a few other
+  languages, as in "Disco 2" or "Disque 1", so that their tracks make one
+  album without album tags, and find the cover in the album's folder
 
 ### Fixed
 

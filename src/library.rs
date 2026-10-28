@@ -2283,13 +2283,24 @@ pub fn is_mbid(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
-// Whether a folder holds a disc of an album, e.g. "CD 1" or "Disc 2"
+// Whether a folder holds a disc of an album, e.g. "CD 1", "Disc 2 - Live"
+// or "Disque 3", in a few languages: a word for a disc, then its number,
+// of up to three digits, as box sets can have a hundred discs, but "Disco
+// 1980" isn't one, and then anything after a space or a separator
 pub fn is_disc_folder(name: &std::ffi::OsStr) -> bool {
+    const WORDS: [&str; 7] = ["cd", "disc", "disk", "disco", "disque", "schijf", "płyta"];
+    const SEPARATORS: [char; 4] = [' ', '_', '-', '.'];
+
     let name = name.to_string_lossy().to_lowercase();
-    ["cd", "disc", "disk"].iter().any(|prefix| {
-        name.strip_prefix(prefix).is_some_and(|rest| {
-            let rest = rest.trim_start_matches([' ', '_', '-', '.']);
-            !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+    WORDS.iter().any(|word| {
+        name.strip_prefix(word).is_some_and(|rest| {
+            let rest = rest.trim_start_matches(SEPARATORS);
+            let digits = rest.chars().take_while(char::is_ascii_digit).count();
+            (1..=3).contains(&digits)
+                && rest[digits..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| SEPARATORS.contains(&c) || matches!(c, '(' | '['))
         })
     })
 }
@@ -2783,6 +2794,42 @@ mod tests {
         assert!(search.contains("praludium und fuge"));
         assert!(search.contains("well-tempered clavier"));
         assert!(search.contains("prelude and fugue in c major"));
+    }
+
+    #[test]
+    fn disc_folders_have_names_in_several_languages() {
+        use super::is_disc_folder;
+        use std::ffi::OsStr;
+
+        for name in [
+            "CD1",
+            "CD 2",
+            "cd_03",
+            "Disc 1",
+            "Disc 1 - Live at the Proms",
+            "Disc 2 of 2",
+            "CD1 (Bonus)",
+            "Disk.4",
+            "Disco 2",
+            "Disque 1",
+            "Schijf 2",
+            "Płyta 1",
+            "CD 153",
+        ] {
+            assert!(is_disc_folder(OsStr::new(name)), "{name}");
+        }
+        for name in [
+            "CD Collection",
+            "Discography",
+            "Disco 1980",
+            "Disco 1980 Hits",
+            "CD1s",
+            "Disc One",
+            "Album",
+            "1",
+        ] {
+            assert!(!is_disc_folder(OsStr::new(name)), "{name}");
+        }
     }
 
     #[test]
