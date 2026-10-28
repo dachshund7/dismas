@@ -21,7 +21,7 @@ impl Window {
     // once the pointer leaves the window, focused or not: with focus following
     // the pointer, the window keeps the focus when the pointer goes to an empty
     // part of the screen. They come back when the pointer enters the window,
-    // or when it gets the focus, and on touchscreens with a tap. In
+    // when it gets the focus or a key, and on touchscreens with a tap. In
     // fullscreen, which the pointer can't leave, they always fade out once
     // the pointer stays still, and the pointer hides with them
     pub(super) fn setup_zen_mode(&self) {
@@ -78,6 +78,25 @@ impl Window {
             }
         ));
         self.add_controller(tap);
+
+        // A key brings the controls back too, and starts the wait again, as
+        // moving the pointer does, so that Tab doesn't go through buttons
+        // that can't be seen. Before the window's handler of Space and Home,
+        // which stops them; GTK stops the accels' keys before either
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, _, _, _| {
+                win.show_controls();
+                win.update_zen();
+                glib::Propagation::Proceed
+            }
+        ));
+        self.add_controller(keys);
 
         // Getting the focus brings the controls back, for a while if the
         // pointer is elsewhere, e.g. with a keybinding of the window manager

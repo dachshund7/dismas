@@ -91,6 +91,9 @@ All notable changes to this project will be documented in this file.
   match dimmed, and clicking one of those plays the whole album from it.
   While albums are selected during a search, the bar says how many of their
   tracks the buttons take
+- In Zen Mode and in fullscreen, pressing a key brings back the controls,
+  as moving the pointer does, so that Tab doesn't go through buttons that
+  can't be seen
 
 ### Fixed
 
