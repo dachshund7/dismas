@@ -724,6 +724,15 @@ impl AlbumTracks {
         self.imp().work.borrow().is_some()
     }
 
+    // The key of the work whose recordings are showing
+    pub fn shown_work_key(&self) -> Option<String> {
+        self.imp()
+            .work
+            .borrow()
+            .as_ref()
+            .map(|work| work.key.clone())
+    }
+
     // The files to play from the track at `pos`, and the position to start
     // at among them: those of the album that the search matches, or all of
     // them from a track it doesn't match, which is dimmed, or the selected

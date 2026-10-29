@@ -40,6 +40,14 @@ All notable changes to this project will be documented in this file.
 - Random Album, on the Playlists page, plays an album picked at random in
   place of the queue, with an Undo; an album not heard lately is more
   likely, and choosing it again plays another
+- Works and recordings can be favorites, not only tracks: Add Work to
+  Favorites is in the menu of a work's header and of the rows of the
+  Works page, with a right click, a long press or the Menu key, and Add
+  Recording to Favorites in the menu of a recording's header. The Works
+  page shows a heart on the rows of favorite works, and its heart button
+  shows only them. Favorite Works, on the Playlists page, plays them in
+  the order they were marked: each recording marked, and for a work, a
+  recording of it picked as Random Work picks one
 - Random Work, below Random Album, plays a recording of a work picked at
   random in the same way. A work that hasn't been heard lately in any of
   its recordings is more likely to be picked, and so is a recording of it

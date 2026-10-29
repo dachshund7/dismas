@@ -20,6 +20,7 @@ use crate::{
     audio::{Arrangement, PerformerKind, normalize_search_text},
     i18n::{i18n, i18n_f, i18n_k, ni18n_f},
     library::{self, Album, AlbumSort, Counted, ScanEvent, ScanResult, TrackFilter},
+    play_stats,
     square_bin::SquareBin,
     utils,
     work_sections::{WorkSectionModel, same_section_of},
@@ -118,6 +119,8 @@ mod imp {
         pub sort_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub select_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
+        pub favorites_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
@@ -321,6 +324,17 @@ mod imp {
                     // Add or play the tracks of the selected albums
                     Signal::builder("add-albums").build(),
                     Signal::builder("play-albums").build(),
+                    // The menu of a work of the list, at a point of its
+                    // row; the object holds its `library::WorkInfo` and the
+                    // filter, as for "work-activated"
+                    Signal::builder("work-menu-requested")
+                        .param_types([
+                            glib::BoxedAnyObject::static_type(),
+                            gtk::Widget::static_type(),
+                            f64::static_type(),
+                            f64::static_type(),
+                        ])
+                        .build(),
                     // The menu of an album, at a point of its cell
                     Signal::builder("album-menu-requested")
                         .param_types([
@@ -386,6 +400,26 @@ impl LibraryView {
             glib::closure_local!(move |view: &Self, item: &glib::BoxedAnyObject| {
                 let item = item.borrow::<(library::WorkInfo, TrackFilter)>();
                 f(view, &item.0, &item.1);
+            }),
+        )
+    }
+
+    pub fn connect_work_menu_requested<
+        F: Fn(&Self, &library::WorkInfo, &TrackFilter, &gtk::Widget, f64, f64) + 'static,
+    >(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "work-menu-requested",
+            false,
+            glib::closure_local!(move |view: &Self,
+                                       item: &glib::BoxedAnyObject,
+                                       widget: &gtk::Widget,
+                                       x: f64,
+                                       y: f64| {
+                let item = item.borrow::<(library::WorkInfo, TrackFilter)>();
+                f(view, &item.0, &item.1, widget, x, y);
             }),
         )
     }
@@ -998,7 +1032,25 @@ impl LibraryView {
     // activating one shows its recordings
     fn setup_works(&self) {
         let imp = self.imp();
-        imp.works_list.set_factory(Some(&work_factory()));
+        imp.works_list.set_factory(Some(&work_factory(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |widget: &gtk::Widget, x, y, work: &library::WorkInfo| {
+                let item =
+                    glib::BoxedAnyObject::new((work.clone(), this.search_filter_for_works()));
+                this.emit_by_name::<()>("work-menu-requested", &[&item, widget, &x, &y]);
+            }
+        ))));
+        // The rows' menus open with the Menu key too, through their action
+        utils::setup_menu_key(&*imp.works_list, |row: &gtk::Box| {
+            let _ = row.activate_action("work-row.menu", None);
+        });
+        // Showing only the favorite works reads them again
+        imp.favorites_button.connect_toggled(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.refresh_favorites()
+        ));
         imp.works_list
             .set_header_factory(Some(&work_section_factory()));
         self.set_works_model();
@@ -1087,6 +1139,7 @@ impl LibraryView {
             .update_property(&[gtk::accessible::Property::Label(&search)]);
         imp.sort_button.set_visible(!works);
         imp.select_button.set_visible(!works);
+        imp.favorites_button.set_visible(works);
         self.update_stack();
         self.update_works();
     }
@@ -1115,13 +1168,21 @@ impl LibraryView {
         }
 
         let hidden = imp.hidden_folders.borrow().clone();
+        let favorites_only = imp.favorites_button.is_active();
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
                 let (filter, generation) = wanted;
                 let Ok((filter, works)) = gio::spawn_blocking(move || {
-                    let works = library::works(&filter, &hidden);
+                    let favorites = play_stats::favorite_work_keys();
+                    let mut works = library::works(&filter, &hidden);
+                    for work in &mut works {
+                        work.favorite = favorites.contains(&work.key);
+                    }
+                    if favorites_only {
+                        works.retain(|work| work.favorite);
+                    }
                     (filter, works)
                 })
                 .await
@@ -1139,6 +1200,14 @@ impl LibraryView {
                 this.show_works(filter, generation, works);
             }
         ));
+    }
+
+    // Reads the works again, after a work or a recording was marked as a
+    // favorite or unmarked, or the list was set to show only the favorites
+    pub fn refresh_favorites(&self) {
+        let generation = &self.imp().works_generation;
+        generation.set(generation.get().wrapping_add(1));
+        self.update_works();
     }
 
     // A work's recordings are found with the filter, as albums are, but
@@ -2293,8 +2362,10 @@ pub fn recordings_label(n: u32) -> String {
 // cuts off first, and the number of its recordings. The rows are all one
 // line high, as measuring wrapped text made scrolling slow; the tooltip has
 // the full title
-fn work_factory() -> gtk::SignalListItemFactory {
-    name_count_factory::<library::WorkInfo>(
+fn work_factory(
+    on_menu: impl Fn(&gtk::Widget, f64, f64, &library::WorkInfo) + 'static,
+) -> gtk::SignalListItemFactory {
+    let factory = name_count_factory::<library::WorkInfo>(
         |work| {
             let recordings = recordings_label(work.recordings);
             let arrangement = work.arrangement.as_ref().map(|arrangement| {
@@ -2330,7 +2401,74 @@ fn work_factory() -> gtk::SignalListItemFactory {
             name.set_markup(&with_dimmed(&work.name, &more));
             count.set_label(&work.recordings.to_string());
         },
-    )
+    );
+
+    // A heart before the number of recordings of a favorite work, and the
+    // row's menu, with a right click or a long press, and with the Menu key
+    // through the row's action, as keys go to the list
+    let on_menu = Rc::new(on_menu);
+    factory.connect_setup(move |_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let Some(row) = item.child().and_downcast::<gtk::Box>() else {
+            return;
+        };
+        let heart = gtk::Image::builder()
+            .icon_name("heart-filled-symbolic")
+            .css_classes(["favorite-work"])
+            .visible(false)
+            .build();
+        heart.update_property(&[gtk::accessible::Property::Label(&i18n("Favorite"))]);
+        if let Some(name) = row.first_child() {
+            row.insert_child_after(&heart, Some(&name));
+        }
+
+        let open = Rc::new(clone!(
+            #[weak]
+            item,
+            #[strong]
+            on_menu,
+            move |widget: &gtk::Widget, x: f64, y: f64| {
+                if let Some(object) = item.item().and_downcast::<glib::BoxedAnyObject>() {
+                    on_menu(widget, x, y, &object.borrow::<library::WorkInfo>());
+                }
+            }
+        ));
+        utils::setup_context_menu(
+            &row,
+            clone!(
+                #[weak]
+                row,
+                #[strong]
+                open,
+                move |x, y| open(row.upcast_ref(), x, y)
+            ),
+        );
+        let menu = gio::SimpleAction::new("menu", None);
+        menu.connect_activate(clone!(
+            #[weak]
+            row,
+            move |_, _| {
+                let (x, y) = (f64::from(row.width()) / 2.0, f64::from(row.height()) / 2.0);
+                open(row.upcast_ref(), x, y);
+            }
+        ));
+        let actions = gio::SimpleActionGroup::new();
+        actions.add_action(&menu);
+        row.insert_action_group("work-row", Some(&actions));
+    });
+    factory.connect_bind(|_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let heart = item
+            .child()
+            .and_then(|row| row.first_child())
+            .and_then(|name| name.next_sibling())
+            .and_downcast::<gtk::Image>();
+        let work = item.item().and_downcast::<glib::BoxedAnyObject>();
+        if let (Some(heart), Some(work)) = (heart, work) {
+            heart.set_visible(work.borrow::<library::WorkInfo>().favorite);
+        }
+    });
+    factory
 }
 
 // The headers of the list of works: the names of the composers

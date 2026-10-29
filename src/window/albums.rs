@@ -202,7 +202,37 @@ impl Window {
         let actions = gio::SimpleActionGroup::new();
         let section = gio::Menu::new();
         self.add_other_recordings_item(&section, &actions, "work", track);
+        self.add_favorite_work_item(&section, &actions, "work", track);
         popup_menu(&section, "work", &actions, widget, x, y);
+    }
+
+    // The menu of a work of the list of works, at a point of its row: its
+    // recordings are shown, as activating it does, and it can be marked as
+    // a favorite
+    fn show_works_row_menu(
+        &self,
+        work: &library::WorkInfo,
+        filter: &TrackFilter,
+        widget: &gtk::Widget,
+        x: f64,
+        y: f64,
+    ) {
+        let actions = gio::SimpleActionGroup::new();
+        let show = gio::SimpleAction::new("show", None);
+        show.connect_activate(clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[strong]
+            work,
+            #[strong]
+            filter,
+            move |_, _| win.show_work_recordings(&work, &filter, None)
+        ));
+        actions.add_action(&show);
+        let section = gio::Menu::new();
+        section.append(Some(&i18n("Show Recordings")), Some("works-row.show"));
+        section.append_item(&self.favorite_work_item(&actions, "works-row", &work.key));
+        popup_menu(&section, "works-row", &actions, widget, x, y);
     }
 
     // Plays tracks in place of the queue, from the one at `start`, as an
@@ -223,6 +253,16 @@ impl Window {
             return;
         };
         let album_id = album_tracks.recording_album(start);
+        // The recording is told by its work, its album and its first track
+        let recording =
+            album_tracks
+                .shown_work_key()
+                .zip(album_id.clone())
+                .map(|(work_key, album_id)| FavoriteRecording {
+                    work_key,
+                    album_id,
+                    uri: first.uri().to_string(),
+                });
 
         let enabled = self.imp().loads.get() == 0;
         let actions = gio::SimpleActionGroup::new();
@@ -259,6 +299,22 @@ impl Window {
         menu.append_section(None, &section);
         let section = gio::Menu::new();
         section.append(Some(&i18n("Go to Album")), Some("recording.go-to-album"));
+        if let Some(recording) = recording {
+            let favorite = play_stats::is_favorite_recording(&recording);
+            let mark = gio::SimpleAction::new("favorite", None);
+            mark.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| win.mark_favorite_recording(&recording, !favorite)
+            ));
+            actions.add_action(&mark);
+            let label = if favorite {
+                i18n("Remove Recording from Favorites")
+            } else {
+                i18n("Add Recording to Favorites")
+            };
+            section.append(Some(&label), Some("recording.favorite"));
+        }
         menu.append_section(None, &section);
         popup_menu(&menu, "recording", &actions, widget, x, y);
     }
@@ -566,6 +622,12 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, work, filter| win.show_work_recordings(work, filter, None)
+        ));
+        library_view.connect_work_menu_requested(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, work, filter, widget, x, y| win
+                .show_works_row_menu(work, filter, widget, x, y)
         ));
 
         library_view.connect_add_albums(clone!(

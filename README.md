@@ -91,8 +91,11 @@ What Dismas adds
   the last 6 months, and Not Heard Lately plays the tracks you played the
   most but haven't heard in the last 2 months. Random Album plays an album
   picked at random, more likely one you haven't heard lately, and Random
-  Work plays a recording of a work picked the same way. They play in place
-  of the queue, with an Undo.
+  Work plays a recording of a work picked the same way. Works and
+  particular recordings can be favorites too, from their menus: the Works
+  page marks them with a heart and can show only them, and Favorite Works
+  plays them, the recording you marked or else one picked like Random
+  Work. They play in place of the queue, with an Undo.
 - **Queue editing and drag and drop:** drag tracks by their handle to
   reorder them, and select ranges with Shift+click. Play Next, in the menu
   of a track, puts it after the playing track, or after the last movement

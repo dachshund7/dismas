@@ -21,7 +21,7 @@ use gtk::glib;
 use log::{debug, warn};
 use rusqlite::{Connection, TransactionBehavior, params};
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 // Tracks are told apart by their URI, as for the resume points; a moved
 // or renamed file starts with no stats
@@ -44,6 +44,20 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS listens (
         uri TEXT PRIMARY KEY,
         -- Seconds since the epoch, for the order of the list
         added INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS favorite_works (
+        -- What the library tells the work apart by, see `library::WorkInfo`
+        key TEXT PRIMARY KEY,
+        added INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS favorite_recordings (
+        work_key TEXT NOT NULL,
+        album_id TEXT NOT NULL,
+        -- The URI of its first track, which tells two recordings of the
+        -- work on one album apart
+        uri TEXT NOT NULL,
+        added INTEGER NOT NULL,
+        PRIMARY KEY (work_key, album_id, uri)
     );";
 
 const DAY: i64 = 24 * 60 * 60;
@@ -188,8 +202,9 @@ fn open() -> rusqlite::Result<Connection> {
 }
 
 // Unlike the library, the tables are never made again: a later version
-// changes them in place. Version 2 only adds the favorites table, as each
-// statement of the schema leaves a table that's already there as it is.
+// changes them in place. Version 2 only adds the favorites table, and
+// version 3 the favorite works and recordings, as each statement of the
+// schema leaves a table that's already there as it is.
 // A database from a newer Dismas is left as it is
 fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -480,6 +495,151 @@ pub fn favorites() -> Vec<String> {
 fn query_favorites(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare("SELECT uri FROM favorites ORDER BY added, rowid")?;
     stmt.query_map([], |row| row.get(0))?.collect()
+}
+
+// A recording of a work marked as a favorite: the work, the album, and
+// the URI of the recording's first track, see `library::find_recording`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FavoriteRecording {
+    pub work_key: String,
+    pub album_id: String,
+    pub uri: String,
+}
+
+// What Favorite Works plays, in the order they were marked: each favorite
+// recording, and each favorite work none of whose recordings is one, which
+// plays one of its recordings
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FavoriteItem {
+    Work(String),
+    Recording(FavoriteRecording),
+}
+
+// The favorite works and recordings are read and written on the main
+// thread too, like the favorite tracks
+pub fn is_favorite_work(key: &str) -> bool {
+    with_connection(|conn| {
+        conn.prepare_cached("SELECT 1 FROM favorite_works WHERE key = ?1")?
+            .exists([key])
+    })
+    .unwrap_or_else(|e| {
+        warn!("Unable to find whether work {key} is a favorite: {e}");
+        false
+    })
+}
+
+pub fn set_favorite_work(key: &str, favorite: bool) {
+    let result = with_connection(|conn| set_work(conn, key, favorite, now()));
+    if let Err(e) = result {
+        warn!("Unable to change whether work {key} is a favorite: {e}");
+    }
+}
+
+// Marking one again keeps its place in the list, as for the tracks
+fn set_work(conn: &Connection, key: &str, favorite: bool, added: i64) -> rusqlite::Result<usize> {
+    if favorite {
+        conn.execute(
+            "INSERT OR IGNORE INTO favorite_works (key, added) VALUES (?1, ?2)",
+            params![key, added],
+        )
+    } else {
+        conn.execute("DELETE FROM favorite_works WHERE key = ?1", [key])
+    }
+}
+
+pub fn is_favorite_recording(recording: &FavoriteRecording) -> bool {
+    with_connection(|conn| {
+        conn.prepare_cached(
+            "SELECT 1 FROM favorite_recordings
+             WHERE work_key = ?1 AND album_id = ?2 AND uri = ?3",
+        )?
+        .exists(params![
+            recording.work_key,
+            recording.album_id,
+            recording.uri
+        ])
+    })
+    .unwrap_or_else(|e| {
+        warn!("Unable to find whether a recording is a favorite: {e}");
+        false
+    })
+}
+
+pub fn set_favorite_recording(recording: &FavoriteRecording, favorite: bool) {
+    let result = with_connection(|conn| set_recording(conn, recording, favorite, now()));
+    if let Err(e) = result {
+        warn!("Unable to change whether a recording is a favorite: {e}");
+    }
+}
+
+fn set_recording(
+    conn: &Connection,
+    recording: &FavoriteRecording,
+    favorite: bool,
+    added: i64,
+) -> rusqlite::Result<usize> {
+    let FavoriteRecording {
+        work_key,
+        album_id,
+        uri,
+    } = recording;
+    if favorite {
+        conn.execute(
+            "INSERT OR IGNORE INTO favorite_recordings (work_key, album_id, uri, added)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![work_key, album_id, uri, added],
+        )
+    } else {
+        conn.execute(
+            "DELETE FROM favorite_recordings WHERE work_key = ?1 AND album_id = ?2 AND uri = ?3",
+            params![work_key, album_id, uri],
+        )
+    }
+}
+
+// The keys of the works that are favorites, or have a favorite recording,
+// which the Works page marks
+pub fn favorite_work_keys() -> std::collections::HashSet<String> {
+    with_connection(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT key FROM favorite_works UNION SELECT work_key FROM favorite_recordings",
+        )?;
+        stmt.query_map([], |row| row.get(0))?.collect()
+    })
+    .unwrap_or_else(|e| {
+        warn!("Unable to load the favorite works: {e}");
+        Default::default()
+    })
+}
+
+pub fn favorite_items() -> Vec<FavoriteItem> {
+    with_connection(|conn| query_favorite_items(conn)).unwrap_or_else(|e| {
+        warn!("Unable to load the favorite works: {e}");
+        Vec::new()
+    })
+}
+
+fn query_favorite_items(conn: &Connection) -> rusqlite::Result<Vec<FavoriteItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT work_key, album_id, uri, added FROM favorite_recordings
+         UNION ALL
+         SELECT key, NULL, NULL, added FROM favorite_works
+         WHERE key NOT IN (SELECT work_key FROM favorite_recordings)
+         ORDER BY 4, 1",
+    )?;
+    stmt.query_map([], |row| {
+        let work_key: String = row.get(0)?;
+        let recording: Option<(String, String)> = row.get::<_, Option<String>>(1)?.zip(row.get(2)?);
+        Ok(match recording {
+            Some((album_id, uri)) => FavoriteItem::Recording(FavoriteRecording {
+                work_key,
+                album_id,
+                uri,
+            }),
+            None => FavoriteItem::Work(work_key),
+        })
+    })?
+    .collect()
 }
 
 #[cfg(test)]
@@ -856,6 +1016,61 @@ mod tests {
         insert_favorite(&conn, "a", 1_800_000_000).unwrap();
         assert_eq!(query_favorites(&conn).unwrap(), ["a"]);
         assert_eq!(query_recently_played(&conn).unwrap(), ["a"]);
+    }
+
+    #[test]
+    fn version_2_gains_the_favorite_works_and_keeps_the_favorites() {
+        let mut conn = test_db();
+        insert_favorite(&conn, "file:///music/a.flac", 1).unwrap();
+        conn.execute_batch(
+            "DROP TABLE favorite_works; DROP TABLE favorite_recordings;
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+        set_work(&conn, "work", true, 2).unwrap();
+        assert_eq!(query_favorites(&conn).unwrap(), ["file:///music/a.flac"]);
+        assert_eq!(
+            query_favorite_items(&conn).unwrap(),
+            [FavoriteItem::Work("work".to_string())]
+        );
+    }
+
+    #[test]
+    fn favorite_works_and_recordings_are_in_the_order_they_were_marked() {
+        let conn = test_db();
+        let recording = |work_key: &str, uri: &str| FavoriteRecording {
+            work_key: work_key.to_string(),
+            album_id: "album".to_string(),
+            uri: uri.to_string(),
+        };
+        set_work(&conn, "a", true, 10).unwrap();
+        set_recording(&conn, &recording("b", "file:///music/b1.flac"), true, 20).unwrap();
+        // A work with a favorite recording plays that, so it comes once
+        set_work(&conn, "b", true, 30).unwrap();
+        set_work(&conn, "c", true, 40).unwrap();
+        // Marking one again keeps its place
+        set_work(&conn, "a", true, 50).unwrap();
+        assert_eq!(
+            query_favorite_items(&conn).unwrap(),
+            [
+                FavoriteItem::Work("a".to_string()),
+                FavoriteItem::Recording(recording("b", "file:///music/b1.flac")),
+                FavoriteItem::Work("c".to_string()),
+            ]
+        );
+
+        // Unmarking the recording leaves the work, at its own place
+        set_recording(&conn, &recording("b", "file:///music/b1.flac"), false, 0).unwrap();
+        set_work(&conn, "c", false, 0).unwrap();
+        assert_eq!(
+            query_favorite_items(&conn).unwrap(),
+            [
+                FavoriteItem::Work("a".to_string()),
+                FavoriteItem::Work("b".to_string()),
+            ]
+        );
     }
 
     #[test]

@@ -43,6 +43,14 @@ template $DismasLibraryView: Widget {
         active: bind template.selection-mode bidirectional;
         tooltip-text: _("Select Albums");
       }
+
+      // In their place on the Works page, which has neither
+      [end]
+      ToggleButton favorites_button {
+        visible: false;
+        icon-name: "heart-outline-symbolic";
+        tooltip-text: _("Show Only Favorite Works");
+      }
     }
 
     // An open search bar, so that the entry has the same spacing as the

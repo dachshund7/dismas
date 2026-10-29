@@ -6,7 +6,7 @@ use std::{collections::HashMap, path::PathBuf};
 use adw::prelude::*;
 
 use super::*;
-use crate::audio::shuffle;
+use crate::{audio::shuffle, play_stats::FavoriteItem};
 
 impl Window {
     // Plays the tracks of a smart playlist in place of the queue, like
@@ -16,6 +16,7 @@ impl Window {
         let (query, empty): (fn() -> Vec<String>, _) = match name {
             "random-album" => return self.play_random(Random::Album),
             "random-work" => return self.play_random(Random::Work),
+            "favorite-works" => return self.play_favorite_works(),
             "favorites" => (play_stats::favorites, i18n("No favorite tracks yet")),
             "recently-played" => (play_stats::recently_played, i18n("No tracks played yet")),
             "most-played" => (play_stats::most_played, i18n("No tracks played yet")),
@@ -72,6 +73,30 @@ impl Window {
                 let files = picked.paths.into_iter().map(gio::File::for_path).collect();
                 let message = random.announce(&picked.name);
                 win.play_announced_in_place_of_queue(files, Some(message));
+            }
+        ));
+    }
+
+    // Plays the favorite works and recordings in place of the queue, with
+    // an Undo, in the order they were marked: each recording marked, and
+    // for a work marked without one, a recording of it picked as Random
+    // Work picks one, so that they take turns
+    fn play_favorite_works(&self) {
+        // What was heard of the track playing counts, as for the lists
+        self.player().save_listen();
+        let hidden = self.imp().library_view.hidden_folders();
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = win)]
+            self,
+            async move {
+                let paths = gio::spawn_blocking(move || favorite_works_paths(&hidden))
+                    .await
+                    .unwrap_or_default();
+                if paths.is_empty() {
+                    win.add_toast(i18n("No favorite works yet"));
+                    return;
+                }
+                win.play_in_place_of_queue(paths.into_iter().map(gio::File::for_path).collect());
             }
         ));
     }
@@ -252,10 +277,114 @@ fn pick_work(hidden: &[PathBuf], last: Option<&str>) -> Option<Picked> {
     })
 }
 
+// The tracks Favorite Works plays, outside the `hidden` folders; this
+// blocks
+fn favorite_works_paths(hidden: &[PathBuf]) -> Vec<PathBuf> {
+    let items = play_stats::favorite_items();
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let recordings: HashMap<String, Vec<Vec<PathBuf>>> = library::work_recording_paths(hidden)
+        .into_iter()
+        .map(|(work, recordings)| (work.key, recordings))
+        .collect();
+    let now = play_stats::now();
+    let mut rng = rand::rng();
+    favorite_paths(
+        &items,
+        |recording| {
+            library::find_recording(
+                &recording.work_key,
+                &recording.album_id,
+                &recording.uri,
+                hidden,
+            )
+            .map(|recording| recording.paths)
+        },
+        |key| recordings.get(key).map(Vec::as_slice),
+        |recordings| {
+            let uris: Vec<Vec<String>> = recordings.iter().map(|paths| uris_of(paths)).collect();
+            let stats = play_stats::track_stats(&uris.concat());
+            let weights: Vec<f64> = uris
+                .iter()
+                .map(|uris| {
+                    shuffle::weight(uris.iter().filter_map(|uri| stats.get(uri).copied()), now)
+                })
+                .collect();
+            let pos = shuffle::weighted_pick(&weights, &mut rng)?;
+            recordings.get(pos).cloned()
+        },
+    )
+}
+
+// The tracks of the favorites, in their order: each recording marked, as
+// `find` finds it, and for a work marked, or a recording that's gone, one
+// of the work's recordings, as `pick` picks it among those `recordings_of`
+// gives; a work that's gone gives none
+fn favorite_paths<'a>(
+    items: &[FavoriteItem],
+    find: impl Fn(&FavoriteRecording) -> Option<Vec<PathBuf>>,
+    recordings_of: impl Fn(&str) -> Option<&'a [Vec<PathBuf>]>,
+    mut pick: impl FnMut(&[Vec<PathBuf>]) -> Option<Vec<PathBuf>>,
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for item in items {
+        let (work_key, found) = match item {
+            FavoriteItem::Recording(recording) => (recording.work_key.as_str(), find(recording)),
+            FavoriteItem::Work(key) => (key.as_str(), None),
+        };
+        let found = found.or_else(|| pick(recordings_of(work_key)?));
+        paths.extend(found.into_iter().flatten());
+    }
+    paths
+}
+
 // The URIs of the files at the paths, as the play stats know them
 fn uris_of(paths: &[PathBuf]) -> Vec<String> {
     paths
         .iter()
         .map(|path| gio::File::for_path(path).uri().to_string())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::favorite_paths;
+    use crate::play_stats::{FavoriteItem, FavoriteRecording};
+
+    #[test]
+    fn favorites_play_their_recording_or_one_picked() {
+        let paths = |names: &[&str]| names.iter().map(PathBuf::from).collect::<Vec<_>>();
+        let recording = |work_key: &str, uri: &str| FavoriteRecording {
+            work_key: work_key.to_string(),
+            album_id: "album".to_string(),
+            uri: uri.to_string(),
+        };
+        let mass = vec![
+            paths(&["/m/A/01", "/m/A/02"]),
+            paths(&["/m/B/01", "/m/B/02"]),
+        ];
+        let items = [
+            FavoriteItem::Recording(recording("mass", "file:///m/B/01")),
+            FavoriteItem::Work("mass".to_string()),
+            // Gone from the music folders
+            FavoriteItem::Work("gone".to_string()),
+            // Its album is gone, so one of its work's recordings plays
+            FavoriteItem::Recording(recording("mass", "file:///m/C/01")),
+        ];
+        let found = favorite_paths(
+            &items,
+            |recording| (recording.uri == "file:///m/B/01").then(|| mass[1].clone()),
+            |key| (key == "mass").then_some(mass.as_slice()),
+            |recordings| recordings.first().cloned(),
+        );
+        assert_eq!(
+            found,
+            paths(&[
+                "/m/B/01", "/m/B/02", "/m/A/01", "/m/A/02", "/m/A/01", "/m/A/02"
+            ])
+        );
+    }
 }

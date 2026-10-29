@@ -146,6 +146,11 @@ playbackcontrol button.favorite:checked.keyboard-activating {
   background-color: color-mix(in srgb, currentColor 30%, transparent);
 }
 
+/* The heart of a favorite work, in the list of works */
+image.favorite-work {
+  color: var(--red-2);
+}
+
 playbackcontrol button.favorite:checked > image {
   color: var(--red-2);
 }

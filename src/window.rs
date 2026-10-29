@@ -42,7 +42,7 @@ use crate::{
     library::{self, Album, TrackFilter},
     library_view::{AlbumDrag, LibraryView, PickNames},
     page_switcher::PageSwitcher,
-    play_stats,
+    play_stats::{self, FavoriteRecording},
     playback_control::PlaybackControl,
     player_box::PlayerBox,
     playlist_view::PlaylistView,

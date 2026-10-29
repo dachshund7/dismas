@@ -1243,6 +1243,9 @@ pub struct WorkInfo {
     // The number of its recordings that the filter matches, see
     // `recordings_of_works()`
     pub recordings: u32,
+    // Whether it's a favorite, or one of its recordings is; they're in the
+    // play stats, as they can't be read again from the music
+    pub favorite: bool,
 }
 
 impl WorkInfo {
@@ -1416,6 +1419,7 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                 }),
                 composers,
                 recordings: seen.recordings,
+                favorite: false,
             }
         })
         .collect();
@@ -1540,6 +1544,45 @@ fn query_track_work(
 // The recordings of a work that the filter matches, with all their
 // tracks, see `recordings_of_works()`, by the year of their albums, those without one last, and then
 // by the albums' titles. The tracks in the `hidden` folders are left out
+// A recording marked as a favorite, among the recordings of its work
+// outside the `hidden` folders: the one on its album whose first track is
+// at `uri`, or else the first one on its album, as a file can move within
+// an album, which keeps its MusicBrainz id; none if the album has no
+// recording of the work any more
+pub fn find_recording(
+    work_key: &str,
+    album_id: &str,
+    uri: &str,
+    hidden: &[PathBuf],
+) -> Option<WorkRecording> {
+    query_or_default(
+        format_args!("find a recording of work {work_key}"),
+        |conn| query_find_recording(conn, work_key, album_id, uri, hidden),
+    )
+}
+
+fn query_find_recording(
+    conn: &Connection,
+    work_key: &str,
+    album_id: &str,
+    uri: &str,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<Option<WorkRecording>> {
+    let mut on_album: Vec<WorkRecording> =
+        query_work_recordings(conn, work_key, &TrackFilter::default(), hidden)?
+            .into_iter()
+            .filter(|recording| recording.album_id == album_id)
+            .collect();
+    let starts_at = |recording: &WorkRecording| {
+        recording
+            .paths
+            .first()
+            .is_some_and(|path| gio::File::for_path(path).uri() == uri)
+    };
+    let index = on_album.iter().position(starts_at).unwrap_or(0);
+    Ok((index < on_album.len()).then(|| on_album.swap_remove(index)))
+}
+
 pub fn work_recordings(key: &str, filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkRecording> {
     query_or_default("list the recordings of a work", |conn| {
         query_work_recordings(conn, key, filter, hidden)
@@ -4449,6 +4492,58 @@ mod tests {
         };
         let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
         assert_eq!(albums.get("a"), Some(&(1, 2)));
+    }
+
+    #[test]
+    fn a_favorite_recording_is_found_among_those_of_its_album() {
+        use gtk::gio::{self, prelude::*};
+
+        let conn = test_db();
+        // Two recordings of the Goldberg Variations on one album
+        for (path, album, order) in [
+            ("/m/B/01.flac", "b", "1"),
+            ("/m/B/02.flac", "b", "2"),
+            ("/m/B/03.flac", "b", "1"),
+            ("/m/B/04.flac", "b", "2"),
+            ("/m/C/01.flac", "c", "1"),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, track,
+                                     work_key, work, movement_order)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, 'goldberg', 'Goldberg-Variationen', ?4)",
+                rusqlite::params![
+                    path.as_bytes(),
+                    album,
+                    path[5..7].parse::<i64>().unwrap(),
+                    order
+                ],
+            )
+            .unwrap();
+        }
+        let uri = |path: &str| gio::File::for_path(path).uri().to_string();
+        let paths = |found: Option<super::WorkRecording>| {
+            found.map(|recording| {
+                recording
+                    .paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+            })
+        };
+        let find = |album: &str, first: &str| {
+            paths(super::query_find_recording(&conn, "goldberg", album, &uri(first), &[]).unwrap())
+        };
+
+        assert_eq!(
+            find("b", "/m/B/03.flac"),
+            Some(vec!["/m/B/03.flac".to_string(), "/m/B/04.flac".to_string()])
+        );
+        // A first track that moved leaves the first recording of the album
+        assert_eq!(
+            find("b", "/m/B/moved.flac"),
+            Some(vec!["/m/B/01.flac".to_string(), "/m/B/02.flac".to_string()])
+        );
+        assert_eq!(find("gone", "/m/B/01.flac"), None);
     }
 
     #[test]
