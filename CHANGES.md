@@ -74,6 +74,12 @@ All notable changes to this project will be documented in this file.
 - The tracks of an album show when it was made under its title, with its
   record label and catalogue number
 - The player shows the year after the album, as in "Cello Suites · 1961"
+- Open Booklet opens the booklet of an album in the app for PDF files:
+  from the menu of an album and of a track, the More menu of the player,
+  and a button over the tracks of an album. Any PDF in the album's
+  folder counts, whatever its name, and for an album whose discs are in
+  folders of their own, one in the folder above them too; with several,
+  the item lists them by name
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane

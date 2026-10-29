@@ -45,6 +45,7 @@ impl Window {
         self.update_title(state.track().as_ref());
         self.update_style(state.track().as_ref());
         self.sync_track_favorite();
+        self.update_playing_booklets();
     }
 
     pub(super) fn update_cover(&self) {

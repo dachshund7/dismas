@@ -169,6 +169,9 @@ impl Window {
         section.append_item(&item);
 
         section.append(Some(&i18n("Open Directory")), Some("track.open-directory"));
+        if let Some(path) = track.file().path() {
+            self.add_booklet_item(&section, move || vec![path]);
+        }
         section.append(Some(&i18n("Track Information")), Some("track.info"));
         menu.append_section(None, &section);
 

@@ -22,6 +22,24 @@ template $DismasAlbumTracks: Widget {
         tooltip-text: _("Select Tracks");
       }
 
+      // The booklets of the album: a button for one, a menu for several;
+      // the action and its target are set with them
+      [end]
+      Button booklet_button {
+        icon-name: "booklet-symbolic";
+        valign: center;
+        visible: false;
+        tooltip-text: _("Open Booklet");
+      }
+
+      [end]
+      MenuButton booklets_button {
+        icon-name: "booklet-symbolic";
+        valign: center;
+        visible: false;
+        tooltip-text: _("Open Booklet");
+      }
+
       title-widget: Box {
         orientation: vertical;
         valign: center;

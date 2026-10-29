@@ -334,6 +334,16 @@ impl Window {
             section.append(Some(&add), Some("album.add-whole"));
             menu.append_section(None, &section);
         }
+        // The album's booklets, once they're found, for an album of its own
+        if !selection {
+            let section = gio::Menu::new();
+            menu.append_section(None, &section);
+            let album_id = album.id();
+            let hidden = library_view.hidden_folders();
+            self.add_booklet_item(&section, move || {
+                library::album_tracks(&album_id, &TrackFilter::default(), &hidden)
+            });
+        }
         popup_menu(&menu, "album", &actions, cell, x, y);
     }
 

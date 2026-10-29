@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 
 use crate::{
     audio::{Track, load_tracks},
+    booklets,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album, TrackFilter},
     library_view::{self, PickNames},
@@ -53,6 +54,10 @@ mod imp {
         pub album_artist: TemplateChild<gtk::Label>,
         #[template_child]
         pub album_info: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub booklet_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub booklets_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub filter_bar: TemplateChild<gtk::Revealer>,
         #[template_child]
@@ -869,6 +874,7 @@ impl AlbumTracks {
         let imp = self.imp();
         self.set_selection_mode(false);
         self.update_buttons();
+        self.show_booklets(&[]);
 
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
@@ -932,18 +938,20 @@ impl AlbumTracks {
                     let album_id = album.map(|album| album.id()).unwrap_or_default();
                     // All the tracks are shown, and with a search, those it
                     // matches are taken, and the others dimmed
-                    let (all, matching) = gio::spawn_blocking(move || {
+                    let (all, matching, found) = gio::spawn_blocking(move || {
                         let all =
                             library::album_tracks(&album_id, &TrackFilter::default(), &hidden);
                         let matching = (!filter.is_empty())
                             .then(|| library::album_tracks(&album_id, &filter, &hidden));
-                        (all, matching)
+                        let found = booklets::find(&all);
+                        (all, matching, found)
                     })
                     .await
                     .unwrap_or_default();
                     if this.imp().generation.get() != generation {
                         return;
                     }
+                    this.show_booklets(&found);
                     let all: Vec<gio::File> = all.into_iter().map(gio::File::for_path).collect();
                     let matching = matching.filter(|matching| matching.len() < all.len());
                     let imp = this.imp();
@@ -965,6 +973,27 @@ impl AlbumTracks {
                 this.read_tracks(generation, files, reveal).await;
             }
         ));
+    }
+
+    // The buttons that open the booklets of the album: one, or a menu of
+    // several; none for the recordings of a work, which come from several
+    // albums
+    fn show_booklets(&self, found: &[PathBuf]) {
+        let imp = self.imp();
+        imp.booklet_button.set_visible(found.len() == 1);
+        imp.booklets_button.set_visible(found.len() > 1);
+        match found {
+            [] => {}
+            [booklet] => {
+                imp.booklet_button
+                    .set_action_target_value(Some(&booklets::target(booklet)));
+                imp.booklet_button
+                    .set_action_name(Some(booklets::OPEN_ACTION));
+            }
+            _ => imp
+                .booklets_button
+                .set_menu_model(Some(&booklets::menu(found))),
+        }
     }
 
     fn set_partial(&self, partial: bool) {

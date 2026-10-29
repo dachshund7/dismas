@@ -4,6 +4,7 @@
 mod adding;
 mod albums;
 mod bindings;
+mod booklets;
 mod favorites;
 mod fullscreen;
 mod loading;
@@ -362,6 +363,24 @@ mod imp {
                 debug!("Window::win.open-directory()");
                 win.open_playing_track_directory().await;
             });
+            // The target is the URI of the booklet. The action is the
+            // class's, so other programs can't open files with it over
+            // D-Bus, as they could the window's own actions
+            klass.install_action_async(
+                crate::booklets::OPEN_ACTION,
+                Some(glib::VariantTy::STRING),
+                async move |win, _, target| {
+                    debug!("Window::win.open-booklet()");
+                    let file = target
+                        .as_ref()
+                        .and_then(glib::Variant::str)
+                        .map(gio::File::for_uri)
+                        .filter(|file| file.path().is_some());
+                    if let Some(file) = file {
+                        win.open_booklet(file).await;
+                    }
+                },
+            );
             klass.install_action("win.show-playing-track", None, move |win, _, _| {
                 debug!("Window::win.show-playing-track()");
                 win.show_playing_track();

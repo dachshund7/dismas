@@ -22,6 +22,7 @@ src/audio/track/file_name.rs
 src/audio/track/loader.rs
 src/audio/tray_controller.rs
 src/album_tracks.rs
+src/booklets.rs
 src/cover_picture.rs
 src/library.rs
 src/library_view.rs
@@ -33,6 +34,7 @@ src/track_info_dialog.rs
 src/window.rs
 src/window/adding.rs
 src/window/albums.rs
+src/window/booklets.rs
 src/window/loading.rs
 src/window/now_playing.rs
 src/window/playlist.rs

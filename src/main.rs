@@ -5,6 +5,7 @@ mod album_cell;
 mod album_tracks;
 mod application;
 mod audio;
+mod booklets;
 mod config;
 mod cover_backdrop;
 mod cover_image;

@@ -105,7 +105,9 @@ What Dismas adds
   the production credits. Albums and recordings go by the year they were
   recorded, or else first released, rather than the year of a reissue, and
   the tracks of an album show it with the record label and catalogue
-  number. Dismas reads the tags written by the [Work
+  number. Open Booklet, in the menus of an album and of a track and over
+  an album's tracks, opens any PDF in the album's folder, such as the
+  booklet that comes with a download. Dismas reads the tags written by the [Work
   Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for
   Picard, in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio, WavPack
   and Musepack files; from version 0.4, it also writes when each recording
