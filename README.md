@@ -178,7 +178,11 @@ Besides what it adds, Dismas changes some of what Amberol already does:
 - **ReplayGain:** besides Album and Track, Automatic takes the album gain
   while the tracks of an album play in their order, and the track gain in
   a shuffled queue or a playlist of tracks from many albums. A pre-amp
-  plays every track louder or quieter, but never past its peak.
+  plays every track louder or quieter, but never past its peak. Dismas
+  reads the gains from the tags, both ReplayGain tags and the R128 gains
+  of Opus files, and doesn't measure tracks itself, as it never changes
+  your files; to tag music that has neither, scan it with a tool such as
+  [rsgain](https://github.com/complexlogic/rsgain).
 - **Searching the queue** looks for every word in every tag, rather than
   fuzzy matching, keeps the order of the queue, and says so when it finds
   nothing, rather than leaving the pane blank.

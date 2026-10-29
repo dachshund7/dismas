@@ -1426,6 +1426,23 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_file_takes_the_gains_its_stream_lacks() {
+        // The R128 gains of an Opus file, which the stream doesn't give
+        let mut whole = source("opus", 0, None);
+        whole.gains = Some(Gains {
+            track_gain: Some(-1.0),
+            ..Default::default()
+        });
+        let Some(gains) = gains_through_filter(Gapless {
+            current: Some(whole),
+            ..Default::default()
+        }) else {
+            return;
+        };
+        assert_eq!(gains, vec![-1.0; 5]);
+    }
+
+    #[test]
     fn automatic_replaygain_takes_the_album_gain_of_tracks_in_album_order() {
         let with_gains = |mut source: TrackSource, track_gain, album_order| {
             source.gains = Some(Gains {

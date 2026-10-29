@@ -395,7 +395,7 @@ impl TrackData {
         let artist = track_artist(tag);
         let title = track_title(tag);
         let album = track_album(tag);
-        let replay_gain = ReplayGain::from_tag(tag);
+        let replay_gain = ReplayGain::from_tags(tag, extra);
 
         let uuid = read
             .display_name

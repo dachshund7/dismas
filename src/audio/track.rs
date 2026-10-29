@@ -164,19 +164,46 @@ pub struct FileDetails {
 pub struct ReplayGain {
     pub track: Option<String>,
     pub album: Option<String>,
+    // The gains of an Opus file whose tags only give them as its format
+    // does, as R128 gains, which GStreamer doesn't pass on to rgvolume, so
+    // the player gives them to it, see `TrackData::gains()`
+    pub r128: Option<Gains>,
 }
 
 impl ReplayGain {
     fn from_tag(tag: &Tag) -> Self {
+        Self::from_tags(tag, &ExtraComments::default())
+    }
+
+    fn from_tags(tag: &Tag, extra: &ExtraComments) -> Self {
+        let get = |key| tag.get_string(key).map(ToString::to_string);
+        let track = get(ItemKey::ReplayGainTrackGain);
+        let album = get(ItemKey::ReplayGainAlbumGain);
+        let r128 = Some(Gains {
+            track_gain: r128_gain(extra.r128_track_gain.as_deref()),
+            album_gain: r128_gain(extra.r128_album_gain.as_deref()),
+            ..Default::default()
+        })
+        .filter(|gains| {
+            track.is_none()
+                && album.is_none()
+                && (gains.track_gain.is_some() || gains.album_gain.is_some())
+        });
+        let shown = |gain: Option<f64>| gain.map(|gain| format!("{gain:.2} dB"));
         ReplayGain {
-            track: tag
-                .get_string(ItemKey::ReplayGainTrackGain)
-                .map(ToString::to_string),
-            album: tag
-                .get_string(ItemKey::ReplayGainAlbumGain)
-                .map(ToString::to_string),
+            track: track.or_else(|| shown(r128.and_then(|gains| gains.track_gain))),
+            album: album.or_else(|| shown(r128.and_then(|gains| gains.album_gain))),
+            r128,
         }
     }
+}
+
+// An R128 gain of an Opus file, e.g. "-1536", as a ReplayGain gain in dB:
+// it's in 1/256 dB, as a 16-bit number, and makes the track as loud as
+// −23 LUFS rather than ReplayGain 2.0's −18 LUFS, so 5 dB louder
+fn r128_gain(value: Option<&str>) -> Option<f64> {
+    let value = value?.trim().parse::<i16>().ok()?;
+    Some(f64::from(value) / 256.0 + 5.0)
 }
 
 // The usual name of a format
@@ -412,10 +439,14 @@ impl TrackData {
             .map_or((Duration::ZERO, None), |audio| (audio.start, audio.end))
     }
 
-    // The ReplayGain of a track of a CUE sheet; the stream of a whole file
-    // has its own
+    // The ReplayGain of a track of a CUE sheet, or of an Opus file whose
+    // tags only give R128 gains; the stream of another file has its own,
+    // which GStreamer gives rgvolume
     pub fn gains(&self) -> Option<Gains> {
-        self.audio.as_ref().map(|audio| audio.gains)
+        self.audio
+            .as_ref()
+            .map(|audio| audio.gains)
+            .or(self.details.replay_gain.r128)
     }
 }
 
@@ -941,6 +972,37 @@ mod tests {
         Missing, MusicBrainzIds, PerformerKind, Track, TrackCredits, TrackData, credits::Credit,
         track_album, track_title,
     };
+
+    #[test]
+    fn opus_files_give_their_r128_gains_as_replaygain() {
+        use lofty::ogg::tag::VorbisComments;
+
+        use super::{ReplayGain, r128_gain, tags::ExtraComments};
+
+        let mut comments = VorbisComments::default();
+        comments.push("R128_TRACK_GAIN".to_string(), "-1536".to_string());
+        comments.push("R128_ALBUM_GAIN".to_string(), "256".to_string());
+        let extra = ExtraComments::from_vorbis(Some(&comments));
+
+        // −6 dB to −23 LUFS is −1 dB to ReplayGain 2.0's −18 LUFS
+        let gain = ReplayGain::from_tags(&Tag::new(TagType::VorbisComments), &extra);
+        let r128 = gain.r128.unwrap();
+        assert_eq!((r128.track_gain, r128.album_gain), (Some(-1.0), Some(6.0)));
+        assert_eq!(gain.track.as_deref(), Some("-1.00 dB"));
+        assert_eq!(gain.album.as_deref(), Some("6.00 dB"));
+
+        // ReplayGain tags come first, and the stream gives them itself
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::ReplayGainTrackGain, "-6.20 dB".to_string());
+        let gain = ReplayGain::from_tags(&tag, &extra);
+        assert!(gain.r128.is_none());
+        assert_eq!(gain.track.as_deref(), Some("-6.20 dB"));
+
+        // Not a 16-bit number of 1/256 dB
+        assert_eq!(r128_gain(Some("40000")), None);
+        assert_eq!(r128_gain(Some("-6 dB")), None);
+        assert_eq!(r128_gain(None), None);
+    }
 
     #[test]
     fn blank_titles_are_missing() {

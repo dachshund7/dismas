@@ -22,6 +22,10 @@ pub struct ExtraComments {
     pub(super) recording_date: Option<String>,
     // A CUE sheet that splits the file into tracks
     pub cue_sheet: Option<String>,
+    // The gains of an Opus file, as its format gives them (RFC 7845), in
+    // place of ReplayGain tags, e.g. "-1536"; see `ReplayGain::r128`
+    pub(super) r128_track_gain: Option<String>,
+    pub(super) r128_album_gain: Option<String>,
 }
 
 // The name of the tag of the "Work Hierarchy" plugin; MusicBrainz Picard
@@ -62,6 +66,8 @@ impl ExtraComments {
             work_hierarchy: get("WORK_HIERARCHY"),
             recording_date: get("RECORDINGDATE"),
             cue_sheet: get("CUESHEET"),
+            r128_track_gain: get("R128_TRACK_GAIN"),
+            r128_album_gain: get("R128_ALBUM_GAIN"),
         }
     }
 
@@ -75,10 +81,12 @@ impl ExtraComments {
                     _ => None,
                 })
         };
+        // R128 gains are only for Opus files, which have Vorbis comments
         ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
             recording_date: get(RECORDING_DATE),
             cue_sheet: get("Cuesheet"),
+            ..Default::default()
         }
     }
 

@@ -108,6 +108,10 @@ All notable changes to this project will be documented in this file.
 - Pre-amp, in the ReplayGain settings, plays every track louder or
   quieter than its ReplayGain, by up to 15 dB, those without ReplayGain
   tags too, but never raises a track past its peak
+- ReplayGain also takes the R128 gains of Opus files (R128_TRACK_GAIN and
+  R128_ALBUM_GAIN), which some tools write in place of ReplayGain tags, as
+  the Opus format has them; those files played without their gains, and
+  Track Information shows them now
 - A work that MusicBrainz has as an arrangement of another, which often
   has the same title, says so after its name on the Works page and in
   its header, with what it is when MusicBrainz says, such as "for two
