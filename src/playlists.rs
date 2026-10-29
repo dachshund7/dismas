@@ -431,7 +431,11 @@ fn free_name_among(name: &str, taken: impl Fn(&str) -> bool) -> String {
     while name.len() + EXTENSION.len() > 240 {
         name.pop();
     }
-    if name.trim().is_empty() {
+    // The playlist is made with the name trimmed, so it's checked trimmed:
+    // otherwise ". Mix" would give " Mix", which looks free, and the
+    // playlist made would write over "Mix"
+    name = name.trim().to_string();
+    if name.is_empty() {
         name = "Playlist".to_string();
     }
 
@@ -675,6 +679,29 @@ mod tests {
 
         let taken = |name: &str| name == "Mix" || name == "Mix 2";
         assert_eq!(free_name_among("Mix", taken), "Mix 3");
+    }
+
+    #[test]
+    fn free_names_are_checked_trimmed() {
+        // A name that only a trim makes the same as a playlist's is taken
+        let taken = |name: &str| name == "Road Trip";
+        for stem in [". Road Trip", "..  Road Trip", "Road Trip\u{7f}"] {
+            assert_eq!(free_name_among(stem, taken), "Road Trip 2", "{stem:?}");
+        }
+
+        // The name checked is always the name the playlist is made with,
+        // also when the limit on its length cuts it after a space
+        let cut_after_space = format!("{} b", "a".repeat(235));
+        assert_eq!(
+            free_name_among(&cut_after_space, |_| false),
+            "a".repeat(235)
+        );
+        for stem in [". Mix", "Mix\t", "\u{1}Mix", &cut_after_space] {
+            let name = free_name_among(stem, |_| false);
+            assert_eq!(name, name.trim(), "{stem:?}");
+            let numbered = free_name_among(stem, |n| n == name);
+            assert_eq!(numbered, numbered.trim(), "{stem:?}");
+        }
     }
 
     #[test]

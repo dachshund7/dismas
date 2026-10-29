@@ -180,6 +180,10 @@ All notable changes to this project will be documented in this file.
 - An album with tracks in a folder left out, or on a drive that wasn't
   there, listed and counted them among its tracks, and played the ones
   left out until the next scan
+- Importing a playlist file whose name was a saved playlist's with a dot
+  and a space before it, or a control character after it, like
+  ". Road Trip.m3u", wrote over that playlist rather than making
+  "Road Trip 2"
 
 ### Removed
 
