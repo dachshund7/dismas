@@ -1667,6 +1667,64 @@ fn query_album_tracks(
     Ok(tracks.into_iter().map(|(_, path)| path).collect())
 }
 
+// The disc of its album a track is on: its number in the tags, or else
+// the disc folder it's in, as in Album/CD 2, by which `TrackOrder` puts its
+// tracks in order; with neither, the first
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Disc {
+    Number(u32),
+    Folder(PathBuf),
+}
+
+impl Disc {
+    // The disc of a track with the disc number `number`, in the folder `dir`
+    pub fn of(number: Option<u32>, dir: Option<&Path>) -> Self {
+        match (number, dir) {
+            (Some(number), _) => Self::Number(number),
+            (None, Some(dir)) if dir.file_name().is_some_and(is_disc_folder) => {
+                Self::Folder(dir.to_path_buf())
+            }
+            _ => Self::Number(1),
+        }
+    }
+}
+
+// Whether the tracks of an album outside the `hidden` folders are on more
+// than one disc
+pub fn album_has_discs(album_id: &str, hidden: &[PathBuf]) -> bool {
+    query_or_default(
+        format_args!("look up the discs of album {album_id}"),
+        |conn| query_album_has_discs(conn, album_id, hidden),
+    )
+}
+
+fn query_album_has_discs(
+    conn: &Connection,
+    album_id: &str,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<bool> {
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT path, disc FROM tracks WHERE album_id = ?{hidden_sql}"
+    ))?;
+    let params = std::iter::once(rusqlite::types::Value::Text(album_id.to_string()))
+        .chain(hidden_params.into_iter().map(rusqlite::types::Value::Blob));
+    let mut discs = HashSet::new();
+    let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
+    while let Some(row) = rows.next()? {
+        let path = path_from_bytes(row.get(0)?);
+        let number = row
+            .get::<_, Option<i64>>(1)?
+            .and_then(|n| u32::try_from(n).ok());
+        // The folder of the sheet, for its tracks
+        discs.insert(Disc::of(number, cue_sheet::real_path(&path).parent()));
+        if discs.len() > 1 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 // The album of a track, if it's part of the library and not in one of the
 // `hidden` folders
 pub fn track_album(path: &Path, hidden: &[PathBuf]) -> Option<String> {
@@ -3681,6 +3739,50 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn albums_are_on_several_discs_by_number_or_folder() {
+        use super::Disc;
+
+        let conn = test_db();
+        for (path, album, disc) in [
+            // Disc numbers, the folder aside
+            ("/m/Box/1-01.flac", "box", Some(1)),
+            ("/m/Box/2-01.flac", "box", Some(2)),
+            // One disc, numbered or not
+            ("/m/One/01.flac", "one", Some(1)),
+            ("/m/One/02.flac", "one", None),
+            // Disc folders without numbers
+            ("/m/Opera/CD 1/01.flac", "opera", None),
+            ("/m/Opera/CD 2/01.flac", "opera", None),
+            // A disc that's hidden
+            ("/m/Hidden/CD 1/01.flac", "hidden", None),
+            ("/m/Gone/CD 2/01.flac", "hidden", None),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, disc)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3)",
+                rusqlite::params![path.as_bytes(), album, disc],
+            )
+            .unwrap();
+        }
+        let gone = [PathBuf::from("/m/Gone")];
+        let has_discs = |album| super::query_album_has_discs(&conn, album, &gone).unwrap();
+        assert!(has_discs("box"));
+        assert!(!has_discs("one"));
+        assert!(has_discs("opera"));
+        assert!(!has_discs("hidden"));
+        assert!(!has_discs("missing"));
+
+        let folder = Path::new("/m/Opera/Disc 2 - Act III");
+        assert_eq!(Disc::of(Some(3), Some(folder)), Disc::Number(3));
+        assert_eq!(
+            Disc::of(None, Some(folder)),
+            Disc::Folder(folder.to_path_buf())
+        );
+        assert_eq!(Disc::of(None, Some(Path::new("/m/Opera"))), Disc::Number(1));
+        assert_eq!(Disc::of(None, None), Disc::Number(1));
     }
 
     #[test]

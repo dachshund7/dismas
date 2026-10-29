@@ -44,7 +44,7 @@ use crate::{
     audio::cover_cache::{AlbumCover, CoverArt, CoverCache},
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::{i18n, i18n_f},
-    library::{folder_album_title, is_mbid},
+    library::{Disc, folder_album_title, is_mbid},
     utils::{self, ATTRIBUTE_HOST_PATH},
 };
 
@@ -830,6 +830,21 @@ impl Track {
         }
     }
 
+    // The disc of its album the track is on, by its number or its disc
+    // folder: the audio file's, which a CUE sheet is next to
+    pub fn disc(&self) -> Disc {
+        let data = self.imp().data.borrow();
+        let path = data.audio_file().path();
+        Disc::of(
+            data.credits().disc_number,
+            path.as_deref().and_then(Path::parent),
+        )
+    }
+
+    pub fn disc_subtitle(&self) -> Option<String> {
+        self.imp().data.borrow().credits().disc_subtitle.clone()
+    }
+
     // The artist that shuffling keeps from coming twice in a row: the
     // composers of a movement, as its work shows them, and otherwise the
     // artist in the tags
@@ -1096,6 +1111,54 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(duet.copied_details(), "Song — Singer");
+    }
+
+    #[test]
+    fn a_track_is_on_the_disc_of_its_number_or_its_folder() {
+        use crate::{library::Disc, work_sections::shares_section};
+
+        let movement = |disc: Option<u32>, track: u32, file: &str| {
+            Track::new(TrackData {
+                credits: TrackCredits {
+                    work: Some("Stabat Mater, op. 58".to_string()),
+                    movement: Some("Quis est homo".to_string()),
+                    work_composers: vec!["Antonín Dvořák".to_string()],
+                    disc_number: disc,
+                    disc_subtitle: disc.map(|disc| format!("Part {disc}")),
+                    track_number: Some(track),
+                    musicbrainz: MusicBrainzIds {
+                        release: Some("stabat".to_string()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                file: gtk::gio::File::for_path(file),
+                ..Default::default()
+            })
+        };
+
+        // A work that goes on to the next disc is one work, on two discs,
+        // which the album's tracks show apart
+        let end = movement(Some(1), 9, "/music/Stabat/1-09.flac");
+        let start = movement(Some(2), 1, "/music/Stabat/2-01.flac");
+        assert!(shares_section(&end, &start));
+        assert_eq!(end.disc(), Disc::Number(1));
+        assert_eq!(start.disc(), Disc::Number(2));
+        assert_eq!(start.disc_subtitle().as_deref(), Some("Part 2"));
+
+        // Without numbers, by their disc folders
+        let first = movement(None, 9, "/music/Opera/CD 1/09.flac");
+        let second = movement(None, 1, "/music/Opera/CD 2/01.flac");
+        assert_eq!(
+            second.disc(),
+            Disc::Folder(std::path::PathBuf::from("/music/Opera/CD 2"))
+        );
+        assert_ne!(first.disc(), second.disc());
+        assert_eq!(second.disc_subtitle(), None);
+
+        // And without either, the first disc
+        let single = movement(None, 1, "/music/Single/01.flac");
+        assert_eq!(single.disc(), Disc::Number(1));
     }
 
     #[test]

@@ -551,6 +551,11 @@ listview.navigation-sidebar > header label.work-title {
   margin: 6px 12px 0 12px;
 }
 
+/* The disc an album's tracks go on to, above the work they start with */
+listview.navigation-sidebar > header label.work-disc {
+  margin: 12px 12px 0 12px;
+}
+
 listview.navigation-sidebar > header label.work-composer {
   margin: 0 12px 2px 12px;
 }

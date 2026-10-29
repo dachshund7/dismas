@@ -99,7 +99,7 @@ What Dismas adds
   them to the selected playlist, and the one below it plays them in place of
   the queue, with an Undo.
 - **Classical music:** the queue and the album view show the name of each
-  work above its movements, and the player and the queue show the composers
+  work above its movements, the album view shows where each disc starts, and the player and the queue show the composers
   and the performers, naming an orchestra or a choir and its soloists rather
   than every player. Track Information shows the work, the performers and
   the production credits. Albums and recordings go by the year they were

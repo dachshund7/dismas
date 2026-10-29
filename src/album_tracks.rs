@@ -21,11 +21,13 @@ use crate::{
     audio::{Track, load_tracks},
     booklets,
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
-    library::{self, Album, TrackFilter},
+    library::{self, Album, Disc, TrackFilter},
     library_view::{self, PickNames},
     queue_row::QueueRow,
     utils,
-    work_sections::{SameSection, WorkSectionModel, same_section_of, work_header_factory},
+    work_sections::{
+        SameSection, WorkSectionModel, same_section_of, shares_section, work_header_factory,
+    },
 };
 
 // How fast a swipe to the right has to be to go back, in pixels a second
@@ -94,6 +96,9 @@ mod imp {
         pub work: RefCell<Option<library::WorkInfo>>,
         pub recordings: RefCell<Vec<library::WorkRecording>>,
         pub recording_of: Rc<RefCell<HashMap<String, usize>>>,
+        // Whether the album is on more than one disc, whose sections then
+        // start with each disc
+        pub multi_disc: Rc<Cell<bool>>,
         // The sections of the list, and the headers of the works of an
         // album and of the recordings of a work
         pub sections: OnceCell<WorkSectionModel>,
@@ -412,6 +417,12 @@ impl AlbumTracks {
                 }
             ),
             None::<(fn() -> bool, fn(&Track, u32))>,
+            Some(clone!(
+                #[weak(rename_to = this)]
+                self,
+                #[upgrade_or_default]
+                move |track: &Track, start| this.disc_line(track, start)
+            )),
         );
         imp.tracks_view.set_header_factory(Some(&work_headers));
         let _ = imp.sections.set(sections);
@@ -890,6 +901,7 @@ impl AlbumTracks {
         self.set_partial(false);
         imp.recordings.replace(Vec::new());
         imp.recording_of.replace(HashMap::new());
+        imp.multi_disc.set(false);
 
         // Each recording of a work is a section, under a header of its own
         let (same, headers): (Option<SameSection>, _) = if work_key.is_some() {
@@ -901,7 +913,13 @@ impl AlbumTracks {
             });
             (Some(same), imp.recording_headers.get())
         } else {
-            (None, imp.work_headers.get())
+            // A work that goes on to the next disc starts a section again
+            let multi_disc = imp.multi_disc.clone();
+            let same = same_section_of(move |previous: &Track, track: &Track| {
+                shares_section(previous, track)
+                    && (!multi_disc.get() || previous.disc() == track.disc())
+            });
+            (Some(same), imp.work_headers.get())
         };
         if let Some(sections) = imp.sections.get() {
             sections.set_same_section(same);
@@ -938,13 +956,14 @@ impl AlbumTracks {
                     let album_id = album.map(|album| album.id()).unwrap_or_default();
                     // All the tracks are shown, and with a search, those it
                     // matches are taken, and the others dimmed
-                    let (all, matching, found) = gio::spawn_blocking(move || {
+                    let (all, matching, found, discs) = gio::spawn_blocking(move || {
                         let all =
                             library::album_tracks(&album_id, &TrackFilter::default(), &hidden);
                         let matching = (!filter.is_empty())
                             .then(|| library::album_tracks(&album_id, &filter, &hidden));
                         let found = booklets::find(&all);
-                        (all, matching, found)
+                        let discs = library::album_has_discs(&album_id, &hidden);
+                        (all, matching, found, discs)
                     })
                     .await
                     .unwrap_or_default();
@@ -952,6 +971,8 @@ impl AlbumTracks {
                         return;
                     }
                     this.show_booklets(&found);
+                    // Before the tracks come, as their headers read it
+                    this.imp().multi_disc.set(discs);
                     let all: Vec<gio::File> = all.into_iter().map(gio::File::for_path).collect();
                     let matching = matching.filter(|matching| matching.len() < all.len());
                     let imp = this.imp();
@@ -973,6 +994,43 @@ impl AlbumTracks {
                 this.read_tracks(generation, files, reveal).await;
             }
         ));
+    }
+
+    // The line over the tracks of an album on several discs where a disc
+    // starts, at the section that starts at `start`: its number, with its
+    // subtitle, or the name of its folder
+    fn disc_line(&self, track: &Track, start: u32) -> Option<String> {
+        let imp = self.imp();
+        if !imp.multi_disc.get() {
+            return None;
+        }
+        let disc = track.disc();
+        let previous = start
+            .checked_sub(1)
+            .and_then(|position| imp.tracks.borrow().as_ref()?.item(position))
+            .and_downcast::<Track>();
+        if previous.is_some_and(|previous| previous.disc() == disc) {
+            return None;
+        }
+        Some(match disc {
+            Disc::Number(number) => {
+                let disc = i18n_k(
+                    // Translators: `{n}` must be left unmodified; it is
+                    // expanded to the number of a disc of an album
+                    "Disc {n}",
+                    &[("n", &number.to_string())],
+                );
+                match track.disc_subtitle() {
+                    Some(subtitle) => format!("{disc} · {subtitle}"),
+                    None => disc,
+                }
+            }
+            Disc::Folder(folder) => folder
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        })
     }
 
     // The buttons that open the booklets of the album: one, or a menu of

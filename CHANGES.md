@@ -80,6 +80,10 @@ All notable changes to this project will be documented in this file.
   folder counts, whatever its name, and for an album whose discs are in
   folders of their own, one in the folder above them too; with several,
   the item lists them by name
+- The tracks of an album on several discs show where each disc starts,
+  with its number and its subtitle, such as "Disc 2 · Act II", or the name
+  of its folder for discs in folders of their own. A work that goes on to
+  the next disc is named again under it
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane

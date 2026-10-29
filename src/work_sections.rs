@@ -151,15 +151,20 @@ impl WorkSectionModel {
 }
 
 // Whether the track at `position` is in the same section as the one before
-// it: a movement that continues the work of the one before it, or two
-// tracks that are not movements, so that consecutive ones end up in a
-// single section
+// it, see `shares_section()`
 fn same_section(model: &gio::ListModel, position: u32) -> bool {
     let track = |position| model.item(position).and_downcast::<Track>();
     let (Some(previous), Some(track)) = (track(position - 1), track(position)) else {
         return false;
     };
-    continues_work(&previous, &track) || (!previous.is_movement() && !track.is_movement())
+    shares_section(&previous, &track)
+}
+
+// Whether a track is in the same section as the one before it: a movement
+// that continues the work of the one before it, or two tracks that are not
+// movements, so that consecutive ones end up in a single section
+pub fn shares_section(previous: &Track, track: &Track) -> bool {
+    continues_work(previous, track) || (!previous.is_movement() && !track.is_movement())
 }
 
 // Whether a movement continues the work of the track before it, so that
@@ -186,11 +191,14 @@ pub fn continues_work(previous: &Track, track: &Track) -> bool {
 // now, as the rows do, and a track dropped on the header of a work at the
 // top of the list is given to it with the position of the first movement;
 // elsewhere, tracks go before a work by being dropped below the row above
-// its header
+// its header. In an album's tracks, `disc_line` gives the line that names
+// the disc a section starts, if it starts one, from its first track and
+// its position, above the work's name
 pub fn work_header_factory(
     on_work_clicked: impl Fn(u32, u32, bool) + 'static,
     on_work_menu: impl Fn(&gtk::Widget, f64, f64, &Track) + 'static,
     drop_before_work: Option<(impl Fn() -> bool + 'static, impl Fn(&Track, u32) + 'static)>,
+    disc_line: Option<impl Fn(&Track, u32) -> Option<String> + 'static>,
 ) -> gtk::ListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     let on_work_clicked = Rc::new(on_work_clicked);
@@ -274,10 +282,19 @@ pub fn work_header_factory(
         });
         title.add_controller(motion);
 
+        let disc_label = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .css_classes(["work-disc", "heading"])
+            .visible(false)
+            .build();
+
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .build();
         content.append(&separator);
+        content.append(&disc_label);
         content.append(&title);
 
         if let Some((can_move, on_drop)) = &drop_before_work {
@@ -333,12 +350,16 @@ pub fn work_header_factory(
         header.set_child(Some(&content));
     });
 
-    factory.connect_bind(|_, item| {
+    factory.connect_bind(move |_, item| {
         let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
         let Some(content) = header.child() else {
             return;
         };
         let separator = content.first_child().unwrap();
+        let disc_label = separator
+            .next_sibling()
+            .and_downcast::<gtk::Label>()
+            .unwrap();
         let title = content.last_child().unwrap();
         let work_label = title.first_child().and_downcast::<gtk::Label>().unwrap();
         let composer_label = title.last_child().and_downcast::<gtk::Label>().unwrap();
@@ -347,13 +368,21 @@ pub fn work_header_factory(
         separator.set_visible(header.start() > 0);
 
         let track = header.item().and_downcast::<Track>();
+        let disc = track
+            .as_ref()
+            .zip(disc_line.as_ref())
+            .and_then(|(track, disc_line)| disc_line(track, header.start()));
+        disc_label.set_visible(disc.is_some());
+        disc_label.set_label(disc.as_deref().unwrap_or_default());
+
+        // A work that goes on to the next disc is named again under it
         let work = track.as_ref().and_then(Track::movement_work);
         title.set_visible(work.is_some());
         work_label.set_label(work.as_deref().unwrap_or_default());
         let composer = track.filter(|_| work.is_some()).map(|t| t.composer());
         composer_label.set_label(composer.as_deref().unwrap_or_default());
 
-        content.set_visible(separator.is_visible() || title.is_visible());
+        content.set_visible(separator.is_visible() || disc.is_some() || title.is_visible());
     });
 
     factory.upcast()
