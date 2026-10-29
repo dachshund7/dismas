@@ -76,6 +76,20 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
       description: _("Play tracks at an even loudness, from their ReplayGain tags");
 
       Adw.ActionRow {
+        title: C_("replaygain-menu", "Aut_omatic");
+        subtitle: _("Album gain when an album plays in order, track gain otherwise");
+        use-underline: true;
+        activatable-widget: replaygain_auto;
+
+        [prefix]
+        CheckButton replaygain_auto {
+          action-name: "win.replaygain";
+          action-target: "'auto'";
+          valign: center;
+        }
+      }
+
+      Adw.ActionRow {
         title: C_("replaygain-menu", "_Album");
         subtitle: _("Keep the differences in loudness within an album");
         use-underline: true;

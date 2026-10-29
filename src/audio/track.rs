@@ -811,6 +811,17 @@ impl Track {
             && a.same_release(&b)
     }
 
+    // Whether the track comes after another from the same release, later
+    // on the album, as the tracks of an album played in order do
+    pub fn continues_album(&self, previous: &Track) -> bool {
+        let same_release = self
+            .imp()
+            .data
+            .borrow()
+            .same_release(&previous.imp().data.borrow());
+        same_release && self.follows_on_album(previous)
+    }
+
     // Whether the track comes after another on their album, by disc and
     // track number, or else whether it's another track
     pub fn follows_on_album(&self, other: &Track) -> bool {
@@ -1111,6 +1122,40 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(duet.copied_details(), "Song — Singer");
+    }
+
+    #[test]
+    fn tracks_play_in_album_order_next_to_the_tracks_after_them_on_their_album() {
+        use crate::audio::player::plays_in_album_order;
+
+        let track = |release: &str, number: u32| {
+            Track::new(TrackData {
+                credits: TrackCredits {
+                    track_number: Some(number),
+                    musicbrainz: MusicBrainzIds {
+                        release: Some(release.to_string()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                file: gtk::gio::File::for_path(format!("/music/{release}/{number:02}.flac")),
+                ..Default::default()
+            })
+        };
+        let (one, two, three) = (track("a", 1), track("a", 2), track("a", 3));
+        let other = track("b", 5);
+
+        // An album played through, from its first track to its last
+        assert!(plays_in_album_order(None, &one, Some(&two)));
+        assert!(plays_in_album_order(Some(&one), &two, Some(&three)));
+        assert!(plays_in_album_order(Some(&two), &three, None));
+        // A track from another album between them, or alone
+        assert!(!plays_in_album_order(Some(&one), &other, Some(&three)));
+        assert!(!plays_in_album_order(None, &other, None));
+        // Shuffled, out of the album's order
+        assert!(!plays_in_album_order(Some(&three), &one, Some(&other)));
+        // Tracks left out of the album still go in its order
+        assert!(plays_in_album_order(Some(&other), &one, Some(&three)));
     }
 
     #[test]

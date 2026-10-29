@@ -138,6 +138,11 @@ pub enum ReplayGainMode {
     #[enum_value(name = "off")]
     #[default]
     Off,
+    // The album gain while the tracks around the one playing in the queue
+    // are from its album, in its order, and the track gain otherwise, as
+    // in a shuffled queue or a playlist of tracks from many albums
+    #[enum_value(name = "auto")]
+    Auto,
 }
 
 // As the replay-gain setting stores them
@@ -146,6 +151,7 @@ impl From<i32> for ReplayGainMode {
         match value {
             0 => Self::Album,
             1 => Self::Track,
+            3 => Self::Auto,
             _ => Self::Off,
         }
     }
@@ -157,6 +163,7 @@ impl From<ReplayGainMode> for i32 {
             ReplayGainMode::Album => 0,
             ReplayGainMode::Track => 1,
             ReplayGainMode::Off => 2,
+            ReplayGainMode::Auto => 3,
         }
     }
 }
@@ -342,7 +349,7 @@ impl AudioPlayer {
 
         let next_track = next_track.filter(|_| !self.stops_at_track_end());
         self.backend
-            .set_next(next_track.map(|t| TrackSource::of(&t)));
+            .set_next(next_track.map(|t| self.source_of(&t)));
     }
 
     // Whether the music stops at the end of the current track, for the
@@ -418,7 +425,7 @@ impl AudioPlayer {
                 return;
             };
             debug!("Next track: {}", next_track.uri());
-            self.backend.set_track(Some(TrackSource::of(&next_track)));
+            self.backend.set_track(Some(self.source_of(&next_track)));
             self.show_track(next_track);
         }
 
@@ -446,7 +453,7 @@ impl AudioPlayer {
             self.set_playback_state(PlaybackState::Paused);
         }
 
-        self.backend.set_track(Some(TrackSource::of(&track)));
+        self.backend.set_track(Some(self.source_of(&track)));
         self.show_track(track);
 
         if was_playing {
@@ -529,7 +536,7 @@ impl AudioPlayer {
         }
         if let Some(next_track) = self.queue.next_track() {
             debug!("Playing next (gapless): {}", next_track.uri());
-            self.backend.confirm_switch(TrackSource::of(&next_track));
+            self.backend.confirm_switch(self.source_of(&next_track));
             self.show_track(next_track);
         }
     }
@@ -557,7 +564,7 @@ impl AudioPlayer {
                 if let Some(current_track) = self.state.track() {
                     current_track.set_playing(false);
                 }
-                self.backend.set_track(Some(TrackSource::of(&next_track)));
+                self.backend.set_track(Some(self.source_of(&next_track)));
                 self.show_track(next_track);
             }
         }
@@ -1012,6 +1019,22 @@ impl AudioPlayer {
         }
     }
 
+    // What the backend plays for a track of the queue
+    fn source_of(&self, track: &Track) -> TrackSource {
+        let album_order = self.queue.position(track).is_some_and(|position| {
+            let at = |position| self.queue.track_at(position).filter(|t| !t.missing());
+            plays_in_album_order(
+                position.checked_sub(1).and_then(at).as_ref(),
+                track,
+                at(position + 1).as_ref(),
+            )
+        });
+        TrackSource {
+            album_order,
+            ..TrackSource::of(track)
+        }
+    }
+
     pub fn set_replaygain(&self, replaygain: ReplayGainMode) {
         self.backend.set_replaygain(replaygain);
     }
@@ -1019,6 +1042,18 @@ impl AudioPlayer {
     pub fn replaygain_available(&self) -> bool {
         self.backend.replaygain_available()
     }
+}
+
+// Whether a track plays as part of its album, for the automatic ReplayGain:
+// the track before it or the one after it in the queue is from the same
+// release, in the order of the album
+pub(super) fn plays_in_album_order(
+    previous: Option<&Track>,
+    track: &Track,
+    next: Option<&Track>,
+) -> bool {
+    previous.is_some_and(|previous| track.continues_album(previous))
+        || next.is_some_and(|next| next.continues_album(track))
 }
 
 #[cfg(test)]
@@ -1064,6 +1099,7 @@ mod tests {
             ReplayGainMode::Album,
             ReplayGainMode::Track,
             ReplayGainMode::Off,
+            ReplayGainMode::Auto,
         ] {
             assert_eq!(ReplayGainMode::from(i32::from(mode)), mode);
         }

@@ -57,6 +57,8 @@ pub struct TrackSource {
     pub gains: Option<Gains>,
     // Whether the file has a video stream, which GstPlay turns off
     pub video: bool,
+    // Whether the track plays as part of its album, see `ReplayGainMode::Auto`
+    pub album_order: bool,
 }
 
 impl TrackSource {
@@ -70,6 +72,7 @@ impl TrackSource {
             end: end.map(clock_time),
             gains: track.gains(),
             video: track.has_video(),
+            album_order: false,
         }
     }
 }
@@ -104,6 +107,9 @@ struct Gapless {
     // Whether the pipeline played since the player loaded the track; until
     // then, it's never paused (see `GstBackend::pause`)
     played: bool,
+    // Whether ReplayGain takes the album gain or the track gain of each
+    // track by whether it plays as part of its album (`album_order`)
+    auto_gain: bool,
 }
 
 impl Gapless {
@@ -309,11 +315,16 @@ fn gain_tags(gains: Gains) -> Option<gst::TagList> {
 // as the tags of the stream are about the whole file. They're sent before
 // the first buffer of each track that reaches the filter: the stream's
 // tags come before it, and at the start of the next part of a file, the
-// gain changes up to a buffer late, a fraction of a second
+// gain changes up to a buffer late, a fraction of a second. With the
+// automatic ReplayGain, rgvolume is switched to the album or the track
+// gain there too: the filter runs about 2 s ahead of the sink, so the
+// hand-over of a track, and the player's following it, would be too early
+// or too late
 fn add_gain_probe(pad: &gst::Pad, rg_volume_sink: gst::Pad, gapless: Arc<Mutex<Gapless>>) {
     // The track whose audio reaches the filter, ahead of the sink, and
     // whether rgvolume has its gains
     let filtered: Mutex<(Option<TrackSource>, bool)> = Mutex::default();
+    let rg_volume = rg_volume_sink.parent_element();
     pad.add_probe(
         gst::PadProbeType::BUFFER
             | gst::PadProbeType::EVENT_DOWNSTREAM
@@ -353,7 +364,14 @@ fn add_gain_probe(pad: &gst::Pad, rg_volume_sink: gst::Pad, gapless: Arc<Mutex<G
                 if std::mem::replace(&mut filtered.1, true) {
                     return gst::PadProbeReturn::Ok;
                 }
-                filtered.0.as_ref().and_then(|track| track.gains)
+                let track = filtered.0.as_ref();
+                if gapless.auto_gain
+                    && let Some(rg_volume) = &rg_volume
+                {
+                    let album = track.is_some_and(|track| track.album_order);
+                    rg_volume.set_property("album-mode", album);
+                }
+                track.and_then(|track| track.gains)
             };
             if let Some(tags) = tags.and_then(gain_tags) {
                 rg_volume_sink.send_event(gst::event::Tag::new(tags));
@@ -942,14 +960,23 @@ impl GstBackend {
     }
 
     pub fn set_replaygain(&self, replaygain: ReplayGainMode) {
+        let mut gapless = self.gapless.lock().unwrap();
+        gapless.auto_gain = replaygain == ReplayGainMode::Auto;
         let filter = match (&self.replaygain, replaygain) {
-            (Some(r), ReplayGainMode::Album | ReplayGainMode::Track) => {
-                r.rg_volume
-                    .set_property("album-mode", replaygain == ReplayGainMode::Album);
+            (Some(_), ReplayGainMode::Off) | (None, _) => self.identity(),
+            (Some(r), _) => {
+                // Automatically, the track playing keeps its own until the
+                // next one comes, see `add_gain_probe()`
+                let album = match replaygain {
+                    ReplayGainMode::Album => true,
+                    ReplayGainMode::Auto => gapless.playing().is_some_and(|t| t.album_order),
+                    _ => false,
+                };
+                r.rg_volume.set_property("album-mode", album);
                 r.rg_filter_bin.clone()
             }
-            _ => self.identity(),
         };
+        drop(gapless);
         self.gst_player
             .pipeline()
             .set_property("audio-filter", &filter);
@@ -1028,6 +1055,7 @@ mod tests {
             end: end_ms.map(gst::ClockTime::from_mseconds),
             gains: None,
             video: false,
+            album_order: false,
         }
     }
 
@@ -1350,6 +1378,29 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(gains, Some(vec![-10.0; 5]));
+    }
+
+    #[test]
+    fn automatic_replaygain_takes_the_album_gain_of_tracks_in_album_order() {
+        let with_gains = |mut source: TrackSource, track_gain, album_order| {
+            source.gains = Some(Gains {
+                track_gain: Some(track_gain),
+                album_gain: Some(-8.0),
+                ..Default::default()
+            });
+            source.album_order = album_order;
+            source
+        };
+        // The first track plays as part of its album, the next alone
+        let Some(gains) = gains_through_filter(Gapless {
+            current: Some(with_gains(source("track01", 0, Some(900)), -3.0, true)),
+            next: Some(with_gains(source("track02", 900, None), -6.0, false)),
+            auto_gain: true,
+            ..Default::default()
+        }) else {
+            return;
+        };
+        assert_eq!(gains, vec![-8.0, -8.0, -8.0, -6.0, -6.0]);
     }
 
     fn redirect_to(location: &str) -> gst::Message {

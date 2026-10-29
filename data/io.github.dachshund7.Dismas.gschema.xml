@@ -4,6 +4,7 @@
     <value nick="album" value="0"/>
     <value nick="track" value="1"/>
     <value nick="off" value="2"/>
+    <value nick="auto" value="3"/>
   </enum>
   <enum id="io.github.dachshund7.Dismas.RepeatMode">
     <value nick="consecutive" value="0"/>

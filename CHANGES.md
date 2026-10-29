@@ -84,6 +84,10 @@ All notable changes to this project will be documented in this file.
   with its number and its subtitle, such as "Disc 2 · Act II", or the name
   of its folder for discs in folders of their own. A work that goes on to
   the next disc is named again under it
+- Automatic, in the ReplayGain settings, takes the album gain while the
+  tracks of an album play in their order, so that the quiet movements of
+  a symphony stay quiet, and the track gain otherwise, as in a shuffled
+  queue or a playlist of tracks from many albums
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane
