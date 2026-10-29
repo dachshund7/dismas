@@ -63,8 +63,8 @@ What Dismas adds
   soloists, with what they play or sing, and picking a composer and a
   performer shows the albums where they meet; once one is picked, the
   other list has only the names that go with it. The Works page, next to the
-  albums, lists the works instead, by composer, with the number of their
-  recordings, and keeps the search and what you picked; open one to compare
+  albums, lists the works instead, by composer and in the order of their catalogue
+  numbers, with the number of their recordings, and keeps the search and what you picked; open one to compare
   its recordings, with their performers and years, and play one. Other Recordings, in the menu of a
   movement, shows the recordings of its work next to whatever you're
   doing.

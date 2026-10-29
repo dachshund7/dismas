@@ -134,6 +134,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The Works page lists the works of each composer in the order of their
+  catalogue numbers, BWV 1004 before BWV 1007, rather than by title: by
+  the catalogue that most of the composer's works are in, then by any
+  other, as Beethoven's WoO after his opus numbers, and then the works
+  without a number, by title
 - The year of an album, which the grid can be sorted by, is when its
   tracks were recorded, if their tags say, or else when they were first
   released, rather than the year of a reissue

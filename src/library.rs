@@ -39,6 +39,7 @@ use crate::{
         ReadOptions, TrackCredits, normalize_search_text, plain_commas, read_file_tags, search_key,
         split_composers, title_from_file_name, track_search_text, track_title,
     },
+    catalogue::{self, CatalogueNumber},
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
     utils,
@@ -1397,14 +1398,14 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
     }
 
     let most = |counts: HashMap<&str, usize>| Some(most_common(counts)).filter(|s| !s.is_empty());
-    let mut works: Vec<(_, WorkInfo)> = seen
+    let works: Vec<WorkInfo> = seen
         .into_iter()
         .filter(|(_, seen)| seen.recordings > 0)
         .map(|(key, seen)| {
             let composers = most(seen.composers)
                 .map(|entries| work_composers(&entries))
                 .unwrap_or_default();
-            let info = WorkInfo {
+            WorkInfo {
                 key: key.to_owned(),
                 name: most(seen.names).unwrap_or_default(),
                 title: most(seen.titles),
@@ -1415,20 +1416,91 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                 }),
                 composers,
                 recordings: seen.recordings,
-            };
-            let sort_key = (
-                info.composers.is_empty(),
-                info.composers
-                    .first()
-                    .map(|composer| glib::CollationKey::from(composer.sort.as_str())),
-                info.composer_keys().join("\x1f"),
-                glib::FilenameCollationKey::from(info.name.as_str()),
-            );
-            (sort_key, info)
+            }
         })
         .collect();
-    works.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
-    works.into_iter().map(|(_, info)| info).collect()
+    sort_works(works)
+}
+
+// Where a work goes among the works of its composers, by its catalogue
+// number: first the works in the catalogue that the most of them are in,
+// by their numbers, then the works in another catalogue, by it, and then
+// those without a number
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum CatalogueOrder {
+    Main(Vec<(u32, String)>),
+    Other(CatalogueNumber),
+    None,
+}
+
+// The works under their composers, sorted by the composers' sort names,
+// and the works of each by their catalogue numbers, then by name, "no. 2"
+// before "no. 10"
+fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
+    // The numbers in the name of each work, or else in its full title
+    let numbers: Vec<Vec<CatalogueNumber>> = works
+        .iter()
+        .map(|work| {
+            let numbers = catalogue::catalogue_numbers(&work.name);
+            match &work.title {
+                Some(title) if numbers.is_empty() => catalogue::catalogue_numbers(title),
+                _ => numbers,
+            }
+        })
+        .collect();
+    let composers: Vec<String> = works
+        .iter()
+        .map(|work| work.composer_keys().join("\x1f"))
+        .collect();
+
+    // The catalogue of each composer's works, the one the most of them are
+    // in, as Dvořák's opus numbers or Beethoven's; an even count goes to
+    // the first in the list of catalogues, which is the same every time
+    let mut counts: HashMap<&str, HashMap<&'static str, usize>> = HashMap::new();
+    for (composer, numbers) in composers.iter().zip(&numbers) {
+        let counts = counts.entry(composer).or_default();
+        for catalogue in numbers.iter().map(|n| n.catalogue).unique() {
+            *counts.entry(catalogue).or_default() += 1;
+        }
+    }
+    let main: HashMap<&str, &'static str> = counts
+        .into_iter()
+        .filter_map(|(composer, counts)| {
+            let catalogue = counts
+                .into_iter()
+                .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(a.0)))?
+                .0;
+            Some((composer, catalogue))
+        })
+        .collect();
+
+    let mut sorted: Vec<_> = works
+        .into_iter()
+        .zip(numbers)
+        .zip(&composers)
+        .map(|((work, numbers), composer)| {
+            let main = main.get(composer.as_str());
+            let order = match numbers.iter().find(|n| Some(&n.catalogue) == main) {
+                Some(number) => CatalogueOrder::Main(number.order.clone()),
+                None => numbers
+                    .into_iter()
+                    .next()
+                    .map_or(CatalogueOrder::None, CatalogueOrder::Other),
+            };
+            let sort_key = (
+                work.composers.is_empty(),
+                work.composers
+                    .first()
+                    .map(|composer| glib::CollationKey::from(composer.sort.as_str())),
+                composer,
+                order,
+                glib::FilenameCollationKey::from(work.name.as_str()),
+            );
+            (sort_key, work)
+        })
+        .collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
+    sorted.into_iter().map(|(_, work)| work).collect()
 }
 
 // The work of a track, if it's part of one in the library, and the number
@@ -4377,6 +4449,66 @@ mod tests {
         };
         let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
         assert_eq!(albums.get("a"), Some(&(1, 2)));
+    }
+
+    #[test]
+    fn the_works_of_a_composer_are_in_the_order_of_their_catalogue() {
+        use super::TrackFilter;
+
+        let conn = test_db();
+        let bach = "\njohann sebastian bach\tJohann Sebastian Bach\tBach, Johann Sebastian\n";
+        let beethoven = "\nludwig van beethoven\tLudwig van Beethoven\tBeethoven, Ludwig van\n";
+        let dvorak = "\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\n";
+        for (i, (name, composers)) in [
+            ("Suite no. 1 in G major, BWV 1007", bach),
+            ("A chorale without a number", bach),
+            ("Partita no. 2 in D minor, BWV 1004", bach),
+            ("Für Elise, WoO 59", beethoven),
+            ("Symphony no. 3, op. 55 “Eroica”", beethoven),
+            ("Piano Sonata no. 5, op. 10 no. 1", beethoven),
+            ("Piano Sonata no. 1, op. 2 no. 1", beethoven),
+            // Opus numbers are the most common, so the polka, with only a
+            // B. number, comes after them
+            ("Polka, B. 1", dvorak),
+            ("Humoresques, op. 101", dvorak),
+            ("Symphony no. 9, op. 95", dvorak),
+            ("Slavonic Dances, op. 46, B. 83", dvorak),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, work_key,
+                                     work, work_composers)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?3, ?4)",
+                rusqlite::params![
+                    format!("/m/{i}/01.flac").as_bytes(),
+                    format!("album {i}"),
+                    name,
+                    composers
+                ],
+            )
+            .unwrap();
+        }
+
+        let works = super::query_works(&conn, &TrackFilter::default(), &[]).unwrap();
+        let names: Vec<_> = works.iter().map(|work| work.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Partita no. 2 in D minor, BWV 1004",
+                "Suite no. 1 in G major, BWV 1007",
+                "A chorale without a number",
+                "Piano Sonata no. 1, op. 2 no. 1",
+                "Piano Sonata no. 5, op. 10 no. 1",
+                "Symphony no. 3, op. 55 “Eroica”",
+                "Für Elise, WoO 59",
+                "Slavonic Dances, op. 46, B. 83",
+                "Symphony no. 9, op. 95",
+                "Humoresques, op. 101",
+                "Polka, B. 1",
+            ]
+        );
     }
 
     #[test]
