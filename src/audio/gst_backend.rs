@@ -237,6 +237,18 @@ fn report_error(sender: &Sender<PlaybackAction>, gapless: &Mutex<Gapless>) {
     }
 }
 
+// Whether a message tells the pipeline to play another address instead,
+// as qtdemux does for a QuickTime reference movie, a file that only names
+// where its media is
+fn is_redirect(msg: &gst::MessageRef) -> bool {
+    match msg.view() {
+        gst::MessageView::Element(element) => element
+            .structure()
+            .is_some_and(|structure| structure.has_name("redirect")),
+        _ => false,
+    }
+}
+
 // A number of seconds as a clock time. Seek offsets come from other
 // programs over MPRIS, and lengths from the headers of files, so a value
 // too large for a clock time becomes the largest one rather than a panic
@@ -550,6 +562,7 @@ impl GstBackend {
 
         res.setup_signals();
         res.setup_gapless();
+        res.setup_redirects();
 
         res
     }
@@ -642,6 +655,23 @@ impl GstBackend {
 
             if let Err(e) = sender.try_send(PlaybackAction::TrackAdvanced(generation, id)) {
                 error!("Failed to send TrackAdvanced: {e}");
+            }
+        });
+    }
+
+    // GstPlay plays the address a redirect gives in place of the track, so
+    // a QuickTime reference movie in the music folders would make Dismas
+    // fetch any address it names. Dismas only plays the files of its queue,
+    // so the redirects are dropped before GstPlay's watch of the bus sees
+    // them; the messages that pass still reach `connect_sync_message`
+    fn setup_redirects(&self) {
+        let bus = self.gst_player.pipeline().bus().unwrap();
+        bus.set_sync_handler(|_bus, msg| {
+            if is_redirect(msg) {
+                debug!("Not following a redirect to another address");
+                gst::BusSyncReply::Drop
+            } else {
+                gst::BusSyncReply::Pass
             }
         });
     }
@@ -1320,5 +1350,36 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(gains, Some(vec![-10.0; 5]));
+    }
+
+    fn redirect_to(location: &str) -> gst::Message {
+        gst::message::Element::new(
+            gst::Structure::builder("redirect")
+                .field("new-location", location)
+                .build(),
+        )
+    }
+
+    #[test]
+    fn redirects_are_told_apart() {
+        gst::init().unwrap();
+        assert!(is_redirect(&redirect_to("http://192.0.2.1/movie.mov")));
+        let other = gst::message::Element::new(gst::Structure::new_empty("level"));
+        assert!(!is_redirect(&other));
+        assert!(!is_redirect(&gst::message::Eos::new()));
+    }
+
+    #[test]
+    fn a_redirect_is_not_followed() {
+        gst::init().unwrap();
+        let (sender, _receiver) = async_channel::unbounded();
+        let backend = GstBackend::new(sender);
+        let playbin = backend.gst_player.pipeline();
+        let location = "file:///nowhere/redirected.m4a";
+        playbin.bus().unwrap().post(redirect_to(location)).unwrap();
+        // GstPlay would set the address from its own thread
+        std::thread::sleep(Duration::from_millis(300));
+        let uri = playbin.property::<Option<String>>("uri");
+        assert_ne!(uri.as_deref(), Some(location));
     }
 }
