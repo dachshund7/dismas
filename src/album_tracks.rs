@@ -417,12 +417,12 @@ impl AlbumTracks {
                 }
             ),
             None::<(fn() -> bool, fn(&Track, u32))>,
-            Some(clone!(
+            clone!(
                 #[weak(rename_to = this)]
                 self,
                 #[upgrade_or_default]
                 move |track: &Track, start| this.disc_line(track, start)
-            )),
+            ),
         );
         imp.tracks_view.set_header_factory(Some(&work_headers));
         let _ = imp.sections.set(sections);
@@ -956,21 +956,18 @@ impl AlbumTracks {
                     let album_id = album.map(|album| album.id()).unwrap_or_default();
                     // All the tracks are shown, and with a search, those it
                     // matches are taken, and the others dimmed
-                    let (all, matching, found, discs) = gio::spawn_blocking(move || {
-                        let all =
-                            library::album_tracks(&album_id, &TrackFilter::default(), &hidden);
+                    let (all, matching, discs) = gio::spawn_blocking(move || {
+                        let (all, discs) = library::album_tracks_and_discs(&album_id, &hidden);
                         let matching = (!filter.is_empty())
                             .then(|| library::album_tracks(&album_id, &filter, &hidden));
-                        let found = booklets::find(&all);
-                        let discs = library::album_has_discs(&album_id, &hidden);
-                        (all, matching, found, discs)
+                        (all, matching, discs)
                     })
                     .await
                     .unwrap_or_default();
                     if this.imp().generation.get() != generation {
                         return;
                     }
-                    this.show_booklets(&found);
+                    this.find_booklets(generation, all.clone());
                     // Before the tracks come, as their headers read it
                     this.imp().multi_disc.set(discs);
                     let all: Vec<gio::File> = all.into_iter().map(gio::File::for_path).collect();
@@ -1031,6 +1028,23 @@ impl AlbumTracks {
                 .to_string_lossy()
                 .into_owned(),
         })
+    }
+
+    // Shows the buttons that open the booklets of the album's tracks once
+    // they're found, in a separate thread, without holding up the tracks
+    fn find_booklets(&self, generation: u32, paths: Vec<PathBuf>) {
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = this)]
+            self,
+            async move {
+                let found = gio::spawn_blocking(move || booklets::find(&paths))
+                    .await
+                    .unwrap_or_default();
+                if this.imp().generation.get() == generation {
+                    this.show_booklets(&found);
+                }
+            }
+        ));
     }
 
     // The buttons that open the booklets of the album: one, or a menu of

@@ -402,10 +402,14 @@ impl Queue {
         self.track_at(prev)
     }
 
-    // Whether the track at a position can play: it's there, and isn't a
+    // The track at a position, if it can play: it's there, and isn't a
     // placeholder for a file that gave no track
+    pub fn playable_track(&self, pos: u32) -> Option<Track> {
+        self.track_at(pos).filter(|track| !track.missing())
+    }
+
     fn playable(&self, pos: u32) -> bool {
-        self.track_at(pos).is_some_and(|track| !track.missing())
+        self.playable_track(pos).is_some()
     }
 
     // The first track from a position on that can play

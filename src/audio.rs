@@ -72,8 +72,8 @@ pub use queue::Queue;
 pub use sleep_timer::{SleepTimer, TimerEnd};
 pub use state::PlayerState;
 pub use track::{
-    ExtraComments, FileDetails, FileTags, Gains, ListedPerformer, Missing, MusicBrainzIds,
-    PerformerKind, ReadOptions, Track, TrackCredits, discovered, load_tracks,
+    Arrangement, ExtraComments, FileDetails, FileTags, Gains, ListedPerformer, Missing,
+    MusicBrainzIds, PerformerKind, ReadOptions, Track, TrackCredits, discovered, load_tracks,
     normalize_search_text, plain_commas, read_file_tags, search_key, split_composers,
     title_from_file_name, track_search_text, track_title,
 };

@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use crate::{
     album_cell::AlbumCell,
-    audio::{PerformerKind, normalize_search_text},
+    audio::{Arrangement, PerformerKind, normalize_search_text},
     i18n::{i18n, i18n_f, i18n_k, ni18n_f},
     library::{self, Album, AlbumSort, Counted, ScanEvent, ScanResult, TrackFilter},
     square_bin::SquareBin,
@@ -2297,13 +2297,13 @@ fn work_factory() -> gtk::SignalListItemFactory {
     name_count_factory::<library::WorkInfo>(
         |work| {
             let recordings = recordings_label(work.recordings);
-            let arrangement = work.arrangement_of.as_ref().map(|of| {
+            let arrangement = work.arrangement.as_ref().map(|arrangement| {
                 i18n_k(
                     // Translators: `{work}` must be left unmodified; it is
                     // expanded to the title of the work an arrangement
                     // arranges
                     "Arrangement of {work}",
-                    &[("work", of)],
+                    &[("work", &arrangement.of)],
                 )
             });
             let text = [
@@ -2321,7 +2321,8 @@ fn work_factory() -> gtk::SignalListItemFactory {
         |work, name, count| {
             // What an arrangement is, e.g. "for two pianos, Busoni", tells
             // it from the work it arranges, whose title it often has
-            let more = [work.arrangement_label(), work.collection.clone()]
+            let arrangement = work.arrangement.as_ref().map(Arrangement::shown);
+            let more = [arrangement.as_deref(), work.collection.as_deref()]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()

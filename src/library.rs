@@ -35,8 +35,8 @@ pub use watch::FolderWatch;
 
 use crate::{
     audio::{
-        CoverCache, ExtraComments, FileTags, ListedPerformer, PerformerKind, ReadOptions,
-        TrackCredits, normalize_search_text, plain_commas, read_file_tags, search_key,
+        Arrangement, CoverCache, ExtraComments, FileTags, ListedPerformer, PerformerKind,
+        ReadOptions, TrackCredits, normalize_search_text, plain_commas, read_file_tags, search_key,
         split_composers, title_from_file_name, track_search_text, track_title,
     },
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
@@ -1235,10 +1235,9 @@ pub struct WorkInfo {
     pub title: Option<String>,
     // The work it's part of, or the collection it's in
     pub collection: Option<String>,
-    // For an arrangement, the title of the work it arranges, and what it
-    // is, if MusicBrainz says
-    pub arrangement_of: Option<String>,
-    pub arrangement: Option<String>,
+    // For an arrangement, the work it arranges, and what it is, if
+    // MusicBrainz says
+    pub arrangement: Option<Arrangement>,
     pub composers: Vec<WorkComposer>,
     // The number of its recordings that the filter matches, see
     // `recordings_of_works()`
@@ -1246,18 +1245,6 @@ pub struct WorkInfo {
 }
 
 impl WorkInfo {
-    // What it is, for an arrangement, after its name: what MusicBrainz
-    // says it is, e.g. "for two pianos, Busoni", or that it's an
-    // arrangement
-    pub fn arrangement_label(&self) -> Option<String> {
-        self.arrangement_of.as_ref()?;
-        Some(
-            self.arrangement
-                .clone()
-                .unwrap_or_else(|| i18n("arrangement")),
-        )
-    }
-
     // The names of its composers, as a list
     pub fn composer_names(&self) -> String {
         self.composers
@@ -1392,8 +1379,10 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                 name: most(seen.names).unwrap_or_default(),
                 title: most(seen.titles),
                 collection: most(seen.collections),
-                arrangement_of: most(seen.arrangements_of),
-                arrangement: most(seen.arrangements),
+                arrangement: most(seen.arrangements_of).map(|of| Arrangement {
+                    of,
+                    label: most(seen.arrangements),
+                }),
                 composers,
                 recordings: seen.recordings,
             };
@@ -1673,14 +1662,29 @@ pub fn album_tracks(album_id: &str, filter: &TrackFilter, hidden: &[PathBuf]) ->
         format_args!("load the tracks of album {album_id}"),
         |conn| query_album_tracks(conn, album_id, filter, hidden),
     )
+    .into_iter()
+    .map(|(_, path)| path)
+    .collect()
 }
 
+// All the files of the tracks of an album, as `album_tracks()` gives them,
+// and whether they're on more than one disc
+pub fn album_tracks_and_discs(album_id: &str, hidden: &[PathBuf]) -> (Vec<PathBuf>, bool) {
+    let tracks = query_or_default(
+        format_args!("load the tracks of album {album_id}"),
+        |conn| query_album_tracks(conn, album_id, &TrackFilter::default(), hidden),
+    );
+    let discs = on_several_discs(&tracks);
+    (tracks.into_iter().map(|(_, path)| path).collect(), discs)
+}
+
+// The tracks of an album, in order, with the disc numbers in their tags
 fn query_album_tracks(
     conn: &Connection,
     album_id: &str,
     filter: &TrackFilter,
     hidden: &[PathBuf],
-) -> rusqlite::Result<Vec<PathBuf>> {
+) -> rusqlite::Result<Vec<(Option<i64>, PathBuf)>> {
     let (conditions, _) = filter.conditions();
     let mut stmt = conn.prepare(&format!(
         "SELECT path, disc, track FROM tracks
@@ -1692,11 +1696,15 @@ fn query_album_tracks(
     let mut tracks = stmt
         .query_map(rusqlite::params_from_iter(params), |row| {
             let path = path_from_bytes(row.get(0)?);
-            Ok((TrackOrder::new(&path, row.get(1)?, row.get(2)?), path))
+            let disc = row.get(1)?;
+            Ok((TrackOrder::new(&path, disc, row.get(2)?), disc, path))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     tracks.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(tracks.into_iter().map(|(_, path)| path).collect())
+    Ok(tracks
+        .into_iter()
+        .map(|(_, disc, path)| (disc, path))
+        .collect())
 }
 
 // The disc of its album a track is on: its number in the tags, or else
@@ -1721,40 +1729,16 @@ impl Disc {
     }
 }
 
-// Whether the tracks of an album outside the `hidden` folders are on more
-// than one disc
-pub fn album_has_discs(album_id: &str, hidden: &[PathBuf]) -> bool {
-    query_or_default(
-        format_args!("look up the discs of album {album_id}"),
-        |conn| query_album_has_discs(conn, album_id, hidden),
-    )
-}
-
-fn query_album_has_discs(
-    conn: &Connection,
-    album_id: &str,
-    hidden: &[PathBuf],
-) -> rusqlite::Result<bool> {
-    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
-    let mut stmt = conn.prepare(&format!(
-        "SELECT path, disc FROM tracks WHERE album_id = ?{hidden_sql}"
-    ))?;
-    let params = std::iter::once(rusqlite::types::Value::Text(album_id.to_string()))
-        .chain(hidden_params.into_iter().map(rusqlite::types::Value::Blob));
-    let mut discs = HashSet::new();
-    let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
-    while let Some(row) = rows.next()? {
-        let path = path_from_bytes(row.get(0)?);
-        let number = row
-            .get::<_, Option<i64>>(1)?
-            .and_then(|n| u32::try_from(n).ok());
-        // The folder of the sheet, for its tracks
-        discs.insert(Disc::of(number, cue_sheet::real_path(&path).parent()));
-        if discs.len() > 1 {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+// Whether tracks, with their disc numbers, are on more than one disc
+fn on_several_discs(tracks: &[(Option<i64>, PathBuf)]) -> bool {
+    !tracks
+        .iter()
+        .map(|(number, path)| {
+            let number = number.and_then(|n| u32::try_from(n).ok());
+            // The folder of the sheet, for its tracks
+            Disc::of(number, cue_sheet::real_path(path).parent())
+        })
+        .all_equal()
 }
 
 // The album of a track, if it's part of the library and not in one of the
@@ -2466,6 +2450,14 @@ pub fn is_disc_folder(name: &std::ffi::OsStr) -> bool {
                     .is_none_or(|c| SEPARATORS.contains(&c) || matches!(c, '(' | '['))
         })
     })
+}
+
+// The folder of the album that `dir` is a disc folder of, as Album is for
+// Album/CD 1, where the album's cover and booklet are often left; `None`
+// when it isn't a disc folder
+pub fn disc_album_folder(dir: &Path) -> Option<&Path> {
+    dir.parent()
+        .filter(|_| dir.file_name().is_some_and(is_disc_folder))
 }
 
 // The folder of the album a track is in; the discs of an album are often
@@ -3692,14 +3684,18 @@ mod tests {
         let all = super::TrackFilter::default();
         let sub = [PathBuf::from("/m/B/sub")];
         let three = Path::new("/m/B/sub/Three.flac");
+        let album_tracks = |hidden: &[PathBuf]| {
+            super::query_album_tracks(&conn, "b", &all, hidden)
+                .unwrap()
+                .into_iter()
+                .map(|(_, path)| path)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            super::query_album_tracks(&conn, "b", &all, &[]).unwrap(),
+            album_tracks(&[]),
             [PathBuf::from("/m/B/Two.flac"), three.to_path_buf()]
         );
-        assert_eq!(
-            super::query_album_tracks(&conn, "b", &all, &sub).unwrap(),
-            [PathBuf::from("/m/B/Two.flac")]
-        );
+        assert_eq!(album_tracks(&sub), [PathBuf::from("/m/B/Two.flac")]);
         assert_eq!(
             super::query_track_album(&conn, three, &[])
                 .unwrap()
@@ -3844,7 +3840,10 @@ mod tests {
             .unwrap();
         }
         let gone = [PathBuf::from("/m/Gone")];
-        let has_discs = |album| super::query_album_has_discs(&conn, album, &gone).unwrap();
+        let all = super::TrackFilter::default();
+        let has_discs = |album| {
+            super::on_several_discs(&super::query_album_tracks(&conn, album, &all, &gone).unwrap())
+        };
         assert!(has_discs("box"));
         assert!(!has_discs("one"));
         assert!(has_discs("opera"));
@@ -4355,7 +4354,12 @@ mod tests {
         let works = super::query_works(&conn, &TrackFilter::default(), &[]).unwrap();
         let labels: Vec<_> = works
             .iter()
-            .map(|work| (work.key.as_str(), work.arrangement_label()))
+            .map(|work| {
+                (
+                    work.key.as_str(),
+                    work.arrangement.as_ref().map(super::Arrangement::shown),
+                )
+            })
             .collect();
         assert_eq!(
             labels,

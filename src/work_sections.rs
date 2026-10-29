@@ -191,14 +191,14 @@ pub fn continues_work(previous: &Track, track: &Track) -> bool {
 // now, as the rows do, and a track dropped on the header of a work at the
 // top of the list is given to it with the position of the first movement;
 // elsewhere, tracks go before a work by being dropped below the row above
-// its header. In an album's tracks, `disc_line` gives the line that names
-// the disc a section starts, if it starts one, from its first track and
-// its position, above the work's name
+// its header. `disc_line` gives the line that names the disc a section
+// starts, if it starts one, from its first track and its position, above
+// the work's name; only an album's tracks have one
 pub fn work_header_factory(
     on_work_clicked: impl Fn(u32, u32, bool) + 'static,
     on_work_menu: impl Fn(&gtk::Widget, f64, f64, &Track) + 'static,
     drop_before_work: Option<(impl Fn() -> bool + 'static, impl Fn(&Track, u32) + 'static)>,
-    disc_line: Option<impl Fn(&Track, u32) -> Option<String> + 'static>,
+    disc_line: impl Fn(&Track, u32) -> Option<String> + 'static,
 ) -> gtk::ListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     let on_work_clicked = Rc::new(on_work_clicked);
@@ -370,8 +370,7 @@ pub fn work_header_factory(
         let track = header.item().and_downcast::<Track>();
         let disc = track
             .as_ref()
-            .zip(disc_line.as_ref())
-            .and_then(|(track, disc_line)| disc_line(track, header.start()));
+            .and_then(|track| disc_line(track, header.start()));
         disc_label.set_visible(disc.is_some());
         disc_label.set_label(disc.as_deref().unwrap_or_default());
 

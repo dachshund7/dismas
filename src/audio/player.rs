@@ -1038,17 +1038,14 @@ impl AudioPlayer {
     // What the backend plays for a track of the queue
     fn source_of(&self, track: &Track) -> TrackSource {
         let album_order = self.queue.position(track).is_some_and(|position| {
-            let at = |position| self.queue.track_at(position).filter(|t| !t.missing());
+            let at = |position| self.queue.playable_track(position);
             plays_in_album_order(
                 position.checked_sub(1).and_then(at).as_ref(),
                 track,
                 at(position + 1).as_ref(),
             )
         });
-        TrackSource {
-            album_order,
-            ..TrackSource::of(track)
-        }
+        TrackSource::of(track, album_order)
     }
 
     pub fn set_replaygain(&self, replaygain: ReplayGainMode) {

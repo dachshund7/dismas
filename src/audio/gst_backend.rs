@@ -62,7 +62,8 @@ pub struct TrackSource {
 }
 
 impl TrackSource {
-    pub fn of(track: &Track) -> Self {
+    // `album_order` comes from the queue, see `AudioPlayer::source_of`
+    pub fn of(track: &Track, album_order: bool) -> Self {
         let (start, end) = track.segment();
         let clock_time = |d: Duration| gst::ClockTime::from_nseconds(d.as_nanos() as u64);
         Self {
@@ -72,7 +73,7 @@ impl TrackSource {
             end: end.map(clock_time),
             gains: track.gains(),
             video: track.has_video(),
-            album_order: false,
+            album_order,
         }
     }
 }
@@ -320,11 +321,11 @@ fn gain_tags(gains: Gains) -> Option<gst::TagList> {
 // gain there too: the filter runs about 2 s ahead of the sink, so the
 // hand-over of a track, and the player's following it, would be too early
 // or too late
-fn add_gain_probe(pad: &gst::Pad, rg_volume_sink: gst::Pad, gapless: Arc<Mutex<Gapless>>) {
+fn add_gain_probe(pad: &gst::Pad, rg_volume: gst::Element, gapless: Arc<Mutex<Gapless>>) {
     // The track whose audio reaches the filter, ahead of the sink, and
     // whether rgvolume has its gains
     let filtered: Mutex<(Option<TrackSource>, bool)> = Mutex::default();
-    let rg_volume = rg_volume_sink.parent_element();
+    let rg_volume_sink = rg_volume.static_pad("sink").unwrap();
     pad.add_probe(
         gst::PadProbeType::BUFFER
             | gst::PadProbeType::EVENT_DOWNSTREAM
@@ -365,9 +366,7 @@ fn add_gain_probe(pad: &gst::Pad, rg_volume_sink: gst::Pad, gapless: Arc<Mutex<G
                     return gst::PadProbeReturn::Ok;
                 }
                 let track = filtered.0.as_ref();
-                if gapless.auto_gain
-                    && let Some(rg_volume) = &rg_volume
-                {
+                if gapless.auto_gain {
                     let album = track.is_some_and(|track| track.album_order);
                     rg_volume.set_property("album-mode", album);
                 }
@@ -540,9 +539,7 @@ impl GstReplayGain {
             rg_volume,
         })
     }
-}
 
-impl GstReplayGain {
     // Raises or lowers every track by `db`: rgvolume adds it to the gain of
     // the tracks with gains, and to the fallback gain of the others, so
     // they keep their place against them. It never raises a track past its
@@ -581,8 +578,7 @@ impl GstBackend {
             let pad = replaygain.rg_filter_bin.static_pad("src").unwrap();
             add_end_probe(&pad, res.gapless.clone());
             let pad = replaygain.rg_filter_bin.static_pad("sink").unwrap();
-            let rg_volume_sink = replaygain.rg_volume.static_pad("sink").unwrap();
-            add_gain_probe(&pad, rg_volume_sink, res.gapless.clone());
+            add_gain_probe(&pad, replaygain.rg_volume.clone(), res.gapless.clone());
         }
         res.gst_player
             .pipeline()
@@ -1349,9 +1345,12 @@ mod tests {
         // rgvolume comes with the good plugins
         let replaygain = GstReplayGain::new().ok()?;
         replaygain.rg_volume.set_property("album-mode", false);
-        let rg_volume_sink = replaygain.rg_volume.static_pad("sink").unwrap();
         let pad = replaygain.rg_filter_bin.static_pad("sink").unwrap();
-        add_gain_probe(&pad, rg_volume_sink, Arc::new(Mutex::new(gapless)));
+        add_gain_probe(
+            &pad,
+            replaygain.rg_volume.clone(),
+            Arc::new(Mutex::new(gapless)),
+        );
 
         let pipeline = gst::Pipeline::new();
         let sink = gst::ElementFactory::make("fakesink")

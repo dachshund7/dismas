@@ -12,7 +12,7 @@ use std::{
 
 use gtk::{gio, glib, prelude::*};
 
-use crate::{cue_sheet, i18n::i18n, library::is_disc_folder, utils};
+use crate::{cue_sheet, i18n::i18n, library::disc_album_folder, utils};
 
 // The action that opens a booklet, with the URI of its file
 pub const OPEN_ACTION: &str = "win.open-booklet";
@@ -22,22 +22,12 @@ pub const OPEN_ACTION: &str = "win.open-booklet";
 // album's booklet is often left; in the order a file manager shows their
 // names. This reads the folders, so it must not run on the main thread
 pub fn find(paths: &[PathBuf]) -> Vec<PathBuf> {
-    let mut folders: Vec<&Path> = Vec::new();
-    let mut seen = HashSet::new();
-    for path in paths {
+    let folders: HashSet<&Path> = paths
+        .iter()
         // The folder of a CUE sheet, for its tracks
-        let Some(dir) = cue_sheet::real_path(path).parent() else {
-            continue;
-        };
-        let album = dir
-            .parent()
-            .filter(|_| dir.file_name().is_some_and(is_disc_folder));
-        for folder in std::iter::once(dir).chain(album) {
-            if seen.insert(folder) {
-                folders.push(folder);
-            }
-        }
-    }
+        .filter_map(|path| cue_sheet::real_path(path).parent())
+        .flat_map(|dir| std::iter::once(dir).chain(disc_album_folder(dir)))
+        .collect();
 
     let mut found: Vec<_> = folders
         .into_iter()

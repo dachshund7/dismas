@@ -106,7 +106,7 @@ pub(super) struct WorkLabels {
 // often with the title of the work it arranges, e.g. the "catch-all for
 // arrangements" of a partita, which a recording of its Chaconne on the
 // lute is linked to
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Arrangement {
     // The title of the work it arranges
     pub of: String,
@@ -375,18 +375,18 @@ impl WorkHierarchy {
     // (`work_id`, from MUSICBRAINZ_WORKID), so that the library keeps it
     // for the work it lists the track under
     pub(super) fn whole_work_arrangement(&self, work_id: &str) -> Option<Arrangement> {
-        let mut works = self.segments.iter().map(|segment| {
-            let index = usize::try_from(segment.work_index?).ok()?;
-            segment
-                .path
-                .get(index)
-                .filter(|work| work.id.as_deref() == Some(work_id))
-        });
-        let work = works.next()??;
-        if works.any(|other| other.is_none()) {
-            return None;
-        }
-        work.arrangement()
+        let works = self
+            .segments
+            .iter()
+            .map(|segment| {
+                let index = usize::try_from(segment.work_index?).ok()?;
+                segment
+                    .path
+                    .get(index)
+                    .filter(|work| work.id.as_deref() == Some(work_id))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        works.first()?.arrangement()
     }
 
     // The names of all the works in the tag, and of the collections they

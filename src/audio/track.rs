@@ -846,11 +846,12 @@ impl Track {
     // folder: the audio file's, which a CUE sheet is next to
     pub fn disc(&self) -> Disc {
         let data = self.imp().data.borrow();
+        // Without the path, which the number goes before
+        if let Some(number) = data.credits().disc_number {
+            return Disc::Number(number);
+        }
         let path = data.audio_file().path();
-        Disc::of(
-            data.credits().disc_number,
-            path.as_deref().and_then(Path::parent),
-        )
+        Disc::of(None, path.as_deref().and_then(Path::parent))
     }
 
     // The work the track's work arranges, if it's an arrangement

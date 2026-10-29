@@ -191,9 +191,7 @@ impl CoverCache {
     // Album/CD1, which often has no cover of its own. Failing those, the
     // only image in either folder, which can be named after the album
     pub fn cover_files_for(dir: &Path) -> impl Iterator<Item = PathBuf> {
-        let album = dir
-            .parent()
-            .filter(|_| dir.file_name().is_some_and(crate::library::is_disc_folder));
+        let album = crate::library::disc_album_folder(dir);
         let (named, only) = folder_covers(dir);
         let (album_named, album_only) = album.map(folder_covers).unwrap_or_default();
         named

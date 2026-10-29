@@ -134,7 +134,7 @@ impl Window {
                     ),
                 )),
                 // The queue mixes albums, so it names no discs
-                None::<fn(&Track, u32) -> Option<String>>,
+                |_: &Track, _| None,
             )));
 
         let player = self.player();
