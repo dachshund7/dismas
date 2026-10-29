@@ -286,7 +286,8 @@ mod imp {
         // The toast about the last track that failed to play, which the
         // next one takes the place of
         pub failed_toast: glib::WeakRef<adw::Toast>,
-        // The toast with an Undo button that Ctrl+Z presses, while it's up
+        // The toast with an Undo button that Ctrl+Z presses, while it's up,
+        // which the next one takes the place of
         pub undo_toast: glib::WeakRef<adw::Toast>,
 
         // The handlers connected to objects that outlive the window, the
@@ -1326,8 +1327,15 @@ impl Window {
         toast
     }
 
-    // A toast whose button undoes something, which Ctrl+Z presses too
+    // A toast whose button undoes something, which Ctrl+Z presses too. It
+    // takes the place of the one before: a toast waits behind the one
+    // showing, which would then name what came before, and its Undo would
+    // put back what was there before that, rather than what Ctrl+Z puts
+    // back
     pub(super) fn add_undo_toast(&self, msg: String, undo: impl Fn(&Self) + 'static) {
+        if let Some(toast) = self.imp().undo_toast.upgrade() {
+            toast.dismiss();
+        }
         let toast = self.add_toast_with_button(msg, i18n("Undo"), undo);
         toast.connect_dismissed(clone!(
             #[weak(rename_to = win)]
