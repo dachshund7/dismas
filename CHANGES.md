@@ -40,6 +40,11 @@ All notable changes to this project will be documented in this file.
 - Random Album, on the Playlists page, plays an album picked at random in
   place of the queue, with an Undo; an album not heard lately is more
   likely, and choosing it again plays another
+- Random Work, below Random Album, plays a recording of a work picked at
+  random in the same way. A work that hasn't been heard lately in any of
+  its recordings is more likely to be picked, and so is a recording of it
+  that hasn't been heard lately. It's on the page while a track is part of
+  a work
 - Composers, the button next to the album search, lists the composers of
   the albums, sorted by their last names, with the number of their albums;
   the names are shown last name first only where the tags give them so,

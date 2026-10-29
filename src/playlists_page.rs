@@ -10,15 +10,22 @@ use gtk::{CompositeTemplate, gio, glib};
 use crate::i18n::{i18n, i18n_k};
 
 mod imp {
+    use std::cell::Cell;
+
     use super::*;
 
-    #[derive(Debug, Default, CompositeTemplate)]
+    #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[template(resource = "/io/github/dachshund7/Dismas/playlists-page.ui")]
+    #[properties(wrapper_type = super::PlaylistsPage)]
     pub struct PlaylistsPage {
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub playlists_list: TemplateChild<gtk::ListBox>,
+        // Whether a track is part of a work, which Random Work needs, as
+        // the window's `works-available`
+        #[property(get, set)]
+        pub works_available: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -42,6 +49,7 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for PlaylistsPage {
         fn constructed(&self) {
             self.parent_constructed();

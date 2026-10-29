@@ -1328,6 +1328,36 @@ fn query_works(
     Ok(works_of_rows(&rows))
 }
 
+// The works of the albums of the grid, sorted as in `works()`, each with
+// the paths of the tracks of each of its recordings, in the order of their
+// albums, see `recordings_of_works()`; the tracks in the `hidden` folders
+// are left out
+pub fn work_recording_paths(hidden: &[PathBuf]) -> Vec<(WorkInfo, Vec<Vec<PathBuf>>)> {
+    query_or_default("load the recordings of the works", |conn| {
+        query_work_recording_paths(conn, hidden)
+    })
+}
+
+fn query_work_recording_paths(
+    conn: &Connection,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<Vec<(WorkInfo, Vec<Vec<PathBuf>>)>> {
+    let rows = query_work_rows(conn, &TrackFilter::default(), None, hidden)?;
+    let mut recordings: HashMap<&str, Vec<Vec<PathBuf>>> = HashMap::new();
+    for recording in recordings_of_works(&rows) {
+        let work = rows[recording[0]].work.as_str();
+        let paths = recording.iter().map(|&i| rows[i].path.clone()).collect();
+        recordings.entry(work).or_default().push(paths);
+    }
+    Ok(works_of_rows(&rows)
+        .into_iter()
+        .filter_map(|work| {
+            let paths = recordings.remove(work.key.as_str())?;
+            Some((work, paths))
+        })
+        .collect())
+}
+
 // The works of the rows with a recording that the filter matches, sorted
 // as in `works()`
 fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
@@ -4812,6 +4842,52 @@ mod tests {
                 strings(&["/m/E/01", "/m/E/02", "/m/E/04", "/m/E/05"]),
                 String::new()
             )]
+        );
+
+        // All the works with all their recordings, as Random Work picks
+        // from them
+        let all_recordings = super::query_work_recording_paths(&conn, &hidden)
+            .unwrap()
+            .into_iter()
+            .map(|(work, recordings)| {
+                let recordings = recordings
+                    .iter()
+                    .map(|paths| {
+                        paths
+                            .iter()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                (work.name, recordings)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            all_recordings,
+            [
+                (
+                    "Die Kunst der Fuge".to_string(),
+                    vec![strings(&["/m/E/01", "/m/E/02", "/m/E/04", "/m/E/05"])]
+                ),
+                (
+                    "Goldberg Variations".to_string(),
+                    vec![
+                        strings(&["/m/B/01", "/m/B/02", "/m/B/03"]),
+                        strings(&["/m/B/04"]),
+                        strings(&["/m/E/03"]),
+                    ]
+                ),
+                (
+                    "Requiem v B-moll".to_string(),
+                    vec![
+                        strings(&["/m/A/01", "/m/A/02"]),
+                        strings(&["/m/C/01", "/m/C/02"])
+                    ]
+                ),
+                ("Stabat Mater".to_string(), vec![strings(&["/m/A/04"])]),
+                ("Symphony no. 2".to_string(), vec![strings(&["/m/D/02"])]),
+                ("Symphony no. 10".to_string(), vec![strings(&["/m/D/01"])]),
+            ]
         );
     }
 

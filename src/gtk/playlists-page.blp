@@ -142,6 +142,21 @@ template $DismasPlaylistsPage: Widget {
                 icon-name: "media-playback-start-symbolic";
               }
             }
+
+            // There while a track is part of a work, like the Works page
+            Adw.ActionRow {
+              title: _("Random Work");
+              subtitle: _("A recording of a work picked at random, more likely one not heard lately");
+              activatable: true;
+              visible: bind template.works-available;
+              action-name: "win.play-smart-playlist";
+              action-target: "'random-work'";
+
+              [suffix]
+              Image {
+                icon-name: "media-playback-start-symbolic";
+              }
+            }
           }
         };
       };

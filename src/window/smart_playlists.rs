@@ -13,11 +13,9 @@ impl Window {
     // dropped files, with an Undo. They're read from the play stats, or
     // the favorites, each time, so it's never the selected playlist
     pub(super) fn play_smart_playlist(&self, name: &str) {
-        if name == "random-album" {
-            self.play_random_album();
-            return;
-        }
         let (query, empty): (fn() -> Vec<String>, _) = match name {
+            "random-album" => return self.play_random(Random::Album),
+            "random-work" => return self.play_random(Random::Work),
             "favorites" => (play_stats::favorites, i18n("No favorite tracks yet")),
             "recently-played" => (play_stats::recently_played, i18n("No tracks played yet")),
             "most-played" => (play_stats::most_played, i18n("No tracks played yet")),
@@ -48,33 +46,31 @@ impl Window {
         ));
     }
 
-    // Plays an album of the grid picked at random in place of the queue,
-    // with an Undo; one not heard lately is more likely, as with the tracks
-    // the shuffle puts first, and the one it played last isn't picked
-    // again, so choosing it again plays another
-    fn play_random_album(&self) {
+    // Plays an album of the grid, or a recording of a work, picked at
+    // random in place of the queue, with an Undo; one not heard lately is
+    // more likely, as with the tracks the shuffle puts first, and the one
+    // it played last isn't picked again, so choosing it again plays another
+    fn play_random(&self, random: Random) {
         // What was heard of the track playing counts, as for the lists
         self.player().save_listen();
         let hidden = self.imp().library_view.hidden_folders();
-        let last = self.imp().last_random_album.borrow().clone();
+        let last = random.last(self).borrow().clone();
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
             self,
             async move {
-                let picked = gio::spawn_blocking(move || pick_album(&hidden, last.as_deref()))
+                let picked = gio::spawn_blocking(move || random.pick(&hidden, last.as_deref()))
                     .await
                     .ok()
                     .flatten();
-                let Some((album, paths)) = picked else {
-                    win.add_toast(i18n("No albums found"));
+                let Some(picked) = picked else {
+                    win.add_toast(random.none_found());
                     return;
                 };
-                win.imp().last_random_album.replace(Some(album.id));
-                let files = paths.into_iter().map(gio::File::for_path).collect();
-                // Translators: `{album}` must be left unmodified; it is
-                // expanded to the title of an album
-                let message = i18n_k("Playing “{album}”", &[("album", &album.title)]);
+                random.last(&win).replace(Some(picked.id));
+                let files = picked.paths.into_iter().map(gio::File::for_path).collect();
+                let message = random.announce(&picked.name);
                 win.play_announced_in_place_of_queue(files, Some(message));
             }
         ));
@@ -130,14 +126,62 @@ impl Window {
     }
 }
 
-// An album of the grid, without the tracks in the `hidden` folders and
-// without the one played `last` unless it's the only one, picked at random
-// by what was heard of its tracks, with the paths of its tracks; this
-// blocks
-fn pick_album(
-    hidden: &[PathBuf],
-    last: Option<&str>,
-) -> Option<(library::AlbumInfo, Vec<PathBuf>)> {
+// What Random Album and Random Work, on the Playlists page, pick from
+#[derive(Clone, Copy)]
+enum Random {
+    Album,
+    Work,
+}
+
+// An album or a work that `Random` picked: its id, which it isn't picked
+// by the next time, its name, and the paths of the tracks to play
+struct Picked {
+    id: String,
+    name: String,
+    paths: Vec<PathBuf>,
+}
+
+impl Random {
+    // The id of the one played last
+    fn last(self, win: &Window) -> &RefCell<Option<String>> {
+        match self {
+            Self::Album => &win.imp().last_random_album,
+            Self::Work => &win.imp().last_random_work,
+        }
+    }
+
+    // One picked at random, without the tracks in the `hidden` folders and
+    // without the one played `last` unless it's the only one; this blocks
+    fn pick(self, hidden: &[PathBuf], last: Option<&str>) -> Option<Picked> {
+        match self {
+            Self::Album => pick_album(hidden, last),
+            Self::Work => pick_work(hidden, last),
+        }
+    }
+
+    fn none_found(self) -> String {
+        match self {
+            Self::Album => i18n("No albums found"),
+            Self::Work => i18n("No works found"),
+        }
+    }
+
+    // The toast that names the one picked, as it plays
+    fn announce(self, name: &str) -> String {
+        match self {
+            // Translators: `{album}` must be left unmodified; it is
+            // expanded to the title of an album
+            Self::Album => i18n_k("Playing “{album}”", &[("album", name)]),
+            // Translators: `{work}` must be left unmodified; it is expanded
+            // to the name of a musical work, such as “Goldberg Variations”
+            Self::Work => i18n_k("Playing “{work}”", &[("work", name)]),
+        }
+    }
+}
+
+// An album of the grid, picked at random by what was heard of its tracks,
+// with the paths of its tracks; see `Random::pick`
+fn pick_album(hidden: &[PathBuf], last: Option<&str>) -> Option<Picked> {
     let mut tracks: HashMap<String, Vec<PathBuf>> =
         library::album_track_paths(hidden).into_iter().collect();
     let mut albums: Vec<(library::AlbumInfo, Vec<PathBuf>)> = library::albums(hidden)
@@ -151,15 +195,7 @@ fn pick_album(
         albums.retain(|(album, _)| Some(album.id.as_str()) != last);
     }
 
-    let uris: Vec<Vec<String>> = albums
-        .iter()
-        .map(|(_, paths)| {
-            paths
-                .iter()
-                .map(|path| gio::File::for_path(path).uri().to_string())
-                .collect()
-        })
-        .collect();
+    let uris: Vec<Vec<String>> = albums.iter().map(|(_, paths)| uris_of(paths)).collect();
     let stats = play_stats::track_stats(&uris.concat());
     let now = play_stats::now();
     let weights: Vec<f64> = uris
@@ -167,5 +203,59 @@ fn pick_album(
         .map(|uris| shuffle::weight(uris.iter().filter_map(|uri| stats.get(uri).copied()), now))
         .collect();
     let pos = shuffle::weighted_pick(&weights, &mut rand::rng())?;
-    Some(albums.swap_remove(pos))
+    let (album, paths) = albums.swap_remove(pos);
+    Some(Picked {
+        id: album.id,
+        name: album.title,
+        paths,
+    })
+}
+
+// A work of the albums of the grid, picked at random by what was heard of
+// all its recordings, so that a work heard lately in any of them is less
+// likely, and one of its recordings, picked by what was heard of it, so
+// that its recordings take turns, with the paths of its tracks; see
+// `Random::pick`
+fn pick_work(hidden: &[PathBuf], last: Option<&str>) -> Option<Picked> {
+    let mut works = library::work_recording_paths(hidden);
+    if works.len() > 1 {
+        works.retain(|(work, _)| Some(work.key.as_str()) != last);
+    }
+
+    let uris: Vec<Vec<Vec<String>>> = works
+        .iter()
+        .map(|(_, recordings)| recordings.iter().map(|paths| uris_of(paths)).collect())
+        .collect();
+    let all: Vec<String> = uris.iter().flatten().flatten().cloned().collect();
+    let stats = play_stats::track_stats(&all);
+    let now = play_stats::now();
+    let mut rng = rand::rng();
+    let weights: Vec<f64> = uris
+        .iter()
+        .map(|recordings| {
+            let heard = recordings.iter().flatten();
+            shuffle::weight(heard.filter_map(|uri| stats.get(uri).copied()), now)
+        })
+        .collect();
+    let pos = shuffle::weighted_pick(&weights, &mut rng)?;
+    let (work, mut recordings) = works.swap_remove(pos);
+
+    let weights: Vec<f64> = uris[pos]
+        .iter()
+        .map(|uris| shuffle::weight(uris.iter().filter_map(|uri| stats.get(uri).copied()), now))
+        .collect();
+    let pos = shuffle::weighted_pick(&weights, &mut rng)?;
+    Some(Picked {
+        id: work.key,
+        name: work.name,
+        paths: recordings.swap_remove(pos),
+    })
+}
+
+// The URIs of the files at the paths, as the play stats know them
+fn uris_of(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| gio::File::for_path(path).uri().to_string())
+        .collect()
 }

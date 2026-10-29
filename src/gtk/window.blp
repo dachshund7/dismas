@@ -172,7 +172,9 @@ template $DismasWindow: Adw.ApplicationWindow {
             StackPage {
               name: "playlists";
 
-              child: $DismasPlaylistsPage playlists_page {};
+              child: $DismasPlaylistsPage playlists_page {
+                works-available: bind template.works-available;
+              };
             }
           };
         };

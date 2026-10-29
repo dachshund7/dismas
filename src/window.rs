@@ -242,6 +242,8 @@ mod imp {
         // The album Random Album played last, which it doesn't play again
         // right away
         pub last_random_album: RefCell<Option<String>>,
+        // The work Random Work played last, by its key, likewise
+        pub last_random_work: RefCell<Option<String>>,
         // Whether the sidebar was showing before the tracks of an album
         pub sidebar_was_visible: Cell<bool>,
         // Whether the sidebar was showing before the split view collapsed
@@ -582,6 +584,7 @@ mod imp {
                 queue_time_idle: Cell::new(false),
                 loads: Cell::new(0),
                 last_random_album: RefCell::default(),
+                last_random_work: RefCell::default(),
                 hide_focus_after_transition: Cell::new(false),
                 sidebar_was_visible: Cell::new(false),
                 sidebar_visible_uncollapsed: Cell::new(true),
