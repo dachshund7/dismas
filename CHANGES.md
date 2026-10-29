@@ -74,7 +74,9 @@ All notable changes to this project will be documented in this file.
 - Searching the queue and the albums also finds tracks by the names that
   the Work Hierarchy plugin gives their works, the works those are part
   of and the collections they're in, such as "Well-Tempered" for the
-  Preludes and Fugues
+  Preludes and Fugues, and by the other names their works have on
+  MusicBrainz, in any language, such as "Trout" for Schubert's
+  "Forellenquintett". The other names need version 0.6 of the plugin
 - Track Information says when a track was recorded, from the
   RECORDINGDATE tag that the Work Hierarchy plugin writes from MusicBrainz
 - The tracks of an album show when it was made under its title, with its
@@ -146,7 +148,8 @@ All notable changes to this project will be documented in this file.
   shortcuts follow the order of the page buttons
 - The music folders are read again once after updating, as the library
   now keeps the composers, the works and the performers of each track,
-  when it was made, and whether its work is an arrangement
+  when it was made, whether its work is an arrangement, and the other
+  names of its works
 - Scan the Music Folders moved from the main menu to Preferences, as Scan
   Now, as the music folders are watched
 - Whole Albums, next to the album search, is gone, as it made the search

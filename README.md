@@ -52,7 +52,9 @@ What Dismas adds
   tag of the tracks, not just the title, artist and album. Find a recording
   by its conductor, soloist, orchestra, ensemble, composer, work or label,
   and combine them: "Karajan Brahms" finds the tracks with both. Case and
-  accents don't matter, so "dvorak" finds Dvořák. Searching the albums shows
+  accents don't matter, so "dvorak" finds Dvořák. With the Work Hierarchy
+  plugin, a work is also found by its other names on MusicBrainz, such as
+  "Trout" for Schubert's "Forellenquintett". Searching the albums shows
   each album with only the tracks that match, and adding or playing it takes
   only those; its menu has Play Whole Album and Add Whole Album. The button
   next to the queue's search plays only the tracks it found, in place of the

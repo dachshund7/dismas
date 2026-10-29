@@ -192,6 +192,10 @@ struct HierarchyWork {
     disambiguation: Option<String>,
     // The work it arranges, if it's an arrangement
     arrangement_of: Option<HierarchyLink>,
+    // Its other names, in any language, e.g. "Trout Quintet" for
+    // "Quintett A-Dur, D. 667 „Forellenquintett“", from version 0.6 of the
+    // plugin; null when it didn't look them up
+    aliases: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -389,8 +393,9 @@ impl WorkHierarchy {
         works.first()?.arrangement()
     }
 
-    // The names of all the works in the tag, and of the collections they
-    // are in, so that searching finds a track by them, e.g. by "Well-
+    // The names of all the works in the tag, their other names, and the
+    // names of the collections they are in, so that searching finds a track
+    // by them, e.g. by "Well-
     // Tempered" for a Prelude and Fugue, or by its English name when its
     // work tag has the original one. Their types are left out, as "Song"
     // would match every song
@@ -413,6 +418,12 @@ impl WorkHierarchy {
                                 .iter()
                                 .flatten()
                                 .map(|link| link.title.as_deref()),
+                        )
+                        .chain(
+                            work.aliases
+                                .iter()
+                                .flatten()
+                                .map(|alias| Some(alias.as_str())),
                         )
                     })
                     .chain([segment.excerpt.as_deref()])
@@ -1429,8 +1440,10 @@ mod tests {
             "path": [
                 { "id": "wtc", "title": "The Well-Tempered Clavier",
                   "name": "The Well-Tempered Clavier", "type": "Song",
-                  "collections": [{ "id": "c", "title": "Keyboard Works" }] },
-                { "id": "book1", "title": "The Well-Tempered Clavier, Book I", "name": "Book I" },
+                  "collections": [{ "id": "c", "title": "Keyboard Works" }],
+                  "aliases": ["Das Wohltemperierte Klavier", "The Well-Tempered Clavier"] },
+                { "id": "book1", "title": "The Well-Tempered Clavier, Book I", "name": "Book I",
+                  "aliases": null },
                 { "id": "f", "title": "Fugue", "name": "Fugue" },
             ] }] });
         let text = WorkHierarchy::parse(&json.to_string())
@@ -1438,8 +1451,8 @@ mod tests {
             .search_text();
         assert_eq!(
             text,
-            "The Well-Tempered Clavier Keyboard Works The Well-Tempered Clavier, Book I \
-             Book I Fugue Ia. Overture"
+            "The Well-Tempered Clavier Keyboard Works Das Wohltemperierte Klavier \
+             The Well-Tempered Clavier, Book I Book I Fugue Ia. Overture"
         );
     }
 }
