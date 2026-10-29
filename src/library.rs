@@ -1243,6 +1243,12 @@ impl WorkInfo {
             .map(|composer| &composer.name)
             .join(", ")
     }
+
+    // The keys of its composers, which tell the works of other composers
+    // apart, see `composer_key()`
+    pub fn composer_keys(&self) -> impl Iterator<Item = &str> {
+        self.composers.iter().map(|composer| composer.key.as_str())
+    }
 }
 
 // A composer of a work, see `composer_entries()`
@@ -1366,7 +1372,7 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                 info.composers
                     .first()
                     .map(|composer| glib::CollationKey::from(composer.sort.as_str())),
-                info.composers.iter().map(|c| c.key.as_str()).join("\x1f"),
+                info.composer_keys().join("\x1f"),
                 glib::FilenameCollationKey::from(info.name.as_str()),
             );
             (sort_key, info)

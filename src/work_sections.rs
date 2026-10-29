@@ -8,7 +8,8 @@
 // movements gets its own section. So does each recording of the work, and
 // each time it's played again: a movement that doesn't come after the one
 // above it on their album starts a new section. A list can go by its own
-// sections instead, as the recordings of a work do (`set_same_section`).
+// sections instead, as the recordings of a work do, and the list of works,
+// by their composers (`set_same_section`).
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -22,7 +23,7 @@ mod imp {
     #[derive(Default)]
     pub struct WorkSectionModel {
         pub model: RefCell<Option<gio::ListModel>>,
-        // Whether a track is in the same section as the one before it, in
+        // Whether an item is in the same section as the one before it, in
         // place of `same_section()`
         pub same_section: RefCell<Option<SameSection>>,
     }
@@ -38,7 +39,10 @@ mod imp {
 
     impl ListModelImpl for WorkSectionModel {
         fn item_type(&self) -> glib::Type {
-            Track::static_type()
+            self.model
+                .borrow()
+                .as_ref()
+                .map_or_else(glib::Object::static_type, ListModelExt::item_type)
         }
 
         fn n_items(&self) -> u32 {
@@ -67,13 +71,10 @@ mod imp {
 
             let custom = self.same_section.borrow();
             let same = |position: u32| match custom.as_ref() {
-                Some(same) => {
-                    let track = |position| model.item(position).and_downcast::<Track>();
-                    match (track(position - 1), track(position)) {
-                        (Some(previous), Some(track)) => same(&previous, &track),
-                        _ => false,
-                    }
-                }
+                Some(same) => match (model.item(position - 1), model.item(position)) {
+                    (Some(previous), Some(item)) => same(&previous, &item),
+                    _ => false,
+                },
                 None => same_section(model, position),
             };
 
@@ -97,8 +98,21 @@ glib::wrapper! {
         @implements gio::ListModel, gtk::SectionModel;
 }
 
-// Whether a track is in the same section as the track before it
-pub type SameSection = Rc<dyn Fn(&Track, &Track) -> bool>;
+// Whether an item is in the same section as the item before it
+pub type SameSection = Rc<dyn Fn(&glib::Object, &glib::Object) -> bool>;
+
+// Sections of the items of type `T`, by whether one is in the same section
+// as the one before it
+pub fn same_section_of<T: IsA<glib::Object>>(
+    same: impl Fn(&T, &T) -> bool + 'static,
+) -> SameSection {
+    Rc::new(
+        move |previous, item| match (previous.downcast_ref::<T>(), item.downcast_ref::<T>()) {
+            (Some(previous), Some(item)) => same(previous, item),
+            _ => false,
+        },
+    )
+}
 
 impl WorkSectionModel {
     pub fn new(model: &impl IsA<gio::ListModel>) -> Self {
@@ -125,7 +139,8 @@ impl WorkSectionModel {
         res
     }
 
-    // Puts the tracks in sections by `same`, or by their works with None
+    // Puts the items in sections by `same`, or the tracks by their works
+    // with None
     pub fn set_same_section(&self, same: Option<SameSection>) {
         self.imp().same_section.replace(same);
         let n_items = self.n_items();

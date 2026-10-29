@@ -24,7 +24,7 @@ use crate::{
     library_view::{self, PickNames},
     queue_row::QueueRow,
     utils,
-    work_sections::{SameSection, WorkSectionModel, work_header_factory},
+    work_sections::{SameSection, WorkSectionModel, same_section_of, work_header_factory},
 };
 
 // How fast a swipe to the right has to be to go back, in pixels a second
@@ -888,7 +888,7 @@ impl AlbumTracks {
         // Each recording of a work is a section, under a header of its own
         let (same, headers): (Option<SameSection>, _) = if work_key.is_some() {
             let recording_of = imp.recording_of.clone();
-            let same: SameSection = Rc::new(move |previous: &Track, track: &Track| {
+            let same = same_section_of(move |previous: &Track, track: &Track| {
                 let recording_of = recording_of.borrow();
                 recording_of.get(previous.file().uri().as_str())
                     == recording_of.get(track.file().uri().as_str())

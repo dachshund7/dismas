@@ -22,6 +22,7 @@ use crate::{
     library::{self, Album, AlbumSort, Counted, ScanEvent, ScanResult, TrackFilter},
     square_bin::SquareBin,
     utils,
+    work_sections::{WorkSectionModel, same_section_of},
 };
 
 // The covers in the grid grow with the width of the columns, between
@@ -1013,7 +1014,7 @@ impl LibraryView {
                 else {
                     return;
                 };
-                let work = item.borrow::<WorkItem>().info.clone();
+                let work = item.borrow::<library::WorkInfo>().clone();
                 let filter = this.search_filter_for_works();
                 let item = glib::BoxedAnyObject::new((work, filter));
                 this.emit_by_name::<()>("work-activated", &[&item]);
@@ -1027,23 +1028,22 @@ impl LibraryView {
         self.imp().hidden_folders.borrow().clone()
     }
 
-    // Gives the list of works a new model, which it shows from the top; each
-    // item has the index of its composers' section, as the works are already
-    // in the order of their composers
+    // Gives the list of works a new model, which it shows from the top, with
+    // a section for each composer, or composers, as the works come sorted
+    // by them
     fn set_works_model(&self) -> gio::ListStore {
         let imp = self.imp();
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
-        let sections = gtk::CustomSorter::new(|a, b| {
-            let section = |item: &glib::Object| {
-                let item = item.downcast_ref::<glib::BoxedAnyObject>().unwrap();
-                item.borrow::<WorkItem>().section
-            };
-            section(a).cmp(&section(b)).into()
-        });
-        let model = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
-        model.set_section_sorter(Some(&sections));
+        let sections = WorkSectionModel::new(&store);
+        sections.set_same_section(Some(same_section_of(
+            |previous: &glib::BoxedAnyObject, work: &glib::BoxedAnyObject| {
+                let previous = previous.borrow::<library::WorkInfo>();
+                let work = work.borrow::<library::WorkInfo>();
+                previous.composer_keys().eq(work.composer_keys())
+            },
+        )));
         imp.works_list
-            .set_model(Some(&gtk::NoSelection::new(Some(model))));
+            .set_model(Some(&gtk::NoSelection::new(Some(sections))));
         imp.works.replace(Some(store.clone()));
         store
     }
@@ -1153,24 +1153,6 @@ impl LibraryView {
             .is_none_or(|(before, _)| *before != filter);
         imp.works_filter.replace(Some((filter, generation)));
 
-        // A section for each composer, or composers, as they come sorted
-        fn composer_keys(info: &library::WorkInfo) -> impl Iterator<Item = &str> {
-            info.composers.iter().map(|composer| composer.key.as_str())
-        }
-        let mut section = 0;
-        let sections: Vec<_> = std::iter::once(0)
-            .chain(works.windows(2).map(|pair| {
-                if !composer_keys(&pair[0]).eq(composer_keys(&pair[1])) {
-                    section += 1;
-                }
-                section
-            }))
-            .collect();
-        let items: Vec<WorkItem> = works
-            .into_iter()
-            .zip(sections)
-            .map(|(info, section)| WorkItem { info, section })
-            .collect();
         // A new search shows what it found from the top, with the header of
         // the first work. The list keeps its place by an item, so it's given
         // a new model, which it shows from the first work, and then it's
@@ -1187,20 +1169,17 @@ impl LibraryView {
         };
         // When the works are read again because the library was, only the
         // ones that changed are replaced, so the list stays where it was,
-        // and stays as it was when none changed. A work is compared with the
-        // index of its section too, so when a section is added or removed,
-        // the works after it are replaced as well, and the sections stay in
-        // order
+        // and stays as it was when none changed
         let shown = |pos: usize| {
             store
                 .item(pos as u32)
                 .and_downcast::<glib::BoxedAnyObject>()
         };
         let (start, removed, added) =
-            utils::changed_range(store.n_items() as usize, items.len(), |old, new| {
-                shown(old).is_some_and(|work| *work.borrow::<WorkItem>() == items[new])
+            utils::changed_range(store.n_items() as usize, works.len(), |old, new| {
+                shown(old).is_some_and(|work| *work.borrow::<library::WorkInfo>() == works[new])
             });
-        let added: Vec<glib::BoxedAnyObject> = items
+        let added: Vec<glib::BoxedAnyObject> = works
             .into_iter()
             .skip(start)
             .take(added)
@@ -2296,14 +2275,6 @@ fn performer_section_factory() -> gtk::SignalListItemFactory {
     factory
 }
 
-// A work in the list of works, with the index of the section of its
-// composers
-#[derive(PartialEq)]
-struct WorkItem {
-    info: library::WorkInfo,
-    section: u32,
-}
-
 // The number of the recordings of a work, e.g. "3 recordings"
 pub fn recordings_label(n: u32) -> String {
     ni18n_f(
@@ -2323,9 +2294,8 @@ pub fn recordings_label(n: u32) -> String {
 // line high, as measuring wrapped text made scrolling slow; the tooltip has
 // the full title
 fn work_factory() -> gtk::SignalListItemFactory {
-    name_count_factory::<WorkItem>(
+    name_count_factory::<library::WorkInfo>(
         |work| {
-            let work = &work.info;
             let recordings = recordings_label(work.recordings);
             let text = [
                 Some(work.title.as_deref().unwrap_or(&work.name)),
@@ -2339,7 +2309,6 @@ fn work_factory() -> gtk::SignalListItemFactory {
             Some(text)
         },
         |work, name, count| {
-            let work = &work.info;
             let collection = work.collection.as_deref().unwrap_or_default();
             name.set_markup(&with_dimmed(&work.name, collection));
             count.set_label(&work.recordings.to_string());
@@ -2367,8 +2336,7 @@ fn work_section_factory() -> gtk::SignalListItemFactory {
         let Some(work) = header.item().and_downcast::<glib::BoxedAnyObject>() else {
             return;
         };
-        let work = &work.borrow::<WorkItem>().info;
-        let names = work.composer_names();
+        let names = work.borrow::<library::WorkInfo>().composer_names();
         label.set_label(&if names.is_empty() {
             i18n("Unknown composer")
         } else {
