@@ -38,8 +38,10 @@ impl Window {
         self.imp().library_view.refresh_favorites();
     }
 
+    // The work's recordings show it with a heart, and the Works page too
     pub(super) fn mark_favorite_recording(&self, recording: &FavoriteRecording, favorite: bool) {
         play_stats::set_favorite_recording(recording, favorite);
+        self.imp().album_tracks.refresh_favorite_recordings();
         self.imp().library_view.refresh_favorites();
     }
 

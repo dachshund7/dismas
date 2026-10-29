@@ -23,6 +23,7 @@ use crate::{
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album, Disc, TrackFilter},
     library_view::{self, PickNames},
+    play_stats::{self, FavoriteRecording},
     queue_row::QueueRow,
     utils,
     work_sections::{
@@ -96,6 +97,9 @@ mod imp {
         pub work: RefCell<Option<library::WorkInfo>>,
         pub recordings: RefCell<Vec<library::WorkRecording>>,
         pub recording_of: Rc<RefCell<HashMap<String, usize>>>,
+        // The recordings that are favorites, by their place in `recordings`,
+        // which their headers show with a heart
+        pub favorite_recordings: RefCell<HashSet<usize>>,
         // Whether the album is on more than one disc, whose sections then
         // start with each disc
         pub multi_disc: Rc<Cell<bool>>,
@@ -910,6 +914,7 @@ impl AlbumTracks {
         self.set_partial(false);
         imp.recordings.replace(Vec::new());
         imp.recording_of.replace(HashMap::new());
+        imp.favorite_recordings.replace(HashSet::new());
         imp.multi_disc.set(false);
 
         // Each recording of a work is a section, under a header of its own
@@ -1109,7 +1114,51 @@ impl AlbumTracks {
             imp.album_artist.set_label(&subtitle);
         }
         imp.recordings.replace(recordings);
+        self.update_favorite_recordings();
         files
+    }
+
+    // Which recordings of the work showing are favorites, for the hearts on
+    // their headers; on the main thread, as the favorites are read there
+    fn update_favorite_recordings(&self) {
+        let imp = self.imp();
+        let favorites = imp
+            .work
+            .borrow()
+            .as_ref()
+            .map(|work| {
+                imp.recordings
+                    .borrow()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, recording)| {
+                        recording.paths.first().is_some_and(|first| {
+                            play_stats::is_favorite_recording(&FavoriteRecording {
+                                work_key: work.key.clone(),
+                                album_id: recording.album_id.clone(),
+                                uri: gio::File::for_path(first).uri().to_string(),
+                            })
+                        })
+                    })
+                    .map(|(i, _)| i)
+                    .collect()
+            })
+            .unwrap_or_default();
+        imp.favorite_recordings.replace(favorites);
+    }
+
+    // Shows the hearts again, after a recording was marked as a favorite
+    // or unmarked: the list makes its headers again when it's given its
+    // factory again
+    pub fn refresh_favorite_recordings(&self) {
+        if !self.shows_work() {
+            return;
+        }
+        self.update_favorite_recordings();
+        let tracks_view = &self.imp().tracks_view;
+        let headers = tracks_view.header_factory();
+        tracks_view.set_header_factory(None::<&gtk::ListItemFactory>);
+        tracks_view.set_header_factory(headers.as_ref());
     }
 
     // Reads the tags of the tracks, which are shown as they come, unless
@@ -1236,8 +1285,18 @@ impl AlbumTracks {
                     }
                 ));
 
+                // A favorite recording's heart, as on the Works page
+                let heart = gtk::Image::builder()
+                    .icon_name("heart-filled-symbolic")
+                    .css_classes(["favorite-work"])
+                    .valign(gtk::Align::Center)
+                    .visible(false)
+                    .build();
+                heart.update_property(&[gtk::accessible::Property::Label(&i18n("Favorite"))]);
+
                 let row = gtk::Box::builder().spacing(6).margin_end(6).build();
                 row.append(&text);
+                row.append(&heart);
                 row.append(&play);
                 row.append(&more);
 
@@ -1307,15 +1366,19 @@ impl AlbumTracks {
                 let imp = this.imp();
                 let track = header.item().and_downcast::<Track>();
                 let recordings = imp.recordings.borrow();
-                let recording = track
-                    .and_then(|track| {
-                        imp.recording_of
-                            .borrow()
-                            .get(track.file().uri().as_str())
-                            .copied()
-                    })
-                    .and_then(|i| recordings.get(i));
-                let Some(recording) = recording else {
+                let index = track.and_then(|track| {
+                    imp.recording_of
+                        .borrow()
+                        .get(track.file().uri().as_str())
+                        .copied()
+                });
+                let heart = text.next_sibling();
+                if let Some(heart) = &heart {
+                    heart.set_visible(
+                        index.is_some_and(|i| imp.favorite_recordings.borrow().contains(&i)),
+                    );
+                }
+                let Some(recording) = index.and_then(|i| recordings.get(i)) else {
                     performers.set_label("");
                     album.set_label("");
                     return;
@@ -1350,7 +1413,7 @@ impl AlbumTracks {
                 } else {
                     recording.performers.as_str()
                 };
-                let play = text.next_sibling();
+                let play = heart.as_ref().and_then(gtk::Widget::next_sibling);
                 let more = play.as_ref().and_then(gtk::Widget::next_sibling);
                 if let (Some(play), Some(more)) = (play, more) {
                     play.update_property(&[gtk::accessible::Property::Label(&i18n_k(

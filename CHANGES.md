@@ -44,7 +44,8 @@ All notable changes to this project will be documented in this file.
   Favorites is in the menu of a work's header and of the rows of the
   Works page, with a right click, a long press or the Menu key, and Add
   Recording to Favorites in the menu of a recording's header. The Works
-  page shows a heart on the rows of favorite works, and its heart button
+  page shows a heart on the rows of favorite works, and on the headers of
+  the favorite recordings among a work's recordings, and its heart button
   shows only them. Favorite Works, on the Playlists page, plays them in
   the order they were marked: each recording marked, and for a work, a
   recording of it picked as Random Work picks one
