@@ -93,9 +93,10 @@ mod imp {
                 #[upgrade_or]
                 false,
                 move |_, _, _, _, tooltip| {
-                    let status = imp.sleep_timer_status.borrow();
-                    let text = status.clone().unwrap_or_else(|| i18n("Sleep Timer"));
-                    tooltip.set_text(Some(&text));
+                    match imp.sleep_timer_status.borrow().as_deref() {
+                        Some(status) => tooltip.set_text(Some(status)),
+                        None => tooltip.set_text(Some(&i18n("Sleep Timer"))),
+                    }
                     true
                 }
             ));

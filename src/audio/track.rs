@@ -780,8 +780,12 @@ impl Track {
             .map(ToString::to_string)
     }
 
-    pub fn cover_cache(&self) -> Option<PathBuf> {
-        self.imp().data.borrow().cover_cache().cloned()
+    pub fn cover_cache_file(&self) -> Option<gio::File> {
+        self.imp()
+            .data
+            .borrow()
+            .cover_cache()
+            .map(gio::File::for_path)
     }
 
     pub fn uuid(&self) -> Option<String> {

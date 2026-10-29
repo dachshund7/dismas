@@ -435,13 +435,17 @@ fn free_name_among(name: &str, taken: impl Fn(&str) -> bool) -> String {
         name = "Playlist".to_string();
     }
 
-    let mut candidate = name.clone();
+    if !taken(&name) {
+        return name;
+    }
     let mut n = 2;
-    while taken(&candidate) {
-        candidate = format!("{name} {n}");
+    loop {
+        let candidate = format!("{name} {n}");
+        if !taken(&candidate) {
+            return candidate;
+        }
         n += 1;
     }
-    candidate
 }
 
 // Writes a playlist for other players and devices, as an M3U8 file; the

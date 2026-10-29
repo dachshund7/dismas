@@ -406,17 +406,20 @@ pub fn relative_to(folder: &MusicFolder, music_folder: &MusicFolder) -> Option<P
 // The values whose keys are neither in another's, nor the same as an
 // earlier one's
 fn outermost<T>(keyed: Vec<(PathBuf, T)>) -> Vec<T> {
-    let keys: Vec<PathBuf> = keyed.iter().map(|(key, _)| key.clone()).collect();
-    keyed
-        .into_iter()
+    let kept: Vec<bool> = keyed
+        .iter()
         .enumerate()
-        .filter(|(i, (key, _))| {
-            !keys
+        .map(|(i, (key, _))| {
+            !keyed
                 .iter()
                 .enumerate()
-                .any(|(j, other)| key.starts_with(other) && (key != other || j < *i))
+                .any(|(j, (other, _))| key.starts_with(other) && (key != other || j < i))
         })
-        .map(|(_, (_, value))| value)
+        .collect();
+    keyed
+        .into_iter()
+        .zip(kept)
+        .filter_map(|((_, value), kept)| kept.then_some(value))
         .collect()
 }
 
@@ -656,18 +659,16 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
             label: row.get(8)?,
             catalog_number: row.get(9)?,
         };
-        let key = (
-            key,
-            info.year.clone(),
-            glib::CollationKey::from(info.title.as_str()),
-        );
+        let key = (key, glib::CollationKey::from(info.title.as_str()));
         Ok((key, info))
     })?;
 
     // Sorted by artist, then year and title, in the order of the
     // current locale
     let mut albums = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    albums.sort_by(|(a, _), (b, _)| a.cmp(b));
+    albums.sort_by(|((a_artist, a_title), a), ((b_artist, b_title), b)| {
+        (a_artist, &a.year, a_title).cmp(&(b_artist, &b.year, b_title))
+    });
 
     Ok(albums.into_iter().map(|(_, info)| info).collect())
 }
@@ -1724,9 +1725,10 @@ fn folders_to_watch(
         unavailable: !roots.unavailable.is_empty(),
         ..WatchList::default()
     };
-    let canonical = |path: PathBuf| std::fs::canonicalize(&path).unwrap_or(path);
+    let canonical =
+        |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     for (root, tree) in roots.available.iter().zip(trees) {
-        list.available.push(canonical(root.clone()));
+        list.available.push(canonical(root));
         let portal = folders
             .iter()
             .any(|folder| folder.path == *root && folder.host.is_some());
@@ -1739,12 +1741,12 @@ fn folders_to_watch(
         list.unavailable |= tree.broken_links;
         let mut remote = Vec::new();
         for link in tree.links.iter().filter_map(gio::File::path) {
+            list.available.push(canonical(&link));
             if is_remote(&link) {
                 debug!("Library: not watching {link:?}");
                 list.unwatched = true;
-                remote.push(link.clone());
+                remote.push(link);
             }
-            list.available.push(canonical(link));
         }
         list.folders.extend(
             tree.folders

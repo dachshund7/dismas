@@ -174,10 +174,11 @@ impl Queue {
             .iter()
             .rposition(|t| removed.contains(t))
             .unwrap_or(start);
-        let kept: Vec<Track> = old[start..=end]
-            .iter()
+        let kept: Vec<Track> = old
+            .into_iter()
+            .take(end + 1)
+            .skip(start)
             .filter(|t| !removed.contains(t))
-            .cloned()
             .collect();
 
         let current = self.current();
@@ -191,7 +192,7 @@ impl Queue {
     // Where playback goes when the current track is removed with others:
     // the first track after it that can play and stays, round to the start
     // when the queue repeats all of it, and even when it repeats the track
-    pub fn following_except(&self, removed: &HashSet<Track>) -> Option<u32> {
+    pub fn following_except(&self, removed: &HashSet<&Track>) -> Option<u32> {
         let n_tracks = self.imp().store.n_items();
         let current = self.current_track_index()?;
         let stays = |pos: u32| {
@@ -208,7 +209,7 @@ impl Queue {
     }
 
     // The first track that can play and isn't removed
-    pub fn first_except(&self, removed: &HashSet<Track>) -> Option<u32> {
+    pub fn first_except(&self, removed: &HashSet<&Track>) -> Option<u32> {
         (0..self.imp().store.n_items()).find(|&pos| {
             self.playable(pos)
                 && self
@@ -235,11 +236,11 @@ impl Queue {
 
         let before = before.and_then(|before| {
             let from = old.iter().position(|t| t == before)?;
-            old[from..].iter().find(|t| !moved.contains(t)).cloned()
+            old[from..].iter().find(|t| !moved.contains(t))
         });
         let mut new: Vec<Track> = old.iter().filter(|t| !moved.contains(t)).cloned().collect();
         let to = before
-            .and_then(|before| new.iter().position(|t| *t == before))
+            .and_then(|before| new.iter().position(|t| t == before))
             .unwrap_or(new.len());
         new.splice(to..to, moved);
 
@@ -338,7 +339,7 @@ impl Queue {
             |pos| continues_work(&tracks[pos - 1], &tracks[pos]),
             |pos| played_next.contains(&tracks[pos]),
         );
-        tracks.get(pos).cloned()
+        tracks.into_iter().nth(pos)
     }
 
     // Tracks Play Next put in; the ones put in next go after them, while
@@ -722,18 +723,18 @@ mod tests {
     fn playback_goes_on_from_a_track_that_stays() {
         let (queue, t) = queue_of(5);
         queue.set_current_track(Some(t[1].clone()));
-        let removed: HashSet<Track> = [1, 2, 4].map(|i| t[i].clone()).into();
+        let removed: HashSet<&Track> = [1, 2, 4].map(|i| &t[i]).into();
         assert_eq!(queue.following_except(&removed), Some(3));
         assert_eq!(queue.first_except(&removed), Some(0));
 
         // Past the end, round to the start only when repeating
-        let removed: HashSet<Track> = [1, 2, 3, 4].map(|i| t[i].clone()).into();
+        let removed: HashSet<&Track> = [1, 2, 3, 4].map(|i| &t[i]).into();
         assert_eq!(queue.following_except(&removed), None);
         queue.set_repeat_mode(RepeatMode::RepeatAll);
         assert_eq!(queue.following_except(&removed), Some(0));
         // Repeating the track goes on to the next one too
         queue.set_repeat_mode(RepeatMode::RepeatOne);
-        let removed: HashSet<Track> = [1].map(|i| t[i].clone()).into();
+        let removed: HashSet<&Track> = [1].map(|i| &t[i]).into();
         assert_eq!(queue.following_except(&removed), Some(2));
     }
 

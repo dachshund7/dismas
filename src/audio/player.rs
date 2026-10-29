@@ -293,7 +293,7 @@ impl AudioPlayer {
             pending_volume: Rc::default(),
         });
 
-        res.clone().setup_channel();
+        res.setup_channel();
         res.setup_next_track();
 
         res
@@ -362,7 +362,7 @@ impl AudioPlayer {
         }
     }
 
-    fn setup_channel(self: Rc<Self>) {
+    fn setup_channel(self: &Rc<Self>) {
         let receiver = self.receiver.borrow_mut().take().unwrap();
 
         glib::MainContext::default().spawn_local(clone!(
@@ -989,7 +989,7 @@ impl AudioPlayer {
     // repeating the track would keep playing it after it's gone; that's one
     // load into the backend, rather than one for each removed track after it
     pub fn remove_tracks(&self, tracks: &[Track]) {
-        let removed: HashSet<Track> = tracks.iter().cloned().collect();
+        let removed: HashSet<&Track> = tracks.iter().collect();
         if let Some(current_track) = self.state.track().filter(|t| removed.contains(t)) {
             current_track.set_playing(false);
             if let Some(pos) = self.queue.following_except(&removed) {

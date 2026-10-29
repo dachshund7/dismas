@@ -112,8 +112,6 @@ impl MprisController {
         glib::spawn_future_local(clone!(
             #[weak]
             shared,
-            #[strong]
-            sender,
             async move {
                 match builder.build().await {
                     Err(err) => error!("Failed to create MPRIS server: {err:?}"),
@@ -171,8 +169,7 @@ impl MprisController {
 
         // MPRIS should really support passing a bytes buffer for the cover
         // art, instead of requiring this ridiculous charade
-        if let Some(cache) = track.cover_cache() {
-            let file = gio::File::for_path(cache);
+        if let Some(file) = track.cover_cache_file() {
             match file.query_info(
                 "standard::type",
                 gio::FileQueryInfoFlags::NONE,
@@ -393,16 +390,12 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
         }
     ));
 
-    mpris.connect_seek(clone!(
-        #[strong]
-        sender,
-        move |_, offset| {
-            let offset = offset.as_secs();
-            if let Err(e) = sender.try_send(PlaybackAction::Seek(offset)) {
-                error!("Unable to send Seek({offset}): {e}");
-            }
+    mpris.connect_seek(move |_, offset| {
+        let offset = offset.as_secs();
+        if let Err(e) = sender.try_send(PlaybackAction::Seek(offset)) {
+            error!("Unable to send Seek({offset}): {e}");
         }
-    ));
+    });
 }
 
 #[cfg(test)]

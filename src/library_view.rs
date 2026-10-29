@@ -2104,7 +2104,7 @@ impl LibraryView {
                     if imp
                         .watch
                         .get()
-                        .is_some_and(|watch| watch.set_folders(&result.watch))
+                        .is_some_and(|watch| watch.set_folders(result.watch))
                     {
                         imp.rescan_pending.set(true);
                     }

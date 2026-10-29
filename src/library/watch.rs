@@ -67,14 +67,13 @@ impl FolderWatch {
     // Watches the folders of the list, and no others; returns whether it
     // watched folders already and some of these are new, as files could
     // have come into them before they were watched
-    pub fn set_folders(self: &Rc<Self>, list: &WatchList) -> bool {
-        self.available.replace(list.available.clone());
+    pub fn set_folders(self: &Rc<Self>, list: WatchList) -> bool {
+        self.available.replace(list.available);
         self.unavailable.set(list.unavailable);
 
-        let folders = &list.folders;
         let mut monitors = self.monitors.borrow_mut();
         let watching = !monitors.is_empty();
-        let wanted: HashSet<&PathBuf> = folders.iter().collect();
+        let wanted: HashSet<&PathBuf> = list.folders.iter().collect();
         monitors.retain(|path, monitor| {
             let keep = wanted.contains(path);
             if !keep {
@@ -84,11 +83,11 @@ impl FolderWatch {
         });
 
         let mut added = false;
-        for folder in folders {
-            if monitors.contains_key(folder) {
+        for folder in list.folders {
+            if monitors.contains_key(&folder) {
                 continue;
             }
-            match gio::File::for_path(folder).monitor_directory(
+            match gio::File::for_path(&folder).monitor_directory(
                 gio::FileMonitorFlags::WATCH_MOVES,
                 None::<&gio::Cancellable>,
             ) {
@@ -102,7 +101,7 @@ impl FolderWatch {
                             watch.schedule();
                         }
                     });
-                    monitors.insert(folder.clone(), monitor);
+                    monitors.insert(folder, monitor);
                     added = true;
                 }
                 Err(e) => warn!("Unable to watch {folder:?}: {e}"),
