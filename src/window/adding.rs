@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::{albums::album_files, *};
+use super::*;
 
 // Tracks to play next or add to a playlist, from wherever they're chosen
 #[derive(Clone)]
@@ -22,9 +22,7 @@ impl Tracks {
         match self {
             Tracks::InQueue(tracks) => Some(tracks.iter().map(Track::file).collect()),
             Tracks::ShownAlbum(files) => Some(files),
-            Tracks::Albums(albums) => {
-                album_files(albums, win.imp().library_view.hidden_folders()).await
-            }
+            Tracks::Albums(albums) => win.album_files(albums).await,
         }
     }
 }

@@ -149,17 +149,13 @@ impl TrackInfoDialog {
 }
 
 fn release_fields(track: &Track, credits: TrackCredits) -> Vec<(String, Vec<String>)> {
+    let original_date = credits.distinct_original_date().map(str::to_string);
     // Only show the album artist if it adds anything
-    let album_artist = credits
-        .album_artist
-        .as_ref()
-        .filter(|a| **a != track.artist())
-        .cloned();
+    let album_artist = credits.album_artist.filter(|a| *a != track.artist());
 
     // Only show the disc for albums with more than one
     let disc = position(credits.disc_number, credits.disc_total)
         .filter(|_| credits.disc_number > Some(1) || credits.disc_total > Some(1));
-    let original_date = credits.distinct_original_date().map(str::to_string);
 
     vec![
         (i18n("Album"), track.tag_album().into_iter().collect()),

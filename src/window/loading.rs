@@ -5,6 +5,10 @@ use super::selected_playlist::start_in_music_folder;
 use super::*;
 use crate::{cue_sheet, library, playlists};
 
+// The types of the files that are tracks, or give some: CUE sheets split
+// audio files into tracks, and WebM files are often audio alone
+const TRACK_TYPES: [&str; 3] = ["audio/*", "application/x-cue", "video/webm"];
+
 impl Window {
     // Called once the queue of the last session, or the files the
     // application was opened with, have been added, or there are none
@@ -619,12 +623,10 @@ impl Window {
     pub(super) async fn add_tracks_from_dialog(&self) {
         let filter = gtk::FileFilter::new();
         filter.set_name(Some(&i18n("Audio files")));
-        filter.add_mime_type("audio/*");
-        // CUE sheets split audio files into tracks, and WebM files are
-        // often audio alone
-        filter.add_mime_type("application/x-cue");
+        for mime_type in TRACK_TYPES {
+            filter.add_mime_type(mime_type);
+        }
         filter.add_suffix("cue");
-        filter.add_mime_type("video/webm");
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
         let dialog = gtk::FileDialog::builder()
@@ -1055,11 +1057,9 @@ fn audio_files(files: Vec<gio::File>, music_folders: &[std::path::PathBuf]) -> V
                         {
                             queue.extend(tracks);
                         }
-                    // CUE sheets split audio files into tracks, and WebM
-                    // files are often audio alone
-                    } else if gio::content_type_is_mime_type(&content_type, "audio/*")
-                        || gio::content_type_is_mime_type(&content_type, "application/x-cue")
-                        || gio::content_type_is_mime_type(&content_type, "video/webm")
+                    } else if TRACK_TYPES
+                        .iter()
+                        .any(|mime_type| gio::content_type_is_mime_type(&content_type, mime_type))
                     {
                         debug!("Adding file '{}' to the queue", file.uri());
                         queue.push(file);

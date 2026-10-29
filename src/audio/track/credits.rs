@@ -375,6 +375,28 @@ impl TrackCredits {
         self.work.is_some() && self.movement.is_some()
     }
 
+    // The work the track is a movement of, if it is one
+    pub fn movement_work(&self) -> Option<&str> {
+        self.work.as_deref().filter(|_| self.is_movement())
+    }
+
+    // The levels of the work above the movement, and the movement, if the
+    // track is a movement that the queue shows them for, on lines of their
+    // own
+    pub fn shown_levels(&self) -> Option<&(String, String)> {
+        self.movement_levels.as_ref().filter(|_| self.is_movement())
+    }
+
+    // The composers of the work of a movement, which all its movements
+    // share, or else the track's
+    pub fn work_composer_names(&self) -> &[String] {
+        if self.work_composers.is_empty() {
+            &self.composers
+        } else {
+            &self.work_composers
+        }
+    }
+
     // The performers to show in the queue for a track that is not part of
     // a larger work, when the artist is its composer, as classical
     // releases are often tagged; the artist would be the only name shown.

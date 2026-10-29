@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::path::PathBuf;
-
 use super::{adding::Tracks, albums::popup_menu, *};
 
 impl Window {
@@ -106,14 +104,15 @@ impl Window {
                 }
             ));
             actions.add_action(&go_to_album);
-            let hidden = self.imp().library_view.hidden_folders();
             glib::spawn_future_local(clone!(
+                #[weak(rename_to = win)]
+                self,
                 #[weak]
                 go_to_album,
                 #[strong]
                 track,
                 async move {
-                    if let Some(id) = track_album(&track.file(), hidden).await {
+                    if let Some(id) = win.track_album(&track.file()).await {
                         album_id.replace(Some(id));
                         go_to_album.set_enabled(true);
                     }
@@ -235,8 +234,7 @@ impl Window {
 
     async fn playing_album(&self) -> Option<(String, gio::File)> {
         let file = self.player().state().track()?.file();
-        let hidden = self.imp().library_view.hidden_folders();
-        let album_id = track_album(&file, hidden).await?;
+        let album_id = self.track_album(&file).await?;
         Some((album_id, file))
     }
 
@@ -367,14 +365,15 @@ impl Window {
             self.add_toast(i18n("Unable to open folder"));
         }
     }
-}
 
-// The album of a track in the album grid, unless it's in one of the
-// `hidden` folders; the database is read in a separate thread
-async fn track_album(file: &gio::File, hidden: Vec<PathBuf>) -> Option<String> {
-    let path = file.path()?;
-    gio::spawn_blocking(move || library::track_album(&path, &hidden))
-        .await
-        .ok()
-        .flatten()
+    // The album of a track in the album grid, unless it's in one of the
+    // folders the grid hides; the database is read in a separate thread
+    async fn track_album(&self, file: &gio::File) -> Option<String> {
+        let path = file.path()?;
+        let hidden = self.imp().library_view.hidden_folders();
+        gio::spawn_blocking(move || library::track_album(&path, &hidden))
+            .await
+            .ok()
+            .flatten()
+    }
 }

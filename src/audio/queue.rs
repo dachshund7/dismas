@@ -15,6 +15,7 @@ use crate::{
         shuffle::{Entry, shuffled_order},
     },
     play_stats::TrackStats,
+    utils,
     work_sections::continues_work,
 };
 
@@ -166,7 +167,7 @@ impl Queue {
     // is found again first, for the handlers of the number of tracks
     pub fn remove_tracks(&self, tracks: &[Track]) {
         let removed: HashSet<&Track> = tracks.iter().collect();
-        let old = self.tracks();
+        let mut old = self.tracks();
         let Some(start) = old.iter().position(|t| removed.contains(t)) else {
             return;
         };
@@ -175,9 +176,7 @@ impl Queue {
             .rposition(|t| removed.contains(t))
             .unwrap_or(start);
         let kept: Vec<Track> = old
-            .into_iter()
-            .take(end + 1)
-            .skip(start)
+            .drain(start..=end)
             .filter(|t| !removed.contains(t))
             .collect();
 
@@ -248,13 +247,14 @@ impl Queue {
         // places are replaced, in a single change, rather than removing
         // the tracks and inserting them again, so the list redraws the
         // headers of the works around them
-        let Some(start) = (0..old.len()).find(|&i| old[i] != new[i]) else {
+        let (start, removed, added) =
+            utils::changed_range(old.len(), new.len(), |o, n| old[o] == new[n]);
+        if removed == 0 {
             return;
-        };
-        let end = (0..old.len()).rfind(|&i| old[i] != new[i]).unwrap_or(start);
+        }
 
         let current = self.current();
-        store.splice(start as u32, (end - start + 1) as u32, &new[start..=end]);
+        store.splice(start as u32, removed as u32, &new[start..start + added]);
 
         // Moving tracks moves the ones between their old and new places
         self.update_current_pos(current);

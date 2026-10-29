@@ -1910,8 +1910,8 @@ impl LibraryView {
         // Keep the selection, minus the albums that are gone
         {
             let mut selected = imp.selected.borrow_mut();
-            let ids: HashSet<String> = albums.iter().map(Album::id).collect();
-            selected.retain(|id| ids.contains(id));
+            let ids: HashSet<&str> = albums.iter().map(Album::id_str).collect();
+            selected.retain(|id| ids.contains(id.as_str()));
             for album in &albums {
                 album.set_selected(selected.contains(album.id_str()));
             }

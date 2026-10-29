@@ -1330,7 +1330,7 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
         collections: HashMap<&'a str, usize>,
         composers: HashMap<&'a str, usize>,
     }
-    fn count<'a>(counts: &mut HashMap<&'a str, usize>, value: Option<&'a str>) {
+    fn count_some<'a>(counts: &mut HashMap<&'a str, usize>, value: Option<&'a str>) {
         if let Some(value) = value {
             *counts.entry(value).or_default() += 1;
         }
@@ -1344,10 +1344,10 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
             work.recordings += 1;
         }
         for row in rows {
-            count(&mut work.names, row.name.as_deref());
-            count(&mut work.titles, row.title.as_deref());
-            count(&mut work.collections, row.collection.as_deref());
-            count(&mut work.composers, row.composers.as_deref());
+            count_some(&mut work.names, row.name.as_deref());
+            count_some(&mut work.titles, row.title.as_deref());
+            count_some(&mut work.collections, row.collection.as_deref());
+            count_some(&mut work.composers, row.composers.as_deref());
         }
     }
 
@@ -2492,19 +2492,16 @@ fn work_entry(
     if name.is_empty() {
         return None;
     }
-    let is_movement = credits.movement_label().is_some();
+    let is_movement = credits.is_movement();
 
     // The composers of the work, as `TrackData::work_composers()` finds them,
     // sorted by their own sort names if the tags have them
     let only_artist;
-    let work_names: &[String] = if !credits.work_composers.is_empty() {
-        &credits.work_composers
-    } else if !credits.composers.is_empty() {
-        &credits.composers
-    } else {
+    let mut work_names = credits.work_composer_names();
+    if work_names.is_empty() {
         only_artist = artist.map(ToString::to_string);
-        only_artist.as_slice()
-    };
+        work_names = only_artist.as_slice();
+    }
     let sort_of = |composer: &String| {
         names
             .iter()

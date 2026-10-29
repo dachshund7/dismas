@@ -5,6 +5,8 @@
 // the player, which plays them, and tracks are added to it. It's either
 // the queue, saved in the cache, or one of the saved playlists
 
+use std::borrow::Cow;
+
 use adw::prelude::*;
 
 use super::*;
@@ -110,14 +112,7 @@ impl Window {
     fn update_playlist_labels(&self) {
         let imp = self.imp();
         let name = self.selected_playlist();
-        let queue;
-        let title = if name.is_empty() {
-            queue = i18n("Queue");
-            &queue
-        } else {
-            &name
-        };
-        imp.playlist_view.set_title(title);
+        imp.playlist_view.set_title(&playlist_title(&name));
 
         let add_label = self.add_to_playlist_label();
         imp.album_tracks.set_add_label(&add_label);
@@ -672,13 +667,7 @@ impl Window {
     // Saves a playlist where the user picks, e.g. to copy it with the
     // music to a phone; the tracks in that folder have relative paths
     pub(super) async fn export_playlist(&self, name: &str) {
-        let queue;
-        let title = if name.is_empty() {
-            queue = i18n("Queue");
-            &queue
-        } else {
-            name
-        };
+        let title = playlist_title(name);
         let dialog = playlist_file_dialog(&i18n("Export the Playlist")).await;
         dialog.set_initial_name(Some(&format!("{title}.m3u8")));
         let Ok(file) = dialog.save_future(Some(self)).await else {
@@ -702,7 +691,7 @@ impl Window {
         let message = match export {
             // Translators: `{playlist}` must be left unmodified; it is
             // expanded to the name of a playlist
-            Ok(0) => i18n_k("Exported “{playlist}”", &[("playlist", title)]),
+            Ok(0) => i18n_k("Exported “{playlist}”", &[("playlist", &title)]),
             Ok(n_outside) => ni18n_k(
                 // Translators: `{playlist}` and `{n}` must be left
                 // unmodified; they are expanded to the name of a playlist,
@@ -711,7 +700,7 @@ impl Window {
                 "Exported “{playlist}”; one track isn't in its folder, so other devices won't find it",
                 "Exported “{playlist}”; {n} tracks aren't in its folder, so other devices won't find them",
                 n_outside as u32,
-                &[("playlist", title), ("n", &n_outside.to_string())],
+                &[("playlist", &title), ("n", &n_outside.to_string())],
             ),
             Err(e) => {
                 log::warn!("Unable to export the playlist '{name}' to {path:?}: {e}");
@@ -719,6 +708,16 @@ impl Window {
             }
         };
         self.add_toast(message);
+    }
+}
+
+// The title of a playlist: its name, or "Queue" for the queue, whose name
+// is empty
+fn playlist_title(name: &str) -> Cow<'_, str> {
+    if name.is_empty() {
+        Cow::Owned(i18n("Queue"))
+    } else {
+        Cow::Borrowed(name)
     }
 }
 

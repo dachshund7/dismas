@@ -226,36 +226,27 @@ impl TrackData {
     }
 
     // The composers of the work of a movement, which all its movements
-    // share, or else the track's, or else its artist; a single name isn't
-    // copied
-    fn work_composers(&self) -> Cow<'_, str> {
-        let credits = self.credits();
-        let names = if credits.work_composers.is_empty() {
-            &credits.composers
+    // share, or else the track's, or else its artist
+    fn work_composers(&self) -> impl Iterator<Item = &str> {
+        let names = self.credits().work_composer_names();
+        let artist = if names.is_empty() {
+            self.artist()
         } else {
-            &credits.work_composers
+            None
         };
-        match names.as_slice() {
-            [] => self
-                .artist()
-                .map_or_else(|| i18n("Unknown artist").into(), Cow::Borrowed),
-            [name] => Cow::Borrowed(name),
-            names => names.join(", ").into(),
-        }
+        names.iter().map(String::as_str).chain(artist)
     }
 
-    // The release the track is from: its MusicBrainz id, or else its album
-    // and album artist
-    fn release_key(&self) -> Cow<'_, str> {
-        let credits = self.credits();
-        match &credits.musicbrainz.release {
-            Some(id) => Cow::Borrowed(id),
-            None => format!(
-                "{}\0{}",
-                self.shown_album(),
-                credits.album_artist.as_deref().unwrap_or_default()
-            )
-            .into(),
+    // Whether both tracks are from the same release: the same MusicBrainz
+    // id, or else the same album and album artist
+    fn same_release(&self, other: &TrackData) -> bool {
+        let (a, b) = (self.credits(), other.credits());
+        match (&a.musicbrainz.release, &b.musicbrainz.release) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => {
+                self.shown_album() == other.shown_album() && a.album_artist == b.album_artist
+            }
+            _ => false,
         }
     }
 
@@ -548,12 +539,7 @@ mod imp {
         // The work the movement belongs to, if the track is a movement
         pub(super) fn movement_work(&self) -> Option<String> {
             let data = self.data.borrow();
-            let credits = data.credits();
-            credits
-                .work
-                .as_ref()
-                .filter(|_| credits.is_movement())
-                .cloned()
+            data.credits().movement_work().map(ToString::to_string)
         }
 
         // The rows of the queue are bound to this and the two below as
@@ -562,9 +548,9 @@ mod imp {
         fn row_title(&self) -> String {
             let data = self.data.borrow();
             let credits = data.credits();
-            match &credits.movement_levels {
-                Some((_, movement)) if credits.is_movement() => movement.clone(),
-                _ => credits.movement_label().unwrap_or_else(|| self.title()),
+            match credits.shown_levels() {
+                Some((_, movement)) => movement.clone(),
+                None => credits.movement_label().unwrap_or_else(|| self.title()),
             }
         }
 
@@ -576,10 +562,10 @@ mod imp {
                 None => {}
             }
             let credits = data.credits();
-            match (&credits.movement_levels, credits.is_movement()) {
-                (Some((levels, _)), true) => levels.clone(),
+            match (credits.shown_levels(), credits.is_movement()) {
+                (Some((levels, _)), _) => levels.clone(),
                 // The artist of classical releases is often the composer
-                (_, true) => Some(self.performers())
+                (None, true) => Some(self.performers())
                     .filter(|p| !p.is_empty())
                     .unwrap_or_else(|| self.artist()),
                 (_, false) => self.listed_composers().unwrap_or_else(|| self.artist()),
@@ -590,7 +576,7 @@ mod imp {
             let (is_movement, has_levels) = {
                 let data = self.data.borrow();
                 let credits = data.credits();
-                (credits.is_movement(), credits.movement_levels.is_some())
+                (credits.is_movement(), credits.shown_levels().is_some())
             };
             if is_movement && has_levels {
                 self.performers()
@@ -629,17 +615,6 @@ mod imp {
                 .map(str::trim)
                 .filter(|a| !a.is_empty() && !credits.composers.iter().any(|c| is_composer(a, c)))
                 .join("; ")
-        }
-
-        // The levels of the work above the movement, and the movement
-        pub(super) fn movement_levels(&self) -> Option<(String, String)> {
-            let data = self.data.borrow();
-            let credits = data.credits();
-            credits
-                .movement_levels
-                .as_ref()
-                .filter(|_| credits.is_movement())
-                .cloned()
         }
 
         // The composers, or the artist if the track has no composer
@@ -808,17 +783,9 @@ impl Track {
     }
 
     // Whether the track is a movement whose levels in the work are shown
-    // on a line of their own, see `movement_levels()`
+    // on a line of their own, see `TrackCredits::shown_levels()`
     pub fn has_movement_levels(&self) -> bool {
-        let data = self.imp().data.borrow();
-        let credits = data.credits();
-        credits.is_movement() && credits.movement_levels.is_some()
-    }
-
-    // The levels of the work above the movement, and the movement, if the
-    // queue shows them on separate lines
-    pub fn movement_levels(&self) -> Option<(String, String)> {
-        self.imp().movement_levels()
+        self.imp().data.borrow().credits().shown_levels().is_some()
     }
 
     // The composers, or the artist if the track has no composer
@@ -833,16 +800,15 @@ impl Track {
 
     // Whether both tracks are movements of the same work, by the same
     // composers, from the same release (see `TrackData::work_composers()`
-    // and `TrackData::release_key()`). Rows of the queue are compared
+    // and `TrackData::same_release()`). Rows of the queue are compared
     // with the ones next to them as they're shown, so nothing is copied
-    // but the names of several composers, or of an album without an id
     pub fn same_work_as(&self, other: &Track) -> bool {
         let (a, b) = (self.imp().data.borrow(), other.imp().data.borrow());
         a.credits().is_movement()
             && b.credits().is_movement()
             && a.credits().work == b.credits().work
-            && a.work_composers() == b.work_composers()
-            && a.release_key() == b.release_key()
+            && a.work_composers().eq(b.work_composers())
+            && a.same_release(&b)
     }
 
     // Whether the track comes after another on their album, by disc and
