@@ -2297,8 +2297,18 @@ fn work_factory() -> gtk::SignalListItemFactory {
     name_count_factory::<library::WorkInfo>(
         |work| {
             let recordings = recordings_label(work.recordings);
+            let arrangement = work.arrangement_of.as_ref().map(|of| {
+                i18n_k(
+                    // Translators: `{work}` must be left unmodified; it is
+                    // expanded to the title of the work an arrangement
+                    // arranges
+                    "Arrangement of {work}",
+                    &[("work", of)],
+                )
+            });
             let text = [
                 Some(work.title.as_deref().unwrap_or(&work.name)),
+                arrangement.as_deref(),
                 work.collection.as_deref(),
                 Some(&recordings),
             ]
@@ -2309,8 +2319,14 @@ fn work_factory() -> gtk::SignalListItemFactory {
             Some(text)
         },
         |work, name, count| {
-            let collection = work.collection.as_deref().unwrap_or_default();
-            name.set_markup(&with_dimmed(&work.name, collection));
+            // What an arrangement is, e.g. "for two pianos, Busoni", tells
+            // it from the work it arranges, whose title it often has
+            let more = [work.arrangement_label(), work.collection.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            name.set_markup(&with_dimmed(&work.name, &more));
             count.set_label(&work.recordings.to_string());
         },
     )

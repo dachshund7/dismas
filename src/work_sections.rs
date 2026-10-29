@@ -379,7 +379,19 @@ pub fn work_header_factory(
         let work = track.as_ref().and_then(Track::movement_work);
         title.set_visible(work.is_some());
         work_label.set_label(work.as_deref().unwrap_or_default());
-        let composer = track.filter(|_| work.is_some()).map(|t| t.composer());
+        // With what an arrangement is, as the work often has the title of
+        // the work it arranges
+        let composer = track.filter(|_| work.is_some()).map(|track| {
+            [
+                Some(track.composer()),
+                track.work_arrangement().map(|a| a.shown()),
+            ]
+            .into_iter()
+            .flatten()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
+        });
         composer_label.set_label(composer.as_deref().unwrap_or_default());
 
         content.set_visible(separator.is_visible() || disc.is_some() || title.is_visible());

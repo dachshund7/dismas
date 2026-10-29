@@ -91,6 +91,11 @@ All notable changes to this project will be documented in this file.
 - Pre-amp, in the ReplayGain settings, plays every track louder or
   quieter than its ReplayGain, by up to 15 dB, those without ReplayGain
   tags too, but never raises a track past its peak
+- A work that MusicBrainz has as an arrangement of another, which often
+  has the same title, says so after its name on the Works page and in
+  its header, with what it is when MusicBrainz says, such as "for two
+  pianos, Busoni", and Track Information names the work it arranges.
+  This needs version 0.5 of the Work Hierarchy plugin
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane
@@ -130,7 +135,7 @@ All notable changes to this project will be documented in this file.
   shortcuts follow the order of the page buttons
 - The music folders are read again once after updating, as the library
   now keeps the composers, the works and the performers of each track,
-  and when it was made
+  when it was made, and whether its work is an arrangement
 - Scan the Music Folders moved from the main menu to Preferences, as Scan
   Now, as the music folders are watched
 - Whole Albums, next to the album search, is gone, as it made the search

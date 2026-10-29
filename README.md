@@ -111,7 +111,8 @@ What Dismas adds
   Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for
   Picard, in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio, WavPack
   and Musepack files; from version 0.4, it also writes when each recording
-  was made. MusicBrainz names some composers in the script of
+  was made, and from version 0.5, which works are arrangements of others,
+  which the Works page marks. MusicBrainz names some composers in the script of
   their language, such as Валентин Сильвестров; to have their names in Latin
   letters, turn on "Translate artist names" and "Use artist sort name for
   translation" in Picard's Metadata options before tagging.

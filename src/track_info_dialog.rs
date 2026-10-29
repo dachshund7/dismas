@@ -109,6 +109,15 @@ impl TrackInfoDialog {
                     .into_iter()
                     .collect(),
             ),
+            (
+                i18n("Arrangement of"),
+                credits
+                    .work_arrangement
+                    .take()
+                    .map(|arrangement| arrangement.of)
+                    .into_iter()
+                    .collect(),
+            ),
             (i18n("Movement"), movement.into_iter().collect()),
             (i18n("Composer"), take(&mut credits.composers)),
             (i18n("Lyricist"), take(&mut credits.lyricists)),

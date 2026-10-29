@@ -20,6 +20,7 @@ src/audio/state.rs
 src/audio/track.rs
 src/audio/track/file_name.rs
 src/audio/track/loader.rs
+src/audio/track/work_hierarchy.rs
 src/audio/tray_controller.rs
 src/album_tracks.rs
 src/booklets.rs

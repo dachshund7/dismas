@@ -46,7 +46,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 22;
+const SCHEMA_VERSION: i32 = 23;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -79,7 +79,9 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         movement_order TEXT,
         performers TEXT,
         label TEXT,
-        catalog_number TEXT
+        catalog_number TEXT,
+        work_arrangement_of TEXT,
+        work_arrangement TEXT
     );
     CREATE INDEX tracks_album ON tracks (album_id);
     CREATE INDEX tracks_file ON tracks (file);
@@ -187,6 +189,10 @@ struct WorkEntry {
     // Where the movement is in the work, e.g. "1.3.3", or "" if that isn't
     // known; `None` if the track performs the whole work
     order: Option<String>,
+    // For an arrangement, the title of the work it arranges, and what it
+    // is, or "" if MusicBrainz doesn't say, see `Arrangement`
+    arrangement_of: Option<String>,
+    arrangement: Option<String>,
 }
 
 // A folder whose albums are in the grid: the path that's read, and the
@@ -1229,6 +1235,10 @@ pub struct WorkInfo {
     pub title: Option<String>,
     // The work it's part of, or the collection it's in
     pub collection: Option<String>,
+    // For an arrangement, the title of the work it arranges, and what it
+    // is, if MusicBrainz says
+    pub arrangement_of: Option<String>,
+    pub arrangement: Option<String>,
     pub composers: Vec<WorkComposer>,
     // The number of its recordings that the filter matches, see
     // `recordings_of_works()`
@@ -1236,6 +1246,18 @@ pub struct WorkInfo {
 }
 
 impl WorkInfo {
+    // What it is, for an arrangement, after its name: what MusicBrainz
+    // says it is, e.g. "for two pianos, Busoni", or that it's an
+    // arrangement
+    pub fn arrangement_label(&self) -> Option<String> {
+        self.arrangement_of.as_ref()?;
+        Some(
+            self.arrangement
+                .clone()
+                .unwrap_or_else(|| i18n("arrangement")),
+        )
+    }
+
     // The names of its composers, as a list
     pub fn composer_names(&self) -> String {
         self.composers
@@ -1289,6 +1311,8 @@ struct WorkRow {
     album: Option<String>,
     year: Option<String>,
     performers: Option<String>,
+    arrangement_of: Option<String>,
+    arrangement: Option<String>,
 }
 
 // Whether a track of the albums of the grid is part of a work, without the
@@ -1329,6 +1353,8 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
         titles: HashMap<&'a str, usize>,
         collections: HashMap<&'a str, usize>,
         composers: HashMap<&'a str, usize>,
+        arrangements_of: HashMap<&'a str, usize>,
+        arrangements: HashMap<&'a str, usize>,
     }
     fn count_some<'a>(counts: &mut HashMap<&'a str, usize>, value: Option<&'a str>) {
         if let Some(value) = value {
@@ -1348,6 +1374,8 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
             count_some(&mut work.titles, row.title.as_deref());
             count_some(&mut work.collections, row.collection.as_deref());
             count_some(&mut work.composers, row.composers.as_deref());
+            count_some(&mut work.arrangements_of, row.arrangement_of.as_deref());
+            count_some(&mut work.arrangements, row.arrangement.as_deref());
         }
     }
 
@@ -1364,6 +1392,8 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                 name: most(seen.names).unwrap_or_default(),
                 title: most(seen.titles),
                 collection: most(seen.collections),
+                arrangement_of: most(seen.arrangements_of),
+                arrangement: most(seen.arrangements),
                 composers,
                 recordings: seen.recordings,
             };
@@ -1487,7 +1517,7 @@ fn query_work_rows(
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, path, work_key, movement_order, {},
                 work, work_title, work_collection, work_composers, album, year, performers,
-                disc, track
+                disc, track, work_arrangement_of, work_arrangement
          FROM tracks
          WHERE album_id IS NOT NULL AND work_key IS NOT NULL{}{key_sql}",
         filter.matches_sql(),
@@ -1518,6 +1548,8 @@ fn query_work_rows(
             album: row.get(9)?,
             year: row.get(10)?,
             performers: row.get(11)?,
+            arrangement_of: row.get(14)?,
+            arrangement: row.get(15)?,
         };
         Ok((track_order, row))
     })?;
@@ -2007,9 +2039,9 @@ fn scan_with(
                  (path, file, mtime, ctime, size, album_id, album, album_artist, artist,
                   artist_sort, year, disc, track, title, search, added, composers, work_key,
                   work, work_title, work_collection, work_composers, movement_order, performers,
-                  label, catalog_number)
+                  label, catalog_number, work_arrangement_of, work_arrangement)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
             )?;
             for source in chunk {
                 let key = path_bytes(&source.path);
@@ -2075,6 +2107,8 @@ fn scan_with(
                         tags.performers,
                         tags.label,
                         tags.catalog_number,
+                        work.and_then(|w| w.arrangement_of.as_ref()),
+                        work.and_then(|w| w.arrangement.as_ref()),
                     ])?;
                     n_changed += 1;
                     // A changed track might have new cover art; new tracks
@@ -2602,6 +2636,14 @@ fn work_entry(
         collection: credits.work_collection.clone(),
         composers: composer_entries(work_names, &work_sorts),
         order,
+        arrangement_of: credits
+            .work_arrangement
+            .as_ref()
+            .map(|arrangement| arrangement.of.clone()),
+        arrangement: credits
+            .work_arrangement
+            .as_ref()
+            .map(|arrangement| arrangement.label.clone().unwrap_or_default()),
     })
 }
 
@@ -4231,6 +4273,64 @@ mod tests {
         };
         let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
         assert_eq!(albums.get("a"), Some(&(1, 2)));
+    }
+
+    #[test]
+    fn arrangements_are_listed_with_what_they_are() {
+        use super::TrackFilter;
+
+        let conn = test_db();
+        let bach = "\njohann sebastian bach\tJohann Sebastian Bach\tBach, Johann Sebastian\n";
+        let partita = "Violin Partita no. 2 in D minor, BWV 1004";
+        for (path, album, work, arrangement_of, arrangement) in [
+            ("/m/Violin/05.flac", "violin", "partita", None, None),
+            // The catch-all for its arrangements, and one of its own
+            (
+                "/m/Lute/20.flac",
+                "lute",
+                "catch-all",
+                Some(partita),
+                Some(""),
+            ),
+            (
+                "/m/Piano/01.flac",
+                "piano",
+                "busoni",
+                Some(partita),
+                Some("for piano, Busoni"),
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, work_key,
+                                     work, work_composers, movement_order,
+                                     work_arrangement_of, work_arrangement)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4, ?5, '5', ?6, ?7)",
+                rusqlite::params![
+                    path.as_bytes(),
+                    album,
+                    work,
+                    partita,
+                    bach,
+                    arrangement_of,
+                    arrangement
+                ],
+            )
+            .unwrap();
+        }
+
+        let works = super::query_works(&conn, &TrackFilter::default(), &[]).unwrap();
+        let labels: Vec<_> = works
+            .iter()
+            .map(|work| (work.key.as_str(), work.arrangement_label()))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("busoni", Some("for piano, Busoni".to_string())),
+                ("catch-all", Some("arrangement".to_string())),
+                ("partita", None),
+            ]
+        );
     }
 
     #[test]

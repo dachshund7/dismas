@@ -66,6 +66,7 @@ use lofty_gaps::Fills;
 pub use search::{normalize_search_text, search_key, track_search_text};
 pub use tags::{ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_title};
 use tags::{track_album, track_artist};
+pub use work_hierarchy::Arrangement;
 use work_hierarchy::{MovementName, WorkHierarchy, WorkLabels};
 
 #[derive(Debug, Clone)]
@@ -850,6 +851,11 @@ impl Track {
             data.credits().disc_number,
             path.as_deref().and_then(Path::parent),
         )
+    }
+
+    // The work the track's work arranges, if it's an arrangement
+    pub fn work_arrangement(&self) -> Option<Arrangement> {
+        self.imp().data.borrow().credits().work_arrangement.clone()
     }
 
     pub fn disc_subtitle(&self) -> Option<String> {

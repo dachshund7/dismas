@@ -91,6 +91,9 @@ pub struct TrackCredits {
     // The work it's part of, or the collection it's in, from the "Work
     // Hierarchy" plugin
     pub work_collection: Option<String>,
+    // The work it arranges, if MusicBrainz has it as an arrangement, from
+    // the "Work Hierarchy" plugin
+    pub work_arrangement: Option<Arrangement>,
     // Where the movement is in the work, which tells two recordings of a
     // work on one album apart: the positions in each level below the work,
     // empty if they aren't known, and `None` if the track performs the
@@ -217,8 +220,10 @@ impl TrackCredits {
             id,
             collection,
             order,
+            arrangement,
         }) = hierarchy.as_ref().and_then(WorkHierarchy::labels)
         {
+            credits.work_arrangement = arrangement;
             credits.work_title = (title != work).then_some(title);
             credits.work = Some(work);
             credits.work_composers = composers;
@@ -252,6 +257,7 @@ impl TrackCredits {
             work_title: None,
             work_id: None,
             work_collection: None,
+            work_arrangement: None,
             movement_order,
             work_search: String::new(),
             movement,

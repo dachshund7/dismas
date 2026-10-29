@@ -97,6 +97,52 @@ pub(super) struct WorkLabels {
     // `None` if the track performs the whole work, and empty if a level
     // has none
     pub(super) order: Option<Vec<u32>>,
+    // The work it arranges, if it's an arrangement
+    pub(super) arrangement: Option<Arrangement>,
+}
+
+// A work that MusicBrainz has as an arrangement of another, which the "Work
+// Hierarchy" plugin records from its version 0.5. It's a work of its own,
+// often with the title of the work it arranges, e.g. the "catch-all for
+// arrangements" of a partita, which a recording of its Chaconne on the
+// lute is linked to
+#[derive(Clone, Debug, PartialEq)]
+pub struct Arrangement {
+    // The title of the work it arranges
+    pub of: String,
+    // What MusicBrainz says it is, e.g. "for two pianos, Busoni"; `None`
+    // for the catch-all for the arrangements of a work, or without a word
+    pub label: Option<String>,
+}
+
+impl Arrangement {
+    // What it's shown as after its name: what it is, or that it's an
+    // arrangement
+    pub fn shown(&self) -> String {
+        self.label
+            .clone()
+            .unwrap_or_else(|| crate::i18n::i18n("arrangement"))
+    }
+}
+
+// Whether the disambiguation of a work marks the work MusicBrainz keeps for
+// the arrangements of another that have no work of their own, which
+// editors spell "catch-all for arrangements", "catch all" or with other
+// hyphens, as the plugin finds it
+fn is_catch_all(disambiguation: &str) -> bool {
+    let text = disambiguation
+        .chars()
+        .map(|c| {
+            if c == '-' || ('\u{2010}'..='\u{2015}').contains(&c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect::<String>()
+        .to_lowercase();
+    let text = text.split_whitespace().join(" ");
+    text.contains("catch all") && text.contains("arrangement")
 }
 
 // The JSON of the "WORK_HIERARCHY" tag, written by the "Work Hierarchy"
@@ -141,6 +187,11 @@ struct HierarchyWork {
     // part of them
     #[serde(default)]
     collections: Option<Vec<HierarchyLink>>,
+    // What tells it from works with the same title, e.g. "for two pianos,
+    // Busoni"
+    disambiguation: Option<String>,
+    // The work it arranges, if it's an arrangement
+    arrangement_of: Option<HierarchyLink>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +214,24 @@ fn lenient_number<'de, D: serde::Deserializer<'de>>(
 }
 
 impl HierarchyWork {
+    fn arrangement(&self) -> Option<Arrangement> {
+        let of = self.arrangement_of.as_ref()?.title.clone()?;
+        Some(Arrangement {
+            of,
+            label: self.arrangement_label().map(ToString::to_string),
+        })
+    }
+
+    // What an arrangement is, from its disambiguation, unless that's only
+    // the catch-all for the arrangements of a work
+    fn arrangement_label(&self) -> Option<&str> {
+        self.arrangement_of.as_ref()?;
+        self.disambiguation
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty() && !is_catch_all(label))
+    }
+
     // Whether MusicBrainz links the work to its parent as an act
     fn is_act(&self) -> bool {
         self.part_attributes
@@ -283,6 +352,11 @@ impl WorkHierarchy {
                 .collect::<Option<Vec<_>>>()
                 .unwrap_or_default()
         });
+        let arrangement = self
+            .segments
+            .first()
+            .and_then(|segment| segment.path.get(*depth))
+            .and_then(HierarchyWork::arrangement);
         Some(WorkLabels {
             work: work.name.to_string(),
             title: work.title.to_string(),
@@ -291,6 +365,7 @@ impl WorkHierarchy {
             id: work.id.to_string(),
             collection,
             order,
+            arrangement,
         })
     }
 
@@ -307,14 +382,18 @@ impl WorkHierarchy {
                     .path
                     .iter()
                     .flat_map(|work| {
-                        [work.title.as_deref(), work.name.as_deref()]
-                            .into_iter()
-                            .chain(
-                                work.collections
-                                    .iter()
-                                    .flatten()
-                                    .map(|link| link.title.as_deref()),
-                            )
+                        [
+                            work.title.as_deref(),
+                            work.name.as_deref(),
+                            work.arrangement_label(),
+                        ]
+                        .into_iter()
+                        .chain(
+                            work.collections
+                                .iter()
+                                .flatten()
+                                .map(|link| link.title.as_deref()),
+                        )
                     })
                     .chain([segment.excerpt.as_deref()])
             })
@@ -815,6 +894,62 @@ mod tests {
     }
 
     #[test]
+    fn an_arrangement_says_what_it_arranges() {
+        let partita = "Violin Partita no. 2 in D minor, BWV 1004";
+        let tag = |disambiguation: &str| {
+            serde_json::json!({ "version": 1, "segments": [{ "work_index": 0, "path": [
+                { "id": "catch-all", "title": partita, "name": partita,
+                  "disambiguation": disambiguation,
+                  "arrangement_of": { "id": "partita", "title": partita } },
+                { "id": "chaconne", "title": format!("{partita}: V. Chaconne"),
+                  "name": "Chaconne", "number": 5, "position": 5,
+                  "disambiguation": "", "arrangement_of": null },
+            ]}]})
+            .to_string()
+        };
+        let arrangement = |disambiguation| {
+            WorkHierarchy::parse(&tag(disambiguation))
+                .and_then(|hierarchy| hierarchy.labels())
+                .and_then(|labels| labels.arrangement)
+        };
+
+        // MusicBrainz's catch-all for the arrangements of the partita, which
+        // a recording of the Chaconne on the lute is linked to, is only an
+        // arrangement, however it's spelled
+        for catch_all in [
+            "catch-all for arrangements",
+            "Catch all for arrangements",
+            "catch\u{2010}all for arrangements",
+            "",
+        ] {
+            assert_eq!(
+                arrangement(catch_all),
+                Some(Arrangement {
+                    of: partita.to_string(),
+                    label: None
+                }),
+                "{catch_all}"
+            );
+        }
+        // An arrangement of its own says what it is, which is searched
+        let busoni = arrangement("for piano, Busoni").unwrap();
+        assert_eq!(busoni.label.as_deref(), Some("for piano, Busoni"));
+        let hierarchy = WorkHierarchy::parse(&tag("for piano, Busoni")).unwrap();
+        assert!(hierarchy.search_text().contains("Busoni"));
+
+        // Not from older versions of the plugin, nor for an original
+        let older = serde_json::json!({ "version": 1, "segments": [{ "work_index": 0, "path": [
+            { "id": "partita", "title": partita, "name": partita },
+            { "id": "chaconne", "title": format!("{partita}: V. Chaconne"),
+              "name": "Chaconne", "number": 5, "position": 5 },
+        ]}]});
+        let labels = WorkHierarchy::parse(&older.to_string())
+            .and_then(|hierarchy| hierarchy.labels())
+            .unwrap();
+        assert_eq!(labels.arrangement, None);
+    }
+
+    #[test]
     fn the_work_is_the_one_the_plugin_picks() {
         // A Prelude and Fugue of The Well-Tempered Clavier, which has a
         // catalogue number of its own
@@ -843,6 +978,7 @@ mod tests {
                 id: "bwv846".to_string(),
                 collection: Some("The Well-Tempered Clavier, Book I".to_string()),
                 order: Some(vec![2]),
+                arrangement: None,
             })
         );
 
