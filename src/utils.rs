@@ -591,6 +591,12 @@ pub fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
     file_name_key(filename_a).cmp(&file_name_key(filename_b))
 }
 
+// Whether Dismas runs in the Flatpak sandbox, which Flatpak marks with
+// this file
+pub fn in_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").is_file()
+}
+
 // The key a name sorts by: the names starting with "." or "#" go last, and
 // the others in the order of file names in the locale, with numbers in
 // their order, e.g. "Disc 2" before "Disc 10"

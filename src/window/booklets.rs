@@ -10,18 +10,27 @@ use gtk::{gio, glib, glib::clone, prelude::*, subclass::prelude::*};
 use log::debug;
 
 use super::Window;
-use crate::{booklets, i18n::i18n};
+use crate::{booklets, i18n::i18n, utils};
 
 impl Window {
-    // The booklet opens in the app for PDF files. Like Open Directory, it
-    // takes the file's own path, which the launcher hands to the portal in
-    // the Flatpak
+    // The booklet opens in the app for PDF files that the desktop's
+    // settings give (mimeapps.list). GTK's launcher would go through the
+    // desktop portal wherever one runs, which asks which app to use while
+    // several can open PDF files, until it remembers the choice for the
+    // app's ID; outside a sandbox, on a session without systemd, it has no
+    // ID for Dismas, so it asked every time. In the Flatpak, the portal is
+    // the only way out, and knows the app; like Open Directory, it takes
+    // the file's own path, which the launcher hands to the portal
     pub(super) async fn open_booklet(&self, file: gio::File) {
-        let launcher = gtk::FileLauncher::new(Some(&file));
-        if let Err(err) = launcher
-            .launch_future(Some(self.upcast_ref::<gtk::Window>()))
-            .await
-        {
+        let opened = if utils::in_flatpak() {
+            gtk::FileLauncher::new(Some(&file))
+                .launch_future(Some(self.upcast_ref::<gtk::Window>()))
+                .await
+        } else {
+            let context = WidgetExt::display(self).app_launch_context();
+            gio::AppInfo::launch_default_for_uri_future(&file.uri(), Some(&context)).await
+        };
+        if let Err(err) = opened {
             debug!("Unable to open the booklet {}: {err}", file.uri());
             self.add_toast(i18n("Unable to open booklet"));
         }
