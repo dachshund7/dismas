@@ -983,12 +983,11 @@ impl Window {
     // The application's player, which the window keeps from when it's
     // made: the window lives as long as the application, as closing it
     // either hides it or quits
-    fn player(&self) -> Rc<AudioPlayer> {
+    fn player(&self) -> &Rc<AudioPlayer> {
         self.imp()
             .player
             .get()
             .expect("the window has the player from when it's made")
-            .clone()
     }
 
     fn setup_actions(&self) {

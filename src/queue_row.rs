@@ -1125,13 +1125,12 @@ fn track_item(view: &gtk::ListView, track: &Track) -> Option<(gtk::Widget, Queue
             continue;
         }
         // The rows of the queue are in a SlideBin
-        let row = widget.first_child().and_then(|child| {
-            child
-                .clone()
-                .downcast::<QueueRow>()
-                .ok()
-                .or_else(|| child.first_child().and_downcast::<QueueRow>())
-        });
+        let row = widget
+            .first_child()
+            .and_then(|child| match child.downcast::<QueueRow>() {
+                Ok(row) => Some(row),
+                Err(child) => child.first_child().and_downcast(),
+            });
         if let Some(row) = row
             && row.track().as_ref() == Some(track)
         {

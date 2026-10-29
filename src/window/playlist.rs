@@ -138,7 +138,7 @@ impl Window {
         let player = self.player();
         let queue = player.queue();
 
-        let filter = imp.queue_filter.clone();
+        let filter = &imp.queue_filter;
         let filter_model =
             gtk::FilterListModel::new(Some(queue.model().clone()), Some(filter.clone()));
         // Search results keep the order of the queue
@@ -234,7 +234,7 @@ impl Window {
 
         imp.playlist_view
             .queue_searchentry()
-            .bind_property("text", &filter, "search")
+            .bind_property("text", filter, "search")
             .sync_create()
             .build();
         imp.playlist_view

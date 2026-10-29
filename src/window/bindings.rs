@@ -112,60 +112,40 @@ impl Window {
 
         // Bind the track properties to the UI
         state
-            .bind_property("heading", &imp.track_details.get().title_label(), "label")
+            .bind_property("heading", &imp.track_details.title_label(), "label")
             .sync_create()
             .build();
         state
-            .bind_property("artist", &imp.track_details.get().artist_label(), "label")
+            .bind_property("artist", &imp.track_details.artist_label(), "label")
             .sync_create()
             .build();
         // With the year it was made
         state
-            .bind_property(
-                "album-line",
-                &imp.track_details.get().album_label(),
-                "label",
-            )
+            .bind_property("album-line", &imp.track_details.album_label(), "label")
             .sync_create()
             .build();
         state
-            .bind_property(
-                "movement",
-                &imp.track_details.get().movement_label(),
-                "label",
-            )
+            .bind_property("movement", &imp.track_details.movement_label(), "label")
             .sync_create()
             .build();
         state
-            .bind_property(
-                "movement",
-                &imp.track_details.get().movement_label(),
-                "visible",
-            )
+            .bind_property("movement", &imp.track_details.movement_label(), "visible")
             .transform_to(|_, movement: Option<String>| Some(movement.is_some()))
             .sync_create()
             .build();
         state
-            .bind_property("credits", &imp.track_details.get().credits_label(), "label")
+            .bind_property("credits", &imp.track_details.credits_label(), "label")
             .sync_create()
             .build();
         // Most tracks have no credits, so we hide the line instead of
         // leaving an empty space
         state
-            .bind_property(
-                "credits",
-                &imp.track_details.get().credits_label(),
-                "visible",
-            )
+            .bind_property("credits", &imp.track_details.credits_label(), "visible")
             .transform_to(|_, credits: Option<String>| Some(credits.is_some_and(|c| !c.is_empty())))
             .sync_create()
             .build();
         state
-            .bind_property(
-                "volume",
-                &imp.playback_control.get().volume_control(),
-                "volume",
-            )
+            .bind_property("volume", &imp.playback_control.volume_control(), "volume")
             .sync_create()
             .build();
     }
