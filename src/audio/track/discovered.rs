@@ -13,6 +13,7 @@
 //! so `main` looks for the child's before it makes the application.
 
 use std::{
+    collections::HashSet,
     ffi::OsString,
     io::Write,
     process::{Command, Stdio},
@@ -221,7 +222,12 @@ fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
         duration_ms,
         bitrate,
         sample_rate: Some(audio.sample_rate()).filter(|r| *r > 0),
-        bit_depth: u8::try_from(audio.depth()).ok().filter(|d| *d > 0),
+        // A lossy codec's depth is only that of what its decoder gives,
+        // like the 32 bits of a WMA decoder's floats, and lofty gives none
+        // for MP3, Opus or Vorbis files
+        bit_depth: u8::try_from(audio.depth())
+            .ok()
+            .filter(|d| *d > 0 && is_lossless(&caps)),
         channels: u8::try_from(audio.channels()).ok().filter(|c| *c > 0),
         format: format_name(&info, &caps),
         video,
@@ -240,6 +246,25 @@ fn can_decode(caps: &gst::CapsRef) -> bool {
     )
     .iter()
     .any(|factory| factory.can_sink_any_caps(caps))
+}
+
+// Whether a codec keeps every bit of the sound, so that its depth means
+// something
+fn is_lossless(caps: &gst::CapsRef) -> bool {
+    let Some(structure) = caps.structure(0) else {
+        return false;
+    };
+    match structure.name().as_str() {
+        "audio/x-raw" | "audio/x-flac" | "audio/x-alac" | "audio/x-tta" | "audio/x-wavpack"
+        | "audio/x-true-hd" => true,
+        "audio/x-wma" => wma_version(structure) == Some(4),
+        _ => false,
+    }
+}
+
+// The version of WMA a stream has: 3 is WMA Pro, and 4 WMA Lossless
+fn wma_version(structure: &gst::StructureRef) -> Option<i32> {
+    structure.get::<i32>("wmaversion").ok()
 }
 
 // The tags as Vorbis comments, under the keys GStreamer gives them, and the
@@ -266,7 +291,7 @@ fn comments(
                     if let Ok(comment) = gst_tag::tag_parse_extended_comment(value, true)
                         && let Some(key) = comment.key
                     {
-                        comments.push((key.to_string(), comment.value.to_string()));
+                        push_extended_comment(&mut comments, &key, &comment.value);
                     }
                 }
             }
@@ -281,7 +306,33 @@ fn comments(
             }
         }
     }
+    // Two names can come to the same comment, like Matroska's CONDUCTOR,
+    // which GStreamer takes for a performer, and LEAD_PERFORMER
+    let mut unique = HashSet::new();
+    comments.retain(|comment| unique.insert(comment.clone()));
     (comments, pictures)
+}
+
+// A comment that GStreamer passes on as it is, under the name lofty reads it
+// by: ffmpeg writes some tags of Matroska files under names of its own, and
+// the disc as a number and a total, like "1/2", which lofty only splits as
+// it reads a file
+fn push_extended_comment(comments: &mut Vec<(String, String)>, key: &str, value: &str) {
+    let key = match key {
+        "ALBUM_ARTIST" => "ALBUMARTIST",
+        "LEAD_PERFORMER" => "PERFORMER",
+        "DISC" => {
+            let (number, total) = value.split_once('/').unwrap_or((value, ""));
+            for (key, value) in [("DISCNUMBER", number), ("DISCTOTAL", total)] {
+                if !value.trim().is_empty() {
+                    comments.push((key.to_string(), value.trim().to_string()));
+                }
+            }
+            return;
+        }
+        key => key,
+    };
+    comments.push((key.to_string(), value.to_string()));
 }
 
 // A tag's value as a Vorbis comment's
@@ -336,11 +387,16 @@ fn picture(sample: &gst::Sample) -> Option<DiscoveredPicture> {
 // The name of the format: the codec's, after the container's when it isn't
 // the codec's own
 fn format_name(info: &DiscovererInfo, caps: &gst::CapsRef) -> Option<String> {
-    let codec = match caps.structure(0)?.name().as_str() {
+    let structure = caps.structure(0)?;
+    let codec = match structure.name().as_str() {
         "audio/x-flac" => "FLAC".to_string(),
         "audio/x-opus" => "Opus".to_string(),
         "audio/x-vorbis" => "Vorbis".to_string(),
-        "audio/x-wma" => "WMA".to_string(),
+        "audio/x-wma" => match wma_version(structure) {
+            Some(3) => "WMA Pro".to_string(),
+            Some(4) => "WMA Lossless".to_string(),
+            _ => "WMA".to_string(),
+        },
         "audio/x-tta" => "TrueAudio".to_string(),
         "audio/x-ac3" | "audio/ac3" => "AC-3".to_string(),
         "audio/x-eac3" => "E-AC-3".to_string(),
@@ -442,7 +498,10 @@ mod tests {
             video.display()
         ));
         if wrote {
-            assert!(!discover_file(&audio, false).unwrap().video);
+            let audio = discover_file(&audio, false).unwrap();
+            assert!(!audio.video);
+            // Opus is lossy, so its depth would only be its decoder's
+            assert_eq!(audio.bit_depth, None);
             let video = discover_file(&video, false).unwrap();
             assert!(video.duration_ms > 0);
             assert!(video.video);
@@ -592,5 +651,65 @@ mod tests {
         assert_eq!(read.tag.title().as_deref(), Some("Nimrod"));
         assert_eq!(read.tag.album().as_deref(), Some("Enigma Variations"));
         assert_eq!(read.properties.duration().as_secs_f64().round(), 1.0);
+        assert!(read.properties.bit_depth().is_some());
+    }
+
+    #[test]
+    fn ffmpegs_names_for_matroska_tags_are_read_like_vorbis_comments() {
+        gst::init().unwrap();
+        let mut tags = gst::TagList::new();
+        {
+            let tags = tags.get_mut().unwrap();
+            // As GStreamer passes on the tags ffmpeg writes
+            for comment in [
+                "ALBUM_ARTIST=Edward Elgar",
+                "DISC=1/2",
+                "LEAD_PERFORMER=Jacqueline du Pré",
+            ] {
+                tags.add::<gst::tags::ExtendedComment>(&comment, gst::TagMergeMode::Append);
+            }
+            // As GStreamer reads a CONDUCTOR, which a file can have with the
+            // same name
+            tags.add::<gst::tags::Performer>(&"Jacqueline du Pré", gst::TagMergeMode::Append);
+        }
+        let (comments, _) = comments(&tags, false);
+        let read = Discovered {
+            comments,
+            ..Default::default()
+        }
+        .into_file_tags();
+        assert_eq!(
+            read.tag.get_string(ItemKey::AlbumArtist),
+            Some("Edward Elgar")
+        );
+        assert_eq!(read.tag.disk(), Some(1));
+        assert_eq!(read.tag.disk_total(), Some(2));
+        assert_eq!(
+            read.tag.get_strings(ItemKey::Performer).collect::<Vec<_>>(),
+            ["Jacqueline du Pré"]
+        );
+
+        // A disc without a total
+        let mut comments = Vec::new();
+        push_extended_comment(&mut comments, "DISC", "3");
+        assert_eq!(comments, [("DISCNUMBER".to_string(), "3".to_string())]);
+    }
+
+    #[test]
+    fn only_lossless_codecs_have_a_bit_depth() {
+        gst::init().unwrap();
+        let wma = |version: i32| {
+            gst::Caps::builder("audio/x-wma")
+                .field("wmaversion", version)
+                .build()
+        };
+        assert!(!is_lossless(&wma(2)));
+        // WMA Pro
+        assert!(!is_lossless(&wma(3)));
+        // WMA Lossless
+        assert!(is_lossless(&wma(4)));
+        assert!(is_lossless(&gst::Caps::new_empty_simple("audio/x-flac")));
+        assert!(!is_lossless(&gst::Caps::new_empty_simple("audio/x-opus")));
+        assert!(!is_lossless(&gst::Caps::new_empty_simple("audio/mpeg")));
     }
 }

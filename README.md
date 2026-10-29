@@ -125,6 +125,16 @@ What Dismas adds
 - **CUE sheets:** an album ripped to a single file is split into its tracks
   by its CUE sheet, a `.cue` file next to it or a `CUESHEET` tag, in the
   album grid, the queue and playlists. Each track gets its own ReplayGain.
+- **Other file types:** files in a format whose tags Dismas can't read
+  itself, such as Ogg FLAC, Matroska, WebM, WMA, TrueAudio and AC-3, are
+  read through GStreamer, as long as it has the plugins to play them (for
+  WMA, the ugly plugins and gst-libav). GStreamer reads fewer of their tags.
+  In WMA files, it loses the composer and the genre, takes the album
+  artist for a second artist, and only reads a track number written as a
+  number alone ("3", not "3/24"), and a year written as `WM/Year`, as
+  Windows Media Player writes them. In Matroska files written by FFmpeg, it
+  loses the track number and the date, and it takes a conductor for a
+  performer.
 - **Sleep timer:** stops the music after a set number of minutes. It can
   stop right away, or let the track that's playing when time runs out finish
   first. It can also stop the music at the end of the playing track, or at
@@ -339,7 +349,8 @@ out again. It needs, from your distribution:
 
 - glibc 2.39 or later
 - GTK 4.20 or later and libadwaita 1.8 or later
-- GStreamer 1.20 or later, with the base, good and bad plugins
+- GStreamer 1.20 or later, with the base, good and bad plugins, and for
+  WMA files, the ugly plugins and gst-libav
 - the glycin loaders and `bwrap`, to read the covers
 - SQLite, libseccomp and fontconfig
 
@@ -416,6 +427,8 @@ Dismas installed without Flatpak can:
   `.cue` sheet then can't reach its audio file, and cover files next to the
   tracks aren't found.
 - On the command line, only files in the Music folder can be opened.
+- WMA Pro and WMA Lossless files aren't read, as the GNOME runtime has no
+  decoder for them. Other WMA files play.
 - Importing and exporting playlists also goes through the document portal,
   which hides the folder that the playlist file is in. So exported playlists
   have absolute paths, which don't work once the playlist is copied with the

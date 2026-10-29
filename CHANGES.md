@@ -145,7 +145,8 @@ All notable changes to this project will be documented in this file.
   elsewhere
 - Ogg FLAC, Matroska, WMA, TrueAudio, AC-3, DTS, AU and the other audio
   files that GStreamer plays are read with their tags and covers, rather
-  than turned away, as long as GStreamer has the plugins to play them
+  than turned away, as long as GStreamer has the plugins to play them: for
+  WMA, the ugly plugins and gst-libav
 
 ### Changed
 
