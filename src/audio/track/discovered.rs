@@ -165,7 +165,7 @@ pub fn child_main(args: &[OsString]) -> glib::ExitCode {
 // that can be decoded, as the file couldn't play otherwise. A video, as a
 // WebM file can have, is left out when it plays
 fn discover_file(path: &Path, covers: bool) -> Option<Discovered> {
-    gst::init().ok()?;
+    crate::audio::init_gstreamer().ok()?;
     let uri = glib::filename_to_uri(path, None).ok()?;
     let discoverer = Discoverer::new(gst::ClockTime::from_seconds(DISCOVERER_SECONDS)).ok()?;
     let info = match discoverer.discover_uri(&uri) {

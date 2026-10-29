@@ -184,6 +184,9 @@ All notable changes to this project will be documented in this file.
   and a space before it, or a control character after it, like
   ". Road Trip.m3u", wrote over that playlist rather than making
   "Road Trip 2"
+- A file in the music folders named as an audio file but holding an HLS,
+  DASH or Smooth Streaming playlist made Dismas fetch the addresses in it
+  when it read or played the file, outside the Flatpak
 
 ### Removed
 

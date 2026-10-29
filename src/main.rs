@@ -196,7 +196,7 @@ fn main() -> glib::ExitCode {
     glib::set_application_name("Dismas");
     glib::set_program_name(Some("dismas"));
 
-    gst::init().expect("Failed to initialize gstreamer");
+    audio::init_gstreamer().expect("Failed to initialize gstreamer");
 
     migrate::migrate_from_amberol();
 
