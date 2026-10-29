@@ -88,6 +88,9 @@ All notable changes to this project will be documented in this file.
   tracks of an album play in their order, so that the quiet movements of
   a symphony stay quiet, and the track gain otherwise, as in a shuffled
   queue or a playlist of tracks from many albums
+- Pre-amp, in the ReplayGain settings, plays every track louder or
+  quieter than its ReplayGain, by up to 15 dB, those without ReplayGain
+  tags too, but never raises a track past its peak
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane

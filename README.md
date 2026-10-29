@@ -170,7 +170,8 @@ Besides what it adds, Dismas changes some of what Amberol already does:
   and in order, and the same artist doesn't come twice in a row.
 - **ReplayGain:** besides Album and Track, Automatic takes the album gain
   while the tracks of an album play in their order, and the track gain in
-  a shuffled queue or a playlist of tracks from many albums.
+  a shuffled queue or a playlist of tracks from many albums. A pre-amp
+  plays every track louder or quieter, but never past its peak.
 - **Searching the queue** looks for every word in every tag, rather than
   fuzzy matching, keeps the order of the queue, and says so when it finds
   nothing, rather than leaving the pane blank.

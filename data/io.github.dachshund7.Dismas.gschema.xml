@@ -49,6 +49,12 @@
     <key name="replay-gain" enum="io.github.dachshund7.Dismas.ReplayGainMode">
       <default>'off'</default>
     </key>
+    <key name="replaygain-preamp" type="d">
+      <range min="-15" max="15"/>
+      <default>0.0</default>
+      <summary>The pre-amp of ReplayGain</summary>
+      <description>How many decibels louder or quieter than its ReplayGain every track plays, those without ReplayGain tags too. A track is never raised past its peak</description>
+    </key>
 	  <key name="volume" type="d">
 	    <range min="0" max="1"/>
 	    <default>1.0</default>

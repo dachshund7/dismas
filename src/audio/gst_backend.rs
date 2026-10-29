@@ -542,6 +542,16 @@ impl GstReplayGain {
     }
 }
 
+impl GstReplayGain {
+    // Raises or lowers every track by `db`: rgvolume adds it to the gain of
+    // the tracks with gains, and to the fallback gain of the others, so
+    // they keep their place against them. It never raises a track past its
+    // peak, which it takes to be full scale for a track without gains
+    fn set_preamp(&self, db: f64) {
+        self.rg_volume.set_property("pre-amp", db);
+    }
+}
+
 impl GstBackend {
     pub fn new(sender: Sender<PlaybackAction>) -> Self {
         let gst_player = gst_play::Play::default();
@@ -982,6 +992,13 @@ impl GstBackend {
             .set_property("audio-filter", &filter);
     }
 
+    // The pre-amp of ReplayGain, in dB
+    pub fn set_preamp(&self, db: f64) {
+        if let Some(replaygain) = &self.replaygain {
+            replaygain.set_preamp(db);
+        }
+    }
+
     pub fn replaygain_available(&self) -> bool {
         self.replaygain.is_some()
     }
@@ -1012,14 +1029,11 @@ mod tests {
         pad.push(gst::Buffer::with_size(4 * 441).unwrap()).unwrap();
     }
 
-    #[test]
-    fn replaygain_forgets_the_gain_of_the_track_before() {
+    // A playing pipeline with the ReplayGain filter, and the pad that feeds
+    // it, if rgvolume is there: it comes with the good plugins
+    fn replaygain_pipeline() -> Option<(GstReplayGain, gst::Pipeline, gst::Pad)> {
         gst::init().unwrap();
-        // rgvolume comes with the good plugins
-        let Ok(replaygain) = GstReplayGain::new() else {
-            return;
-        };
-
+        let replaygain = GstReplayGain::new().ok()?;
         let pipeline = gst::Pipeline::new();
         let sink = gst::ElementFactory::make("fakesink")
             .property("sync", false)
@@ -1034,6 +1048,14 @@ mod tests {
         src.link(&replaygain.rg_filter_bin.static_pad("sink").unwrap())
             .unwrap();
         pipeline.set_state(gst::State::Playing).unwrap();
+        Some((replaygain, pipeline, src))
+    }
+
+    #[test]
+    fn replaygain_forgets_the_gain_of_the_track_before() {
+        let Some((replaygain, pipeline, src)) = replaygain_pipeline() else {
+            return;
+        };
 
         let gain = || replaygain.rg_volume.property::<f64>("result-gain");
         push_track(&src, "a", Some(-10.0));
@@ -1043,6 +1065,30 @@ mod tests {
         assert_eq!(gain(), 0.0);
         push_track(&src, "c", Some(-4.0));
         assert_eq!(gain(), -4.0);
+
+        pipeline.set_state(gst::State::Null).unwrap();
+    }
+
+    #[test]
+    fn the_preamp_raises_or_lowers_every_track() {
+        let Some((replaygain, pipeline, src)) = replaygain_pipeline() else {
+            return;
+        };
+        let gain = || replaygain.rg_volume.property::<f64>("result-gain");
+
+        replaygain.set_preamp(-6.0);
+        push_track(&src, "a", Some(-10.0));
+        assert_eq!(gain(), -16.0);
+        // A track without gain tags moves as much
+        push_track(&src, "b", None);
+        assert_eq!(gain(), -6.0);
+
+        replaygain.set_preamp(6.0);
+        push_track(&src, "c", Some(-10.0));
+        assert_eq!(gain(), -4.0);
+        // Its peak is taken to be full scale, so it isn't raised
+        push_track(&src, "d", None);
+        assert_eq!(gain(), 0.0);
 
         pipeline.set_state(gst::State::Null).unwrap();
     }

@@ -129,6 +129,21 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
           valign: center;
         }
       }
+
+      // Off while ReplayGain is
+      Adw.SpinRow replaygain_preamp_row {
+        title: _("_Pre-amp");
+        subtitle: _("Raise or lower every track, in decibels, but never past its peak");
+        use-underline: true;
+        digits: 1;
+
+        adjustment: Adjustment {
+          lower: -15;
+          upper: 15;
+          step-increment: 0.5;
+          page-increment: 3;
+        };
+      }
     }
 
     Adw.PreferencesGroup {

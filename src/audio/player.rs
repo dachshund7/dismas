@@ -302,8 +302,24 @@ impl AudioPlayer {
 
         res.setup_channel();
         res.setup_next_track();
+        res.setup_preamp();
 
         res
+    }
+
+    // Gives the backend the pre-amp of ReplayGain, and again whenever it
+    // changes
+    fn setup_preamp(self: &Rc<Self>) {
+        self.backend
+            .set_preamp(self.settings.double("replaygain-preamp"));
+        self.settings.connect_changed(
+            Some("replaygain-preamp"),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |settings, key| this.backend.set_preamp(settings.double(key))
+            ),
+        );
     }
 
     // Tells the backend and the controllers about the next track whenever

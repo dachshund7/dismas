@@ -42,6 +42,8 @@ mod imp {
         pub zen_mode_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub header_bars_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub replaygain_preamp_row: TemplateChild<adw::SpinRow>,
 
         pub settings: OnceCell<gio::Settings>,
         // The music folders, as `MusicFolder`s; each change is stored right
@@ -96,6 +98,14 @@ mod imp {
             ] {
                 settings.bind(key, &**row, "active").build();
             }
+            settings
+                .bind("replaygain-preamp", &*self.replaygain_preamp_row, "value")
+                .build();
+            settings
+                .bind("replay-gain", &*self.replaygain_preamp_row, "sensitive")
+                .get_only()
+                .mapping(|mode, _| Some((mode.str() != Some("off")).to_value()))
+                .build();
 
             obj.setup_folders();
         }
