@@ -20,8 +20,9 @@ All notable changes to this project will be documented in this file.
   without switching to it, so the music goes on, or to a new playlist; the
   toast has an Open button to switch to it
 - The albums in the grid have a menu, with a right click or a long press:
-  Play, Play Next, Add to the selected playlist, and Add to Playlist. On an
-  album selected in selection mode, it takes all the selected ones
+  Play, Play Next, Add to the selected playlist and Add to Playlist, which
+  take all the selected albums on an album selected in selection mode, and
+  Open Directory, which opens the album's folder
 - The Add buttons of an album's tracks and of the albums selected in the
   grid have a menu next to them, with Play Next and the other playlists to
   add to

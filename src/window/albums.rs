@@ -334,9 +334,28 @@ impl Window {
             section.append(Some(&add), Some("album.add-whole"));
             menu.append_section(None, &section);
         }
-        // The album's booklets, once they're found, for an album of its own
+        // Its folder, and its booklets once they're found, for an album of
+        // its own, as in the menu of a track
         if !selection {
+            let open_directory = gio::SimpleAction::new("open-directory", None);
+            let album_id = album.id();
+            open_directory.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| {
+                    glib::spawn_future_local(clone!(
+                        #[weak]
+                        win,
+                        #[strong]
+                        album_id,
+                        async move { win.open_album_directory(album_id).await }
+                    ));
+                }
+            ));
+            actions.add_action(&open_directory);
+
             let section = gio::Menu::new();
+            section.append(Some(&i18n("Open Directory")), Some("album.open-directory"));
             menu.append_section(None, &section);
             let album_id = album.id();
             let hidden = library_view.hidden_folders();
@@ -626,6 +645,29 @@ impl Window {
         .await
         .ok()?;
         Some(paths.into_iter().map(gio::File::for_path).collect())
+    }
+
+    // Opens the folder of an album, with its first track selected, or its
+    // sheet, or the folder of its first disc for an album whose discs are
+    // in folders of their own; for one whose tracks are in several other
+    // folders, the folder of its first track
+    async fn open_album_directory(&self, album_id: String) {
+        let hidden = self.imp().library_view.hidden_folders();
+        let entry = gio::spawn_blocking(move || {
+            library::album_tracks(&album_id, &TrackFilter::default(), &hidden)
+                .first()
+                .map(|path| library::album_folder_entry(path).to_owned())
+        })
+        .await
+        .ok()
+        .flatten();
+        // The album can be gone by now, if the music folders were read again
+        let Some(entry) = entry else {
+            self.add_toast(i18n("Unable to open folder"));
+            return;
+        };
+        self.open_containing_folder(&gio::File::for_path(entry))
+            .await;
     }
 }
 

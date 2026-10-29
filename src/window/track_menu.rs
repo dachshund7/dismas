@@ -349,17 +349,21 @@ impl Window {
         }
     }
 
-    // The file's own path, even for one that came through the document
-    // portal: in the Flatpak, the launcher hands the open file to the
-    // portal, which works out its folder outside the sandbox, while the
-    // path outside the sandbox can't be opened inside it
     async fn open_track_directory(&self, track: &Track) {
-        let file = track.audio_file();
+        self.open_containing_folder(&track.audio_file()).await;
+    }
+
+    // Opens the folder `file` is in, with `file` selected. It takes the
+    // file's own path, even for one that came through the document portal:
+    // in the Flatpak, the launcher hands the open file to the portal, which
+    // works out its folder outside the sandbox, while the path outside the
+    // sandbox can't be opened inside it
+    pub(super) async fn open_containing_folder(&self, file: &gio::File) {
         if file.path().is_none() {
             return;
         }
 
-        let launcher = gtk::FileLauncher::new(Some(&file));
+        let launcher = gtk::FileLauncher::new(Some(file));
         if let Err(err) = launcher
             .open_containing_folder_future(Some(self.upcast_ref::<gtk::Window>()))
             .await

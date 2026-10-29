@@ -2460,6 +2460,20 @@ pub fn disc_album_folder(dir: &Path) -> Option<&Path> {
         .filter(|_| dir.file_name().is_some_and(is_disc_folder))
 }
 
+// What stands for a track in the folder of its album, to be selected
+// there, where `album_folder()` gives the folder itself: the disc folder
+// it's in, as CD 1 is for Album/CD 1, or else its file. That's the sheet
+// for a track of a sheet, the file the library keeps, rather than the
+// audio file that the track menu selects, which would mean reading the
+// sheet; the two are next to each other
+pub fn album_folder_entry(path: &Path) -> &Path {
+    let path = cue_sheet::real_path(path);
+    match path.parent() {
+        Some(dir) if disc_album_folder(dir).is_some() => dir,
+        _ => path,
+    }
+}
+
 // The folder of the album a track is in; the discs of an album are often
 // in their own folders
 fn album_folder(path: &Path) -> Option<&Path> {
@@ -3050,6 +3064,33 @@ mod tests {
         ] {
             assert!(!is_disc_folder(OsStr::new(name)), "{name}");
         }
+    }
+
+    #[test]
+    fn album_folder_entry_is_the_disc_folder_or_the_file() {
+        use super::album_folder_entry;
+
+        // A track is taken for a sheet's only while the sheet is there
+        let dir = test_dir("album-folder-entry");
+        std::fs::create_dir(dir.join("CD 2")).unwrap();
+        for name in ["Album.cue", "Album.flac", "CD 2/Album.cue"] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+
+        for (track, entry) in [
+            ("01.flac", "01.flac"),
+            ("CD 1/01.flac", "CD 1"),
+            ("Album.cue/track03", "Album.cue"),
+            ("Album.flac/track03", "Album.flac"),
+            ("CD 2/Album.cue/track01", "CD 2"),
+        ] {
+            assert_eq!(
+                album_folder_entry(&dir.join(track)),
+                dir.join(entry),
+                "{track}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
