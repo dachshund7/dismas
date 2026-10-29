@@ -46,7 +46,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 23;
+const SCHEMA_VERSION: i32 = 24;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -2928,6 +2928,40 @@ mod tests {
         assert_eq!(movement.key, "1d6a0d5c-0000-0000-0000-000000000000");
         assert_eq!(movement.name, "Requiem in B-flat minor");
         assert_eq!(movement.order.as_deref(), Some("3.1"));
+    }
+
+    #[test]
+    fn a_whole_work_in_a_track_is_kept_as_an_arrangement() {
+        use lofty::tag::{ItemKey, Tag, TagType};
+
+        use super::ExtraComments;
+
+        // A prelude for the lute played on the harpsichord, which MusicBrainz
+        // links to the catch-all for its arrangements, whole in one track
+        const CATCH_ALL: &str = "18047db5-0000-0000-0000-000000000000";
+        const ORIGINAL: &str = "d53cc638-0000-0000-0000-000000000000";
+        let path = Path::new("/music/Keyboard/12.flac");
+        let prelude = "Prelude in C minor, BWV 999";
+        let hierarchy = serde_json::json!({ "version": 1, "segments": [{ "work_index": 0,
+            "path": [{ "id": CATCH_ALL, "title": prelude, "name": prelude,
+                       "disambiguation": "catch-all for arrangements",
+                       "arrangement_of": { "id": ORIGINAL, "title": prelude } }] }] });
+        let extra = ExtraComments::with_work_hierarchy(&hierarchy.to_string());
+        let work = |work_id: &str| {
+            let mut tag = Tag::new(TagType::VorbisComments);
+            tag.insert_text(ItemKey::Work, prelude.to_string());
+            tag.insert_text(ItemKey::MusicBrainzWorkId, work_id.to_string());
+            super::TrackTags::from_tag(&tag, path, Some(path), &extra)
+                .work
+                .unwrap()
+        };
+
+        let arrangement = work(CATCH_ALL);
+        assert_eq!(arrangement.key, CATCH_ALL);
+        assert_eq!(arrangement.arrangement_of.as_deref(), Some(prelude));
+        assert_eq!(arrangement.arrangement.as_deref(), Some(""));
+        // Not when the tags name another work than the plugin
+        assert_eq!(work(ORIGINAL).arrangement_of, None);
     }
 
     #[test]

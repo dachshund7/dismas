@@ -234,6 +234,13 @@ impl TrackCredits {
             credits.movement = movement;
             credits.movement_number = None;
             credits.movement_levels = levels.flatten();
+        } else if !credits.is_movement()
+            && let Some(work_id) = credits.musicbrainz.work.as_deref()
+        {
+            // A whole work in a track, which the work tags name
+            credits.work_arrangement = hierarchy
+                .as_ref()
+                .and_then(|hierarchy| hierarchy.whole_work_arrangement(work_id));
         }
 
         credits
