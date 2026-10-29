@@ -19,7 +19,7 @@ use crate::{
     album_cell::AlbumCell,
     audio::{PerformerKind, normalize_search_text},
     i18n::{i18n, i18n_f, i18n_k, ni18n_f},
-    library::{self, Album, AlbumSort, ScanEvent, ScanResult, TrackFilter},
+    library::{self, Album, AlbumSort, Counted, ScanEvent, ScanResult, TrackFilter},
     square_bin::SquareBin,
     utils,
 };
@@ -1267,7 +1267,8 @@ impl LibraryView {
     // albums can change, with None, for all of them, first. It only has the
     // items with a track that the search and the other picks match, so that
     // a composer's list of performers has only theirs, and the other way
-    // round, and its counts are of those albums. Its search
+    // round, and its counts are of those albums; on the Works page, only
+    // the tracks of works count, and the counts are of works. Its search
     // finds the items by their `search_text`, and Enter takes the first one
     // found. The `sections` sorter, if any, divides the list into sections,
     // which the list is already sorted by
@@ -1361,13 +1362,18 @@ impl LibraryView {
                 search.grab_focus();
                 let hidden = this.imp().hidden_folders.borrow().clone();
                 let filter = others(this.wanted_filter());
+                let counted = if this.shows_works() {
+                    Counted::Works
+                } else {
+                    Counted::Albums
+                };
                 glib::spawn_future_local(clone!(
                     #[weak]
                     store,
                     #[weak]
                     list,
                     async move {
-                        let items = gio::spawn_blocking(move || read(&hidden, &filter))
+                        let items = gio::spawn_blocking(move || read(&hidden, &filter, counted))
                             .await
                             .unwrap_or_default();
                         let items: Vec<glib::BoxedAnyObject> = std::iter::once(None)
@@ -2131,8 +2137,9 @@ struct Picker<T> {
     search: gtk::SearchEntry,
     list: gtk::ListView,
     // Reads the items, in another thread, without the hidden folders,
-    // those of the tracks the filter matches
-    read: fn(&[PathBuf], &TrackFilter) -> Vec<T>,
+    // those of the tracks the filter matches, with the number of albums,
+    // or of works on the Works page
+    read: fn(&[PathBuf], &TrackFilter, Counted) -> Vec<T>,
     // The filter of the items that go with the others picked and the
     // search: the one of the albums shown, without the item picked
     others: fn(TrackFilter) -> TrackFilter,
@@ -2216,7 +2223,7 @@ fn composer_factory() -> gtk::SignalListItemFactory {
         |composer, name, count| {
             if let Some(composer) = composer {
                 name.set_label(&composer.label);
-                count.set_label(&composer.albums.to_string());
+                count.set_label(&composer.count.to_string());
             } else {
                 name.set_label(&i18n("All Composers"));
                 count.set_label("");
@@ -2244,7 +2251,7 @@ fn performer_factory() -> gtk::SignalListItemFactory {
         |performer, name, count| {
             if let Some(performer) = performer {
                 name.set_markup(&with_dimmed(&performer.sort, &performer.roles.join(", ")));
-                count.set_label(&performer.albums.to_string());
+                count.set_label(&performer.count.to_string());
             } else {
                 name.set_label(&i18n("All Performers"));
                 count.set_label("");

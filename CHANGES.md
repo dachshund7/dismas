@@ -52,7 +52,9 @@ All notable changes to this project will be documented in this file.
   with the search
 - With a composer picked, or a search, Performers lists only the
   performers of the tracks they match, with the number of those albums,
-  and Composers does the same with a performer picked
+  and Composers does the same with a performer picked. On the Works page,
+  they list only those of works, with the number of those works, so that
+  picking one always shows some
 - A Works page, next to the albums (Ctrl+3), lists the works of the
   albums under the names of their composers, with the number of their
   recordings. It shares the albums' search and the composer and performer

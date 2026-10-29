@@ -866,8 +866,19 @@ pub struct ComposerInfo {
     // Both names, normalized with `normalize_search_text()`, which
     // searching the list looks into
     pub search: String,
-    // The number of albums with a track by the composer
-    pub albums: u32,
+    // The number of albums, or works, with a track by the composer that
+    // the filter matches, see `Counted`
+    pub count: u32,
+}
+
+// What the lists of composers and performers count: the albums with a
+// track that the filter matches, for the album grid, or the works, for
+// the Works page, where the tracks that aren't part of a work count for
+// nothing, so that picking someone listed always finds some
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Counted {
+    Albums,
+    Works,
 }
 
 // Whether a track of the albums of the grid has a value in `column`, e.g.
@@ -888,19 +899,24 @@ fn query_tracks_have(
     )
 }
 
-// The album, the lines of `column` (see `composer_entries()` and
-// `performer_entries()`) and whether the filter matches, of each track of
-// the albums of the grid with some, without the tracks in the `hidden`
-// folders
+// The album, the album or the work it counts for, if the filter matches
+// it (see `Counted`), and the lines of `column` (see `composer_entries()`
+// and `performer_entries()`), of each track of the albums of the grid with
+// some, without the tracks in the `hidden` folders
 fn read_entries(
     conn: &Connection,
     column: &str,
+    counted: Counted,
     filter: &TrackFilter,
     hidden: &[PathBuf],
-    mut read: impl FnMut(&str, &str, bool),
+    mut read: impl FnMut(&str, Option<&str>, &str),
 ) -> rusqlite::Result<()> {
+    let counted = match counted {
+        Counted::Albums => "album_id",
+        Counted::Works => "work_key",
+    };
     let mut stmt = conn.prepare(&format!(
-        "SELECT album_id, {column}, {} FROM tracks
+        "SELECT album_id, CASE WHEN {} = 1 THEN {counted} END, {column} FROM tracks
          WHERE album_id IS NOT NULL AND {column} IS NOT NULL{}",
         filter.matches_sql(),
         hidden_condition("file", hidden).0
@@ -909,8 +925,8 @@ fn read_entries(
     while let Some(row) = rows.next()? {
         read(
             row.get_ref(0)?.as_str()?,
-            row.get_ref(1)?.as_str()?,
-            row.get(2)?,
+            row.get_ref(1)?.as_str_or_null()?,
+            row.get_ref(2)?.as_str()?,
         );
     }
     Ok(())
@@ -926,10 +942,10 @@ pub fn has_composers(hidden: &[PathBuf]) -> bool {
 
 // The composers of the tracks of the albums of the grid that the filter
 // matches, by their sort names, without the tracks in the `hidden` folders,
-// with the number of the albums of those tracks
-pub fn composers(hidden: &[PathBuf], filter: &TrackFilter) -> Vec<ComposerInfo> {
+// with the number of the albums, or works, of those tracks
+pub fn composers(hidden: &[PathBuf], filter: &TrackFilter, counted: Counted) -> Vec<ComposerInfo> {
     query_or_default("list the composers", |conn| {
-        query_composers(conn, hidden, filter)
+        query_composers(conn, hidden, filter, counted)
     })
 }
 
@@ -939,12 +955,13 @@ fn query_composers(
     conn: &Connection,
     hidden: &[PathBuf],
     filter: &TrackFilter,
+    counted: Counted,
 ) -> rusqlite::Result<Vec<ComposerInfo>> {
-    // The albums of a composer that the filter matches, and how often each
-    // of its names is given
+    // The albums or works of a composer that the filter matches, and how
+    // often each of its names is given
     #[derive(Default)]
     struct Seen {
-        albums: HashSet<String>,
+        counted: HashSet<String>,
         names: HashMap<String, usize>,
         sorts: HashMap<String, usize>,
     }
@@ -953,9 +970,10 @@ fn query_composers(
     read_entries(
         conn,
         "composers",
+        counted,
         filter,
         hidden,
-        |album, entries, matches| {
+        |_, counts_for, entries| {
             for line in entries.lines() {
                 let mut fields = line.split('\t');
                 let (Some(key), Some(name), Some(sort)) =
@@ -964,8 +982,8 @@ fn query_composers(
                     continue;
                 };
                 let composer = entry_of(&mut seen, key);
-                if matches {
-                    insert_str(&mut composer.albums, album);
+                if let Some(counts_for) = counts_for {
+                    insert_str(&mut composer.counted, counts_for);
                 }
                 count(&mut composer.names, name);
                 if !sort.is_empty() {
@@ -977,7 +995,7 @@ fn query_composers(
 
     let mut composers: Vec<(glib::CollationKey, ComposerInfo)> = seen
         .into_iter()
-        .filter(|(_, seen)| !seen.albums.is_empty())
+        .filter(|(_, seen)| !seen.counted.is_empty())
         .map(|(key, seen)| {
             let name = most_common(seen.names);
             let tagged = most_common(seen.sorts);
@@ -994,7 +1012,7 @@ fn query_composers(
                 name,
                 sort,
                 label,
-                albums: seen.albums.len() as u32,
+                count: seen.counted.len() as u32,
             };
             (collation, info)
         })
@@ -1061,8 +1079,9 @@ pub struct PerformerInfo {
     // which searching the list looks into, so that "piano" finds the
     // pianists
     pub search: String,
-    // The number of albums with a track they perform on
-    pub albums: u32,
+    // The number of albums, or works, with a track they perform on that
+    // the filter matches, see `Counted`
+    pub count: u32,
 }
 
 // Whether a track of the albums of the grid has a conductor or performer,
@@ -1077,9 +1096,13 @@ pub fn has_performers(hidden: &[PathBuf]) -> bool {
 // grid that the filter matches, in that order, each by their sort names,
 // without the tracks in the `hidden` folders, with the number of the
 // albums of those tracks
-pub fn performers(hidden: &[PathBuf], filter: &TrackFilter) -> Vec<PerformerInfo> {
+pub fn performers(
+    hidden: &[PathBuf],
+    filter: &TrackFilter,
+    counted: Counted,
+) -> Vec<PerformerInfo> {
     query_or_default("list the performers", |conn| {
-        query_performers(conn, hidden, filter)
+        query_performers(conn, hidden, filter, counted)
     })
 }
 
@@ -1094,13 +1117,14 @@ fn query_performers(
     conn: &Connection,
     hidden: &[PathBuf],
     filter: &TrackFilter,
+    counted: Counted,
 ) -> rusqlite::Result<Vec<PerformerInfo>> {
-    // The albums of a performer that the filter matches, the albums they
-    // have each kind on, and how often each of their names and roles is
-    // given
+    // The albums or works of a performer that the filter matches, the
+    // albums they have each kind on, and how often each of their names and
+    // roles is given
     #[derive(Default)]
     struct Seen {
-        albums: HashSet<String>,
+        counted: HashSet<String>,
         kinds: HashMap<PerformerKind, HashSet<String>>,
         names: HashMap<String, usize>,
         sorts: HashMap<String, usize>,
@@ -1111,9 +1135,10 @@ fn query_performers(
     read_entries(
         conn,
         "performers",
+        counted,
         filter,
         hidden,
-        |album, entries, matches| {
+        |album, counts_for, entries| {
             for line in entries.lines() {
                 let mut fields = line.split('\t');
                 let (Some(kind), Some(key), Some(name), Some(sort), Some(role)) = (
@@ -1126,8 +1151,8 @@ fn query_performers(
                     continue;
                 };
                 let performer = entry_of(&mut seen, key);
-                if matches {
-                    insert_str(&mut performer.albums, album);
+                if let Some(counts_for) = counts_for {
+                    insert_str(&mut performer.counted, counts_for);
                 }
                 let guessed = kind == PerformerKind::Ensemble && role.is_empty();
                 if !guessed {
@@ -1144,7 +1169,7 @@ fn query_performers(
 
     let mut performers: Vec<(glib::CollationKey, PerformerInfo)> = seen
         .into_iter()
-        .filter(|(_, seen)| !seen.albums.is_empty())
+        .filter(|(_, seen)| !seen.counted.is_empty())
         .map(|(key, seen)| {
             // With as many albums, conducting comes first, and a group last
             let preference = |kind: &PerformerKind| match kind {
@@ -1180,7 +1205,7 @@ fn query_performers(
                 name,
                 sort,
                 roles,
-                albums: seen.albums.len() as u32,
+                count: seen.counted.len() as u32,
             };
             (collation, info)
         })
@@ -3774,12 +3799,16 @@ mod tests {
         // Sorted by the last name all the same, but a sort name worked out
         // isn't shown, as it would turn a band's name around; one from the
         // tags is
-        let listed: Vec<(String, String)> =
-            super::query_composers(&conn, &[], &super::TrackFilter::default())
-                .unwrap()
-                .into_iter()
-                .map(|composer| (composer.sort, composer.label))
-                .collect();
+        let listed: Vec<(String, String)> = super::query_composers(
+            &conn,
+            &[],
+            &super::TrackFilter::default(),
+            super::Counted::Albums,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|composer| (composer.sort, composer.label))
+        .collect();
         assert_eq!(
             listed,
             [
@@ -3822,10 +3851,11 @@ mod tests {
         assert!(!super::query_tracks_have(&conn, "composers", &only_anonymous).unwrap());
 
         let all = super::TrackFilter::default();
-        let composers = super::query_composers(&conn, &hidden, &all).unwrap();
+        let composers =
+            super::query_composers(&conn, &hidden, &all, super::Counted::Albums).unwrap();
         let listed: Vec<(&str, u32)> = composers
             .iter()
-            .map(|composer| (composer.sort.as_str(), composer.albums))
+            .map(|composer| (composer.sort.as_str(), composer.count))
             .collect();
         assert_eq!(
             listed,
@@ -3847,10 +3877,10 @@ mod tests {
                 words: words.iter().map(ToString::to_string).collect(),
                 ..Default::default()
             };
-            super::query_composers(&conn, &hidden, &filter)
+            super::query_composers(&conn, &hidden, &filter, super::Counted::Albums)
                 .unwrap()
                 .into_iter()
-                .map(|composer| (composer.sort, composer.albums))
+                .map(|composer| (composer.sort, composer.count))
                 .collect()
         };
         assert_eq!(
@@ -3891,6 +3921,68 @@ mod tests {
         let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
         assert_eq!(albums.get("a"), Some(&(1, 2)));
         assert_eq!(albums.len(), 1);
+    }
+
+    #[test]
+    fn the_works_page_lists_only_the_people_of_works() {
+        use super::Counted::{Albums, Works};
+
+        let conn = test_db();
+        let vivaldi = "\nantonio vivaldi\tAntonio Vivaldi\tVivaldi, Antonio\n";
+        let violinist = "\ns\tenrico onofri\tEnrico Onofri\tOnofri, Enrico\tviolin\n";
+        let conductor = "\nc\tgiovanni antonini\tGiovanni Antonini\tAntonini, Giovanni\t\n";
+        // A sonata tagged with its work, and a concerto whose tracks only
+        // name it in their titles
+        for (path, album, work, performers) in [
+            ("/m/A/01.opus", "a", Some("t:sonata"), violinist),
+            ("/m/A/02.opus", "a", Some("t:sonata"), violinist),
+            ("/m/B/01.opus", "b", None, conductor),
+            ("/m/B/02.opus", "b", None, conductor),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, composers,
+                                     performers, work_key, search)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4, ?5, '')",
+                rusqlite::params![path.as_bytes(), album, vivaldi, performers, work],
+            )
+            .unwrap();
+        }
+
+        let performers = |counted| -> Vec<(String, u32)> {
+            let filter = super::TrackFilter {
+                composer: Some("antonio vivaldi".to_string()),
+                ..Default::default()
+            };
+            super::query_performers(&conn, &[], &filter, counted)
+                .unwrap()
+                .into_iter()
+                .map(|performer| (performer.sort, performer.count))
+                .collect()
+        };
+        assert_eq!(
+            performers(Albums),
+            [
+                ("Antonini, Giovanni".to_string(), 1),
+                ("Onofri, Enrico".to_string(), 1)
+            ]
+        );
+        // The conductor of the concerto has no works to show
+        assert_eq!(performers(Works), [("Onofri, Enrico".to_string(), 1)]);
+
+        let composers = |performer: &str, counted| -> Vec<u32> {
+            let filter = super::TrackFilter {
+                performer: Some(performer.to_string()),
+                ..Default::default()
+            };
+            super::query_composers(&conn, &[], &filter, counted)
+                .unwrap()
+                .into_iter()
+                .map(|composer| composer.count)
+                .collect()
+        };
+        assert_eq!(composers("giovanni antonini", Albums), [1]);
+        assert!(composers("giovanni antonini", Works).is_empty());
+        assert_eq!(composers("enrico onofri", Works), [1]);
     }
 
     #[test]
@@ -3943,10 +4035,11 @@ mod tests {
         assert!(super::query_tracks_have(&conn, "performers", &hidden).unwrap());
 
         let all = super::TrackFilter::default();
-        let performers = super::query_performers(&conn, &hidden, &all).unwrap();
+        let performers =
+            super::query_performers(&conn, &hidden, &all, super::Counted::Albums).unwrap();
         let listed: Vec<(PerformerKind, &str, &[String], u32)> = performers
             .iter()
-            .map(|p| (p.kind, p.sort.as_str(), p.roles.as_slice(), p.albums))
+            .map(|p| (p.kind, p.sort.as_str(), p.roles.as_slice(), p.count))
             .collect();
         let roles = |roles: &[&str]| roles.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert_eq!(
@@ -3987,10 +4080,11 @@ mod tests {
             composer: Some("antonin dvorak".to_string()),
             ..Default::default()
         };
-        let dvorak = super::query_performers(&conn, &hidden, &filter).unwrap();
+        let dvorak =
+            super::query_performers(&conn, &hidden, &filter, super::Counted::Albums).unwrap();
         let listed: Vec<(PerformerKind, &str, u32)> = dvorak
             .iter()
-            .map(|p| (p.kind, p.sort.as_str(), p.albums))
+            .map(|p| (p.kind, p.sort.as_str(), p.count))
             .collect();
         assert_eq!(
             listed,
