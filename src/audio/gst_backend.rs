@@ -65,7 +65,6 @@ impl TrackSource {
     // `album_order` comes from the queue, see `AudioPlayer::source_of`
     pub fn of(track: &Track, album_order: bool) -> Self {
         let (start, end) = track.segment();
-        let clock_time = |d: Duration| gst::ClockTime::from_nseconds(d.as_nanos() as u64);
         Self {
             id: track.uri(),
             uri: track.audio_uri(),
@@ -164,10 +163,10 @@ pub struct GstBackend {
     // Where the track starts once it plays, if it hasn't since it was
     // loaded, from the start of the track: GstPlay would only seek once
     // it's ready to play
-    start_position: Cell<Option<u64>>,
+    start_position: Cell<Option<gst::ClockTime>>,
     // Where the track was last asked to start, from the start of the
     // track, in case it's paused before it plays
-    starting_at: Cell<u64>,
+    starting_at: Cell<gst::ClockTime>,
     // Whether the track plays once it's loaded
     play_requested: Cell<bool>,
     gapless: Arc<Mutex<Gapless>>,
@@ -217,9 +216,9 @@ fn update_position(
         .map_or(gst::ClockTime::ZERO, |playing| playing.start);
     drop(gapless);
 
-    let pos = position.saturating_sub(start).seconds();
+    let pos = Duration::from(position.saturating_sub(start));
     if let Err(e) = sender.try_send(PlaybackAction::UpdatePosition(pos, notify)) {
-        error!("Failed to send UpdatePosition({pos}): {e}");
+        error!("Failed to send UpdatePosition({pos:?}): {e}");
     }
 }
 
@@ -262,6 +261,14 @@ fn is_redirect(msg: &gst::MessageRef) -> bool {
 fn seconds(seconds: u64) -> gst::ClockTime {
     let nseconds = seconds
         .saturating_mul(gst::ClockTime::SECOND.nseconds())
+        .min(gst::ClockTime::MAX.nseconds());
+    gst::ClockTime::from_nseconds(nseconds)
+}
+
+// A duration as a clock time, the same way
+fn clock_time(duration: Duration) -> gst::ClockTime {
+    let nseconds = u64::try_from(duration.as_nanos())
+        .unwrap_or(u64::MAX)
         .min(gst::ClockTime::MAX.nseconds());
     gst::ClockTime::from_nseconds(nseconds)
 }
@@ -567,7 +574,7 @@ impl GstBackend {
             gst_player,
             replaygain: GstReplayGain::new().ok(),
             start_position: Cell::default(),
-            starting_at: Cell::default(),
+            starting_at: Cell::new(gst::ClockTime::ZERO),
             play_requested: Cell::default(),
             gapless: Arc::default(),
         };
@@ -778,7 +785,8 @@ impl GstBackend {
     }
 
     pub fn set_track(&self, source: Option<TrackSource>) {
-        self.start_position.set(source.as_ref().map(|_| 0));
+        self.start_position
+            .set(source.as_ref().map(|_| gst::ClockTime::ZERO));
         self.play_requested.set(false);
         let uri = source.as_ref().map(|source| source.uri.clone());
         {
@@ -833,31 +841,30 @@ impl GstBackend {
         duration: u64,
         offset: u64,
         direction: SeekDirection,
-    ) -> Option<u64> {
+    ) -> Option<Duration> {
         let destination = seek_destination(position, duration, offset, direction)?;
         self.seek_to(seconds(destination))
     }
 
-    pub fn seek_position(&self, position: u64) -> Option<u64> {
-        self.seek_to(seconds(position))
+    pub fn seek_position(&self, position: Duration) -> Option<Duration> {
+        self.seek_to(clock_time(position))
     }
 
-    pub fn seek_start(&self) -> Option<u64> {
+    pub fn seek_start(&self) -> Option<Duration> {
         self.seek_to(gst::ClockTime::ZERO)
     }
 
     // The destination is from the start of the track
-    fn seek_to(&self, destination: gst::ClockTime) -> Option<u64> {
+    fn seek_to(&self, destination: gst::ClockTime) -> Option<Duration> {
         if self.start_position.get().is_some() {
-            let position = destination.seconds();
-            self.start_position.set(Some(position));
-            Some(position)
+            self.start_position.set(Some(destination));
+            Some(destination.into())
         } else {
             let start = {
                 let mut gapless = self.gapless();
                 gapless.start_seek = false;
                 if !gapless.played {
-                    self.starting_at.set(destination.seconds());
+                    self.starting_at.set(destination);
                 }
                 gapless
                     .playing()
@@ -871,8 +878,8 @@ impl GstBackend {
     // The track starts at the position once it plays, unless it's moved
     // or changed before. Getting it ready now, paused, would leave its
     // position stuck once it plays (see `pause()`)
-    pub fn resume_at(&self, position: u64) {
-        self.start_position.set(Some(position));
+    pub fn resume_at(&self, position: Duration) {
+        self.start_position.set(Some(clock_time(position)));
     }
 
     pub fn play(&self) {
@@ -888,7 +895,7 @@ impl GstBackend {
         let position = self
             .start_position
             .get()
-            .map(|position| start.saturating_add(seconds(position)))
+            .map(|position| start.saturating_add(position))
             .filter(|position| !position.is_zero());
         // GstPlay would drop the seek when it loads the file
         if loading && position.is_some() {
@@ -1292,7 +1299,18 @@ mod tests {
         update_position(&sender, &gapless, gst::ClockTime::from_seconds(90), false);
         assert!(matches!(
             receiver.try_recv(),
-            Ok(PlaybackAction::UpdatePosition(30, false))
+            Ok(PlaybackAction::UpdatePosition(p, false)) if p == Duration::from_secs(30)
+        ));
+        // Between seconds too, for the lyrics
+        update_position(
+            &sender,
+            &gapless,
+            gst::ClockTime::from_mseconds(90_500),
+            false,
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PlaybackAction::UpdatePosition(p, false)) if p == Duration::from_millis(30_500)
         ));
 
         // Past the end, the next part of the file takes over, until the
@@ -1304,12 +1322,12 @@ mod tests {
         ));
         assert!(matches!(
             receiver.try_recv(),
-            Ok(PlaybackAction::UpdatePosition(5, false))
+            Ok(PlaybackAction::UpdatePosition(p, false)) if p == Duration::from_secs(5)
         ));
         update_position(&sender, &gapless, gst::ClockTime::from_seconds(126), false);
         assert!(matches!(
             receiver.try_recv(),
-            Ok(PlaybackAction::UpdatePosition(6, false))
+            Ok(PlaybackAction::UpdatePosition(p, false)) if p == Duration::from_secs(6)
         ));
         assert!(receiver.try_recv().is_err());
 
@@ -1333,7 +1351,7 @@ mod tests {
         update_position(&sender, &gapless, gst::ClockTime::from_seconds(121), false);
         assert!(matches!(
             receiver.try_recv(),
-            Ok(PlaybackAction::UpdatePosition(61, false))
+            Ok(PlaybackAction::UpdatePosition(p, false)) if p == Duration::from_secs(61)
         ));
         assert!(receiver.try_recv().is_err());
     }

@@ -4,6 +4,7 @@
 use std::{
     cell::{Cell, RefCell},
     sync::LazyLock,
+    time::Duration,
 };
 
 use glib::subclass::Signal;
@@ -22,8 +23,10 @@ mod imp {
     pub struct PlayerState {
         #[property(name = "playing", get = Self::playing, type = bool)]
         pub playback_state: Cell<PlaybackState>,
-        #[property(get)]
-        pub position: Cell<u64>,
+        // Where the track is; the property is in whole seconds, as the
+        // labels and the controllers show it, see `position_time()`
+        #[property(name = "position", get = Self::position, type = u64)]
+        pub position: Cell<Duration>,
         // These are proxies for Track properties
         #[property(name = "track", get, nullable)]
         #[property(name = "title", get = Self::title, nullable, type = Option<String>)]
@@ -48,7 +51,7 @@ mod imp {
         fn new() -> Self {
             Self {
                 playback_state: Cell::new(PlaybackState::Stopped),
-                position: Cell::new(0),
+                position: Cell::new(Duration::ZERO),
                 current_track: RefCell::new(None),
                 volume: Cell::new(1.0),
             }
@@ -72,6 +75,10 @@ mod imp {
     }
 
     impl PlayerState {
+        fn position(&self) -> u64 {
+            self.position.get().as_secs()
+        }
+
         fn playing(&self) -> bool {
             matches!(self.playback_state.get(), PlaybackState::Playing)
         }
@@ -157,12 +164,12 @@ impl PlayerState {
         // The same track again, as when it repeats, only starts over: the
         // cover, the labels and the queue stay as they are
         if track.is_some() && self.track() == track {
-            self.set_position(0);
+            self.set_position(Duration::ZERO);
             return;
         }
 
         self.imp().current_track.replace(track);
-        self.imp().position.replace(0);
+        self.imp().position.replace(Duration::ZERO);
         self.notify_track();
         self.notify_title();
         self.notify_artist();
@@ -204,9 +211,17 @@ impl PlayerState {
         )
     }
 
-    pub fn set_position(&self, position: u64) {
+    // Notifies at each position the backend reports, about four times a
+    // second, even within the same second, as the lyrics follow the time
+    // between the seconds
+    pub fn set_position(&self, position: Duration) {
         self.imp().position.replace(position);
         self.notify_position();
+    }
+
+    // The position to the millisecond
+    pub fn position_time(&self) -> Duration {
+        self.imp().position.get()
     }
 
     pub fn set_volume(&self, volume: f64) {
@@ -248,7 +263,7 @@ mod tests {
         let state = PlayerState::default();
         let track = Track::new(TrackData::default());
         state.set_current_track(Some(track.clone()));
-        state.set_position(42);
+        state.set_position(Duration::from_millis(42_500));
 
         let notified = record_notifies(&state);
         state.set_current_track(Some(track));

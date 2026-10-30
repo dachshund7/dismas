@@ -4,6 +4,7 @@
 use std::{
     cell::{Cell, OnceCell, RefCell},
     rc::Rc,
+    time::Duration,
 };
 
 use async_channel::Sender;
@@ -383,9 +384,9 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
                 return;
             }
 
-            let position = position.as_secs() as u64;
+            let position = Duration::from_micros(position.as_micros().unsigned_abs());
             if let Err(e) = sender.try_send(PlaybackAction::SeekTo(position)) {
-                error!("Unable to send SeekTo({position}): {e}");
+                error!("Unable to send SeekTo({position:?}): {e}");
             }
         }
     ));

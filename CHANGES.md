@@ -250,6 +250,8 @@ All notable changes to this project will be documented in this file.
   lyrics, such as "[01:12.50]" for "12"
 - Searching found every track that a CUE sheet splits from one file by the
   lyrics of the whole file
+- A click on the waveform, or a position set from the desktop's media
+  controls, went to the whole second before it
 
 ### Removed
 

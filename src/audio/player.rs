@@ -59,13 +59,13 @@ pub enum PlaybackAction {
     SkipPrevious,
     SkipNext,
 
-    UpdatePosition(u64, bool),
+    UpdatePosition(Duration, bool),
     VolumeChanged(f64),
     // A number of volume steps, negative to lower it
     StepVolume(i32),
     Repeat(RepeatMode),
     Seek(i64),
-    SeekTo(u64),
+    SeekTo(Duration),
     PlayNext,
     // The track handed over to the backend started playing, or the
     // pipeline went on to the next track of the same file
@@ -491,7 +491,7 @@ impl AudioPlayer {
         if self.state.track().is_some() && self.queue.peek_next_track().is_none() {
             self.end_listen();
             self.set_playback_state(PlaybackState::Stopped);
-            self.update_position(self.state.duration(), true);
+            self.update_position(Duration::from_secs(self.state.duration()), true);
             self.finished.set(true);
             return;
         }
@@ -511,7 +511,7 @@ impl AudioPlayer {
         {
             self.skip_to(first);
         } else {
-            self.update_position(0, true);
+            self.update_position(Duration::ZERO, true);
         }
     }
 
@@ -627,7 +627,7 @@ impl AudioPlayer {
         self.state.set_current_track(Some(track));
         // The controllers too, as a track that doesn't play yet reports
         // no position
-        self.update_position(0, false);
+        self.update_position(Duration::ZERO, false);
     }
 
     // Pausing keeps the position, to go on from there later
@@ -771,7 +771,7 @@ impl AudioPlayer {
 
     // A track that hasn't played yet isn't moved, only the position it
     // will start at, which the backend doesn't report
-    fn show_start(&self, start: Option<u64>) {
+    fn show_start(&self, start: Option<Duration>) {
         if let Some(position) = start {
             self.update_position(position, true);
         }
@@ -794,15 +794,18 @@ impl AudioPlayer {
         self.seek(offset.unsigned_abs(), direction);
     }
 
+    // Seeks to a share of the track, between seconds too, as a click on the
+    // waveform can be
     pub fn seek_position_rel(&self, position: f64) {
         let duration = self.state.duration() as f64;
         let pos = (duration * position).clamp(0.0, duration);
         self.finished.set(false);
-        self.show_start(self.backend.seek_position(pos as u64));
+        let pos = Duration::try_from_secs_f64(pos).unwrap_or_default();
+        self.show_start(self.backend.seek_position(pos));
     }
 
-    pub fn seek_position_abs(&self, position: u64) {
-        let pos = u64::min(position, self.state.duration());
+    pub fn seek_position_abs(&self, position: Duration) {
+        let pos = position.min(Duration::from_secs(self.state.duration()));
         self.finished.set(false);
         self.show_start(self.backend.seek_position(pos));
     }
@@ -821,8 +824,9 @@ impl AudioPlayer {
             position
         };
         // Shown and saved right away
+        let position = Duration::from_secs(position);
         self.update_position(position, false);
-        if position > 0 {
+        if !position.is_zero() {
             self.backend.resume_at(position);
         }
         self.announce_state(PlaybackState::Paused);
@@ -902,18 +906,20 @@ impl AudioPlayer {
         }
     }
 
-    fn update_position(&self, position: u64, notify: bool) {
+    // The listens and the controllers go by whole seconds
+    fn update_position(&self, position: Duration, notify: bool) {
         self.state.set_position(position);
+        let seconds = position.as_secs();
         // A track plays, so the ones that failed before it don't count
-        if position > 0 && !self.failed.borrow().is_empty() {
+        if seconds > 0 && !self.failed.borrow().is_empty() {
             self.failed.borrow_mut().clear();
         }
         self.listens
             .borrow_mut()
-            .advance(position, self.state.playing());
+            .advance(seconds, self.state.playing());
 
         for c in &self.controllers {
-            c.set_position(position, notify);
+            c.set_position(seconds, notify);
         }
     }
 
