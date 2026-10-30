@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // The cover of an album over its title and artist, in a box that
-// highlights the album when it's selected in selection mode, and tells
-// screen readers whether it's selected. The cover says how many of the
-// album's tracks are taken from it, when it's only some of them, and among
-// the covers of the albums of a work, whether one of its recordings there
-// is a favorite
+// highlights the album when it's selected in selection mode, and has the
+// item it's in tell screen readers whether it's selected. The cover says
+// how many of the album's tracks are taken from it, when it's only some of
+// them, and among the covers of the albums of a work, whether one of its
+// recordings there is a favorite
 
 use std::cell::{Cell, OnceCell, RefCell};
 
@@ -179,6 +179,7 @@ impl AlbumCell {
         cell.append(&SquareBin::new(&overlay, min_cover_size, max_cover_size));
         cell.append(title);
         cell.append(artist);
+        cell.connect_map(Self::update_selected_state);
         cell
     }
 
@@ -231,17 +232,33 @@ impl AlbumCell {
     // check button over the cover
     fn update_selected(&self) {
         let imp = self.imp();
-        let selection_mode = imp.selection_mode.get();
-        let highlighted = selection_mode && imp.selected.get();
+        let highlighted = imp.selection_mode.get() && imp.selected.get();
         if highlighted {
             self.add_css_class("selected-item");
         } else {
             self.remove_css_class("selected-item");
         }
-        if selection_mode {
-            self.update_state(&[gtk::accessible::State::Selected(Some(highlighted))]);
+        self.update_selected_state();
+    }
+
+    // Screen readers present the item of the grid or of the flow box that
+    // the cell is in, so it says whether the album is selected, in
+    // selection mode. It's only taken while the cell is on screen: a list
+    // binds a cell before it takes the item it's in, which is still floating
+    // then, and a reference to it would sink it, so that the list would lose
+    // it when the reference is dropped
+    fn update_selected_state(&self) {
+        if !self.is_mapped() {
+            return;
+        }
+        let Some(item) = self.parent() else {
+            return;
+        };
+        let imp = self.imp();
+        if imp.selection_mode.get() {
+            item.update_state(&[gtk::accessible::State::Selected(Some(imp.selected.get()))]);
         } else {
-            self.reset_state(gtk::AccessibleState::Selected);
+            item.reset_state(gtk::AccessibleState::Selected);
         }
     }
 

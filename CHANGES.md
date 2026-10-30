@@ -213,6 +213,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Screen readers didn't say whether an album of the grid was selected in
+  selection mode, as the album it read didn't have it
 - Playing other tracks in place of the queue a few seconds after the last
   time kept the toast about the last time up, whose Undo put back the queue
   from before it; the new toast only showed once that one was gone
