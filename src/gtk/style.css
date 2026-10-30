@@ -651,6 +651,11 @@ gridview.album-grid .album-cell {
   border-radius: 12px;
 }
 
+flowbox.work-covers .album-cell {
+  padding: 6px;
+  border-radius: 12px;
+}
+
 .album-cell .album-cover {
   border-radius: 8px;
   background-color: alpha(currentColor, 0.08);
@@ -682,7 +687,7 @@ flowbox.work-covers {
 }
 
 flowbox.work-covers > flowboxchild {
-  padding: 6px;
+  padding: 0;
   border-radius: 12px;
 }
 
@@ -695,7 +700,7 @@ listview.work-list > row.expanded:active {
 
 /* The albums being dragged */
 .album-cell.dragging,
-gridview.album-grid.dragging-selection .album-cell.selected-item {
+libraryview.dragging-selection .album-cell.selected-item {
   opacity: 0.5;
 }
 
@@ -735,11 +740,12 @@ queuerow.selected-item {
   background-color: rgb(0 0 0 / 12%);
 }
 
-gridview.album-grid .album-cell.selected-item {
+.album-cell.selected-item {
   background-color: rgb(0 0 0 / 30%);
 }
 
-gridview.album-grid > child:hover > .album-cell.selected-item {
+gridview.album-grid > child:hover > .album-cell.selected-item,
+flowbox.work-covers > flowboxchild:hover > .album-cell.selected-item {
   background-color: rgb(0 0 0 / 36%);
 }
 
@@ -748,11 +754,12 @@ gridview.album-grid > child:hover > .album-cell.selected-item {
     background-color: rgb(0 0 0 / 30%);
   }
 
-  gridview.album-grid .album-cell.selected-item {
+  .album-cell.selected-item {
     background-color: rgb(0 0 0 / 45%);
   }
 
-  gridview.album-grid > child:hover > .album-cell.selected-item {
+  gridview.album-grid > child:hover > .album-cell.selected-item,
+  flowbox.work-covers > flowboxchild:hover > .album-cell.selected-item {
     background-color: rgb(0 0 0 / 50%);
   }
 }

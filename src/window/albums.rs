@@ -305,7 +305,7 @@ impl Window {
     // selection mode, its items take all the selected ones, and leave
     // selection mode like the buttons of its bar; on another, only that
     // one. On the Tracks page, a search takes only the tracks that match it,
-    // as elsewhere
+    // as elsewhere, and on the Works page a cover takes the work's tracks
     fn show_album_menu(&self, cell: &AlbumCell, x: f64, y: f64) {
         let Some(album) = cell.album() else {
             return;
@@ -352,8 +352,8 @@ impl Window {
         let menu = gio::Menu::new();
         menu.append_section(None, &section);
         // Among the covers of the albums of a work, the work's recordings
-        // on the album can be marked as favorites
-        if let Some(work) = cell.work() {
+        // on an album of its own can be marked as favorites
+        if let Some(work) = cell.work().filter(|_| !selection) {
             let favorite = work
                 .recordings
                 .iter()

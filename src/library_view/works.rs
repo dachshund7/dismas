@@ -161,6 +161,36 @@ impl LibraryView {
         })
     }
 
+    // What's taken from the albums of the open work: its tracks
+    pub(super) fn taken_from_open_work(&self) -> (TrackFilter, PickNames) {
+        let work = self.imp().expanded_work.borrow();
+        work.as_ref()
+            .map(|work| taken_from_work(work.key.clone(), work.name.clone()))
+            .unwrap_or_default()
+    }
+
+    // The albums of the covers of the open work, in their order
+    pub(super) fn open_work_albums(&self) -> Vec<Album> {
+        let work = self.imp().expanded_work.borrow();
+        work.iter()
+            .flat_map(|work| &work.covers)
+            .map(|cover| cover.album.clone())
+            .collect()
+    }
+
+    // How many tracks the albums of the open work with these ids take
+    pub(super) fn open_work_tracks(&self, ids: &HashSet<String>) -> Option<u32> {
+        let work = self.imp().expanded_work.borrow();
+        let covers = &work.as_ref()?.covers;
+        Some(
+            covers
+                .iter()
+                .filter(|cover| ids.contains(cover.album.id_str()))
+                .map(|cover| cover.matching)
+                .sum(),
+        )
+    }
+
     // Whether a work shows the covers of its albums
     pub fn is_work_open(&self, key: &str) -> bool {
         self.imp()
@@ -180,6 +210,8 @@ impl LibraryView {
         }
     }
 
+    // Closes the open work, leaving selection mode, as its covers were the
+    // ones selected
     fn close_work(&self, animate: bool) {
         let imp = self.imp();
         imp.covers_generation
@@ -187,6 +219,8 @@ impl LibraryView {
         let Some(work) = imp.expanded_work.take() else {
             return;
         };
+        self.set_selection_mode(false);
+        self.update_select_button();
         if let Some(row) = self.work_row(&work.key) {
             self.update_work_row(&row, &work.key, animate);
         }
@@ -197,7 +231,9 @@ impl LibraryView {
     // albums are those of its recordings that the search matches, which
     // are taken whole, as a recording is one piece of music. Opened by the
     // user, it slides open, and the list glides to show its covers. The
-    // cover of `album`, if any, then takes the focus
+    // cover of `album`, if any, then takes the focus. Covers selected among
+    // those of another work are unselected, and the same work read again
+    // keeps them
     fn open_work(&self, key: String, name: String, by_user: bool, album: Option<String>) {
         let imp = self.imp();
         let generation = imp.covers_generation.get().wrapping_add(1);
@@ -232,7 +268,12 @@ impl LibraryView {
                     covers,
                 };
                 let before = imp.expanded_work.replace(Some(work));
-                if let Some(before) = before.filter(|before| before.key != key)
+                let before = before.filter(|before| before.key != key);
+                if before.is_some() {
+                    this.set_selection_mode(false);
+                }
+                this.update_select_button();
+                if let Some(before) = before
                     && let Some(row) = this.work_row(&before.key)
                 {
                     this.update_work_row(&row, &before.key, by_user);
@@ -358,9 +399,10 @@ impl LibraryView {
     }
 
     // The covers of the albums of a work, which open under its line. They
-    // do what the covers of the grid do, but take the work's tracks; the
-    // arrows go from them to the work above and the one below, and a click
-    // between them doesn't close the work, as a click on its line does
+    // do what the covers of the grid do, selection included, but take the
+    // work's tracks; the arrows go from them to the work above and the one
+    // below, and a click between them doesn't close the work, as a click
+    // on its line does
     fn work_covers_bin(&self) -> RevealBin {
         let flowbox = gtk::FlowBox::builder()
             .homogeneous(true)
@@ -368,6 +410,9 @@ impl LibraryView {
             .activate_on_single_click(true)
             .min_children_per_line(1)
             .max_children_per_line(12)
+            // Selected covers next to each other are highlighted apart
+            .row_spacing(6)
+            .column_spacing(6)
             .css_classes(["work-covers"])
             .build();
         flowbox.connect_child_activated(clone!(
@@ -829,6 +874,21 @@ fn work_section_factory() -> gtk::SignalListItemFactory {
     factory
 }
 
+// What's taken from the albums of a work: its tracks, under a bar that
+// names it
+pub(super) fn taken_from_work(key: String, name: String) -> (TrackFilter, PickNames) {
+    (
+        TrackFilter {
+            work: Some(key),
+            ..Default::default()
+        },
+        PickNames {
+            work: Some(name),
+            ..Default::default()
+        },
+    )
+}
+
 // Puts the works in the list in the place of those it shows. The list keeps
 // its place by an item, and goes back to its top when that item is taken
 // out, as when a scan changed works above and below the ones on screen, so
@@ -927,6 +987,11 @@ fn fill_work_covers(view: &LibraryView, bin: &RevealBin, work: &ExpandedWork) {
             let cell = AlbumCell::new(WORK_COVER_MIN, WORK_COVER_MAX);
             view.setup_cell(&cell, false);
             cell.show_album(&cover.album);
+            cover
+                .album
+                .bind_property("selected", &cell, "selected")
+                .sync_create()
+                .build();
             flowbox.append(&cell);
         }
     }

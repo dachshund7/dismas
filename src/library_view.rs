@@ -325,8 +325,14 @@ mod imp {
         }
 
         fn set_page(&self, page: LibraryPage) {
-            if self.page.replace(page) == page {
+            let before = self.page.replace(page);
+            if before == page {
                 return;
+            }
+            // The Albums and Tracks pages share the grid and its selection,
+            // and the Works page selects among the covers of a work
+            if before.shows_grid() != page.shows_grid() {
+                self.obj().set_selection_mode(false);
             }
             self.obj().update_view();
             self.obj().notify_page();
@@ -677,34 +683,6 @@ impl LibraryView {
                 let item = item.downcast_ref::<gtk::ListItem>().unwrap();
                 let content = AlbumCell::new(MIN_COVER_SIZE, MAX_COVER_SIZE);
                 this.setup_cell(&content, true);
-
-                // Ctrl+click selects the album, and Shift+click in selection
-                // mode the albums from the last one clicked, like in the
-                // queue
-                let click = gtk::GestureClick::new();
-                click.connect_pressed(clone!(
-                    #[weak]
-                    this,
-                    #[weak]
-                    item,
-                    move |gesture, _, _, _| {
-                        let state = gesture.current_event_state();
-                        let range =
-                            state.contains(gdk::ModifierType::SHIFT_MASK) && this.selection_mode();
-                        if !range && !state.contains(gdk::ModifierType::CONTROL_MASK) {
-                            return;
-                        }
-                        gesture.set_state(gtk::EventSequenceState::Claimed);
-                        if let Some(album) = item.item().and_downcast::<Album>() {
-                            if range {
-                                this.select_range(&album);
-                            } else {
-                                this.toggle_album(&album);
-                            }
-                        }
-                    }
-                ));
-                content.add_controller(click);
                 content.set_list_item(item);
 
                 item.set_child(Some(&content));
@@ -727,9 +705,6 @@ impl LibraryView {
                     "total",
                     gtk::Widget::NONE,
                 );
-                this.bind_property("selection-mode", &content, "selection-mode")
-                    .sync_create()
-                    .build();
             }
         ));
 
@@ -753,7 +728,7 @@ impl LibraryView {
     }
 
     // What a cell of an album does, in the grid or elsewhere: it shows its
-    // cover while it's on screen, has a menu, and is dragged
+    // cover while it's on screen, is selected, has a menu, and is dragged
     fn setup_cell(&self, cell: &AlbumCell, grid: bool) {
         // GridView keeps hundreds of cells bound around the visible ones,
         // and binds many of them again at about every frame while the grid
@@ -786,6 +761,35 @@ impl LibraryView {
                 }
             }
         ));
+
+        // Ctrl+click selects the album, and Shift+click in selection mode
+        // the albums from the last one clicked, like in the queue
+        let click = gtk::GestureClick::new();
+        click.connect_pressed(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            cell,
+            move |gesture, _, _, _| {
+                let state = gesture.current_event_state();
+                let range = state.contains(gdk::ModifierType::SHIFT_MASK) && this.selection_mode();
+                if !range && !state.contains(gdk::ModifierType::CONTROL_MASK) {
+                    return;
+                }
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                if let Some(album) = cell.album() {
+                    if range {
+                        this.select_range(&album);
+                    } else {
+                        this.toggle_album(&album);
+                    }
+                }
+            }
+        ));
+        cell.add_controller(click);
+        self.bind_property("selection-mode", cell, "selection-mode")
+            .sync_create()
+            .build();
         self.setup_album_menu(cell);
         self.setup_album_drag(cell);
     }
@@ -816,8 +820,13 @@ impl LibraryView {
         }
     }
 
-    // Shows an album, with what's taken from it, see `taken_by()`
+    // Shows an album, with what's taken from it, see `taken_by()`, or in
+    // selection mode selects or unselects it
     fn activate_album(&self, album: &Album, taken: (TrackFilter, PickNames)) {
+        if self.selection_mode() {
+            self.toggle_album(album);
+            return;
+        }
         let taken = glib::BoxedAnyObject::new(taken);
         self.emit_by_name::<()>("album-activated", &[album, &taken]);
     }
@@ -872,10 +881,10 @@ impl LibraryView {
                 )));
                 drag.set_hotspot(DRAG_COVER_SIZE / 2, DRAG_COVER_SIZE / 2);
 
-                // The dragged albums fade in the grid
+                // The dragged albums fade
                 cell.add_css_class("dragging");
                 if n_albums > 1 {
-                    this.imp().grid_view.add_css_class("dragging-selection");
+                    this.add_css_class("dragging-selection");
                 }
                 this.imp().drag_source.replace(Some(source.clone()));
                 this.emit_by_name::<()>("albums-drag-begin", &[]);
@@ -888,7 +897,7 @@ impl LibraryView {
             cell,
             move |_, _, _| {
                 cell.remove_css_class("dragging");
-                this.imp().grid_view.remove_css_class("dragging-selection");
+                this.remove_css_class("dragging-selection");
                 this.imp().drag_source.take();
                 this.emit_by_name::<()>("albums-drag-end", &[]);
             }
@@ -1019,11 +1028,7 @@ impl LibraryView {
                     .and_then(|m| m.item(pos))
                     .and_downcast::<Album>();
                 if let Some(album) = album {
-                    if this.selection_mode() {
-                        this.toggle_album(&album);
-                    } else {
-                        this.activate_album(&album, this.taken());
-                    }
+                    this.activate_album(&album, this.taken());
                 }
             }
         ));
@@ -1087,16 +1092,13 @@ impl LibraryView {
         self.update_view();
     }
 
-    // The works take the place of the grid, without its sorting and
-    // selecting, and its title; the albums and the tracks share the grid,
-    // whose covers only say how many of their tracks the search matches
-    // on the Tracks page, as only those are taken there
+    // The works take the place of the grid, without its sorting, and its
+    // title; the albums and the tracks share the grid, whose covers only
+    // say how many of their tracks the search matches on the Tracks page,
+    // as only those are taken there
     fn update_view(&self) {
         let imp = self.imp();
         let works = self.shows_works();
-        if works {
-            self.set_selection_mode(false);
-        }
         let (title, search) = match imp.page.get() {
             LibraryPage::Albums => (i18n("Albums"), i18n("Search albums")),
             LibraryPage::Tracks => (i18n("Tracks"), i18n("Search tracks")),
@@ -1107,9 +1109,9 @@ impl LibraryView {
         imp.search_entry
             .update_property(&[gtk::accessible::Property::Label(&search)]);
         imp.sort_button.set_visible(!works);
-        imp.select_button.set_visible(!works);
         imp.favorites_button.set_visible(works);
         self.update_match_counts();
+        self.update_select_button();
         self.update_selection();
         self.update_stack();
         self.update_works();
@@ -1509,12 +1511,12 @@ impl LibraryView {
     // added, played, dragged or shown, and the names of the composer and the
     // performer it picks: on the Tracks page, the words of the search and
     // the composer and the performer picked; on the Albums page, nothing,
-    // as they're taken whole
+    // as they're taken whole; on the Works page, the open work's tracks
     pub fn taken(&self) -> (TrackFilter, PickNames) {
-        if self.imp().page.get().takes_matches() {
-            (self.search_filter(), self.search_pick_names())
-        } else {
-            Default::default()
+        match self.imp().page.get() {
+            LibraryPage::Albums => Default::default(),
+            LibraryPage::Tracks => (self.search_filter(), self.search_pick_names()),
+            LibraryPage::Works => self.taken_from_open_work(),
         }
     }
 
@@ -1522,16 +1524,7 @@ impl LibraryView {
     // of a work, its tracks, and otherwise as for the grid, see `taken()`
     pub fn taken_by(&self, cell: &AlbumCell) -> (TrackFilter, PickNames) {
         match cell.work() {
-            Some(work) => (
-                TrackFilter {
-                    work: Some(work.key),
-                    ..Default::default()
-                },
-                PickNames {
-                    work: Some(work.name),
-                    ..Default::default()
-                },
-            ),
+            Some(work) => works::taken_from_work(work.key, work.name),
             None => self.taken(),
         }
     }
@@ -1634,19 +1627,29 @@ impl LibraryView {
         self.imp().selection_anchor.set(Some(album));
     }
 
+    // The albums that can be selected, in their order: those the grid
+    // shows, or on the Works page those of the covers of the open work
+    fn selectable_albums(&self) -> Vec<Album> {
+        let imp = self.imp();
+        if self.shows_works() {
+            return self.open_work_albums();
+        }
+        let Some(model) = imp.grid_view.model() else {
+            return Vec::new();
+        };
+        // The items of the selection model are typed as GObject, so
+        // `iter::<Album>()` would panic
+        (0..model.n_items())
+            .filter_map(|i| model.item(i).and_downcast::<Album>())
+            .collect()
+    }
+
     // Selects the albums from the last one clicked to this one, in the
     // order of the grid; without a last one, it toggles the album like a
     // click
     fn select_range(&self, album: &Album) {
         let anchor = self.imp().selection_anchor.upgrade();
-        let Some(model) = self.imp().grid_view.model() else {
-            return;
-        };
-        // The items of the selection model are typed as GObject, so
-        // `iter::<Album>()` would panic
-        let albums: Vec<Album> = (0..model.n_items())
-            .filter_map(|i| model.item(i).and_downcast::<Album>())
-            .collect();
+        let albums = self.selectable_albums();
         let position = |album: &Album| albums.iter().position(|a| a == album);
 
         let Some((from, to)) = anchor.as_ref().and_then(position).zip(position(album)) else {
@@ -1660,21 +1663,14 @@ impl LibraryView {
         }
     }
 
-    // Selects all the albums shown by the search
+    // Selects all the albums shown by the search, or the covers of the open
+    // work; on the Works page, there's nothing to select until one is open
     pub fn select_all(&self) {
-        // The albums can't be seen
-        if self.shows_works() {
+        let albums = self.selectable_albums();
+        if self.shows_works() && albums.is_empty() {
             return;
         }
         self.set_selection_mode(true);
-        let Some(model) = self.imp().grid_view.model() else {
-            return;
-        };
-        // The items of the selection model are typed as GObject, so
-        // `iter::<Album>()` would panic
-        let albums: Vec<Album> = (0..model.n_items())
-            .filter_map(|i| model.item(i).and_downcast::<Album>())
-            .collect();
         for album in albums {
             if !album.selected() {
                 self.set_album_selected(&album, true);
@@ -1692,22 +1688,14 @@ impl LibraryView {
         self.update_selection();
     }
 
-    // The selected albums, in the order of the grid, with what their
-    // tracks have to match to be taken
+    // The selected albums, in the order of the grid or of the covers, with
+    // what their tracks have to match to be taken
     pub fn selected_albums(&self) -> Vec<(String, TrackFilter)> {
-        let imp = self.imp();
-        let selected = imp.selected.borrow();
         let filter = self.taken().0;
-        let Some(model) = imp.grid_view.model() else {
-            return Vec::new();
-        };
-        // The items of the selection model are typed as GObject, so
-        // `iter::<Album>()` would panic
-        (0..model.n_items())
-            .filter_map(|i| model.item(i).and_downcast::<Album>())
-            .map(|album| album.id())
-            .filter(|id| selected.contains(id))
-            .map(|id| (id, filter.clone()))
+        self.selectable_albums()
+            .into_iter()
+            .filter(Album::selected)
+            .map(|album| (album.id(), filter.clone()))
             .collect()
     }
 
@@ -1736,21 +1724,33 @@ impl LibraryView {
         self.update_selection();
     }
 
+    // On the Works page, the covers of the open work are selected, so
+    // there's nothing to select until one is open
+    fn update_select_button(&self) {
+        let imp = self.imp();
+        let selectable = !self.shows_works() || imp.expanded_work.borrow().is_some();
+        imp.select_button.set_sensitive(selectable);
+    }
+
     fn update_selection(&self) {
         let imp = self.imp();
-        let n_selected = imp.selected.borrow().len() as u32;
-        // During a search on the Tracks page, the number of tracks the
-        // buttons take, as they take only those that match it
-        let matches = imp.search_matches.borrow();
-        let matches = matches.as_ref().filter(|_| imp.page.get().takes_matches());
-        let matching = matches.map(|matches| {
-            imp.selected
-                .borrow()
-                .iter()
-                .filter_map(|id| matches.get(id))
-                .map(|(matching, _)| matching)
-                .sum::<u32>()
-        });
+        let selected = imp.selected.borrow();
+        let n_selected = selected.len() as u32;
+        // During a search on the Tracks page, and on the Works page, the
+        // number of tracks the buttons take, as they take only some of each
+        // album
+        let matching = match imp.page.get() {
+            LibraryPage::Albums => None,
+            LibraryPage::Tracks => imp.search_matches.borrow().as_ref().map(|matches| {
+                selected
+                    .iter()
+                    .filter_map(|id| matches.get(id))
+                    .map(|(matching, _)| matching)
+                    .sum()
+            }),
+            LibraryPage::Works => self.open_work_tracks(&selected),
+        };
+        drop(selected);
         let label = if n_selected == 0 {
             i18n("No album selected")
         } else {
@@ -1767,7 +1767,8 @@ impl LibraryView {
                     let tracks = ni18n_f(
                         // Translators: The '{}' must be left unmodified, and
                         // it is expanded to the number of tracks of the
-                        // albums selected that the search matches
+                        // albums selected that the search matches, or that
+                        // are of a work
                         "{} track",
                         "{} tracks",
                         n,
