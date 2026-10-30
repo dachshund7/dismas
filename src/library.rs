@@ -47,7 +47,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 27;
+const SCHEMA_VERSION: i32 = 28;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -2751,8 +2751,12 @@ impl TrackTags {
 // The work a track performs, or a movement of. The work is told apart by
 // its MusicBrainz id: the one the "Work Hierarchy" plugin picks, or else,
 // for a track of a whole work, the work it's linked to, which for a
-// movement would be the movement's. Without one, works with the same name
-// and composers are the same, as the queue's headers take them to be
+// movement would be the movement's. An arrangement of a single movement,
+// which the tags make a movement of the work, is told apart by the
+// arrangement it's linked to, as its name would make it one with the
+// recordings of the work without MusicBrainz ids. Without one, works with
+// the same name and composers are the same, as the queue's headers take
+// them to be
 fn work_entry(
     credits: &TrackCredits,
     artist: Option<&str>,
@@ -2792,7 +2796,7 @@ fn work_entry(
                 .musicbrainz
                 .work
                 .as_ref()
-                .filter(|_| !is_movement)
+                .filter(|_| !is_movement || credits.work_arrangement.is_some())
                 .cloned()
         })
         .unwrap_or_else(|| {
@@ -3149,6 +3153,55 @@ mod tests {
         assert_eq!(arrangement.part_ids, None);
         // Not when the tags name another work than the plugin
         assert_eq!(work(ORIGINAL).arrangement_of, None);
+    }
+
+    #[test]
+    fn an_arranged_movement_is_kept_by_its_own_id() {
+        use lofty::tag::{ItemKey, Tag, TagType};
+
+        use super::ExtraComments;
+
+        // A song of a cycle arranged for a piano trio, which MusicBrainz
+        // links to the catch-all for the song's arrangements, whose title
+        // the plugin splits into the work and movement tags
+        const CATCH_ALL: &str = "6d1b4a3e-0000-0000-0000-000000000000";
+        const SONG: &str = "c0f3a2b1-0000-0000-0000-000000000000";
+        let path = Path::new("/music/Trios/13.flac");
+        let title = "Schwanengesang, D. 957: IV. Ständchen";
+        let tag_of = |arrangement_of: serde_json::Value| {
+            let hierarchy = serde_json::json!({ "version": 1, "segments": [{ "work_index": 0,
+                "path": [{ "id": CATCH_ALL, "title": title, "name": title,
+                           "disambiguation": "catch-all for arrangements",
+                           "arrangement_of": arrangement_of }] }] });
+            let extra = ExtraComments::with_work_hierarchy(&hierarchy.to_string());
+            let mut tag = Tag::new(TagType::VorbisComments);
+            tag.insert_text(ItemKey::Work, "Schwanengesang, D. 957".to_string());
+            tag.insert_text(ItemKey::Movement, "Ständchen".to_string());
+            tag.insert_text(ItemKey::MovementNumber, "4".to_string());
+            tag.insert_text(ItemKey::Composer, "Franz Schubert".to_string());
+            tag.insert_text(ItemKey::MusicBrainzWorkId, CATCH_ALL.to_string());
+            super::TrackTags::from_tag(&tag, path, Some(path), &extra)
+                .work
+                .unwrap()
+        };
+
+        let arranged = tag_of(serde_json::json!({ "id": SONG, "title": title }));
+        assert_eq!(arranged.key, CATCH_ALL);
+        assert_eq!(arranged.name, "Schwanengesang, D. 957");
+        assert_eq!(arranged.order.as_deref(), Some("4"));
+        assert_eq!(arranged.arrangement_of.as_deref(), Some(title));
+        assert_eq!(arranged.arrangement.as_deref(), Some(""));
+        assert_eq!(arranged.arrangement_of_id.as_deref(), Some(SONG));
+
+        // A movement that MusicBrainz doesn't link to its work, but that
+        // arranges nothing, is still one with the work of the same name
+        let movement = tag_of(serde_json::Value::Null);
+        assert_eq!(movement.arrangement_of, None);
+        assert!(
+            movement.key.starts_with("t:schwanengesang"),
+            "{}",
+            movement.key
+        );
     }
 
     #[test]

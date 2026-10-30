@@ -390,12 +390,17 @@ impl WorkHierarchy {
         })
     }
 
-    // The work that the work a track performs whole arranges, if it's an
-    // arrangement, as `labels()` leaves such a track to its tags: the work
-    // the plugin picks in every segment, when it's the one the tags give
-    // (`work_id`, from MUSICBRAINZ_WORKID), so that the library keeps it
-    // for the work it lists the track under
-    pub(super) fn whole_work_arrangement(&self, work_id: &str) -> Option<Arrangement> {
+    // The work that the work a track is linked to arranges, if it's an
+    // arrangement, as `labels()` leaves such a track to its tags: a whole
+    // work in a track, or an arrangement of a single movement, e.g. the
+    // catch-all for the arrangements of "Schwanengesang, D. 957: IV.
+    // Ständchen", whose title the plugin splits into the work and movement
+    // tags. It's the work the plugin picks in every segment, when it's the
+    // one the tags give (`work_id`, from MUSICBRAINZ_WORKID), so that the
+    // library keeps it for the work it lists the track under. A movement
+    // that MusicBrainz doesn't link to its work passes that too, and only
+    // an arrangement has a work it arranges
+    pub(super) fn linked_work_arrangement(&self, work_id: &str) -> Option<Arrangement> {
         let works = self
             .segments
             .iter()

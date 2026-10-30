@@ -126,7 +126,9 @@ All notable changes to this project will be documented in this file.
   has the same title, says so after its name on the Works page and in
   its header, with what it is when MusicBrainz says, such as "for two
   pianos, Busoni", and Track Information names the work it arranges.
-  This needs version 0.5 of the Work Hierarchy plugin
+  So does a track that MusicBrainz links to an arrangement of a single
+  movement, such as a song of a cycle arranged for a piano trio. This
+  needs version 0.5 of the Work Hierarchy plugin
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does
 - Alt+Up and Alt+Down move the track with the focus in the playlist pane
