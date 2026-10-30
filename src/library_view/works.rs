@@ -611,32 +611,19 @@ impl LibraryView {
             };
             store
         };
-        // When the works are read again because the library was, only the
-        // ones that changed are replaced, so the list stays where it was,
-        // and stays as it was when none changed
-        let shown = |pos: usize| {
-            store
-                .item(pos as u32)
-                .and_downcast::<glib::BoxedAnyObject>()
-        };
-        let (start, removed, added) =
-            utils::changed_range(store.n_items() as usize, works.len(), |old, new| {
-                shown(old).is_some_and(|work| *work.borrow::<library::WorkInfo>() == works[new])
-            });
-        let added: Vec<glib::BoxedAnyObject> = works
-            .into_iter()
-            .skip(start)
-            .take(added)
-            .map(glib::BoxedAnyObject::new)
-            .collect();
         // A cover with the focus keeps it, though the list gives it to the
-        // work's item when its work is replaced, e.g. as one of its
-        // recordings was marked as a favorite from the cover's menu
+        // work's item when its work changes, e.g. as one of its recordings
+        // was marked as a favorite from the cover's menu
         let focused = utils::focused_child::<AlbumCell>(&*imp.works_list)
             .filter(|cell| cell.work().is_some())
             .and_then(|cell| cell.album())
             .map(|album| album.id());
-        store.splice(start as u32, removed as u32, &added);
+        for item in merge_works(&store, works) {
+            let work = item.borrow::<library::WorkInfo>();
+            if let Some(row) = self.work_row(&work.key) {
+                refresh_work_row(row.upcast_ref(), &work);
+            }
+        }
 
         // The open work stays open, with its covers read again, as the
         // albums or the favorites can have changed, unless it's gone
@@ -700,18 +687,7 @@ fn work_factory(
             .join("\n");
             Some(text)
         },
-        |work, name, count| {
-            // What an arrangement is, e.g. "for two pianos, Busoni", tells
-            // it from the work it arranges, whose title it often has
-            let arrangement = work.arrangement.as_ref().map(Arrangement::shown);
-            let more = [arrangement.as_deref(), work.collection.as_deref()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
-            name.set_markup(&with_dimmed(&work.name, &more));
-            count.set_label(&work.recordings.to_string());
-        },
+        show_work_labels,
     );
 
     // A heart before the number of recordings of a favorite work, and the
@@ -775,18 +751,52 @@ fn work_factory(
     });
     factory.connect_bind(|_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let heart = item
-            .child()
-            .and_then(|row| row.first_child())
-            .and_then(|line| line.first_child())
-            .and_then(|name| name.next_sibling())
-            .and_downcast::<gtk::Image>();
+        let heart = item.child().as_ref().and_then(work_heart);
         let work = item.item().and_downcast::<glib::BoxedAnyObject>();
         if let (Some(heart), Some(work)) = (heart, work) {
             heart.set_visible(work.borrow::<library::WorkInfo>().favorite);
         }
     });
     factory
+}
+
+// The name of a work, then, dimmed, what it arranges and the collection
+// it's in, and the number of its recordings
+fn show_work_labels(work: &library::WorkInfo, name: &gtk::Label, count: &gtk::Label) {
+    // What an arrangement is, e.g. "for two pianos, Busoni", tells it from
+    // the work it arranges, whose title it often has
+    let arrangement = work.arrangement.as_ref().map(Arrangement::shown);
+    let more = [arrangement.as_deref(), work.collection.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    name.set_markup(&with_dimmed(&work.name, &more));
+    count.set_label(&work.recordings.to_string());
+}
+
+// The heart of a favorite work, after its name on the line of its row
+fn work_heart(row: &gtk::Widget) -> Option<gtk::Image> {
+    row.first_child()?
+        .first_child()?
+        .next_sibling()
+        .and_downcast::<gtk::Image>()
+}
+
+// Shows a work that changed in the row bound to it, as the list binds the
+// row again only for another item
+fn refresh_work_row(row: &gtk::Widget, work: &library::WorkInfo) {
+    let Some(line) = row.first_child() else {
+        return;
+    };
+    let name = line.first_child().and_downcast::<gtk::Label>();
+    let count = line.last_child().and_downcast::<gtk::Label>();
+    if let (Some(name), Some(count)) = (name, count) {
+        show_work_labels(work, &name, &count);
+    }
+    if let Some(heart) = work_heart(row) {
+        heart.set_visible(work.favorite);
+    }
 }
 
 // The headers of the list of works: the names of the composers
@@ -817,6 +827,63 @@ fn work_section_factory() -> gtk::SignalListItemFactory {
         });
     });
     factory
+}
+
+// Puts the works in the list in the place of those it shows. The list keeps
+// its place by an item, and goes back to its top when that item is taken
+// out, as when a scan changed works above and below the ones on screen, so
+// the items of the works that are still there are kept, and those of the
+// works that changed are changed in place, and returned, for their rows to
+// show them; the works that are new or that moved are put in, and the
+// others taken out
+fn merge_works(store: &gio::ListStore, works: Vec<library::WorkInfo>) -> Vec<glib::BoxedAnyObject> {
+    let keys: HashSet<String> = works.iter().map(|work| work.key.clone()).collect();
+    let mut placed = HashSet::new();
+    let item_at = |pos: u32| store.item(pos).and_downcast::<glib::BoxedAnyObject>();
+    // The place of the next work, the number of items from there that go,
+    // and the works to put in their place, in one splice
+    let mut pos = 0;
+    let mut gone = 0;
+    let mut new = Vec::new();
+    let mut changed = Vec::new();
+    for work in works {
+        let kept = loop {
+            let Some(item) = item_at(pos + gone) else {
+                break None;
+            };
+            let key = item.borrow::<library::WorkInfo>().key.clone();
+            if key == work.key {
+                break Some(item);
+            }
+            // A work that comes later stays for now
+            if keys.contains(&key) && !placed.contains(&key) {
+                break None;
+            }
+            gone += 1;
+        };
+        placed.insert(work.key.clone());
+        let Some(item) = kept else {
+            new.push(glib::BoxedAnyObject::new(work));
+            continue;
+        };
+        if gone > 0 || !new.is_empty() {
+            store.splice(pos, gone, &new);
+        }
+        pos += new.len() as u32;
+        gone = 0;
+        new.clear();
+        if *item.borrow::<library::WorkInfo>() != work {
+            item.replace(work);
+            store.items_changed(pos, 1, 1);
+            changed.push(item);
+        }
+        pos += 1;
+    }
+    let rest = store.n_items() - pos;
+    if rest > 0 || !new.is_empty() {
+        store.splice(pos, rest, &new);
+    }
+    changed
 }
 
 // The key of the work of an item of the list of works
@@ -915,5 +982,74 @@ fn focus_cover(row: &gtk::Box, album: &str) {
         });
     if let Some(child) = child {
         child.grab_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn work(key: &str, recordings: u32) -> library::WorkInfo {
+        library::WorkInfo {
+            key: key.to_string(),
+            name: key.to_string(),
+            title: None,
+            collection: None,
+            arrangement: None,
+            composers: Vec::new(),
+            recordings,
+            favorite: false,
+        }
+    }
+
+    fn items(store: &gio::ListStore) -> Vec<glib::BoxedAnyObject> {
+        (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast())
+            .collect()
+    }
+
+    fn works_of(store: &gio::ListStore) -> Vec<(String, u32)> {
+        items(store)
+            .iter()
+            .map(|item| {
+                let work = item.borrow::<library::WorkInfo>();
+                (work.key.clone(), work.recordings)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn merged_works_keep_the_items_of_those_still_there() {
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        merge_works(
+            &store,
+            ["a", "x", "b", "c", "d"].map(|key| work(key, 1)).to_vec(),
+        );
+        let before = items(&store);
+
+        // "x" is gone, "d" changed, "c" moved up, "n" is new
+        let works = vec![
+            work("a", 1),
+            work("c", 1),
+            work("b", 1),
+            work("n", 1),
+            work("d", 3),
+        ];
+        let changed = merge_works(&store, works);
+        assert_eq!(
+            works_of(&store),
+            [("a", 1), ("c", 1), ("b", 1), ("n", 1), ("d", 3)].map(|(k, n)| (k.to_string(), n))
+        );
+        let after = items(&store);
+        // The works still there keep their items, changed or not
+        assert_eq!(after[0], before[0]);
+        assert_eq!(after[2], before[2]);
+        assert_eq!(after[4], before[4]);
+        assert_eq!(changed, [before[4].clone()]);
+        // A work that moved gets another
+        assert_ne!(after[1], before[3]);
+
+        merge_works(&store, Vec::new());
+        assert_eq!(store.n_items(), 0);
     }
 }
