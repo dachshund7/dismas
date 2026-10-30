@@ -60,6 +60,14 @@ template $DismasPageSwitcher: Widget {
       };
     }
 
+    ToggleButton {
+      icon-name: "tracks-symbolic";
+      focus-on-click: false;
+      action-name: "win.page";
+      action-target: "'tracks'";
+      tooltip-text: _("Tracks");
+    }
+
     // Hidden while no track is part of a work; see page_switcher.rs
     ToggleButton works_button {
       visible: false;
@@ -114,6 +122,11 @@ menu pages_menu {
     item {
       label: _("_Albums");
       action: "switcher.albums";
+    }
+
+    item {
+      label: _("_Tracks");
+      action: "switcher.tracks";
     }
 
     item {

@@ -39,6 +39,22 @@ pub struct Matching {
     total: u32,
 }
 
+// A track to show once it's read: one asked for, as with Go to Album, which
+// flashes and takes the focus, or the first one a search matches, which the
+// list only scrolls to
+enum Reveal {
+    Flash(gio::File),
+    Show(gio::File),
+}
+
+impl Reveal {
+    fn file(&self) -> &gio::File {
+        match self {
+            Self::Flash(file) | Self::Show(file) => file,
+        }
+    }
+}
+
 mod imp {
     use super::*;
 
@@ -111,11 +127,8 @@ mod imp {
         pub filter: RefCell<TrackFilter>,
         pub picks: RefCell<PickNames>,
         // While the search leaves out some of the tracks, the ones it
-        // matches, which are the ones taken; the others are dimmed. The
-        // menu next to the Add button offers to take them all
+        // matches, which are the ones taken; the others are dimmed
         pub matching: RefCell<Option<super::Matching>>,
-        #[property(get)]
-        pub partial: Cell<bool>,
         // Bumped for each album, to stop loading the tracks of the
         // previous one
         pub generation: Cell<u32>,
@@ -792,11 +805,6 @@ impl AlbumTracks {
             .set_visible(!self.shows_work() || self.selection_mode());
     }
 
-    // The files of all the tracks, though the search leaves some out
-    pub fn all_files(&self) -> Vec<gio::File> {
-        self.tracks().iter().map(Track::file).collect()
-    }
-
     // Says how many of the tracks the search matches while it leaves out
     // some, which are dimmed. With only a composer or a performer picked,
     // and no words to search for, it says how many are theirs
@@ -894,7 +902,6 @@ impl AlbumTracks {
         tracks.remove_all();
         imp.files.replace(Vec::new());
         imp.matching.replace(None);
-        self.set_partial(false);
         imp.recordings.replace(Vec::new());
         imp.recording_of.replace(HashMap::new());
         imp.favorite_recordings.replace(HashSet::new());
@@ -931,7 +938,7 @@ impl AlbumTracks {
         imp.generation.set(generation);
         let filter = imp.filter.borrow().clone();
         let hidden = imp.hidden.borrow().clone();
-        let reveal = reveal.cloned();
+        let mut reveal = reveal.cloned().map(Reveal::Flash);
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
@@ -977,8 +984,12 @@ impl AlbumTracks {
                             uris: files.iter().map(|file| file.uri().to_string()).collect(),
                             total: all.len() as u32,
                         }));
+                        // The tracks it matches can be far down a large
+                        // album, e.g. on its last disc
+                        if reveal.is_none() {
+                            reveal = files.first().cloned().map(Reveal::Show);
+                        }
                         imp.files.replace(files);
-                        this.set_partial(true);
                     } else {
                         imp.files.replace(all.clone());
                     }
@@ -1065,12 +1076,6 @@ impl AlbumTracks {
         }
     }
 
-    fn set_partial(&self, partial: bool) {
-        if self.imp().partial.replace(partial) != partial {
-            self.notify_partial();
-        }
-    }
-
     // Keeps the recordings of the work, and the recording of each of their
     // tracks, and gives their files, in order
     fn show_recordings(&self, recordings: Vec<library::WorkRecording>) -> Vec<gio::File> {
@@ -1146,7 +1151,7 @@ impl AlbumTracks {
 
     // Reads the tags of the tracks, which are shown as they come, unless
     // another album or work is shown meanwhile
-    async fn read_tracks(&self, generation: u32, files: Vec<gio::File>, reveal: Option<gio::File>) {
+    async fn read_tracks(&self, generation: u32, files: Vec<gio::File>, reveal: Option<Reveal>) {
         let imp = self.imp();
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
@@ -1173,13 +1178,22 @@ impl AlbumTracks {
             let found = reveal
                 .as_ref()
                 .filter(|_| !revealed.get())
-                .and_then(|file| {
-                    let i = batch.iter().position(|track| track.file().equal(file))?;
-                    Some((start + i as u32, &batch[i]))
+                .and_then(|reveal| {
+                    let i = batch
+                        .iter()
+                        .position(|track| track.file().equal(reveal.file()))?;
+                    Some((start + i as u32, &batch[i], reveal))
                 });
-            if let Some((pos, track)) = found {
+            if let Some((pos, track, reveal)) = found {
                 revealed.set(true);
-                crate::queue_row::flash_track(&imp.tracks_view, pos, track);
+                match reveal {
+                    Reveal::Flash(_) => {
+                        crate::queue_row::flash_track(&imp.tracks_view, pos, track);
+                    }
+                    Reveal::Show(_) => {
+                        crate::queue_row::reveal_track(&imp.tracks_view, track);
+                    }
+                }
             } else if !revealed.get() {
                 // The list keeps its first track at the top as tracks are
                 // added, which hides the header of its work above it, unless

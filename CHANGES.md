@@ -58,19 +58,24 @@ All notable changes to this project will be documented in this file.
   the albums, sorted by their last names, with the number of their albums;
   the names are shown last name first only where the tags give them so,
   as a band can be a composer too. Picking one shows only their albums,
-  taking only the tracks that are theirs, as a search does, and it
-  combines with the search
+  and on the Tracks page takes only the tracks that are theirs, as a
+  search does; it combines with the search
 - Performers, the button next to Composers, lists the conductors, the
   ensembles and the soloists of the albums, with what they play or sing
   and the number of their albums; picking one shows only their albums,
-  taking only the tracks they're on, and it combines with a composer and
-  with the search
+  and on the Tracks page takes only the tracks they're on; it combines
+  with a composer and with the search
 - With a composer picked, or a search, Performers lists only the
   performers of the tracks they match, with the number of those albums,
   and Composers does the same with a performer picked. On the Works page,
   they list only those of works, with the number of those works, so that
   picking one always shows some
-- A Works page, next to the albums (Ctrl+3), lists the works of the
+- A Tracks page, next to the albums (Ctrl+3), shows the same albums, with
+  the same search and the same composer and performer picked, but takes
+  only the tracks they match, rather than whole albums: the cover of each
+  album says how many, and an album opened there lists all its tracks,
+  starting at the first one that matches, with the others dimmed
+- A Works page, next to the tracks (Ctrl+4), lists the works of the
   albums under the names of their composers, with the number of their
   recordings. It shares the albums' search and the composer and performer
   picked, so switching between the two keeps them. A work shows
@@ -173,8 +178,9 @@ All notable changes to this project will be documented in this file.
 - The year of an album, which the grid can be sorted by, is when its
   tracks were recorded, if their tags say, or else when they were first
   released, rather than the year of a reissue
-- Ctrl+4 shows the playlists, and Ctrl+3 the new Works page, so that the
-  shortcuts follow the order of the page buttons
+- Ctrl+P shows the playlists, rather than Ctrl+3, which shows the new
+  Tracks page, and Ctrl+4 the new Works page, so that the shortcuts follow
+  the order of the page buttons, and none is missing without works
 - The music folders are read again once after updating, as the library
   now keeps the composers, the works and the performers of each track,
   when it was made, whether its work is an arrangement, and the other
@@ -182,13 +188,9 @@ All notable changes to this project will be documented in this file.
 - Scan the Music Folders moved from the main menu to Preferences, as Scan
   Now, as the music folders are watched
 - Whole Albums, next to the album search, is gone, as it made the search
-  narrow. Adding or playing albums during a search still takes only the
-  tracks it matches, and an album it matches only in part has Play Whole
-  Album and Add Whole Album in its menu and in the menu next to the Add
-  button. Opening it lists all its tracks, with the ones the search doesn't
-  match dimmed, and clicking one of those plays the whole album from it.
-  While albums are selected during a search, the bar says how many of their
-  tracks the buttons take
+  narrow: during a search, the Albums page takes whole albums, and the new
+  Tracks page only the tracks the search matches. Clicking a dimmed track
+  of an album opened from the Tracks page plays the whole album from it
 - In Zen Mode and in fullscreen, pressing a key brings back the controls,
   as moving the pointer does, so that Tab doesn't go through buttons that
   can't be seen
@@ -265,6 +267,8 @@ All notable changes to this project will be documented in this file.
   controls, went to the whole second before it
 
 ### Removed
+
+- Ctrl+G, as Ctrl+2 shows the albums
 
 ## [2026.11] - 2026-11-01
 

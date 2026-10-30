@@ -57,13 +57,16 @@ const DRAG_COVER_SIZE: i32 = 64;
 const UNWATCHED_RESCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 // The pages of the window that this view shows: the albums of the music
-// folders, or their works. They're one widget, which keeps the search, the
-// composer and the performer picked from one page to the other
+// folders, which are taken whole, the same albums, of which only the tracks
+// the search matches are taken, or their works. They're one widget, which
+// keeps the search, the composer and the performer picked from one page to
+// the other
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, glib::Enum)]
 #[enum_type(name = "DismasLibraryPage")]
 pub enum LibraryPage {
     #[default]
     Albums,
+    Tracks,
     Works,
 }
 
@@ -72,13 +75,14 @@ impl LibraryPage {
     pub fn name(self) -> &'static str {
         match self {
             Self::Albums => "albums",
+            Self::Tracks => "tracks",
             Self::Works => "works",
         }
     }
 
     // The page with the name of a window's page, if it's one of these
     pub fn named(name: &str) -> Option<Self> {
-        [Self::Albums, Self::Works]
+        [Self::Albums, Self::Tracks, Self::Works]
             .into_iter()
             .find(|page| page.name() == name)
     }
@@ -86,6 +90,12 @@ impl LibraryPage {
     // Whether the page shows the grid of the albums
     pub fn shows_grid(self) -> bool {
         self != Self::Works
+    }
+
+    // Whether taking an album from the grid takes only the tracks the
+    // search matches, rather than the whole album
+    fn takes_matches(self) -> bool {
+        self == Self::Tracks
     }
 }
 
@@ -236,10 +246,6 @@ mod imp {
         // picked from the lists next to the search
         pub composer: RefCell<Option<library::ComposerInfo>>,
         pub performer: RefCell<Option<library::PerformerInfo>>,
-        // A selected album matches the search only in part, so the menu
-        // of the Add button offers to take the whole albums
-        #[property(get)]
-        pub selection_partly_matched: Cell<bool>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
         // The cells of the grid that are mapped, which are about the ones
@@ -841,7 +847,7 @@ impl LibraryView {
                 let albums = if selection {
                     this.selected_albums()
                 } else {
-                    vec![(album.id(), this.search_filter())]
+                    vec![(album.id(), this.taken().0)]
                 };
                 let drag = AlbumDrag { albums, selection };
                 Some(gdk::ContentProvider::for_value(&drag.to_value()))
@@ -1150,26 +1156,29 @@ impl LibraryView {
     }
 
     // The works take the place of the grid, without its sorting and
-    // selecting, and its title
+    // selecting, and its title; the albums and the tracks share the grid,
+    // whose covers only say how many of their tracks the search matches
+    // on the Tracks page, as only those are taken there
     fn update_view(&self) {
         let imp = self.imp();
         let works = self.shows_works();
         if works {
             self.set_selection_mode(false);
         }
-        imp.page_title
-            .set_title(&if works { i18n("Works") } else { i18n("Albums") });
-        let search = if works {
-            i18n("Search works")
-        } else {
-            i18n("Search albums")
+        let (title, search) = match imp.page.get() {
+            LibraryPage::Albums => (i18n("Albums"), i18n("Search albums")),
+            LibraryPage::Tracks => (i18n("Tracks"), i18n("Search tracks")),
+            LibraryPage::Works => (i18n("Works"), i18n("Search works")),
         };
+        imp.page_title.set_title(&title);
         imp.search_entry.set_placeholder_text(Some(&search));
         imp.search_entry
             .update_property(&[gtk::accessible::Property::Label(&search)]);
         imp.sort_button.set_visible(!works);
         imp.select_button.set_visible(!works);
         imp.favorites_button.set_visible(works);
+        self.update_match_counts();
+        self.update_selection();
         self.update_stack();
         self.update_works();
     }
@@ -1655,16 +1664,16 @@ impl LibraryView {
     }
 
     // The covers of the albums the search matches only partly say how many
-    // of their tracks it does
+    // of their tracks it does, on the page that takes only those
     fn update_match_counts(&self) {
         let imp = self.imp();
         let matches = imp.search_matches.borrow();
+        let matches = matches.as_ref().filter(|_| imp.page.get().takes_matches());
         let Some(model) = imp.model.borrow().clone() else {
             return;
         };
         for album in model.iter::<Album>().flatten() {
             let (matching, total) = matches
-                .as_ref()
                 .and_then(|matches| matches.get(album.id_str()).copied())
                 .filter(|(matching, total)| matching < total)
                 .unwrap_or_default();
@@ -1677,29 +1686,29 @@ impl LibraryView {
         }
     }
 
-    // Whether the search matches only some of the tracks of an album, so
-    // that taking the album takes only those, and its whole tracks are
-    // offered too
-    pub fn partly_matches(&self, album_id: &str) -> bool {
-        self.imp()
-            .search_matches
-            .borrow()
-            .as_ref()
-            .and_then(|matches| matches.get(album_id))
-            .is_some_and(|(matching, total)| matching < total)
+    // What the tracks taken from an album of the grid have to match, to be
+    // added, played, dragged or shown, and the names of the composer and the
+    // performer it picks: on the Tracks page, the words of the search and
+    // the composer and the performer picked; on the Albums page, nothing,
+    // as they're taken whole
+    pub fn taken(&self) -> (TrackFilter, PickNames) {
+        if self.imp().page.get().takes_matches() {
+            (self.search_filter(), self.search_pick_names())
+        } else {
+            Default::default()
+        }
     }
 
-    // What the tracks taken from an album have to match, to be added,
-    // played, dragged or shown: its words, and the composer and the
-    // performer picked
-    pub fn search_filter(&self) -> TrackFilter {
+    // The words of the search, and the composer and the performer picked,
+    // that the albums shown were found with
+    fn search_filter(&self) -> TrackFilter {
         self.imp().search_filter.borrow().clone()
     }
 
     // The names of the composer and the performer in `search_filter()`, if
     // any. The ones picked can differ for a moment, while the albums of new
     // ones are read
-    pub fn search_pick_names(&self) -> PickNames {
+    fn search_pick_names(&self) -> PickNames {
         let imp = self.imp();
         let filter = imp.search_filter.borrow();
         PickNames {
@@ -1850,7 +1859,7 @@ impl LibraryView {
     pub fn selected_albums(&self) -> Vec<(String, TrackFilter)> {
         let imp = self.imp();
         let selected = imp.selected.borrow();
-        let filter = self.search_filter();
+        let filter = self.taken().0;
         let Some(model) = imp.grid_view.model() else {
             return Vec::new();
         };
@@ -1892,9 +1901,11 @@ impl LibraryView {
     fn update_selection(&self) {
         let imp = self.imp();
         let n_selected = imp.selected.borrow().len() as u32;
-        // During a search, the number of tracks the buttons take, as they
-        // take only those that match it
-        let matching = imp.search_matches.borrow().as_ref().map(|matches| {
+        // During a search on the Tracks page, the number of tracks the
+        // buttons take, as they take only those that match it
+        let matches = imp.search_matches.borrow();
+        let matches = matches.as_ref().filter(|_| imp.page.get().takes_matches());
+        let matching = matches.map(|matches| {
             imp.selected
                 .borrow()
                 .iter()
@@ -1930,15 +1941,6 @@ impl LibraryView {
             }
         };
         imp.selected_label.set_label(&label);
-
-        let partial = imp
-            .selected
-            .borrow()
-            .iter()
-            .any(|id| self.partly_matches(id));
-        if imp.selection_partly_matched.replace(partial) != partial {
-            self.notify_selection_partly_matched();
-        }
 
         let can_add = n_selected > 0 && !imp.loading.get();
         imp.play_albums_button.set_sensitive(can_add);

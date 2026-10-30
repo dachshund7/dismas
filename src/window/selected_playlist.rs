@@ -94,14 +94,10 @@ impl Window {
         imp.playlist_view.set_playlists_menu(menu.upcast_ref());
 
         // The other playlists the Add buttons can add to
-        let whole_album = [i18n("Play Whole Album"), i18n("Add Whole Album")];
-        imp.album_tracks.set_add_menu(
-            self.add_button_menu("album-tracks", whole_album)
-                .upcast_ref(),
-        );
-        let whole_albums = [i18n("Play Whole Albums"), i18n("Add Whole Albums")];
+        imp.album_tracks
+            .set_add_menu(self.add_button_menu("album-tracks").upcast_ref());
         imp.library_view
-            .set_add_menu(self.add_button_menu("albums", whole_albums).upcast_ref());
+            .set_add_menu(self.add_button_menu("albums").upcast_ref());
     }
 
     // The label of the buttons that add tracks to the selected playlist

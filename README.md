@@ -55,8 +55,9 @@ What Dismas adds
   accents don't matter, so "dvorak" finds Dvořák. With the Work Hierarchy
   plugin, a work is also found by its other names on MusicBrainz, such as
   "Trout" for Schubert's "Forellenquintett". Searching the albums shows
-  each album with only the tracks that match, and adding or playing it takes
-  only those; its menu has Play Whole Album and Add Whole Album. The button
+  the albums with a track that matches, and adding or playing one takes the
+  whole album. The Tracks page shows the same albums, with how many of their
+  tracks match, and adding or playing one there takes only those. The button
   next to the queue's search plays only the tracks it found, in place of the
   queue, with an Undo. The Composers button next to the album search lists
   the composers of your albums, sorted by their last names; pick one to see
@@ -312,8 +313,8 @@ Keyboard shortcuts
 | Ctrl+I                           | Track information                              |
 | Ctrl+Shift+L                     | Show or hide the lyrics                        |
 | Ctrl+C                           | Copy the playing track's title and artist      |
-| Ctrl+1 to Ctrl+4                 | Player / albums / works / playlists            |
-| Ctrl+G                           | Search the albums                              |
+| Ctrl+1 to Ctrl+4                 | Player / albums / tracks / works               |
+| Ctrl+P                           | Playlists                                      |
 | Ctrl+F                           | Search the queue                               |
 | Ctrl+R                           | Shuffle, or put back the order from before     |
 | Ctrl+L                           | Remove all the tracks of the playlist          |
