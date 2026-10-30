@@ -599,6 +599,13 @@ listview.navigation-sidebar > header label.picker-section {
   margin: 12px 12px 3px 12px;
 }
 
+/* The line of a row of the works, the composers or the performers is as
+ * high as libadwaita makes a row (`.navigation-sidebar > row`), so that the
+ * line of an open work, with its covers below it, is as high as the others */
+listview.navigation-sidebar > row > box > box.row-line {
+  min-height: 36px;
+}
+
 /* The space above the albums and the tracks of the queue is a margin
  * around the scrolled area, not padding in it, so that it stays the same
  * when the list scrolls, instead of scrolling away with it */

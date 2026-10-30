@@ -2098,14 +2098,26 @@ fn name_count_factory<T: 'static>(
         let count = gtk::Label::builder()
             .css_classes(["dim-label", "numeric"])
             .build();
-        // The scrollbar is drawn over the right edge of the list
-        let line = gtk::Box::builder().spacing(12).margin_end(12).build();
+        // The scrollbar is drawn over the right edge of the list. The line
+        // is as high as the theme makes a row at least, so that its text is
+        // in the middle of the row rather than at its top, and the line of
+        // an open work, with its covers below it, is as high (style.css)
+        let line = gtk::Box::builder()
+            .spacing(12)
+            .margin_end(12)
+            .vexpand(true)
+            .css_classes(["row-line"])
+            .build();
         line.append(&name);
         line.append(&count);
         utils::set_row_tooltip(&line, item, move |object| {
             tooltip(&object.downcast_ref::<glib::BoxedAnyObject>()?.borrow::<T>())
         });
-        let row = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        // Set, so that the line's expanding doesn't spread to the list
+        let row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .vexpand(false)
+            .build();
         row.append(&line);
         item.set_child(Some(&row));
     });
