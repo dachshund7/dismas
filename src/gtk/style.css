@@ -657,14 +657,14 @@ gridview.album-grid .album-cell {
   border-radius: 12px;
 }
 
-gridview.album-grid .album-cover {
+.album-cell .album-cover {
   border-radius: 8px;
   background-color: alpha(currentColor, 0.08);
 }
 
-/* How many of the tracks of an album the search matches, when it's only
- * some of them */
-gridview.album-grid .album-cover label.match-count {
+/* How many of the tracks of an album are taken, when it's only some of
+ * them */
+.album-cell .album-cover label.match-count {
   padding: 2px 8px;
   border-radius: 999px;
   background-color: var(--accent-bg-color);
@@ -674,7 +674,7 @@ gridview.album-grid .album-cover label.match-count {
 }
 
 /* The albums being dragged */
-gridview.album-grid .album-cell.dragging,
+.album-cell.dragging,
 gridview.album-grid.dragging-selection .album-cell.selected-item {
   opacity: 0.5;
 }
@@ -701,7 +701,7 @@ gridview.album-grid.dragging-selection .album-cell.selected-item {
   font-size: 85%;
 }
 
-gridview.album-grid label.album-title {
+.album-cell label.album-title {
   font-weight: 600;
   margin-top: 3px;
 }

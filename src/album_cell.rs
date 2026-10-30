@@ -1,15 +1,16 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The content of a cell of the album grid: the cover over the album's title
-// and artist, in a box that highlights the album when it's selected in
-// selection mode, and tells screen readers whether it's selected
+// The cover of an album over its title and artist, in a box that
+// highlights the album when it's selected in selection mode, and tells
+// screen readers whether it's selected. The cover says how many of the
+// album's tracks are taken from it, when it's only some of them
 
 use std::cell::{Cell, OnceCell, RefCell};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
-use crate::library::Album;
+use crate::{i18n::i18n_f, library::Album, square_bin::SquareBin};
 
 mod imp {
     use super::*;
@@ -21,7 +22,14 @@ mod imp {
         pub selected: Cell<bool>,
         #[property(get, set = Self::set_selection_mode, explicit_notify)]
         pub selection_mode: Cell<bool>,
+        // How many of the album's tracks are taken from it, and how many it
+        // has; 0 for none when they're all taken
+        #[property(get, set = Self::set_matching)]
+        pub matching: Cell<u32>,
+        #[property(get, set = Self::set_total)]
+        pub total: Cell<u32>,
         pub picture: OnceCell<gtk::Picture>,
+        pub badge: gtk::Label,
         // The album the cell shows, and the item of the grid it's in
         pub album: RefCell<Option<Album>>,
         pub list_item: glib::WeakRef<gtk::ListItem>,
@@ -59,6 +67,16 @@ mod imp {
                 obj.notify_selection_mode();
             }
         }
+
+        fn set_matching(&self, matching: u32) {
+            self.matching.set(matching);
+            self.obj().update_badge();
+        }
+
+        fn set_total(&self, total: u32) {
+            self.total.set(total);
+            self.obj().update_badge();
+        }
     }
 }
 
@@ -69,15 +87,45 @@ glib::wrapper! {
 }
 
 impl AlbumCell {
-    // The cover has the picture the album's cover is loaded into
-    pub fn new(cover: &impl IsA<gtk::Widget>, picture: &gtk::Picture) -> Self {
+    // The cover grows with the width it's given, between these sizes
+    pub fn new(min_cover_size: i32, max_cover_size: i32) -> Self {
         let cell: Self = glib::Object::builder()
             .property("orientation", gtk::Orientation::Vertical)
             .property("spacing", 3)
             .build();
         cell.add_css_class("album-cell");
         let imp = cell.imp();
-        imp.picture.set(picture.clone()).unwrap();
+
+        let picture = gtk::Picture::builder()
+            .content_fit(gtk::ContentFit::Cover)
+            .hexpand(true)
+            .vexpand(true)
+            .build();
+        let placeholder = gtk::Image::builder()
+            .icon_name("folder-music-symbolic")
+            .pixel_size(48)
+            .hexpand(true)
+            .vexpand(true)
+            .css_classes(["dim-label"])
+            .build();
+        let overlay = gtk::Overlay::builder()
+            .overflow(gtk::Overflow::Hidden)
+            .css_classes(["album-cover"])
+            .child(&placeholder)
+            .build();
+        overlay.add_overlay(&picture);
+
+        // The number of the tracks taken and of all of them, e.g. "9 of 12"
+        let badge = &imp.badge;
+        badge.set_halign(gtk::Align::End);
+        badge.set_valign(gtk::Align::End);
+        badge.set_margin_end(6);
+        badge.set_margin_bottom(6);
+        badge.set_can_target(false);
+        badge.set_visible(false);
+        badge.add_css_class("match-count");
+        overlay.add_overlay(badge);
+        imp.picture.set(picture).unwrap();
 
         let title = &imp.title;
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -99,7 +147,7 @@ impl AlbumCell {
         artist.add_css_class("caption");
         artist.add_css_class("dim-label");
 
-        cell.append(cover);
+        cell.append(&SquareBin::new(&overlay, min_cover_size, max_cover_size));
         cell.append(title);
         cell.append(artist);
         cell
@@ -149,5 +197,21 @@ impl AlbumCell {
         } else {
             self.reset_state(gtk::AccessibleState::Selected);
         }
+    }
+
+    fn update_badge(&self) {
+        let imp = self.imp();
+        let (matching, total) = (imp.matching.get(), imp.total.get());
+        let shown = matching > 0 && matching < total;
+        if shown {
+            imp.badge.set_label(&i18n_f(
+                // Translators: The first '{}' is the number of tracks of an
+                // album that match the search, and the second the number of
+                // all of them; both must be left unmodified
+                "{} of {}",
+                &[&matching.to_string(), &total.to_string()],
+            ));
+        }
+        imp.badge.set_visible(shown);
     }
 }

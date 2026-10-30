@@ -18,11 +18,9 @@ use std::sync::LazyLock;
 use crate::{
     album_cell::AlbumCell,
     audio::{Arrangement, PerformerKind, normalize_search_text},
-    i18n::{i18n, i18n_f, i18n_k, ni18n_f},
+    i18n::{i18n, i18n_k, ni18n_f},
     library::{self, Album, AlbumSort, Counted, ScanEvent, ScanResult, TrackFilter},
-    play_stats,
-    square_bin::SquareBin,
-    utils,
+    play_stats, utils,
     work_sections::{WorkSectionModel, same_section_of},
 };
 
@@ -690,55 +688,8 @@ impl LibraryView {
             self,
             move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-
-                let picture = gtk::Picture::builder()
-                    .content_fit(gtk::ContentFit::Cover)
-                    .hexpand(true)
-                    .vexpand(true)
-                    .build();
-                let placeholder = gtk::Image::builder()
-                    .icon_name("folder-music-symbolic")
-                    .pixel_size(48)
-                    .hexpand(true)
-                    .vexpand(true)
-                    .css_classes(["dim-label"])
-                    .build();
-                let overlay = gtk::Overlay::builder()
-                    .overflow(gtk::Overflow::Hidden)
-                    .css_classes(["album-cover"])
-                    .child(&placeholder)
-                    .build();
-                overlay.add_overlay(&picture);
-                overlay.add_overlay(&match_count_badge(item));
-                let cover = SquareBin::new(&overlay, MIN_COVER_SIZE, MAX_COVER_SIZE);
-                let content = AlbumCell::new(&cover, &picture);
-
-                // GridView keeps hundreds of cells bound around the visible
-                // ones, and binds many of them again at about every frame
-                // while the grid scrolls, as its anchor moves back and forth,
-                // but it hides the ones off screen. So a cell only shows its
-                // cover while it's mapped; the cache keeps the most recent
-                // ones for when they come back into view
-                picture.connect_map(clone!(
-                    #[weak]
-                    this,
-                    #[weak]
-                    content,
-                    move |_| {
-                        let mapped = &this.imp().mapped_cells;
-                        mapped.set(mapped.get() + 1);
-                        this.show_cover(&content);
-                    }
-                ));
-                picture.connect_unmap(clone!(
-                    #[weak]
-                    this,
-                    move |picture| {
-                        picture.set_paintable(gdk::Paintable::NONE);
-                        let mapped = &this.imp().mapped_cells;
-                        mapped.set(mapped.get().saturating_sub(1));
-                    }
-                ));
+                let content = AlbumCell::new(MIN_COVER_SIZE, MAX_COVER_SIZE);
+                this.setup_cell(&content, true);
 
                 // Ctrl+click selects the album, and Shift+click in selection
                 // mode the albums from the last one clicked, like in the
@@ -767,15 +718,28 @@ impl LibraryView {
                     }
                 ));
                 content.add_controller(click);
-                this.setup_album_menu(&content, item);
-                this.setup_album_drag(&content, item, &picture);
                 content.set_list_item(item);
 
                 item.set_child(Some(&content));
 
-                item.property_expression("item")
-                    .chain_property::<Album>("selected")
-                    .bind(&content, "selected", gtk::Widget::NONE);
+                // The covers of the albums the search matches only partly
+                // say how many of their tracks it does, on the Tracks page
+                let album = item.property_expression("item");
+                album.chain_property::<Album>("selected").bind(
+                    &content,
+                    "selected",
+                    gtk::Widget::NONE,
+                );
+                album.chain_property::<Album>("matching-tracks").bind(
+                    &content,
+                    "matching",
+                    gtk::Widget::NONE,
+                );
+                album.chain_property::<Album>("track-count").bind(
+                    &content,
+                    "total",
+                    gtk::Widget::NONE,
+                );
                 this.bind_property("selection-mode", &content, "selection-mode")
                     .sync_create()
                     .build();
@@ -801,18 +765,54 @@ impl LibraryView {
         factory.upcast()
     }
 
+    // What a cell of an album does, in the grid or elsewhere: it shows its
+    // cover while it's on screen, has a menu, and is dragged
+    fn setup_cell(&self, cell: &AlbumCell, grid: bool) {
+        // GridView keeps hundreds of cells bound around the visible ones,
+        // and binds many of them again at about every frame while the grid
+        // scrolls, as its anchor moves back and forth, but it hides the ones
+        // off screen. So a cell only shows its cover while it's mapped; the
+        // cache keeps the most recent ones for when they come back into
+        // view. The cells of the grid that are mapped tell how many covers
+        // a screenful has
+        cell.picture().connect_map(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            cell,
+            move |_| {
+                if grid {
+                    let mapped = &this.imp().mapped_cells;
+                    mapped.set(mapped.get() + 1);
+                }
+                this.show_cover(&cell);
+            }
+        ));
+        cell.picture().connect_unmap(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |picture| {
+                picture.set_paintable(gdk::Paintable::NONE);
+                if grid {
+                    let mapped = &this.imp().mapped_cells;
+                    mapped.set(mapped.get().saturating_sub(1));
+                }
+            }
+        ));
+        self.setup_album_menu(cell);
+        self.setup_album_drag(cell);
+    }
+
     // A right click, or a long press on a touchscreen, opens the menu of
     // the album, like those of the tracks
-    fn setup_album_menu(&self, cell: &AlbumCell, item: &gtk::ListItem) {
+    fn setup_album_menu(&self, cell: &AlbumCell) {
         let request = clone!(
             #[weak(rename_to = this)]
             self,
             #[weak]
             cell,
-            #[weak]
-            item,
             move |x: f64, y: f64| {
-                if let Some(album) = item.item().and_downcast::<Album>() {
+                if let Some(album) = cell.album() {
                     let cell = cell.upcast_ref::<gtk::Widget>();
                     this.emit_by_name::<()>("album-menu-requested", &[&album, cell, &x, &y]);
                 }
@@ -824,14 +824,14 @@ impl LibraryView {
     // An album is dragged to a place in the playlist pane; in selection
     // mode, a selected album takes the other selected ones with it. On a
     // touchscreen, dragging scrolls the grid instead
-    fn setup_album_drag(&self, cell: &AlbumCell, item: &gtk::ListItem, picture: &gtk::Picture) {
+    fn setup_album_drag(&self, cell: &AlbumCell) {
         let drag_source = gtk::DragSource::new();
         drag_source.set_actions(gdk::DragAction::COPY);
         drag_source.connect_prepare(clone!(
             #[weak(rename_to = this)]
             self,
             #[weak]
-            item,
+            cell,
             #[upgrade_or]
             None,
             move |source, _, _| {
@@ -842,7 +842,7 @@ impl LibraryView {
                 {
                     return None;
                 }
-                let album = item.item().and_downcast::<Album>()?;
+                let album = cell.album()?;
                 let selection = this.selection_mode() && album.selected();
                 let albums = if selection {
                     this.selected_albums()
@@ -858,8 +858,6 @@ impl LibraryView {
             self,
             #[weak]
             cell,
-            #[weak]
-            picture,
             move |source, drag| {
                 let n_albums = drag
                     .content()
@@ -868,7 +866,7 @@ impl LibraryView {
                     .and_then(|value| value.get::<AlbumDrag>().ok())
                     .map_or(1, |drag| drag.albums.len());
                 gtk::DragIcon::for_drag(drag).set_child(Some(&album_drag_icon(
-                    picture.paintable().as_ref(),
+                    cell.picture().paintable().as_ref(),
                     n_albums,
                 )));
                 drag.set_hotspot(DRAG_COVER_SIZE / 2, DRAG_COVER_SIZE / 2);
@@ -2554,44 +2552,6 @@ fn thumbnail_size() -> u32 {
 
 // The copy of an album that follows the pointer while it's dragged: its
 // cover, with the number of albums when there are several
-// The badge on the cover of an album the search matches only partly,
-// with the number of its tracks that match and the number of all of them,
-// e.g. "9 of 12"
-fn match_count_badge(item: &gtk::ListItem) -> gtk::Label {
-    let badge = gtk::Label::builder()
-        .halign(gtk::Align::End)
-        .valign(gtk::Align::End)
-        .margin_end(6)
-        .margin_bottom(6)
-        .can_target(false)
-        .css_classes(["match-count"])
-        .build();
-
-    let album = item.property_expression("item");
-    let matching = album.chain_property::<Album>("matching-tracks");
-    let total = album.chain_property::<Album>("track-count");
-    gtk::ClosureExpression::new::<String>(
-        [&matching, &total],
-        glib::closure!(|_: Option<glib::Object>, matching: u32, total: u32| {
-            i18n_f(
-                // Translators: The first '{}' is the number of tracks of an
-                // album that match the search, and the second the number of
-                // all of them; both must be left unmodified
-                "{} of {}",
-                &[&matching.to_string(), &total.to_string()],
-            )
-        }),
-    )
-    .bind(&badge, "label", gtk::Widget::NONE);
-    matching
-        .chain_closure::<bool>(glib::closure!(
-            |_: Option<glib::Object>, matching: u32| matching > 0
-        ))
-        .bind(&badge, "visible", gtk::Widget::NONE);
-
-    badge
-}
-
 fn album_drag_icon(cover: Option<&gdk::Paintable>, n_albums: usize) -> gtk::Widget {
     let icon = gtk::Box::builder()
         .spacing(8)

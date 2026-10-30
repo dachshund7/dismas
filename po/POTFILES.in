@@ -23,6 +23,7 @@ src/audio/track/file_name.rs
 src/audio/track/loader.rs
 src/audio/track/work_hierarchy.rs
 src/audio/tray_controller.rs
+src/album_cell.rs
 src/album_tracks.rs
 src/booklets.rs
 src/cover_picture.rs
