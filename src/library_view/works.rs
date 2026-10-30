@@ -17,10 +17,12 @@ use crate::{
 const WORK_COVER_MIN: i32 = 120;
 const WORK_COVER_MAX: i32 = 160;
 
-// The work of the list that's open, with the covers of its albums
+// The work of the list that's open, with its key and those of the
+// arrangements listed under it, and the covers of its albums
 #[derive(Debug)]
 pub struct ExpandedWork {
     key: String,
+    keys: Vec<String>,
     name: String,
     covers: Vec<WorkCover>,
 }
@@ -37,7 +39,8 @@ pub struct PendingWork {
 
 // The cover of an album a work is recorded on: how many of the album's
 // tracks are the work's, and how many it has, who performs it there and
-// when, and its recordings there, which can be favorites
+// when, and its recordings there, which can be favorites, and what they
+// are if they're all of an arrangement listed under the work
 #[derive(Debug)]
 struct WorkCover {
     album: Album,
@@ -45,6 +48,7 @@ struct WorkCover {
     total: u32,
     subtitle: String,
     recordings: Vec<FavoriteRecording>,
+    arrangement: Option<Arrangement>,
     favorite: bool,
 }
 
@@ -173,6 +177,18 @@ impl LibraryView {
         self.imp().work_rows.borrow().get(key)?.upgrade()
     }
 
+    // The position of the work that a work is listed under, itself or the
+    // work it arranges, and the work there
+    fn listing(&self, key: &str) -> Option<(u32, library::WorkInfo)> {
+        let store = self.imp().works.borrow().clone()?;
+        (0..store.n_items()).find_map(|i| {
+            let item = store.item(i).and_downcast::<glib::BoxedAnyObject>()?;
+            let work = item.borrow::<library::WorkInfo>();
+            let listed = work.key == key || work.arrangements.iter().any(|a| a.key == key);
+            listed.then(|| (i, work.clone()))
+        })
+    }
+
     // The position of a work in the list
     fn work_position(&self, key: &str) -> Option<u32> {
         let store = self.imp().works.borrow().clone()?;
@@ -188,7 +204,7 @@ impl LibraryView {
     pub(super) fn taken_from_open_work(&self) -> (TrackFilter, PickNames) {
         let work = self.imp().expanded_work.borrow();
         work.as_ref()
-            .map(|work| taken_from_work(work.key.clone(), work.name.clone()))
+            .map(|work| taken_from_work(work.keys.clone(), work.name.clone()))
             .unwrap_or_default()
     }
 
@@ -229,7 +245,7 @@ impl LibraryView {
         if self.is_work_open(&work.key) {
             self.close_work(true);
         } else {
-            self.open_work(work.key.clone(), work.name.clone(), true, None);
+            self.open_work(work, true, None);
         }
     }
 
@@ -251,14 +267,18 @@ impl LibraryView {
 
     // Reads the covers of a work's albums, in a separate thread, and then
     // opens it, which closes the work that was open in the same frame. The
-    // albums are those of its recordings that the search matches, which
-    // are taken whole, as a recording is one piece of music. Opened by the
+    // albums are those of its recordings that the search matches, and of
+    // the recordings of the arrangements listed under it, which are taken
+    // whole, as a recording is one piece of music. Opened by the
     // user, it slides open, and the list glides to show its covers; the
     // cover of `album`, if any, is then pointed out. Read again, the cover
     // of `album` only takes the focus back. Covers selected among those of
     // another work are unselected, and the same work read again keeps them
-    fn open_work(&self, key: String, name: String, by_user: bool, album: Option<String>) {
+    fn open_work(&self, work: &library::WorkInfo, by_user: bool, album: Option<String>) {
         let imp = self.imp();
+        let key = work.key.clone();
+        let keys = work.keys();
+        let name = work.name.clone();
         let generation = imp.covers_generation.get().wrapping_add(1);
         imp.covers_generation.set(generation);
         let filter = self.search_filter_for_works();
@@ -267,11 +287,11 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let read_key = key.clone();
+                let read_keys = keys.clone();
                 let Ok((recordings, counts)) = gio::spawn_blocking(move || {
-                    let recordings = library::work_recordings(&read_key, &filter, &hidden);
+                    let recordings = library::work_recordings(&read_keys, &filter, &hidden);
                     let work = TrackFilter {
-                        work: Some(read_key),
+                        works: read_keys,
                         ..Default::default()
                     };
                     (recordings, library::search_albums(&work, &hidden))
@@ -284,9 +304,10 @@ impl LibraryView {
                 if imp.covers_generation.get() != generation {
                     return;
                 }
-                let covers = this.work_covers(&key, recordings, &counts);
+                let covers = this.work_covers(recordings, &counts);
                 let work = ExpandedWork {
                     key: key.clone(),
+                    keys,
                     name,
                     covers,
                 };
@@ -315,10 +336,11 @@ impl LibraryView {
 
     // One cover for each album the work is recorded on, in the order of
     // its recordings, by year, with the performers and the year of the
-    // first one there, or else the album's artist
+    // first one there, or else the album's artist. The covers of the
+    // arrangements listed under it come after its own, and say first what
+    // they are; an album with a recording of the work itself is the work's
     fn work_covers(
         &self,
-        key: &str,
         recordings: Vec<library::WorkRecording>,
         counts: &HashMap<String, (u32, u32)>,
     ) -> Vec<WorkCover> {
@@ -327,8 +349,10 @@ impl LibraryView {
             let Some(first) = recording.paths.first() else {
                 continue;
             };
+            // By the work of its own tracks, which Favorite Works finds it
+            // among the recordings of
             let favorite = FavoriteRecording {
-                work_key: key.to_string(),
+                work_key: recording.work_key.clone(),
                 album_id: recording.album_id.clone(),
                 uri: gio::File::for_path(first).uri().to_string(),
             };
@@ -337,6 +361,9 @@ impl LibraryView {
                 .find(|cover| cover.album.id_str() == recording.album_id)
             {
                 cover.recordings.push(favorite);
+                if recording.arrangement.is_none() {
+                    cover.arrangement = None;
+                }
                 continue;
             }
             let Some(album) = self.album(&recording.album_id) else {
@@ -360,9 +387,20 @@ impl LibraryView {
                 total,
                 subtitle,
                 recordings: vec![favorite],
+                arrangement: recording.arrangement,
                 favorite: false,
             });
         }
+        for cover in &mut covers {
+            if let Some(arrangement) = &cover.arrangement {
+                cover.subtitle = [arrangement.shown(), std::mem::take(&mut cover.subtitle)]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+            }
+        }
+        covers.sort_by_key(|cover| cover.arrangement.is_some());
         // On the main thread, as the favorites are read there
         for cover in &mut covers {
             cover.favorite = cover
@@ -646,8 +684,10 @@ impl LibraryView {
                 let Ok((filter, works)) = gio::spawn_blocking(move || {
                     let favorites = play_stats::favorite_work_keys();
                     let mut works = library::works(&filter, &hidden);
+                    // A favorite arrangement makes the work it's listed
+                    // under one
                     for work in &mut works {
-                        work.favorite = favorites.contains(&work.key);
+                        work.favorite = work.keys().iter().any(|key| favorites.contains(key));
                     }
                     if favorites_only {
                         works.retain(|work| work.favorite);
@@ -737,22 +777,22 @@ impl LibraryView {
             .expanded_work
             .borrow()
             .as_ref()
-            .map(|work| (work.key.clone(), work.name.clone()));
-        if let Some((key, name)) = open {
-            if self.work_position(&key).is_some() {
-                self.open_work(key, name, false, focused);
-            } else {
-                self.close_work(false);
+            .map(|work| work.key.clone());
+        if let Some(key) = open {
+            match self.listing(&key).filter(|(_, work)| work.key == key) {
+                Some((_, work)) => self.open_work(&work, false, focused),
+                None => self.close_work(false),
             }
         }
         self.reveal_pending_work();
     }
 
     // Goes to a work, as from Go to Work in the menu of a track: the list
-    // scrolls to it, it takes the focus, and it opens, pointing out the
-    // cover of `album`, if any, as if it had been clicked. That's once the
-    // works shown are read for the search as it is, and the library, which
-    // can take a moment when the page was just shown
+    // scrolls to it, or to the work it's listed under if it's an
+    // arrangement, it takes the focus, and it opens, pointing out the cover
+    // of `album`, if any, as if it had been clicked. That's once the works
+    // shown are read for the search as it is, and the library, which can
+    // take a moment when the page was just shown
     pub fn reveal_work(&self, key: &str, album: Option<&str>) {
         self.imp().pending_work.replace(Some(PendingWork {
             key: key.to_string(),
@@ -779,21 +819,13 @@ impl LibraryView {
         let Some(mut pending) = imp.pending_work.take() else {
             return;
         };
-        if let Some(pos) = self.work_position(&pending.key) {
-            let name = imp
-                .works
-                .borrow()
-                .as_ref()
-                .and_then(|store| store.item(pos))
-                .and_downcast::<glib::BoxedAnyObject>()
-                .map(|work| work.borrow::<library::WorkInfo>().name.clone())
-                .unwrap_or_default();
+        if let Some((pos, work)) = self.listing(&pending.key) {
             imp.works_revealed
                 .set(imp.works_revealed.get().wrapping_add(1));
             imp.works_list
                 .scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
             utils::focus_when_laid_out(&*imp.works_list);
-            self.open_work(pending.key, name, true, pending.album);
+            self.open_work(&work, true, pending.album);
             return;
         }
         if pending.cleared || (filter.is_empty() && !imp.favorites_button.is_active()) {
@@ -824,10 +856,28 @@ fn recordings_label(n: u32) -> String {
     )
 }
 
+// The number of the arrangements of a work listed under it, e.g. "2
+// arrangements", whose covers say what they are
+fn arrangements_label(n: usize) -> String {
+    let n = u32::try_from(n).unwrap_or(u32::MAX);
+    ni18n_f(
+        // Translators: The '{}' must be left unmodified, and it is
+        // expanded to the number of arrangements of a work in the music
+        // folders, whose recordings are listed with those of the work
+        "With {} arrangement",
+        "With {} arrangements",
+        n,
+        &[&n.to_string()],
+    )
+}
+
 // The tooltip of a work's row: its full title, what it arranges, the
-// collection it's in, and the number of its recordings, a line each
+// collection it's in, the number of its recordings, and the number of the
+// arrangements listed under it, a line each
 fn work_tooltip(work: &library::WorkInfo) -> String {
     let recordings = recordings_label(work.recordings);
+    let arrangements =
+        (!work.arrangements.is_empty()).then(|| arrangements_label(work.arrangements.len()));
     let arrangement = work.arrangement.as_ref().map(|arrangement| {
         i18n_k(
             // Translators: `{work}` must be left unmodified; it is
@@ -842,6 +892,7 @@ fn work_tooltip(work: &library::WorkInfo) -> String {
         arrangement.as_deref(),
         work.collection.as_deref(),
         Some(&recordings),
+        arrangements.as_deref(),
     ]
     .into_iter()
     .flatten()
@@ -879,12 +930,12 @@ fn work_section_factory() -> gtk::SignalListItemFactory {
     factory
 }
 
-// What's taken from the albums of a work: its tracks, under a bar that
-// names it
-pub(super) fn taken_from_work(key: String, name: String) -> (TrackFilter, PickNames) {
+// What's taken from the albums of a work: its tracks, and those of the
+// arrangements listed under it, by their `keys`, under a bar that names it
+pub(super) fn taken_from_work(keys: Vec<String>, name: String) -> (TrackFilter, PickNames) {
     (
         TrackFilter {
-            work: Some(key),
+            works: keys,
             ..Default::default()
         },
         PickNames {
@@ -1010,6 +1061,7 @@ fn fill_work_covers(view: &LibraryView, bin: &RevealBin, work: &ExpandedWork) {
         cell.set_favorite(cover.favorite);
         cell.set_work(Some(CellWork {
             key: work.key.clone(),
+            keys: work.keys.clone(),
             name: work.name.clone(),
             recordings: cover.recordings.clone(),
         }));
@@ -1043,6 +1095,7 @@ mod tests {
             title: None,
             collection: None,
             arrangement: None,
+            arrangements: Vec::new(),
             composers: Vec::new(),
             recordings,
             favorite: false,

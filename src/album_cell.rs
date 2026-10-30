@@ -24,7 +24,11 @@ use crate::{
 // albums of a work, with its name and its recordings on the album
 #[derive(Clone, Debug)]
 pub struct CellWork {
+    // The key of the work whose covers it's among, which finds its row
     pub key: String,
+    // That key and those of the arrangements listed under the work, which
+    // take their tracks from the album
+    pub keys: Vec<String>,
     pub name: String,
     pub recordings: Vec<FavoriteRecording>,
 }
@@ -174,6 +178,14 @@ impl AlbumCell {
         artist.set_hexpand(true);
         artist.add_css_class("caption");
         artist.add_css_class("dim-label");
+        // So is the line under it, which among the covers of a work names
+        // the performers after what an arrangement is
+        artist.set_has_tooltip(true);
+        artist.connect_query_tooltip(|label, _, _, _, tooltip| {
+            let text = label.label();
+            tooltip.set_text(Some(&text));
+            !text.is_empty()
+        });
 
         cell.append(&SquareBin::new(&overlay, min_cover_size, max_cover_size));
         cell.append(title);

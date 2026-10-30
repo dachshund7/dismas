@@ -15,7 +15,7 @@ mod watch;
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
     time::{Instant, UNIX_EPOCH},
 };
@@ -713,14 +713,15 @@ fn main_artists(
 // What the tracks taken from albums match: every word of a search, normalized
 // with `normalize_search_text()`, in any of their tags, a composer and a
 // performer, by their keys (`composer_key()`), and a work, by its key (see
-// `work_entry()`), as the covers of a work's albums take its tracks. An
-// empty one matches every track
+// `work_entry()`) and those of the arrangements listed under it, as the
+// covers of a work's albums take its tracks. An empty one matches every
+// track
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
     pub words: Vec<String>,
     pub composer: Option<String>,
     pub performer: Option<String>,
-    pub work: Option<String>,
+    pub works: Vec<String>,
 }
 
 impl TrackFilter {
@@ -728,7 +729,7 @@ impl TrackFilter {
         self.words.is_empty()
             && self.composer.is_none()
             && self.performer.is_none()
-            && self.work.is_none()
+            && self.works.is_empty()
     }
 
     // The SQL conditions on a track, each after " AND ", and their values;
@@ -749,9 +750,12 @@ impl TrackFilter {
             sql.push_str(" AND instr(performers, ?) > 0");
             values.push(format!("\t{key}\t"));
         }
-        if let Some(key) = &self.work {
-            sql.push_str(" AND work_key = ?");
-            values.push(key.clone());
+        if !self.works.is_empty() {
+            sql.push_str(&format!(
+                " AND work_key IN ({})",
+                placeholders(self.works.len())
+            ));
+            values.extend(self.works.iter().cloned());
         }
         (sql, values)
     }
@@ -762,6 +766,11 @@ impl TrackFilter {
     fn matches_sql(&self) -> String {
         format!("(CASE WHEN 1{} THEN 1 ELSE 0 END)", self.conditions().0)
     }
+}
+
+// The placeholders of `n` values in a list of SQL, e.g. "?, ?"
+fn placeholders(n: usize) -> String {
+    std::iter::repeat_n("?", n).join(", ")
 }
 
 // The values of a statement that has the filter's `matches_sql()` before
@@ -795,13 +804,18 @@ fn query_search_albums(
 ) -> rusqlite::Result<HashMap<String, (u32, u32)>> {
     // For a work, only the albums of its tracks, which its index finds,
     // rather than all of them
-    let (of_work, work) = match &filter.work {
-        Some(work) => (
-            " AND album_id IN (SELECT album_id FROM tracks WHERE work_key = ?)",
-            Some(rusqlite::types::Value::Text(work.clone())),
-        ),
-        None => ("", None),
+    let of_work = if filter.works.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " AND album_id IN (SELECT album_id FROM tracks WHERE work_key IN ({}))",
+            placeholders(filter.works.len())
+        )
     };
+    let works = filter
+        .works
+        .iter()
+        .map(|key| rusqlite::types::Value::Text(key.clone()));
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, SUM({}) AS matching, COUNT(*)
          FROM tracks
@@ -811,7 +825,7 @@ fn query_search_albums(
         filter.matches_sql(),
         hidden_condition("file", hidden).0
     ))?;
-    let values = filter_values(filter, hidden).into_iter().chain(work);
+    let values = filter_values(filter, hidden).into_iter().chain(works);
     stmt.query_map(rusqlite::params_from_iter(values), |row| {
         Ok((row.get(0)?, (row.get(1)?, row.get(2)?)))
     })?
@@ -1270,16 +1284,35 @@ pub struct WorkInfo {
     // For an arrangement, the work it arranges, and what it is, if
     // MusicBrainz says
     pub arrangement: Option<Arrangement>,
+    // The arrangements of it that are listed under it, rather than on
+    // their own, see `listed_under()`
+    pub arrangements: Vec<ArrangedWork>,
     pub composers: Vec<WorkComposer>,
-    // The number of its recordings that the filter matches, see
-    // `recordings_of_works()`
+    // The number of its recordings that the filter matches, those of its
+    // arrangements included, see `recordings_of_works()`
     pub recordings: u32,
     // Whether it's a favorite, or one of its recordings is; they're in the
     // play stats, as they can't be read again from the music
     pub favorite: bool,
 }
 
+// An arrangement listed under the work it arranges: its key, and what it is
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArrangedWork {
+    pub key: String,
+    pub arrangement: Arrangement,
+}
+
 impl WorkInfo {
+    // Its key and those of the arrangements listed under it, the key first,
+    // which take its tracks from the albums, see `TrackFilter`
+    pub fn keys(&self) -> Vec<String> {
+        std::iter::once(&self.key)
+            .chain(self.arrangements.iter().map(|arranged| &arranged.key))
+            .cloned()
+            .collect()
+    }
+
     // The names of its composers, as a list
     pub fn composer_names(&self) -> String {
         self.composers
@@ -1313,6 +1346,12 @@ pub struct WorkRecording {
     // a track names them, see `performers_line()`
     pub performers: String,
     pub paths: Vec<PathBuf>,
+    // The key of the work of its first track, which it's found by, e.g. as
+    // a favorite
+    pub work_key: String,
+    // What it is, if it's all of an arrangement listed under the work, see
+    // `listed_under()`
+    pub arrangement: Option<Arrangement>,
 }
 
 // A track of an album with works, as the recordings of the works are
@@ -1335,6 +1374,19 @@ struct WorkRow {
     arrangement_of: Option<String>,
     arrangement: Option<String>,
     arrangement_of_id: Option<String>,
+    // See `WorkEntry::part_ids`
+    part_ids: Vec<String>,
+}
+
+impl WorkRow {
+    // The work its work arranges, if it's an arrangement
+    fn arrangement(&self) -> Option<Arrangement> {
+        Some(Arrangement {
+            of: self.arrangement_of.clone()?,
+            of_id: self.arrangement_of_id.clone(),
+            label: self.arrangement.clone().filter(|label| !label.is_empty()),
+        })
+    }
 }
 
 // Whether a track of the albums of the grid is part of a work, without the
@@ -1348,8 +1400,9 @@ pub fn has_works(hidden: &[PathBuf]) -> bool {
 // The works of the albums of the grid with a recording that the filter
 // matches, by their composers' sort names and then their names, with the
 // numbers in them in order, e.g. "no. 2" before "no. 10"; the works
-// without a composer are last. The tracks in the `hidden` folders are left
-// out
+// without a composer are last. An arrangement of one of them is listed
+// under it rather than on its own, see `listed_under()`. The tracks in the
+// `hidden` folders are left out
 pub fn works(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkInfo> {
     query_or_default("list the works", |conn| query_works(conn, filter, hidden))
 }
@@ -1359,8 +1412,8 @@ fn query_works(
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkInfo>> {
-    let rows = query_work_rows(conn, filter, None, hidden)?;
-    Ok(works_of_rows(&rows))
+    let rows = query_work_rows(conn, filter, &[], hidden)?;
+    Ok(works_of_rows(&rows, true))
 }
 
 // The works of the albums of the grid, sorted as in `works()`, each with
@@ -1377,14 +1430,14 @@ fn query_work_recording_paths(
     conn: &Connection,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<(WorkInfo, Vec<Vec<PathBuf>>)>> {
-    let rows = query_work_rows(conn, &TrackFilter::default(), None, hidden)?;
+    let rows = query_work_rows(conn, &TrackFilter::default(), &[], hidden)?;
     let mut recordings: HashMap<&str, Vec<Vec<PathBuf>>> = HashMap::new();
-    for recording in recordings_of_works(&rows) {
+    for recording in recordings_of_works(&rows, |row| &row.work) {
         let work = rows[recording[0]].work.as_str();
         let paths = recording.iter().map(|&i| rows[i].path.clone()).collect();
         recordings.entry(work).or_default().push(paths);
     }
-    Ok(works_of_rows(&rows)
+    Ok(works_of_rows(&rows, false)
         .into_iter()
         .filter_map(|work| {
             let paths = recordings.remove(work.key.as_str())?;
@@ -1394,13 +1447,13 @@ fn query_work_recording_paths(
 }
 
 // The works of the rows with a recording that the filter matches, sorted
-// as in `works()`
-fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
-    // The recordings of a work that the filter matches, and how often each
-    // of its names is given, by all its tracks
+// as in `works()`. With `fold`, the arrangements of a work among them are
+// listed under it, see `listed_under()`, and their recordings count as
+// its own
+fn works_of_rows(rows: &[WorkRow], fold: bool) -> Vec<WorkInfo> {
+    // How often each of the names of a work is given, by all its tracks
     #[derive(Default)]
     struct Seen<'a> {
-        recordings: u32,
         names: HashMap<&'a str, usize>,
         titles: HashMap<&'a str, usize>,
         collections: HashMap<&'a str, usize>,
@@ -1416,35 +1469,28 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
     }
 
     let mut seen: HashMap<&str, Seen> = HashMap::new();
-    for recording in recordings_of_works(rows) {
-        let rows: Vec<&WorkRow> = recording.into_iter().map(|i| &rows[i]).collect();
-        let work = seen.entry(&rows[0].work).or_default();
-        if rows.iter().any(|row| row.matching) {
-            work.recordings += 1;
-        }
-        for row in rows {
-            count_some(&mut work.names, row.name.as_deref());
-            count_some(&mut work.titles, row.title.as_deref());
-            count_some(&mut work.collections, row.collection.as_deref());
-            count_some(&mut work.composers, row.composers.as_deref());
-            count_some(&mut work.arrangements_of, row.arrangement_of.as_deref());
-            count_some(&mut work.arrangements, row.arrangement.as_deref());
-            count_some(
-                &mut work.arrangement_of_ids,
-                row.arrangement_of_id.as_deref(),
-            );
-        }
+    for row in rows {
+        let work = seen.entry(&row.work).or_default();
+        count_some(&mut work.names, row.name.as_deref());
+        count_some(&mut work.titles, row.title.as_deref());
+        count_some(&mut work.collections, row.collection.as_deref());
+        count_some(&mut work.composers, row.composers.as_deref());
+        count_some(&mut work.arrangements_of, row.arrangement_of.as_deref());
+        count_some(&mut work.arrangements, row.arrangement.as_deref());
+        count_some(
+            &mut work.arrangement_of_ids,
+            row.arrangement_of_id.as_deref(),
+        );
     }
 
     let most = |counts: HashMap<&str, usize>| Some(most_common(counts)).filter(|s| !s.is_empty());
-    let works: Vec<WorkInfo> = seen
+    let mut works: HashMap<&str, WorkInfo> = seen
         .into_iter()
-        .filter(|(_, seen)| seen.recordings > 0)
         .map(|(key, seen)| {
             let composers = most(seen.composers)
                 .map(|entries| work_composers(&entries))
                 .unwrap_or_default();
-            WorkInfo {
+            let work = WorkInfo {
                 key: key.to_owned(),
                 name: most(seen.names).unwrap_or_default(),
                 title: most(seen.titles),
@@ -1454,13 +1500,126 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                     of_id: most(seen.arrangement_of_ids),
                     label: most(seen.arrangements),
                 }),
+                arrangements: Vec::new(),
                 composers,
-                recordings: seen.recordings,
+                recordings: 0,
                 favorite: false,
-            }
+            };
+            (key, work)
         })
         .collect();
-    sort_works(works)
+
+    let listed = if fold {
+        listed_under(rows, &works)
+    } else {
+        HashMap::new()
+    };
+    let work_of = |key: &str| listed.get(key).copied().unwrap_or(key).to_owned();
+    for recording in recordings_of_works(rows, |row| split_recording_work(row, &listed)) {
+        if recording.iter().any(|&i| rows[i].matching)
+            && let Some(work) = works.get_mut(work_of(&rows[recording[0]].work).as_str())
+        {
+            work.recordings += 1;
+        }
+    }
+    let mut arranged: Vec<(&str, &str)> = listed.into_iter().collect();
+    arranged.sort_unstable();
+    for (key, under) in arranged {
+        if let Some(arrangement) = works.remove(key).and_then(|work| work.arrangement)
+            && let Some(work) = works.get_mut(under)
+        {
+            work.arrangements.push(ArrangedWork {
+                key: key.to_owned(),
+                arrangement,
+            });
+        }
+    }
+    sort_works(
+        works
+            .into_values()
+            .filter(|work| work.recordings > 0)
+            .collect(),
+    )
+}
+
+// The arrangements among the works, by key, each with the work it's listed
+// under on the Works page rather than on its own: the work it arranges,
+// found by its MusicBrainz id, or, for an arrangement whose tracks are
+// movements, as the tags make an arrangement of a single movement, the
+// work with that movement among its parts, the first by key if there are
+// several. Only when the two share a composer, as an arrangement that
+// MusicBrainz credits to the arranger alone is a work of theirs, and a
+// whole work that arranges a single movement, e.g. Barber's Adagio for
+// Strings, stays on its own too. An arrangement of an arrangement goes
+// under the work that's listed on its own
+fn listed_under<'a>(
+    rows: &'a [WorkRow],
+    works: &HashMap<&'a str, WorkInfo>,
+) -> HashMap<&'a str, &'a str> {
+    let mut with_part: HashMap<&str, BTreeSet<&str>> = HashMap::new();
+    let mut of_movements: HashSet<&str> = HashSet::new();
+    for row in rows {
+        for id in &row.part_ids {
+            with_part.entry(id).or_default().insert(&row.work);
+        }
+        if row.order.is_some() {
+            of_movements.insert(&row.work);
+        }
+    }
+    let share_a_composer = |a: &WorkInfo, b: &WorkInfo| {
+        a.composer_keys()
+            .any(|key| b.composer_keys().contains(&key))
+    };
+
+    let mut parents: HashMap<&str, &str> = HashMap::new();
+    for (&key, work) in works {
+        let Some(of_id) = work.arrangement.as_ref().and_then(|a| a.of_id.as_deref()) else {
+            continue;
+        };
+        let arranged = works.get_key_value(of_id).map(|(&key, _)| key);
+        let with_movement = with_part
+            .get(of_id)
+            .filter(|_| of_movements.contains(key))
+            .into_iter()
+            .flatten()
+            .copied();
+        if let Some(parent) = arranged
+            .into_iter()
+            .chain(with_movement)
+            .find(|&parent| parent != key && share_a_composer(work, &works[parent]))
+        {
+            parents.insert(key, parent);
+        }
+    }
+    // Up to the work that's on its own, leaving out a loop
+    parents
+        .keys()
+        .filter_map(|&key| {
+            let mut passed = HashSet::from([key]);
+            let mut under = parents[key];
+            while let Some(&next) = parents.get(under) {
+                if !passed.insert(under) {
+                    return None;
+                }
+                under = next;
+            }
+            Some((key, under))
+        })
+        .collect()
+}
+
+// The work a track's recording is one of, with the arrangements `listed`
+// under another work: a movement of an arrangement goes with those of
+// the work, as MusicBrainz sometimes links some of the movements of a
+// recording to an arrangement of the work, and a recording split between
+// the two is one recording. The tracks of whole works keep their own, as
+// an arrangement of a movement next to the work on an album is a
+// recording of its own, e.g. its Chaconne on the lute after a partita
+fn split_recording_work<'a>(row: &'a WorkRow, listed: &HashMap<&'a str, &'a str>) -> &'a str {
+    match listed.get(row.work.as_str()) {
+        Some(under) if row.order.is_some() => under,
+        _ => &row.work,
+    }
 }
 
 // Where a work goes among the works of its composers, by its catalogue
@@ -1538,8 +1697,9 @@ fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
     sorted.into_iter().map(|(_, work)| work).collect()
 }
 
-// The key of the work of a track, if it's part of one in the library, as
-// the Works page lists it, without the tracks in the `hidden` folders
+// The key of the work of a track, if it's part of one in the library,
+// without the tracks in the `hidden` folders; the Works page lists an
+// arrangement under the work it arranges, see `listed_under()`
 pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<String> {
     query_or_default("look up the work of a track", |conn| {
         query_track_work(conn, path, hidden)
@@ -1561,7 +1721,12 @@ fn query_track_work(
     let Some(key) = key else {
         return Ok(None);
     };
-    let rows = query_work_rows(conn, &TrackFilter::default(), Some(&key), hidden)?;
+    let rows = query_work_rows(
+        conn,
+        &TrackFilter::default(),
+        std::slice::from_ref(&key),
+        hidden,
+    )?;
     Ok((!rows.is_empty()).then_some(key))
 }
 
@@ -1589,11 +1754,15 @@ fn query_find_recording(
     uri: &str,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Option<WorkRecording>> {
-    let mut on_album: Vec<WorkRecording> =
-        query_work_recordings(conn, work_key, &TrackFilter::default(), hidden)?
-            .into_iter()
-            .filter(|recording| recording.album_id == album_id)
-            .collect();
+    let mut on_album: Vec<WorkRecording> = query_work_recordings(
+        conn,
+        &[work_key.to_owned()],
+        &TrackFilter::default(),
+        hidden,
+    )?
+    .into_iter()
+    .filter(|recording| recording.album_id == album_id)
+    .collect();
     let starts_at = |recording: &WorkRecording| {
         recording
             .paths
@@ -1604,45 +1773,66 @@ fn query_find_recording(
     Ok((index < on_album.len()).then(|| on_album.swap_remove(index)))
 }
 
-// The recordings of a work that the filter matches, with all their
-// tracks, see `recordings_of_works()`, by the year of their albums, those
-// without one last, and then by the albums' titles. The tracks in the
-// `hidden` folders are left out
-pub fn work_recordings(key: &str, filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkRecording> {
+// The recordings of a work that the filter matches, and those of the
+// arrangements listed under it, `keys` being its key and theirs, see
+// `WorkInfo::keys()`, with all their tracks, see `recordings_of_works()`,
+// by the year of their albums, those without one last, and then by the
+// albums' titles. The tracks in the `hidden` folders are left out
+pub fn work_recordings(
+    keys: &[String],
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+) -> Vec<WorkRecording> {
     query_or_default("list the recordings of a work", |conn| {
-        query_work_recordings(conn, key, filter, hidden)
+        query_work_recordings(conn, keys, filter, hidden)
     })
 }
 
 fn query_work_recordings(
     conn: &Connection,
-    key: &str,
+    keys: &[String],
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkRecording>> {
-    let rows = query_work_rows(conn, filter, Some(key), hidden)?;
-    let mut recordings: Vec<(_, WorkRecording)> = recordings_of_works(&rows)
+    let rows = query_work_rows(conn, filter, keys, hidden)?;
+    let (work, arrangements) = keys.split_first().unzip();
+    let listed: HashMap<&str, &str> = arrangements
         .into_iter()
-        .map(|recording| recording.into_iter().map(|i| &rows[i]).collect::<Vec<_>>())
-        .filter(|rows| rows.iter().any(|row| row.matching))
-        .map(|rows| {
-            let album = rows.iter().find_map(|row| row.album.as_deref());
-            let collation = glib::CollationKey::from(album.unwrap_or_default());
-            let recording = WorkRecording {
-                album_id: rows[0].album_id.clone(),
-                year: rows
-                    .iter()
-                    .filter_map(|row| row.year.as_deref())
-                    .min()
-                    .map(str::to_owned),
-                performers: performers_line(
-                    rows.iter().filter_map(|row| row.performers.as_deref()),
-                ),
-                paths: rows.iter().map(|row| row.path.clone()).collect(),
-            };
-            (collation, recording)
-        })
+        .flatten()
+        .zip(std::iter::repeat(
+            work.map(String::as_str).unwrap_or_default(),
+        ))
+        .map(|(key, work)| (key.as_str(), work))
         .collect();
+    let mut recordings: Vec<(_, WorkRecording)> =
+        recordings_of_works(&rows, |row| split_recording_work(row, &listed))
+            .into_iter()
+            .map(|recording| recording.into_iter().map(|i| &rows[i]).collect::<Vec<_>>())
+            .filter(|rows| rows.iter().any(|row| row.matching))
+            .map(|rows| {
+                let album = rows.iter().find_map(|row| row.album.as_deref());
+                let collation = glib::CollationKey::from(album.unwrap_or_default());
+                let recording = WorkRecording {
+                    album_id: rows[0].album_id.clone(),
+                    year: rows
+                        .iter()
+                        .filter_map(|row| row.year.as_deref())
+                        .min()
+                        .map(str::to_owned),
+                    performers: performers_line(
+                        rows.iter().filter_map(|row| row.performers.as_deref()),
+                    ),
+                    paths: rows.iter().map(|row| row.path.clone()).collect(),
+                    work_key: rows[0].work.clone(),
+                    arrangement: rows
+                        .iter()
+                        .all(|row| listed.contains_key(row.work.as_str()))
+                        .then(|| rows[0].arrangement())
+                        .flatten(),
+                };
+                (collation, recording)
+            })
+            .collect();
     // By year, those without one last, then by album
     recordings.sort_by(|(a_album, a), (b_album, b)| {
         (a.year.is_none(), &a.year, a_album, &a.album_id).cmp(&(
@@ -1658,31 +1848,35 @@ fn query_work_recordings(
         .collect())
 }
 
-// The tracks of the works, or of the work of `key`, in the order of their
-// albums; the other tracks of the albums don't split the recordings of a
-// work, see `recordings_of_works()`
+// The tracks of the works, or of the works of `keys`, in the order of
+// their albums; the other tracks of the albums don't split the recordings
+// of a work, see `recordings_of_works()`
 fn query_work_rows(
     conn: &Connection,
     filter: &TrackFilter,
-    key: Option<&str>,
+    keys: &[String],
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkRow>> {
-    let key_sql = if key.is_some() {
-        " AND work_key = ?"
+    let key_sql = if keys.is_empty() {
+        String::new()
     } else {
-        ""
+        format!(" AND work_key IN ({})", placeholders(keys.len()))
     };
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, path, work_key, movement_order, {},
                 work, work_title, work_collection, work_composers, album, year, performers,
-                disc, track, work_arrangement_of, work_arrangement, work_arrangement_of_id
+                disc, track, work_arrangement_of, work_arrangement, work_arrangement_of_id,
+                work_part_ids
          FROM tracks
          WHERE album_id IS NOT NULL AND work_key IS NOT NULL{}{key_sql}",
         filter.matches_sql(),
         hidden_condition("file", hidden).0
     ))?;
     let mut params = filter_values(filter, hidden);
-    params.extend(key.map(|key| rusqlite::types::Value::Text(key.to_string())));
+    params.extend(
+        keys.iter()
+            .map(|key| rusqlite::types::Value::Text(key.clone())),
+    );
     let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
         let order = row.get::<_, Option<String>>(3)?.map(|order| {
             order
@@ -1709,6 +1903,10 @@ fn query_work_rows(
             arrangement_of: row.get(14)?,
             arrangement: row.get(15)?,
             arrangement_of_id: row.get(16)?,
+            part_ids: row
+                .get::<_, Option<String>>(17)?
+                .map(|ids| ids.lines().map(ToString::to_string).collect())
+                .unwrap_or_default(),
         };
         Ok((track_order, row))
     })?;
@@ -1718,7 +1916,8 @@ fn query_work_rows(
 }
 
 // The recordings of the works, as the indices of their rows, which are in
-// the order of their albums: the tracks of an album with the same work.
+// the order of their albums: the tracks of an album with the same work,
+// which `work_of` gives for each row.
 // They're not always in the order of the work, as in The Art of Fugue, nor
 // next to each other, as in recitals that mix the pieces of a collection
 // with others, and MusicBrainz links some of the tracks of an opera to the
@@ -1726,7 +1925,10 @@ fn query_work_rows(
 // unless a movement comes again, as on an album with two recordings of the
 // work. The parts of a movement in several tracks have its place, one
 // after the other
-fn recordings_of_works(rows: &[WorkRow]) -> Vec<Vec<usize>> {
+fn recordings_of_works<'a>(
+    rows: &'a [WorkRow],
+    work_of: impl Fn(&'a WorkRow) -> &'a str,
+) -> Vec<Vec<usize>> {
     // For each work of the album being read, its last recording, and the
     // places of the movements in it
     struct Open<'a> {
@@ -1740,7 +1942,7 @@ fn recordings_of_works(rows: &[WorkRow]) -> Vec<Vec<usize>> {
         if i > 0 && rows[i - 1].album_id != row.album_id {
             open.clear();
         }
-        let work = row.work.as_str();
+        let work = work_of(row);
         let continues = open.get(work).is_some_and(|open| match &row.order {
             Some(place) if !place.is_empty() => {
                 let last = &rows[*recordings[open.recording].last().unwrap()];
@@ -4759,6 +4961,432 @@ mod tests {
     }
 
     #[test]
+    fn arrangements_are_listed_under_the_works_they_arrange() {
+        use std::collections::HashMap;
+
+        use super::TrackFilter;
+
+        let conn = test_db();
+        let bach = "\njohann sebastian bach\tJohann Sebastian Bach\tBach, Johann Sebastian\n";
+        let schubert = "\nfranz schubert\tFranz Schubert\tSchubert, Franz\n";
+        let liszt = "\nfranz liszt\tFranz Liszt\tLiszt, Franz\n";
+        let barber = "\nsamuel barber\tSamuel Barber\tBarber, Samuel\n";
+        // (path, track, key, composers, order, the id of the work it
+        // arranges, what it is, the ids of its parts, search)
+        type Row<'a> = (
+            &'a str,
+            u32,
+            &'a str,
+            &'a str,
+            Option<&'a str>,
+            Option<&'a str>,
+            &'a str,
+            Option<&'a str>,
+            &'a str,
+        );
+        let rows: &[Row] = &[
+            // A partita, and the catch-all for its arrangements, whole in a
+            // track after it on the same album and on an album of its own
+            (
+                "/m/violin/01",
+                1,
+                "partita",
+                bach,
+                Some("1"),
+                None,
+                "",
+                Some("allemande"),
+                "",
+            ),
+            (
+                "/m/violin/02",
+                2,
+                "partita",
+                bach,
+                Some("5"),
+                None,
+                "",
+                Some("chaconne"),
+                "",
+            ),
+            (
+                "/m/violin/03",
+                3,
+                "lute",
+                bach,
+                None,
+                Some("partita"),
+                "",
+                None,
+                "",
+            ),
+            (
+                "/m/lute/01",
+                1,
+                "lute",
+                bach,
+                None,
+                Some("partita"),
+                "",
+                None,
+                "",
+            ),
+            // An arrangement of its own, and an arrangement of that one
+            (
+                "/m/piano/01",
+                1,
+                "busoni",
+                bach,
+                None,
+                Some("partita"),
+                "for piano, Busoni",
+                None,
+                "",
+            ),
+            (
+                "/m/pianos/01",
+                1,
+                "pianos",
+                bach,
+                None,
+                Some("busoni"),
+                "for two pianos",
+                None,
+                "",
+            ),
+            // A song of a cycle arranged for a piano trio, which the tags
+            // make a movement of the cycle, and a paraphrase of it credited
+            // to the arranger, which stays on its own
+            (
+                "/m/lieder/04",
+                4,
+                "d957",
+                schubert,
+                Some("4"),
+                None,
+                "",
+                Some("standchen"),
+                "",
+            ),
+            (
+                "/m/trio/13",
+                13,
+                "standchen",
+                schubert,
+                Some("4"),
+                Some("standchen"),
+                "",
+                None,
+                "trio",
+            ),
+            (
+                "/m/liszt/07",
+                7,
+                "paraphrase",
+                liszt,
+                Some("4"),
+                Some("standchen"),
+                "",
+                None,
+                "",
+            ),
+            // A whole work that arranges a movement stays on its own
+            (
+                "/m/quartet/02",
+                2,
+                "op11",
+                barber,
+                Some("2"),
+                None,
+                "",
+                Some("molto"),
+                "",
+            ),
+            (
+                "/m/strings/01",
+                1,
+                "adagio",
+                barber,
+                None,
+                Some("molto"),
+                "",
+                None,
+                "",
+            ),
+            // An arrangement whose original isn't in the library
+            (
+                "/m/other/01",
+                1,
+                "orphan",
+                bach,
+                None,
+                Some("missing"),
+                "",
+                None,
+                "",
+            ),
+            // A recording whose last movement MusicBrainz links to an
+            // arrangement of the first
+            (
+                "/m/sonn/01",
+                1,
+                "bwv80",
+                bach,
+                Some("1"),
+                None,
+                "",
+                Some("bwv80-1"),
+                "",
+            ),
+            (
+                "/m/sonn/02",
+                2,
+                "bwv80",
+                bach,
+                Some("2"),
+                None,
+                "",
+                Some("bwv80-2"),
+                "",
+            ),
+            (
+                "/m/sonn/08",
+                8,
+                "chorale",
+                bach,
+                Some("8"),
+                Some("bwv80-1"),
+                "",
+                None,
+                "",
+            ),
+            // A song in two works, which an arrangement of it goes under
+            // the first of by key, every time
+            (
+                "/m/cycle/01",
+                1,
+                "cycle",
+                schubert,
+                Some("1"),
+                None,
+                "",
+                Some("song"),
+                "",
+            ),
+            (
+                "/m/set/01",
+                1,
+                "collection",
+                schubert,
+                Some("1"),
+                None,
+                "",
+                Some("song"),
+                "",
+            ),
+            (
+                "/m/song/01",
+                1,
+                "song-arr",
+                schubert,
+                Some("1"),
+                Some("song"),
+                "",
+                None,
+                "",
+            ),
+            // Two arrangements of each other
+            (
+                "/m/loop/01",
+                1,
+                "loop-a",
+                bach,
+                None,
+                Some("loop-b"),
+                "",
+                None,
+                "",
+            ),
+            (
+                "/m/loop/02",
+                2,
+                "loop-b",
+                bach,
+                None,
+                Some("loop-a"),
+                "",
+                None,
+                "",
+            ),
+        ];
+        for (path, track, key, composers, order, of_id, label, parts, search) in rows {
+            let album = path.split('/').nth(2).unwrap();
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album, track,
+                                     search, work_key, work, work_composers, movement_order,
+                                     work_arrangement_of, work_arrangement,
+                                     work_arrangement_of_id, work_part_ids)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![
+                    path.as_bytes(),
+                    album,
+                    track,
+                    search,
+                    key,
+                    composers,
+                    order,
+                    of_id.map(|_| "the work it arranges"),
+                    of_id.map(|_| *label),
+                    of_id,
+                    parts
+                ],
+            )
+            .unwrap();
+        }
+        let works = |filter: &TrackFilter| {
+            let mut works = super::query_works(&conn, filter, &[])
+                .unwrap()
+                .into_iter()
+                .map(|work| {
+                    let arrangements = work
+                        .arrangements
+                        .iter()
+                        .map(|arranged| arranged.key.clone())
+                        .collect::<Vec<_>>();
+                    (work.key, work.recordings, arrangements)
+                })
+                .collect::<Vec<_>>();
+            works.sort();
+            works
+        };
+        let strings = |keys: &[&str]| keys.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let work = |key: &str, recordings, arrangements: &[&str]| {
+            (key.to_string(), recordings, strings(arrangements))
+        };
+        assert_eq!(
+            works(&TrackFilter::default()),
+            [
+                work("adagio", 1, &[]),
+                work("bwv80", 1, &["chorale"]),
+                work("collection", 2, &["song-arr"]),
+                work("cycle", 1, &[]),
+                work("d957", 2, &["standchen"]),
+                work("loop-a", 1, &[]),
+                work("loop-b", 1, &[]),
+                work("op11", 1, &[]),
+                work("orphan", 1, &[]),
+                work("paraphrase", 1, &[]),
+                work("partita", 5, &["busoni", "lute", "pianos"]),
+            ]
+        );
+        // A search that only finds the arrangement finds the work it's
+        // listed under
+        let trio = TrackFilter {
+            words: vec!["trio".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(works(&trio), [work("d957", 1, &["standchen"])]);
+
+        // The recordings of a work and of its arrangements, each found by the
+        // work of its own tracks, and saying what it is if it's all of an
+        // arrangement; the movements of the arrangement are one recording
+        // with those of the work, but the whole works are recordings of
+        // their own
+        let recordings = |keys: &[&str]| {
+            super::query_work_recordings(&conn, &strings(keys), &TrackFilter::default(), &[])
+                .unwrap()
+                .into_iter()
+                .map(|recording| {
+                    let paths = recording
+                        .paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect::<Vec<_>>();
+                    let arrangement = recording.arrangement.map(|a| a.shown());
+                    (paths, recording.work_key, arrangement)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            recordings(&["bwv80", "chorale"]),
+            [(
+                strings(&["/m/sonn/01", "/m/sonn/02", "/m/sonn/08"]),
+                "bwv80".to_string(),
+                None
+            )]
+        );
+        let mut partita = recordings(&["partita", "busoni", "lute", "pianos"]);
+        partita.sort();
+        assert_eq!(
+            partita,
+            [
+                (
+                    strings(&["/m/lute/01"]),
+                    "lute".to_string(),
+                    Some("arrangement".to_string())
+                ),
+                (
+                    strings(&["/m/piano/01"]),
+                    "busoni".to_string(),
+                    Some("for piano, Busoni".to_string())
+                ),
+                (
+                    strings(&["/m/pianos/01"]),
+                    "pianos".to_string(),
+                    Some("for two pianos".to_string())
+                ),
+                (
+                    strings(&["/m/violin/01", "/m/violin/02"]),
+                    "partita".to_string(),
+                    None
+                ),
+                (
+                    strings(&["/m/violin/03"]),
+                    "lute".to_string(),
+                    Some("arrangement".to_string())
+                ),
+            ]
+        );
+        // The covers of the work take the tracks of its arrangements
+        let partita = TrackFilter {
+            works: strings(&["partita", "busoni", "lute", "pianos"]),
+            ..Default::default()
+        };
+        let mut albums = super::query_search_albums(&conn, &partita, &[])
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>();
+        albums.sort();
+        assert_eq!(
+            albums,
+            [
+                ("lute".to_string(), (1, 1)),
+                ("piano".to_string(), (1, 1)),
+                ("pianos".to_string(), (1, 1)),
+                ("violin".to_string(), (3, 3)),
+            ]
+        );
+
+        // Random Work and Favorite Works still find each arrangement as a
+        // work of its own
+        let all_recordings = super::query_work_recording_paths(&conn, &[])
+            .unwrap()
+            .into_iter()
+            .map(|(work, recordings)| (work.key, recordings.len()))
+            .filter(|(key, _)| ["bwv80", "chorale", "partita", "lute"].contains(&key.as_str()))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            all_recordings,
+            HashMap::from([
+                ("bwv80".to_string(), 1),
+                ("chorale".to_string(), 1),
+                ("partita".to_string(), 1),
+                ("lute".to_string(), 2),
+            ])
+        );
+    }
+
+    #[test]
     fn works_are_listed_with_their_recordings() {
         let conn = test_db();
         let dvorak = "\nantonin dvorak\tAntonín Dvořák\tDvořák, Antonín\n";
@@ -5086,7 +5714,7 @@ mod tests {
         // The recordings, each with all its tracks and the performers of
         // all of them, by year, those without one last
         let recordings = |key: &str, filter: &super::TrackFilter| {
-            super::query_work_recordings(&conn, key, filter, &hidden)
+            super::query_work_recordings(&conn, &[key.to_string()], filter, &hidden)
                 .unwrap()
                 .into_iter()
                 .map(|recording| {
@@ -5138,7 +5766,7 @@ mod tests {
         // The tracks of a work on each album, as the covers of the albums of
         // its recordings take them, alone and with the words of a search
         let gold = super::TrackFilter {
-            work: Some("gold".to_string()),
+            works: vec!["gold".to_string()],
             ..Default::default()
         };
         assert!(!gold.is_empty());

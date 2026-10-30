@@ -123,11 +123,16 @@ All notable changes to this project will be documented in this file.
   the Opus format has them; those files played without their gains, and
   Track Information shows them now
 - A work that MusicBrainz has as an arrangement of another, which often
-  has the same title, says so after its name on the Works page and in
-  its header, with what it is when MusicBrainz says, such as "for two
-  pianos, Busoni", and Track Information names the work it arranges.
-  So does a track that MusicBrainz links to an arrangement of a single
-  movement, such as a song of a cycle arranged for a piano trio. This
+  has the same title, says so in its header, with what it is when
+  MusicBrainz says, such as "for two pianos, Busoni", and Track
+  Information names the work it arranges. So does a track that
+  MusicBrainz links to an arrangement of a single movement, such as a
+  song of a cycle arranged for a piano trio. On the Works page, an
+  arrangement is listed under the work it arranges when that work is in
+  the music folders and they share a composer: the work opens to show
+  the covers of its arrangements after its own, each saying what it is,
+  and Go to Work on a track of an arrangement goes there. Otherwise the
+  arrangement is listed on its own, with what it is after its name. This
   needs version 0.5 of the Work Hierarchy plugin
 - The Menu key and Shift+F10 open the menu of the track or the album
   that has the focus, as a right click does

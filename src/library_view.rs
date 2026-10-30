@@ -1448,7 +1448,7 @@ impl LibraryView {
                 .collect(),
             composer: imp.composer.borrow().as_ref().map(|c| c.key.clone()),
             performer: imp.performer.borrow().as_ref().map(|p| p.key.clone()),
-            work: None,
+            works: Vec::new(),
         }
     }
 
@@ -1541,7 +1541,7 @@ impl LibraryView {
     // of a work, its tracks, and otherwise as for the grid, see `taken()`
     pub fn taken_by(&self, cell: &AlbumCell) -> (TrackFilter, PickNames) {
         match cell.work() {
-            Some(work) => works::taken_from_work(work.key, work.name),
+            Some(work) => works::taken_from_work(work.keys, work.name),
             None => self.taken(),
         }
     }
