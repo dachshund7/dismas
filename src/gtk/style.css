@@ -673,6 +673,32 @@ gridview.album-grid .album-cell {
   font-size: 85%;
 }
 
+/* A favorite recording among the covers of the albums of a work, on a
+ * circle that shows it over any cover */
+.album-cell .album-cover image.favorite-recording {
+  padding: 4px;
+  border-radius: 999px;
+  background-color: var(--window-bg-color);
+  color: var(--red-2);
+}
+
+/* The covers of the albums of an open work, under its line */
+flowbox.work-covers {
+  padding: 3px 12px 9px 0;
+}
+
+flowbox.work-covers > flowboxchild {
+  padding: 6px;
+  border-radius: 12px;
+}
+
+/* An open work doesn't light up as a whole under the pointer, as most of
+ * it is its covers, which light up themselves */
+listview.work-list > row.expanded:hover,
+listview.work-list > row.expanded:active {
+  background-color: transparent;
+}
+
 /* The albums being dragged */
 .album-cell.dragging,
 gridview.album-grid.dragging-selection .album-cell.selected-item {

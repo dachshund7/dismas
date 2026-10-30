@@ -43,9 +43,9 @@ All notable changes to this project will be documented in this file.
 - Works and recordings can be favorites, not only tracks: Add Work to
   Favorites is in the menu of a work's header and of the rows of the
   Works page, with a right click, a long press or the Menu key, and Add
-  Recording to Favorites in the menu of a recording's header. The Works
-  page shows a heart on the rows of favorite works, and on the headers of
-  the favorite recordings among a work's recordings, and its heart button
+  Recording to Favorites in the menu of the cover of a work's album. The
+  Works page shows a heart on the rows of favorite works, and on the
+  covers of the favorite recordings of an open work, and its heart button
   shows only them. Favorite Works, on the Playlists page, plays them in
   the order they were marked: each recording marked, and for a work, a
   recording of it picked as Random Work picks one
@@ -78,9 +78,12 @@ All notable changes to this project will be documented in this file.
 - A Works page, next to the tracks (Ctrl+4), lists the works of the
   albums under the names of their composers, with the number of their
   recordings. It shares the albums' search and the composer and performer
-  picked, so switching between the two keeps them. A work shows
-  its recordings, oldest first, each with its performers, the year it was
-  made and the album, to play one, add it, or go to its album
+  picked, so switching between the pages keeps them. Clicking a work, or
+  Enter, opens it, one at a time, to show the covers of the albums it's
+  recorded on, the oldest recording first, each with its performers and
+  the year it was made. A cover takes only the work's tracks from its
+  album, as the Tracks page takes the tracks a search matches: its badge
+  says how many, and it opens the album with the others dimmed
 - Other Recordings, in the menu of a track of a work and in the menu of
   the header of a work, with a right click or a long press, shows all the
   recordings of the work in the music folders, with the track's own among

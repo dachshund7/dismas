@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::{adding::Tracks, *};
+use crate::album_cell::AlbumCell;
 
 impl Window {
     // Shows the tracks of an album in the sidebar, in place of the
@@ -188,31 +189,28 @@ impl Window {
         popup_menu(&section, "work", &actions, widget, x, y);
     }
 
-    // The menu of a work of the list of works, at a point of its row: its
-    // recordings are shown, as activating it does, and it can be marked as
-    // a favorite
-    fn show_works_row_menu(
-        &self,
-        work: &library::WorkInfo,
-        filter: &TrackFilter,
-        widget: &gtk::Widget,
-        x: f64,
-        y: f64,
-    ) {
+    // The menu of a work of the list of works, at a point of its row: it
+    // opens or closes to show the covers of its albums, as activating it
+    // does, and it can be marked as a favorite
+    fn show_works_row_menu(&self, work: &library::WorkInfo, widget: &gtk::Widget, x: f64, y: f64) {
+        let library_view = self.imp().library_view.get();
         let actions = gio::SimpleActionGroup::new();
         let show = gio::SimpleAction::new("show", None);
         show.connect_activate(clone!(
-            #[weak(rename_to = win)]
-            self,
+            #[weak]
+            library_view,
             #[strong]
             work,
-            #[strong]
-            filter,
-            move |_, _| win.show_work_recordings(&work, &filter, None)
+            move |_, _| library_view.toggle_work(&work)
         ));
         actions.add_action(&show);
         let section = gio::Menu::new();
-        section.append(Some(&i18n("Show Recordings")), Some("works-row.show"));
+        let label = if library_view.is_work_open(&work.key) {
+            i18n("Hide Recordings")
+        } else {
+            i18n("Show Recordings")
+        };
+        section.append(Some(&label), Some("works-row.show"));
         section.append_item(&self.favorite_work_item(&actions, "works-row", &work.key));
         popup_menu(&section, "works-row", &actions, widget, x, y);
     }
@@ -308,16 +306,19 @@ impl Window {
     // selection mode like the buttons of its bar; on another, only that
     // one. On the Tracks page, a search takes only the tracks that match it,
     // as elsewhere
-    fn show_album_menu(&self, album: &Album, cell: &gtk::Widget, x: f64, y: f64) {
+    fn show_album_menu(&self, cell: &AlbumCell, x: f64, y: f64) {
+        let Some(album) = cell.album() else {
+            return;
+        };
         let library_view = self.imp().library_view.get();
         let selection = library_view.selection_mode() && album.selected();
         let album_id = album.id();
+        let filter = library_view.taken_by(cell).0;
         let albums = move |win: &Self| {
-            let library_view = win.imp().library_view.get();
             if selection {
-                library_view.take_selected_albums()
+                win.imp().library_view.take_selected_albums()
             } else {
-                vec![(album_id.clone(), library_view.taken().0)]
+                vec![(album_id.clone(), filter.clone())]
             }
         };
         let albums = Rc::new(albums);
@@ -350,6 +351,41 @@ impl Window {
         self.append_adding_items(&section, "album", true, true);
         let menu = gio::Menu::new();
         menu.append_section(None, &section);
+        // Among the covers of the albums of a work, the work's recordings
+        // on the album can be marked as favorites
+        if let Some(work) = cell.work() {
+            let favorite = work
+                .recordings
+                .iter()
+                .any(play_stats::is_favorite_recording);
+            let mark = gio::SimpleAction::new("favorite-recording", None);
+            mark.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| {
+                    if !favorite {
+                        if let Some(first) = work.recordings.first() {
+                            win.mark_favorite_recording(first, true);
+                        }
+                        return;
+                    }
+                    for recording in &work.recordings {
+                        if play_stats::is_favorite_recording(recording) {
+                            win.mark_favorite_recording(recording, false);
+                        }
+                    }
+                }
+            ));
+            actions.add_action(&mark);
+            let label = if favorite {
+                i18n("Remove Recording from Favorites")
+            } else {
+                i18n("Add Recording to Favorites")
+            };
+            let section = gio::Menu::new();
+            section.append(Some(&label), Some("album.favorite-recording"));
+            menu.append_section(None, &section);
+        }
         // Its folder, and its booklets once they're found, for an album of
         // its own, as in the menu of a track
         if !selection {
@@ -379,7 +415,7 @@ impl Window {
                 library::album_tracks(&album_id, &TrackFilter::default(), &hidden)
             });
         }
-        popup_menu(&menu, "album", &actions, cell, x, y);
+        popup_menu(&menu, "album", &actions, cell.upcast_ref(), x, y);
     }
 
     // Adds the tracks of albums dragged from the grid to the queue, before
@@ -452,15 +488,14 @@ impl Window {
         library_view.connect_album_menu_requested(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, album, cell, x, y| win.show_album_menu(album, cell, x, y)
+            move |_, cell, x, y| win.show_album_menu(cell, x, y)
         ));
 
         library_view.connect_album_activated(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, album| {
-                let (filter, picks) = win.imp().library_view.taken();
-                win.show_album_tracks(album, filter, picks, None);
+            move |_, album, filter, picks| {
+                win.show_album_tracks(album, filter.clone(), picks.clone(), None);
             }
         ));
 
@@ -511,16 +546,10 @@ impl Window {
             self,
             move |_, widget, x, y, start, end| win.show_recording_menu(widget, x, y, start, end)
         ));
-        library_view.connect_work_activated(clone!(
-            #[weak(rename_to = win)]
-            self,
-            move |_, work, filter| win.show_work_recordings(work, filter, None)
-        ));
         library_view.connect_work_menu_requested(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, work, filter, widget, x, y| win
-                .show_works_row_menu(work, filter, widget, x, y)
+            move |_, work, widget, x, y| win.show_works_row_menu(work, widget, x, y)
         ));
 
         library_view.connect_add_albums(clone!(

@@ -22,7 +22,7 @@ use crate::{
     audio::{PlayerState, Track},
     i18n::pi18n,
     lyrics::{self, Line, Lyrics},
-    queue_row::GLIDE_DURATION,
+    queue_row::glide_adjustment,
     utils,
 };
 
@@ -513,15 +513,7 @@ impl LyricsView {
             adjustment.set_value(target);
             return;
         }
-        let animation = adw::TimedAnimation::new(
-            &*imp.synced_scrolled,
-            adjustment.value(),
-            target,
-            GLIDE_DURATION.as_millis() as u32,
-            adw::PropertyAnimationTarget::new(&adjustment, "value"),
-        );
-        animation.set_easing(adw::Easing::Ease);
-        animation.play();
+        let animation = glide_adjustment(&*imp.synced_scrolled, &adjustment, target);
         imp.glide.replace(Some(animation));
     }
 

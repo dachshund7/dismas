@@ -223,6 +223,15 @@ mod imp {
         pub works: RefCell<Option<gio::ListStore>>,
         pub works_filter: RefCell<Option<(TrackFilter, u32)>>,
         pub works_generation: Cell<u32>,
+        // The work of the list that's open, showing the covers of its
+        // albums, and the rows the list shows its works in, by their keys,
+        // to open and close them. The generation goes up each time the
+        // covers of a work are read, so that those of one opened before
+        // are dropped
+        pub expanded_work: RefCell<Option<super::works::ExpandedWork>>,
+        pub work_rows: RefCell<HashMap<String, glib::WeakRef<gtk::Box>>>,
+        pub covers_generation: Cell<u32>,
+        pub works_glide: RefCell<Option<adw::TimedAnimation>>,
         // The ids of the selected albums; a new search clears them, so
         // they're all among the albums it shows
         pub selected: RefCell<HashSet<String>>,
@@ -351,21 +360,17 @@ mod imp {
         fn signals() -> &'static [Signal] {
             static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
                 vec![
+                    // An album was activated; the object holds what its
+                    // tracks have to match to be taken, and the names of
+                    // what it picks, see `taken_by()`
                     Signal::builder("album-activated")
-                        .param_types([Album::static_type()])
-                        .build(),
-                    // A work of the list was activated; the object holds
-                    // its `library::WorkInfo`, and the filter its
-                    // recordings were found with
-                    Signal::builder("work-activated")
-                        .param_types([glib::BoxedAnyObject::static_type()])
+                        .param_types([Album::static_type(), glib::BoxedAnyObject::static_type()])
                         .build(),
                     // Add or play the tracks of the selected albums
                     Signal::builder("add-albums").build(),
                     Signal::builder("play-albums").build(),
                     // The menu of a work of the list, at a point of its
-                    // row; the object holds its `library::WorkInfo` and the
-                    // filter, as for "work-activated"
+                    // row; the object holds its `library::WorkInfo`
                     Signal::builder("work-menu-requested")
                         .param_types([
                             glib::BoxedAnyObject::static_type(),
@@ -377,8 +382,7 @@ mod imp {
                     // The menu of an album, at a point of its cell
                     Signal::builder("album-menu-requested")
                         .param_types([
-                            Album::static_type(),
-                            gtk::Widget::static_type(),
+                            AlbumCell::static_type(),
                             f64::static_type(),
                             f64::static_type(),
                         ])
@@ -418,33 +422,24 @@ impl Default for LibraryView {
 }
 
 impl LibraryView {
-    pub fn connect_album_activated<F: Fn(&Self, &Album) + 'static>(
+    pub fn connect_album_activated<F: Fn(&Self, &Album, &TrackFilter, &PickNames) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
         self.connect_closure(
             "album-activated",
             false,
-            glib::closure_local!(move |view: &Self, album: &Album| f(view, album)),
-        )
-    }
-
-    pub fn connect_work_activated<F: Fn(&Self, &library::WorkInfo, &TrackFilter) + 'static>(
-        &self,
-        f: F,
-    ) -> glib::SignalHandlerId {
-        self.connect_closure(
-            "work-activated",
-            false,
-            glib::closure_local!(move |view: &Self, item: &glib::BoxedAnyObject| {
-                let item = item.borrow::<(library::WorkInfo, TrackFilter)>();
-                f(view, &item.0, &item.1);
-            }),
+            glib::closure_local!(
+                move |view: &Self, album: &Album, taken: &glib::BoxedAnyObject| {
+                    let taken = taken.borrow::<(TrackFilter, PickNames)>();
+                    f(view, album, &taken.0, &taken.1);
+                }
+            ),
         )
     }
 
     pub fn connect_work_menu_requested<
-        F: Fn(&Self, &library::WorkInfo, &TrackFilter, &gtk::Widget, f64, f64) + 'static,
+        F: Fn(&Self, &library::WorkInfo, &gtk::Widget, f64, f64) + 'static,
     >(
         &self,
         f: F,
@@ -457,25 +452,20 @@ impl LibraryView {
                                        widget: &gtk::Widget,
                                        x: f64,
                                        y: f64| {
-                let item = item.borrow::<(library::WorkInfo, TrackFilter)>();
-                f(view, &item.0, &item.1, widget, x, y);
+                f(view, &item.borrow::<library::WorkInfo>(), widget, x, y);
             }),
         )
     }
 
-    pub fn connect_album_menu_requested<F: Fn(&Self, &Album, &gtk::Widget, f64, f64) + 'static>(
+    pub fn connect_album_menu_requested<F: Fn(&Self, &AlbumCell, f64, f64) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
         self.connect_closure(
             "album-menu-requested",
             false,
-            glib::closure_local!(move |view: &Self,
-                                       album: &Album,
-                                       cell: &gtk::Widget,
-                                       x: f64,
-                                       y: f64| {
-                f(view, album, cell, x, y);
+            glib::closure_local!(move |view: &Self, cell: &AlbumCell, x: f64, y: f64| {
+                f(view, cell, x, y);
             }),
         )
     }
@@ -571,14 +561,7 @@ impl LibraryView {
             clone!(
                 #[weak(rename_to = this)]
                 self,
-                move |cell: &AlbumCell| {
-                    if let Some(album) = cell.album() {
-                        let x = f64::from(cell.width()) / 2.0;
-                        let y = f64::from(cell.height()) / 2.0;
-                        let cell = cell.upcast_ref::<gtk::Widget>();
-                        this.emit_by_name::<()>("album-menu-requested", &[&album, cell, &x, &y]);
-                    }
-                }
+                move |cell: &AlbumCell| this.request_album_menu(cell)
             ),
         );
 
@@ -816,13 +799,27 @@ impl LibraryView {
             #[weak]
             cell,
             move |x: f64, y: f64| {
-                if let Some(album) = cell.album() {
-                    let cell = cell.upcast_ref::<gtk::Widget>();
-                    this.emit_by_name::<()>("album-menu-requested", &[&album, cell, &x, &y]);
+                if cell.album().is_some() {
+                    this.emit_by_name::<()>("album-menu-requested", &[&cell, &x, &y]);
                 }
             }
         );
         utils::setup_context_menu(cell, request);
+    }
+
+    // The menu of the album of a cell, from the Menu key, in its middle
+    fn request_album_menu(&self, cell: &AlbumCell) {
+        if cell.album().is_some() {
+            let x = f64::from(cell.width()) / 2.0;
+            let y = f64::from(cell.height()) / 2.0;
+            self.emit_by_name::<()>("album-menu-requested", &[cell, &x, &y]);
+        }
+    }
+
+    // Shows an album, with what's taken from it, see `taken_by()`
+    fn activate_album(&self, album: &Album, taken: (TrackFilter, PickNames)) {
+        let taken = glib::BoxedAnyObject::new(taken);
+        self.emit_by_name::<()>("album-activated", &[album, &taken]);
     }
 
     // An album is dragged to a place in the playlist pane; in selection
@@ -851,7 +848,7 @@ impl LibraryView {
                 let albums = if selection {
                     this.selected_albums()
                 } else {
-                    vec![(album.id(), this.taken().0)]
+                    vec![(album.id(), this.taken_by(&cell).0)]
                 };
                 let drag = AlbumDrag { albums, selection };
                 Some(gdk::ContentProvider::for_value(&drag.to_value()))
@@ -1025,7 +1022,7 @@ impl LibraryView {
                     if this.selection_mode() {
                         this.toggle_album(&album);
                     } else {
-                        this.emit_by_name::<()>("album-activated", &[&album]);
+                        this.activate_album(&album, this.taken());
                     }
                 }
             }
@@ -1521,6 +1518,24 @@ impl LibraryView {
         }
     }
 
+    // What's taken from the album of a cell: among the covers of the albums
+    // of a work, its tracks, and otherwise as for the grid, see `taken()`
+    pub fn taken_by(&self, cell: &AlbumCell) -> (TrackFilter, PickNames) {
+        match cell.work() {
+            Some(work) => (
+                TrackFilter {
+                    work: Some(work.key),
+                    ..Default::default()
+                },
+                PickNames {
+                    work: Some(work.name),
+                    ..Default::default()
+                },
+            ),
+            None => self.taken(),
+        }
+    }
+
     // The words of the search, and the composer and the performer picked,
     // that the albums shown were found with
     fn search_filter(&self) -> TrackFilter {
@@ -1546,6 +1561,7 @@ impl LibraryView {
                 .as_ref()
                 .filter(|performer| filter.performer.as_ref() == Some(&performer.key))
                 .map(|performer| performer.name.clone()),
+            work: None,
         }
     }
 
@@ -2053,17 +2069,20 @@ struct Picker<T> {
 }
 
 // The names of the composer and the performer whose albums are shown, if
-// any, which the bar over an album's tracks says
+// any, or of the work whose tracks are taken from an album, which the bar
+// over an album's tracks says
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PickNames {
     pub composer: Option<String>,
     pub performer: Option<String>,
+    pub work: Option<String>,
 }
 
-// The rows of the lists of composers, performers and works: a name, which
-// the end of a long row cuts off, and a number, which `bind` sets from the
-// `T` of the item, a `BoxedAnyObject`; `tooltip` makes the row's tooltip
-// from it when it shows
+// The rows of the lists of composers, performers and works: a line with a
+// name, which the end of a long row cuts off, and a number, which `bind`
+// sets from the `T` of the item, a `BoxedAnyObject`; `tooltip` makes the
+// line's tooltip from it when it shows. A work's row opens under its line
+// to show the covers of its albums
 fn name_count_factory<T: 'static>(
     tooltip: fn(&T) -> Option<String>,
     bind: fn(&T, &gtk::Label, &gtk::Label),
@@ -2080,22 +2099,24 @@ fn name_count_factory<T: 'static>(
             .css_classes(["dim-label", "numeric"])
             .build();
         // The scrollbar is drawn over the right edge of the list
-        let row = gtk::Box::builder().spacing(12).margin_end(12).build();
-        row.append(&name);
-        row.append(&count);
-        utils::set_row_tooltip(&row, item, move |object| {
+        let line = gtk::Box::builder().spacing(12).margin_end(12).build();
+        line.append(&name);
+        line.append(&count);
+        utils::set_row_tooltip(&line, item, move |object| {
             tooltip(&object.downcast_ref::<glib::BoxedAnyObject>()?.borrow::<T>())
         });
+        let row = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        row.append(&line);
         item.set_child(Some(&row));
     });
     factory.connect_bind(move |_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let Some(row) = item.child() else {
+        let Some(line) = item.child().and_then(|row| row.first_child()) else {
             return;
         };
         let (Some(name), Some(count)) = (
-            row.first_child().and_downcast::<gtk::Label>(),
-            row.last_child().and_downcast::<gtk::Label>(),
+            line.first_child().and_downcast::<gtk::Label>(),
+            line.last_child().and_downcast::<gtk::Label>(),
         ) else {
             return;
         };

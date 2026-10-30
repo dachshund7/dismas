@@ -6,11 +6,11 @@ use std::cell::{Cell, RefCell};
 use adw::{prelude::*, subclass::prelude::*};
 use gtk::{glib, graphene};
 
-// How long a row takes to slide into its new place, and how it speeds up
-// and slows down: an ease-out would start at full speed, which looks like a
-// jump for a row dropped far from its place
-const SLIDE_DURATION_MS: u32 = 300;
-const SLIDE_EASING: adw::Easing = adw::Easing::EaseInOutCubic;
+// How long a row takes to slide into its new place, or a work to open, and
+// how it speeds up and slows down: an ease-out would start at full speed,
+// which looks like a jump for a row dropped far from its place
+pub const SLIDE_DURATION_MS: u32 = 300;
+pub const SLIDE_EASING: adw::Easing = adw::Easing::EaseInOutCubic;
 
 mod imp {
     use super::*;

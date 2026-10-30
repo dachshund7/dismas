@@ -4,13 +4,29 @@
 // The cover of an album over its title and artist, in a box that
 // highlights the album when it's selected in selection mode, and tells
 // screen readers whether it's selected. The cover says how many of the
-// album's tracks are taken from it, when it's only some of them
+// album's tracks are taken from it, when it's only some of them, and among
+// the covers of the albums of a work, whether one of its recordings there
+// is a favorite
 
 use std::cell::{Cell, OnceCell, RefCell};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
-use crate::{i18n::i18n_f, library::Album, square_bin::SquareBin};
+use crate::{
+    i18n::{i18n, i18n_f},
+    library::Album,
+    play_stats::FavoriteRecording,
+    square_bin::SquareBin,
+};
+
+// The work whose tracks a cell takes from its album, among the covers of the
+// albums of a work, with its name and its recordings on the album
+#[derive(Clone, Debug)]
+pub struct CellWork {
+    pub key: String,
+    pub name: String,
+    pub recordings: Vec<FavoriteRecording>,
+}
 
 mod imp {
     use super::*;
@@ -30,6 +46,8 @@ mod imp {
         pub total: Cell<u32>,
         pub picture: OnceCell<gtk::Picture>,
         pub badge: gtk::Label,
+        pub heart: gtk::Image,
+        pub work: RefCell<Option<CellWork>>,
         // The album the cell shows, and the item of the grid it's in
         pub album: RefCell<Option<Album>>,
         pub list_item: glib::WeakRef<gtk::ListItem>,
@@ -125,6 +143,17 @@ impl AlbumCell {
         badge.set_visible(false);
         badge.add_css_class("match-count");
         overlay.add_overlay(badge);
+        let heart = &imp.heart;
+        heart.set_icon_name(Some("heart-filled-symbolic"));
+        heart.set_halign(gtk::Align::Start);
+        heart.set_valign(gtk::Align::Start);
+        heart.set_margin_start(6);
+        heart.set_margin_top(6);
+        heart.set_can_target(false);
+        heart.set_visible(false);
+        heart.add_css_class("favorite-recording");
+        heart.update_property(&[gtk::accessible::Property::Label(&i18n("Favorite"))]);
+        overlay.add_overlay(heart);
         imp.picture.set(picture).unwrap();
 
         let title = &imp.title;
@@ -169,6 +198,23 @@ impl AlbumCell {
 
     pub fn album(&self) -> Option<Album> {
         self.imp().album.borrow().clone()
+    }
+
+    // The line under the title, in place of the artist
+    pub fn set_subtitle(&self, subtitle: &str) {
+        self.imp().artist.set_label(subtitle);
+    }
+
+    pub fn set_favorite(&self, favorite: bool) {
+        self.imp().heart.set_visible(favorite);
+    }
+
+    pub fn work(&self) -> Option<CellWork> {
+        self.imp().work.borrow().clone()
+    }
+
+    pub fn set_work(&self, work: Option<CellWork>) {
+        self.imp().work.replace(work);
     }
 
     pub fn set_list_item(&self, item: &gtk::ListItem) {

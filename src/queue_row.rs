@@ -785,6 +785,26 @@ const SIZE_WAIT_FRAMES: u32 = 60;
 // second half settles on the track (`ease`)
 pub const GLIDE_DURATION: std::time::Duration = std::time::Duration::from_millis(350);
 
+// Glides the scrolled place of a list to a value, quickly, then settling,
+// as `flash_track` glides to a track; libadwaita jumps instead when
+// animations are off. The glide can be stopped with the animation
+pub fn glide_adjustment(
+    widget: &impl IsA<gtk::Widget>,
+    adjustment: &gtk::Adjustment,
+    target: f64,
+) -> adw::TimedAnimation {
+    let animation = adw::TimedAnimation::new(
+        widget,
+        adjustment.value(),
+        target,
+        GLIDE_DURATION.as_millis() as u32,
+        adw::PropertyAnimationTarget::new(adjustment, "value"),
+    );
+    animation.set_easing(adw::Easing::Ease);
+    adw::prelude::AnimationExt::play(&animation);
+    animation
+}
+
 // Scrolls a list to a track, gliding to it, places it in the middle of the
 // list, if it can scroll that far, and makes it flash for a moment, like
 // its CSS animation. The list only lays out the rows in its view, so the

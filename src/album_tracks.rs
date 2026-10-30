@@ -821,63 +821,80 @@ impl AlbumTracks {
         };
         let picks = imp.picks.borrow();
         let words = !imp.filter.borrow().words.is_empty();
-        let label = match (picks.composer.as_deref(), picks.performer.as_deref()) {
-            (Some(composer), Some(performer)) if !words => ni18n_k(
-                // Translators: `{n}`, `{total}`, `{composer}` and
-                // `{performer}` must be left unmodified; they are expanded
-                // to the number of tracks of the album by a composer with a
-                // performer, the number of all of them, the name of the
-                // composer and the name of the performer, which can be a
-                // conductor, a group or a player. The plural follows `{n}`
-                "{n} of the {total} tracks is by {composer}, with {performer}",
-                "{n} of the {total} tracks are by {composer}, with {performer}",
+        let label = if let Some(work) = picks.work.as_deref() {
+            ni18n_k(
+                // Translators: `{n}`, `{total}` and `{work}` must be left
+                // unmodified; they are expanded to the number of tracks of
+                // the album that are part of a work, the number of all of
+                // them, and the name of the work. The plural follows `{n}`
+                "{n} of the {total} tracks is of {work}",
+                "{n} of the {total} tracks are of {work}",
                 matching,
                 &[
                     ("n", &matching.to_string()),
                     ("total", &total.to_string()),
-                    ("composer", composer),
-                    ("performer", performer),
+                    ("work", work),
                 ],
-            ),
-            (None, Some(performer)) if !words => ni18n_k(
-                // Translators: `{n}`, `{total}` and `{performer}` must be
-                // left unmodified; they are expanded to the number of
-                // tracks of the album with a performer, the number of all
-                // of them, and the name of the performer, which can be a
-                // conductor, a group or a player. The plural follows `{n}`
-                "{n} of the {total} tracks is with {performer}",
-                "{n} of the {total} tracks are with {performer}",
-                matching,
-                &[
-                    ("n", &matching.to_string()),
-                    ("total", &total.to_string()),
-                    ("performer", performer),
-                ],
-            ),
-            (Some(composer), None) if !words => ni18n_k(
-                // Translators: `{n}`, `{total}` and `{composer}` must be
-                // left unmodified; they are expanded to the number of
-                // tracks of the album by a composer, the number of all of
-                // them, and the name of the composer. The plural follows
-                // `{n}`
-                "{n} of the {total} tracks is by {composer}",
-                "{n} of the {total} tracks are by {composer}",
-                matching,
-                &[
-                    ("n", &matching.to_string()),
-                    ("total", &total.to_string()),
-                    ("composer", composer),
-                ],
-            ),
-            _ => ni18n_f(
-                // Translators: The first '{}' is the number of tracks of the
-                // album that match the search, and the second the number of
-                // all of them; both must be left unmodified
-                "The search matches {} of {} track",
-                "The search matches {} of {} tracks",
-                total,
-                &[&matching.to_string(), &total.to_string()],
-            ),
+            )
+        } else {
+            match (picks.composer.as_deref(), picks.performer.as_deref()) {
+                (Some(composer), Some(performer)) if !words => ni18n_k(
+                    // Translators: `{n}`, `{total}`, `{composer}` and
+                    // `{performer}` must be left unmodified; they are expanded
+                    // to the number of tracks of the album by a composer with a
+                    // performer, the number of all of them, the name of the
+                    // composer and the name of the performer, which can be a
+                    // conductor, a group or a player. The plural follows `{n}`
+                    "{n} of the {total} tracks is by {composer}, with {performer}",
+                    "{n} of the {total} tracks are by {composer}, with {performer}",
+                    matching,
+                    &[
+                        ("n", &matching.to_string()),
+                        ("total", &total.to_string()),
+                        ("composer", composer),
+                        ("performer", performer),
+                    ],
+                ),
+                (None, Some(performer)) if !words => ni18n_k(
+                    // Translators: `{n}`, `{total}` and `{performer}` must be
+                    // left unmodified; they are expanded to the number of
+                    // tracks of the album with a performer, the number of all
+                    // of them, and the name of the performer, which can be a
+                    // conductor, a group or a player. The plural follows `{n}`
+                    "{n} of the {total} tracks is with {performer}",
+                    "{n} of the {total} tracks are with {performer}",
+                    matching,
+                    &[
+                        ("n", &matching.to_string()),
+                        ("total", &total.to_string()),
+                        ("performer", performer),
+                    ],
+                ),
+                (Some(composer), None) if !words => ni18n_k(
+                    // Translators: `{n}`, `{total}` and `{composer}` must be
+                    // left unmodified; they are expanded to the number of
+                    // tracks of the album by a composer, the number of all of
+                    // them, and the name of the composer. The plural follows
+                    // `{n}`
+                    "{n} of the {total} tracks is by {composer}",
+                    "{n} of the {total} tracks are by {composer}",
+                    matching,
+                    &[
+                        ("n", &matching.to_string()),
+                        ("total", &total.to_string()),
+                        ("composer", composer),
+                    ],
+                ),
+                _ => ni18n_f(
+                    // Translators: The first '{}' is the number of tracks of the
+                    // album that match the search, and the second the number of
+                    // all of them; both must be left unmodified
+                    "The search matches {} of {} track",
+                    "The search matches {} of {} tracks",
+                    total,
+                    &[&matching.to_string(), &total.to_string()],
+                ),
+            }
         };
         imp.filter_label.set_label(&label);
         imp.filter_bar.set_reveal_child(true);
