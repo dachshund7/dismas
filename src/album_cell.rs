@@ -220,6 +220,12 @@ impl AlbumCell {
 
     pub fn set_list_item(&self, item: &gtk::ListItem) {
         self.imp().list_item.set(Some(item));
+        crate::utils::keep_selected_state(
+            item,
+            self,
+            Self::selection_mode,
+            Self::update_selected_state,
+        );
     }
 
     // The position in the grid of the album the cell shows
@@ -243,10 +249,11 @@ impl AlbumCell {
 
     // Screen readers present the item of the grid or of the flow box that
     // the cell is in, so it says whether the album is selected, in
-    // selection mode. It's only taken while the cell is on screen: a list
-    // binds a cell before it takes the item it's in, which is still floating
-    // then, and a reference to it would sink it, so that the list would lose
-    // it when the reference is dropped
+    // selection mode; otherwise, it's not, as the grid itself says (see
+    // `utils::keep_selected_state`). It's only taken while the cell is on
+    // screen: a list binds a cell before it takes the item it's in, which is
+    // still floating then, and a reference to it would sink it, so that the
+    // list would lose it when the reference is dropped
     fn update_selected_state(&self) {
         if !self.is_mapped() {
             return;
@@ -255,11 +262,8 @@ impl AlbumCell {
             return;
         };
         let imp = self.imp();
-        if imp.selection_mode.get() {
-            item.update_state(&[gtk::accessible::State::Selected(Some(imp.selected.get()))]);
-        } else {
-            item.reset_state(gtk::AccessibleState::Selected);
-        }
+        let selected = imp.selection_mode.get() && imp.selected.get();
+        item.update_state(&[gtk::accessible::State::Selected(Some(selected))]);
     }
 
     fn update_badge(&self) {

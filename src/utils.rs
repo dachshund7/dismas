@@ -120,6 +120,33 @@ pub fn setup_swipe_back(widget: &impl IsA<gtk::Widget>, back: impl Fn() + 'stati
     widget.add_controller(swipe);
 }
 
+// A list sets the Selected state of each of its items from its selection
+// model, none here, each time the item changes, once its row is bound
+// (`gtk_list_item_base_update`), which undoes the state a row sets for a
+// selection of its own. So while `selecting(row)` says it's in selection
+// mode, `update(row)` sets it again once the list is done with the item
+pub fn keep_selected_state<W: IsA<gtk::Widget>>(
+    list_item: &gtk::ListItem,
+    row: &W,
+    selecting: fn(&W) -> bool,
+    update: fn(&W),
+) {
+    for property in ["item", "position"] {
+        let row = row.downgrade();
+        list_item.connect_notify_local(Some(property), move |_, _| {
+            let Some(row) = row.upgrade().filter(selecting) else {
+                return;
+            };
+            let row = row.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(row) = row.upgrade() {
+                    update(&row);
+                }
+            });
+        });
+    }
+}
+
 // The Menu key and Shift+F10 open the menu of the row or the cell of a
 // list or a grid that has the focus, as a right click on it does. Keys go
 // from the focus up, so the shortcut is on the list rather than the rows

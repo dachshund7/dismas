@@ -287,6 +287,12 @@ impl QueueRow {
             .bind(self, "flashing", gtk::Widget::NONE);
         item.chain_property::<Track>("missing")
             .bind(self, "missing", gtk::Widget::NONE);
+        utils::keep_selected_state(
+            list_item,
+            self,
+            Self::selection_mode,
+            Self::update_selected_state,
+        );
 
         if let Some(app) = gio::Application::default().and_downcast::<Application>() {
             app.player()
@@ -315,6 +321,7 @@ impl QueueRow {
             tooltip.set_text(Some(&text));
             true
         });
+        self.connect_map(Self::update_selected_state);
 
         utils::setup_context_menu(
             self,
@@ -589,17 +596,23 @@ impl QueueRow {
         if !self.starts_work() {
             return None;
         }
+        let item = self.list_child()?;
+        let view = item.parent().and_downcast::<gtk::ListView>()?;
+        let top = item.compute_bounds(&view)?.y();
+        header_above(&view, top).map(|(header, _)| header)
+    }
+
+    // The child of the list holding the row: the list's item, which the row
+    // is in, in the queue inside the bin that slides it, see `SlideBin`
+    fn list_child(&self) -> Option<gtk::Widget> {
         let view = self.ancestor(gtk::ListView::static_type())?;
-        // The child of the list holding the row
         let mut item = self.clone().upcast::<gtk::Widget>();
         while let Some(parent) = item.parent()
             && parent != view
         {
             item = parent;
         }
-        let view = view.downcast::<gtk::ListView>().ok()?;
-        let top = item.compute_bounds(&view)?.y();
-        header_above(&view, top).map(|(header, _)| header)
+        Some(item)
     }
 
     // Whether the row is the first movement of a work, under its header
@@ -725,18 +738,33 @@ impl QueueRow {
         let imp = self.imp();
         let selection_mode = imp.selection_mode.get();
         let highlighted = selection_mode && imp.selected.get();
-        // On the row itself: changing the list's own row widget while the
-        // list rebinds its rows, as when tracks move, crashes GTK
+        // On the row itself, as the list's item is only taken while the row
+        // is on screen, see below
         if highlighted {
             self.add_css_class("selected-item");
         } else {
             self.remove_css_class("selected-item");
         }
-        if selection_mode {
-            self.update_state(&[gtk::accessible::State::Selected(Some(highlighted))]);
-        } else {
-            self.reset_state(gtk::AccessibleState::Selected);
+        self.update_selected_state();
+    }
+
+    // Screen readers present the list's item holding the row, so it says
+    // whether the track is selected, in selection mode; otherwise, it's
+    // not, as the list itself says (see `utils::keep_selected_state`). It's
+    // only taken while the row is on screen: a list binds a row before it
+    // takes the item, which is still floating then, and a reference to it
+    // would sink it, so that the list would lose it when the reference is
+    // dropped, which crashed GTK as tracks moved in selection mode
+    fn update_selected_state(&self) {
+        if !self.is_mapped() {
+            return;
         }
+        let Some(item) = self.list_child() else {
+            return;
+        };
+        let imp = self.imp();
+        let selected = imp.selection_mode.get() && imp.selected.get();
+        item.update_state(&[gtk::accessible::State::Selected(Some(selected))]);
     }
 
     // Long titles get truncated in the queue, so we show the full
