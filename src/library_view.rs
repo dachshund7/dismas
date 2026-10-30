@@ -1595,6 +1595,27 @@ impl LibraryView {
         Some(album)
     }
 
+    // Scrolls the grid to an album, which takes the focus, and opens it, as
+    // a click on its cover does. Scrolling to it only moves the focus there
+    // if the grid has it already (`gtk_list_base_scroll_to`), and otherwise
+    // keeps the album for the grid to give it to when it takes the focus,
+    // which it does once it's laid out, as it was just shown, from the
+    // covers of a work
+    pub fn open_album(&self, album_id: &str) {
+        let Some(album) = self.reveal_album(album_id) else {
+            return;
+        };
+        self.activate_album(&album, self.taken());
+        let laid_out = Cell::new(false);
+        self.imp().grid_view.add_tick_callback(move |grid, _| {
+            if !laid_out.replace(true) {
+                return glib::ControlFlow::Continue;
+            }
+            grid.grab_focus();
+            glib::ControlFlow::Break
+        });
+    }
+
     pub fn focus_search(&self) {
         self.imp().search_entry.grab_focus();
     }

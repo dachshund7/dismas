@@ -62,6 +62,14 @@ impl Window {
         );
     }
 
+    // Goes to the cover of an album on the Albums page, from the covers of
+    // the albums of a work: the grid shows it, with the focus, and opens
+    // it, as a click on it there would
+    fn go_to_album_cover(&self, album_id: &str) {
+        self.set_page(LibraryPage::Albums.name());
+        self.imp().library_view.open_album(album_id);
+    }
+
     // With an empty queue, there is nothing to play, so the album grid
     // takes the place of the player, and there's no going to it
     pub(super) fn update_library_for_queue(&self) {
@@ -351,9 +359,19 @@ impl Window {
         self.append_adding_items(&section, "album", true, true);
         let menu = gio::Menu::new();
         menu.append_section(None, &section);
-        // Among the covers of the albums of a work, the work's recordings
-        // on an album of its own can be marked as favorites
+        // Among the covers of the albums of a work, an album of its own can
+        // be gone to on the Albums page, and the work's recordings on it
+        // marked as favorites
         if let Some(work) = cell.work().filter(|_| !selection) {
+            let go = gio::SimpleAction::new("go-to-album", None);
+            let album_id = album.id();
+            go.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| win.go_to_album_cover(&album_id)
+            ));
+            actions.add_action(&go);
+
             let favorite = work
                 .recordings
                 .iter()
@@ -383,6 +401,7 @@ impl Window {
                 i18n("Add Recording to Favorites")
             };
             let section = gio::Menu::new();
+            section.append(Some(&i18n("Go to Album")), Some("album.go-to-album"));
             section.append(Some(&label), Some("album.favorite-recording"));
             menu.append_section(None, &section);
         }

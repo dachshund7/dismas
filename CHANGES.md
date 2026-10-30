@@ -84,7 +84,8 @@ All notable changes to this project will be documented in this file.
   album, as the Tracks page takes the tracks a search matches: its badge
   says how many, and it opens the album with only those tracks. Several
   covers can be selected, as on the Albums page, to play or add the work
-  from each of them at once
+  from each of them at once, and Go to Album, in the menu of a cover,
+  shows its album on the Albums page and opens it there
 - Other Recordings, in the menu of a track of a work and in the menu of
   the header of a work, with a right click or a long press, shows all the
   recordings of the work in the music folders, with the track's own among
