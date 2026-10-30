@@ -10,6 +10,7 @@ i18n.gettext(
     '--keyword=ni18n:1,2',
     '--keyword=ni18n_f:1,2',
     '--keyword=ni18n_k:1,2',
+    '--keyword=pi18n:1c,2',
   ],
   preset: 'glib',
 )
