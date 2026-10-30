@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Lyrics, as the tags and LRC files give them. Synchronized lyrics, in
-//! the LRC format, have the time each line is sung at before it, e.g.
-//! "[01:23.45]", can have the time of each word in the line, "<01:23.45>",
-//! and start with header lines, like "[ar:Franz Schubert]"
+//! Lyrics, as the tags and the files next to the tracks give them.
+//! Synchronized lyrics, in the LRC format, have the time each line is sung
+//! at before it, e.g. "[01:23.45]", can have the time of each word in the
+//! line, "<01:23.45>", and start with header lines, like
+//! "[ar:Franz Schubert]"
 
 use std::{
     borrow::Cow,
@@ -21,8 +22,13 @@ use crate::{
     cue_sheet,
 };
 
-// The largest LRC file that's read, as lyrics take a few kilobytes
-const MAX_LRC_FILE_SIZE: u64 = 1024 * 1024;
+// The largest file of lyrics that's read, as lyrics take a few kilobytes
+const MAX_LYRICS_FILE_SIZE: u64 = 1024 * 1024;
+
+// The extensions of the files of lyrics next to an audio file, with the
+// same name: LRC files, which lyrics downloaders write, then text files,
+// which can be in the LRC format too
+const LYRICS_EXTENSIONS: [&str; 2] = ["lrc", "txt"];
 
 // The header lines of LRC files: the artist, the album, the title, the
 // author, the lyricist, the maker of the file, the length of the track,
@@ -51,16 +57,19 @@ pub struct Line {
     pub text: String,
 }
 
-// The lyrics of an audio file: the first synchronized ones of the LRC file
-// next to it, of an ID3v2 SYLT frame and of the lyrics in its tags, or else
-// the first plain ones. A track of a CUE sheet plays a `part` of its file,
-// and gets the lines sung in it, see `in_part()`. The files are read here,
-// so this doesn't run on the main thread
+// The lyrics of an audio file: the first synchronized ones of the files of
+// lyrics next to it, of an ID3v2 SYLT frame and of the lyrics in its tags,
+// or else the first plain ones. A track of a CUE sheet plays a `part` of
+// its file, and gets the lines sung in it, see `in_part()`. The files are
+// read here, so this doesn't run on the main thread
 pub fn find(audio_file: &Path, part: Option<(Duration, Option<Duration>)>) -> Option<Lyrics> {
-    let mut plain = match lrc_file_text(audio_file).and_then(|text| parse(&text)) {
-        Some(lyrics @ Lyrics::Synced(_)) => return in_part(lyrics, part),
-        lyrics => lyrics,
-    };
+    let mut plain = None;
+    for text in lyrics_file_texts(audio_file) {
+        match parse(&text) {
+            Some(lyrics @ Lyrics::Synced(_)) => return in_part(lyrics, part),
+            lyrics => plain = plain.or(lyrics),
+        }
+    }
     if let Some(tags) = read_file_tags(audio_file, ReadOptions::LYRICS) {
         if let Some(lyrics) = tags.extra.synced_lyrics.and_then(sylt_lyrics) {
             return in_part(lyrics, part);
@@ -99,18 +108,22 @@ fn in_part(lyrics: Lyrics, part: Option<(Duration, Option<Duration>)>) -> Option
     (!lines.is_empty()).then_some(Lyrics::Synced(lines))
 }
 
-// Where the LRC file of an audio file is: next to it, with the same name
-// and the extension "lrc", e.g. "Die Forelle.lrc" for "Die Forelle.flac"
-pub fn lrc_path(audio_file: &Path) -> PathBuf {
-    audio_file.with_extension("lrc")
+// Where the files of lyrics of an audio file are: next to it, with the
+// same name, e.g. "Die Forelle.lrc" and "Die Forelle.txt" for
+// "Die Forelle.flac"
+pub fn lyrics_file_paths(audio_file: &Path) -> [PathBuf; 2] {
+    LYRICS_EXTENSIONS.map(|extension| audio_file.with_extension(extension))
 }
 
-// The text of the LRC file of an audio file, whose extension can be in
-// capitals, as programs on Windows write it
-fn lrc_file_text(audio_file: &Path) -> Option<String> {
-    [lrc_path(audio_file), audio_file.with_extension("LRC")]
-        .iter()
-        .find_map(|path| read_text_file(path))
+// The texts of the files of lyrics of an audio file, as they're needed:
+// for each extension, the file with it, or else with it in capitals, as
+// programs on Windows write it
+fn lyrics_file_texts(audio_file: &Path) -> impl Iterator<Item = String> {
+    LYRICS_EXTENSIONS.into_iter().filter_map(move |extension| {
+        [extension.to_string(), extension.to_uppercase()]
+            .iter()
+            .find_map(|extension| read_text_file(&audio_file.with_extension(extension)))
+    })
 }
 
 // The text of a file, unless it's too large to be lyrics
@@ -120,14 +133,14 @@ fn read_text_file(path: &Path) -> Option<String> {
     if !metadata.is_file() {
         return None;
     }
-    if metadata.len() > MAX_LRC_FILE_SIZE {
+    if metadata.len() > MAX_LYRICS_FILE_SIZE {
         debug!("Not reading {path:?}, which is too large to be lyrics");
         return None;
     }
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .ok()?
-        .take(MAX_LRC_FILE_SIZE)
+        .take(MAX_LYRICS_FILE_SIZE)
         .read_to_end(&mut bytes)
         .ok()?;
     Some(cue_sheet::decode(&bytes).into_owned())
@@ -488,12 +501,12 @@ mod tests {
         let from_tags = find(&audio, None);
 
         // The LRC file's, when they're plain too
-        std::fs::write(lrc_path(&audio), "Ave Maria,\ngratia plena").unwrap();
+        std::fs::write(audio.with_extension("lrc"), "Ave Maria,\ngratia plena").unwrap();
         let from_plain_file = find(&audio, None);
 
         // In Latin-1, as some programs on Windows write them
         std::fs::write(
-            lrc_path(&audio),
+            audio.with_extension("lrc"),
             b"[ti:Die Forelle]\r\n[00:12.00]In einem B\xe4chlein helle,\r\n[00:16.50]Da scho\xdf in froher Eil\r\n",
         )
         .unwrap();
@@ -523,6 +536,45 @@ mod tests {
             ]))
         );
         assert_eq!(later_part, None);
+    }
+
+    #[test]
+    fn text_files_are_read_after_lrc_files() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-lyrics-XXXXXX")).unwrap();
+        let audio = dir.join("Die Forelle.wav");
+        tagged_wav(&audio, None, None);
+        let (lrc, txt) = (audio.with_extension("lrc"), audio.with_extension("txt"));
+
+        std::fs::write(&txt, "Ave Maria,\ngratia plena\n").unwrap();
+        let from_txt = find(&audio, None);
+        std::fs::write(&lrc, "In einem Bächlein helle,\n").unwrap();
+        let from_lrc = find(&audio, None);
+        // Synchronized lyrics come first, whichever file has them
+        std::fs::write(&txt, "[00:01.00]Ave Maria!\n[00:04.00]Jungfrau mild,\n").unwrap();
+        let synced_txt = find(&audio, None);
+        // The extension in capitals
+        std::fs::remove_file(&lrc).unwrap();
+        std::fs::remove_file(&txt).unwrap();
+        std::fs::write(audio.with_extension("TXT"), "Ave Maria").unwrap();
+        let from_capitals = find(&audio, None);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            from_txt,
+            Some(Lyrics::Plain("Ave Maria,\ngratia plena".to_string()))
+        );
+        assert_eq!(
+            from_lrc,
+            Some(Lyrics::Plain("In einem Bächlein helle,".to_string()))
+        );
+        assert_eq!(
+            synced_txt,
+            Some(Lyrics::Synced(vec![
+                line(1000, None, "Ave Maria!"),
+                line(4000, None, "Jungfrau mild,"),
+            ]))
+        );
+        assert_eq!(from_capitals, Some(Lyrics::Plain("Ave Maria".to_string())));
     }
 
     #[test]
@@ -640,7 +692,7 @@ mod tests {
     fn a_file_too_large_for_lyrics_is_left_out() {
         let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-lyrics-XXXXXX")).unwrap();
         let audio = dir.join("Ave Maria.flac");
-        std::fs::write(lrc_path(&audio), "Ave ".repeat(300_000)).unwrap();
+        std::fs::write(audio.with_extension("lrc"), "Ave ".repeat(300_000)).unwrap();
         let found = find(&audio, None);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(found, None);

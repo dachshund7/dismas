@@ -3,8 +3,8 @@
 
 // The lyrics of the playing track, in the playlist pane. They're only read
 // while the pane shows them: when it opens, when the track changes, and
-// when the track's tags or its LRC file change, as a program that finds
-// lyrics can write the file while the track plays. Synchronized lyrics
+// when the track's tags or its files of lyrics change, as a program that
+// finds lyrics can write a file while the track plays. Synchronized lyrics
 // show the line sung in the middle, and follow the music
 
 use std::{
@@ -67,7 +67,7 @@ mod imp {
 
         // While the view is mapped
         pub handlers: RefCell<Vec<glib::SignalHandlerId>>,
-        pub lrc_monitor: RefCell<Option<gio::FileMonitor>>,
+        pub file_monitors: RefCell<Vec<gio::FileMonitor>>,
         // When the line sung changes next, while the track plays, between
         // the positions the player reports
         pub next_change: RefCell<Option<glib::SourceId>>,
@@ -238,7 +238,7 @@ impl LyricsView {
                 state.disconnect(handler);
             }
         }
-        if let Some(monitor) = imp.lrc_monitor.take() {
+        for monitor in imp.file_monitors.take() {
             monitor.cancel();
         }
         if let Some(source) = imp.next_change.take() {
@@ -249,15 +249,15 @@ impl LyricsView {
     }
 
     fn follow_track(&self) {
-        self.watch_lrc_file();
+        self.watch_lyrics_files();
         self.read();
     }
 
-    // Reads the lyrics again when the LRC file of the playing track is
+    // Reads the lyrics again when a file of lyrics of the playing track is
     // written, or removed
-    fn watch_lrc_file(&self) {
+    fn watch_lyrics_files(&self) {
         let imp = self.imp();
-        if let Some(monitor) = imp.lrc_monitor.take() {
+        for monitor in imp.file_monitors.take() {
             monitor.cancel();
         }
         let path = imp
@@ -268,29 +268,34 @@ impl LyricsView {
         let Some(path) = path else {
             return;
         };
-        let file = gio::File::for_path(lyrics::lrc_path(&path));
-        let monitor = match file.monitor_file(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE) {
-            Ok(monitor) => monitor,
-            Err(e) => {
-                debug!("Unable to watch {path:?} for lyrics: {e}");
-                return;
-            }
-        };
-        monitor.connect_changed(clone!(
-            #[weak(rename_to = view)]
-            self,
-            move |_, _, _, event| {
-                if matches!(
-                    event,
-                    gio::FileMonitorEvent::Created
-                        | gio::FileMonitorEvent::ChangesDoneHint
-                        | gio::FileMonitorEvent::Deleted
-                ) {
-                    view.read();
+        let mut monitors = Vec::new();
+        for lyrics_path in lyrics::lyrics_file_paths(&path) {
+            let file = gio::File::for_path(&lyrics_path);
+            let monitor =
+                match file.monitor_file(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE) {
+                    Ok(monitor) => monitor,
+                    Err(e) => {
+                        debug!("Unable to watch {lyrics_path:?} for lyrics: {e}");
+                        continue;
+                    }
+                };
+            monitor.connect_changed(clone!(
+                #[weak(rename_to = view)]
+                self,
+                move |_, _, _, event| {
+                    if matches!(
+                        event,
+                        gio::FileMonitorEvent::Created
+                            | gio::FileMonitorEvent::ChangesDoneHint
+                            | gio::FileMonitorEvent::Deleted
+                    ) {
+                        view.read();
+                    }
                 }
-            }
-        ));
-        imp.lrc_monitor.replace(Some(monitor));
+            ));
+            monitors.push(monitor);
+        }
+        imp.file_monitors.replace(monitors);
     }
 
     // Reads the lyrics of the playing track, in another thread
