@@ -161,6 +161,21 @@ impl Queue {
         self.update_current_pos(current);
     }
 
+    // Puts back tracks that were removed: before the track that came
+    // right after them, or else after the one that came right before them,
+    // so that tracks added since at the end stay after them. Tracks that
+    // were the whole queue go before those added since. At the end when
+    // neither of their tracks is there anymore
+    pub fn put_back(&self, run: &RemovedRun) {
+        let before = match (&run.before, &run.after) {
+            (Some(before), _) if self.position(before).is_some() => Some(before.clone()),
+            (_, Some(after)) => self.track_after(after),
+            (None, None) => self.track_at(0),
+            (Some(_), None) => None,
+        };
+        self.insert_tracks(&run.tracks, before.as_ref());
+    }
+
     pub fn remove_track(&self, track: &Track) {
         self.remove_tracks(std::slice::from_ref(track));
     }
@@ -504,13 +519,25 @@ impl Queue {
 }
 
 // Tracks that were next to each other in the queue and were removed
-// together, and the track that came right after them, if it stayed, which
-// they go back before: unlike a position, it still holds once other tracks
-// were added, moved or removed
+// together, with the tracks that came right before and right after them,
+// if they stayed, to put them back between: unlike a position, those
+// still hold once other tracks were added, moved or removed
 #[derive(Debug)]
 pub struct RemovedRun {
     pub tracks: Vec<Track>,
+    pub after: Option<Track>,
     pub before: Option<Track>,
+}
+
+impl RemovedRun {
+    // The whole queue, emptied
+    pub fn all(tracks: Vec<Track>) -> Self {
+        Self {
+            tracks,
+            after: None,
+            before: None,
+        }
+    }
 }
 
 // The runs of the removed tracks among the tracks of the queue, in its
@@ -518,19 +545,25 @@ pub struct RemovedRun {
 fn removed_runs(tracks: &[Track], removed: &HashSet<&Track>) -> Vec<RemovedRun> {
     let mut runs: Vec<RemovedRun> = Vec::new();
     let mut run: Vec<Track> = Vec::new();
+    let mut after: Option<&Track> = None;
     for track in tracks {
         if removed.contains(track) {
             run.push(track.clone());
-        } else if !run.is_empty() {
+            continue;
+        }
+        if !run.is_empty() {
             runs.push(RemovedRun {
                 tracks: std::mem::take(&mut run),
+                after: after.cloned(),
                 before: Some(track.clone()),
             });
         }
+        after = Some(track);
     }
     if !run.is_empty() {
         runs.push(RemovedRun {
             tracks: run,
+            after: after.cloned(),
             before: None,
         });
     }
@@ -762,12 +795,13 @@ mod tests {
         let (queue, t) = queue_of(7);
         let runs = queue.remove_tracks(&[t[5].clone(), t[0].clone(), t[2].clone(), t[3].clone()]);
         assert_eq!(order(&queue, &t), [1, 4, 6]);
-        // Each run, with the track that came right after it
-        let shown: Vec<(Vec<usize>, Option<usize>)> = runs
+        // Each run, with the tracks that came right before and after it
+        let index = |track: &Track| t.iter().position(|x| x == track).unwrap();
+        let shown: Vec<(Option<usize>, Vec<usize>, Option<usize>)> = runs
             .iter()
             .map(|run| {
-                let index = |track: &Track| t.iter().position(|x| x == track).unwrap();
                 (
+                    run.after.as_ref().map(index),
                     run.tracks.iter().map(index).collect(),
                     run.before.as_ref().map(index),
                 )
@@ -776,32 +810,50 @@ mod tests {
         assert_eq!(
             shown,
             [
-                (vec![0], Some(1)),
-                (vec![2, 3], Some(4)),
-                (vec![5], Some(6))
+                (None, vec![0], Some(1)),
+                (Some(1), vec![2, 3], Some(4)),
+                (Some(4), vec![5], Some(6))
             ]
         );
 
         // Put back the last first, as an Undo does
         for run in runs.iter().rev() {
-            queue.insert_tracks(&run.tracks, run.before.as_ref());
+            queue.put_back(run);
         }
         assert_eq!(order(&queue, &t), [0, 1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
-    fn removed_runs_at_the_end_go_back_at_the_end() {
-        let (queue, t) = queue_of(3);
-        let first = queue.remove_tracks(&[t[2].clone()]);
-        assert!(first[0].before.is_none());
-        // The track the first removal goes back before is removed too
-        let second = queue.remove_tracks(&[t[0].clone(), t[1].clone()]);
-        assert!(queue.is_empty());
+    fn removed_tracks_go_back_after_the_track_before_them() {
+        let (queue, mut t) = queue_of(4);
+        let first = queue.remove_tracks(&[t[3].clone()]);
+        // The track that came after these is removed too
+        let second = queue.remove_tracks(&[t[1].clone(), t[2].clone()]);
+        assert_eq!(order(&queue, &t), [0]);
+        // Tracks added since stay after them
+        let added = Track::new(TrackData::default());
+        t.push(added.clone());
+        queue.add_tracks(&[added]);
 
         for run in first.iter().chain(&second).rev() {
-            queue.insert_tracks(&run.tracks, run.before.as_ref());
+            queue.put_back(run);
         }
-        assert_eq!(order(&queue, &t), [0, 1, 2]);
+        assert_eq!(order(&queue, &t), [0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn the_whole_queue_goes_back_before_the_tracks_added_since() {
+        let (queue, mut t) = queue_of(3);
+        let first = queue.remove_tracks(&[t[2].clone()]);
+        let all = RemovedRun::all(queue.tracks());
+        queue.clear();
+        let added = Track::new(TrackData::default());
+        t.push(added.clone());
+        queue.add_tracks(&[added]);
+
+        queue.put_back(&all);
+        queue.put_back(&first[0]);
+        assert_eq!(order(&queue, &t), [0, 1, 2, 3]);
     }
 
     #[test]

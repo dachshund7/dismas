@@ -409,7 +409,7 @@ mod imp {
             });
             klass.install_action("queue.clear", None, move |win, _, _| {
                 debug!("Window::queue.clear()");
-                win.clear_queue();
+                win.remove_all_tracks();
             });
             klass.install_action(
                 "win.select-playlist",

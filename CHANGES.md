@@ -156,6 +156,9 @@ All notable changes to this project will be documented in this file.
 - Removing tracks from the playlist pane can be undone: the toast that
   says how many went has an Undo, which Ctrl+Z presses too. Tracks removed
   one after another while it's up come back together, each in its place
+- Remove All can be undone the same way. The tracks come back with the
+  order they had before they were shuffled, and the track that was
+  playing comes back paused where it was
 
 ### Changed
 

@@ -742,17 +742,39 @@ impl Window {
         self.add_removed_toast(undo);
     }
 
+    // Remove All empties the selected playlist like removing each of its
+    // tracks, with the same Undo, which also puts back the order they had
+    // before they were shuffled, as emptying it drops that
+    pub(super) fn remove_all_tracks(&self) {
+        let player = self.player();
+        let queue = player.queue();
+        if queue.is_empty() {
+            return;
+        }
+        let mut undo = self.take_queue_undo();
+        let tracks: Vec<Track> = queue.model().iter::<Track>().flatten().collect();
+        let unshuffled = playlists::load_unshuffled(&self.selected_playlist());
+        self.clear_queue();
+        // Emptying it is what goes up, and this is still the playlist that
+        // the tracks go back to
+        undo.generation = queue.generation();
+        undo.runs.push(RemovedRun::all(tracks));
+        undo.unshuffled = undo.unshuffled.or(unshuffled);
+        self.add_removed_toast(undo);
+    }
+
     // The tracks removed while the toast about removed tracks is up are put
     // back together, so that removing them one at a time doesn't leave only
     // the last for Undo. It's taken out while tracks are removed, so that
-    // the toast that goes doesn't drop it. Otherwise, a new one keeps how
-    // the window is before the tracks go, in case removing them empties
-    // the queue: the album grid then takes the place of the player, and
-    // the pane closes
+    // the toast that goes doesn't drop it. It keeps how the window is
+    // before the tracks go, in case removing them empties the queue: the
+    // album grid then takes the place of the player, the pane closes and
+    // playback stops
     fn take_queue_undo(&self) -> QueueUndo {
         let player = self.player();
         let generation = player.queue().generation();
-        self.imp()
+        let mut undo = self
+            .imp()
             .queue_undo
             .take()
             .filter(|undo| undo.generation == generation)
@@ -760,10 +782,15 @@ impl Window {
                 toast: glib::WeakRef::new(),
                 generation,
                 runs: Vec::new(),
-                page: self.page(),
-                pane: self.playlist_visible(),
-                resume: player.resume_point(),
-            })
+                page: String::new(),
+                pane: false,
+                resume: None,
+                unshuffled: None,
+            });
+        undo.page = self.page();
+        undo.pane = self.playlist_visible();
+        undo.resume = player.resume_point().or(undo.resume);
+        undo
     }
 
     fn add_removed_toast(&self, undo: QueueUndo) {
@@ -832,7 +859,18 @@ impl Window {
             for track in &run.tracks {
                 track.set_selected(false);
             }
-            queue.insert_tracks(&run.tracks, run.before.as_ref());
+            queue.put_back(run);
+        }
+        // Kept first, so that a crash in between can't lose it; not over
+        // the order of the tracks added and shuffled since
+        let name = self.selected_playlist();
+        if let Some(files) = &undo.unshuffled
+            && !playlists::is_shuffled(&name)
+        {
+            if let Err(e) = playlists::save_unshuffled(&name, files) {
+                log::warn!("Unable to keep the order of the playlist '{name}': {e}");
+            }
+            self.sync_queue_shuffled();
         }
         self.store_queue();
         self.update_selected_count();
@@ -873,7 +911,7 @@ impl Window {
 
 // What the Undo of the toast about removed tracks puts back: the runs of
 // tracks removed while it was up, in the order they were removed, and how
-// the window was before the first of them, for a queue that removing them
+// the window was before the last of them, for a queue that removing them
 // emptied
 pub(super) struct QueueUndo {
     toast: glib::WeakRef<adw::Toast>,
@@ -884,6 +922,9 @@ pub(super) struct QueueUndo {
     pane: bool,
     // The track that was playing, and where
     resume: Option<(Track, u64)>,
+    // The order the tracks had before they were shuffled, which Remove All
+    // drops
+    unshuffled: Option<Vec<gio::File>>,
 }
 
 // The tracks of a list of results that can play, leaving out those whose
