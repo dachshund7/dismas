@@ -38,10 +38,9 @@ impl Window {
         self.imp().library_view.refresh_favorites();
     }
 
-    // The work's recordings show it with a heart, and the Works page too
+    // The Works page shows it with a heart, on its work and on its cover
     pub(super) fn mark_favorite_recording(&self, recording: &FavoriteRecording, favorite: bool) {
         play_stats::set_favorite_recording(recording, favorite);
-        self.imp().album_tracks.refresh_favorite_recordings();
         self.imp().library_view.refresh_favorites();
     }
 
@@ -69,41 +68,5 @@ impl Window {
             i18n("Add Work to Favorites")
         };
         gio::MenuItem::new(Some(&label), Some(&format!("{prefix}.favorite-work")))
-    }
-
-    // Adds to the end of a section of the menu of a movement's work the
-    // item that marks the work, once the library says which work it is,
-    // in a separate thread; nothing is added for a track not in it
-    pub(super) fn add_favorite_work_item(
-        &self,
-        section: &gio::Menu,
-        actions: &gio::SimpleActionGroup,
-        prefix: &str,
-        track: &Track,
-    ) {
-        let Some(path) = track.file().path() else {
-            return;
-        };
-        let hidden = self.imp().library_view.hidden_folders();
-        let position = section.n_items();
-        let prefix = prefix.to_string();
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[weak]
-            section,
-            #[weak]
-            actions,
-            async move {
-                let found = gio::spawn_blocking(move || library::track_work(&path, &hidden))
-                    .await
-                    .ok()
-                    .flatten();
-                if let Some((work, _)) = found {
-                    let item = win.favorite_work_item(&actions, &prefix, &work.key);
-                    section.insert_item(position, &item);
-                }
-            }
-        ));
     }
 }

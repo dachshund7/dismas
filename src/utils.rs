@@ -231,6 +231,22 @@ pub fn scroll_to_top_when_laid_out(
     });
 }
 
+// Gives the focus to the item a list or a grid was scrolled to with
+// `ListScrollFlags::FOCUS`, once it's laid out. Scrolling only moves the
+// focus there if the list has it already (`gtk_list_base_scroll_to`), and
+// otherwise keeps the item for when the list takes it, and a list that was
+// just shown, as with another page, lays out its items at the next frame
+pub fn focus_when_laid_out(list: &impl IsA<gtk::Widget>) {
+    let laid_out = Cell::new(false);
+    list.add_tick_callback(move |list, _| {
+        if !laid_out.replace(true) {
+            return glib::ControlFlow::Continue;
+        }
+        list.grab_focus();
+        glib::ControlFlow::Break
+    });
+}
+
 // The part of a list that changed, past the items it has in common at its
 // start and at its end, which `same(old, new)` compares: where it starts,
 // the number of old items removed there, and the number of new ones put in

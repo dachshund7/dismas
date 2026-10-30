@@ -972,11 +972,15 @@ fn arrive(view: &gtk::ListView, track: &Track) {
     }
 }
 
+// How long a track or an album gone to flashes: its CSS animation (style.css,
+// `track-flash`), twice 0.6 s
+pub const FLASH_DURATION: std::time::Duration = std::time::Duration::from_millis(1200);
+
 // Makes the row of a track flash, like its CSS animation
 fn flash(track: &Track) {
     track.set_flashing(true);
     glib::timeout_add_local_once(
-        std::time::Duration::from_millis(1200),
+        FLASH_DURATION,
         clone!(
             #[weak]
             track,

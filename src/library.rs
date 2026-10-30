@@ -1517,9 +1517,9 @@ fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
     sorted.into_iter().map(|(_, work)| work).collect()
 }
 
-// The work of a track, if it's part of one in the library, and the number
-// of its other recordings, without the tracks in the `hidden` folders
-pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<(WorkInfo, u32)> {
+// The work of a track, if it's part of one in the library, as the Works
+// page lists it, without the tracks in the `hidden` folders
+pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<WorkInfo> {
     query_or_default("look up the work of a track", |conn| {
         query_track_work(conn, path, hidden)
     })
@@ -1529,7 +1529,7 @@ fn query_track_work(
     conn: &Connection,
     path: &Path,
     hidden: &[PathBuf],
-) -> rusqlite::Result<Option<(WorkInfo, u32)>> {
+) -> rusqlite::Result<Option<WorkInfo>> {
     let key: Option<String> = conn
         .query_row(
             "SELECT work_key FROM tracks WHERE path = ?1 AND work_key IS NOT NULL",
@@ -1541,19 +1541,11 @@ fn query_track_work(
         return Ok(None);
     };
     let rows = query_work_rows(conn, &TrackFilter::default(), Some(&key), hidden)?;
-    let others = recordings_of_works(&rows)
+    Ok(works_of_rows(&rows)
         .into_iter()
-        .filter(|recording| !recording.iter().any(|&i| rows[i].path == path))
-        .count();
-    let work = works_of_rows(&rows)
-        .into_iter()
-        .find(|work| work.key == key);
-    Ok(work.map(|work| (work, others as u32)))
+        .find(|work| work.key == key))
 }
 
-// The recordings of a work that the filter matches, with all their
-// tracks, see `recordings_of_works()`, by the year of their albums, those without one last, and then
-// by the albums' titles. The tracks in the `hidden` folders are left out
 // A recording marked as a favorite, among the recordings of its work
 // outside the `hidden` folders: the one on its album whose first track is
 // at `uri`, or else the first one on its album, as a file can move within
@@ -1593,6 +1585,10 @@ fn query_find_recording(
     Ok((index < on_album.len()).then(|| on_album.swap_remove(index)))
 }
 
+// The recordings of a work that the filter matches, with all their
+// tracks, see `recordings_of_works()`, by the year of their albums, those
+// without one last, and then by the albums' titles. The tracks in the
+// `hidden` folders are left out
 pub fn work_recordings(key: &str, filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkRecording> {
     query_or_default("list the recordings of a work", |conn| {
         query_work_recordings(conn, key, filter, hidden)
@@ -5087,22 +5083,16 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(tracks, strings(&["/m/E/03"]));
 
-        // The other recordings of the work of a track
-        let others = |path: &str| {
+        // The work of a track
+        let work = |path: &str| {
             super::query_track_work(&conn, Path::new(path), &hidden)
                 .unwrap()
-                .map(|(work, others)| (work.name, others))
+                .map(|work| work.name)
         };
-        assert_eq!(
-            others("/m/B/04"),
-            Some(("Goldberg Variations".to_string(), 2))
-        );
-        assert_eq!(others("/m/A/01"), Some(("Requiem v B-moll".to_string(), 1)));
-        assert_eq!(others("/m/A/03"), None);
-        assert_eq!(
-            others("/m/Gone/01"),
-            Some(("Requiem v B-moll".to_string(), 2))
-        );
+        assert_eq!(work("/m/B/04").as_deref(), Some("Goldberg Variations"));
+        assert_eq!(work("/m/A/01").as_deref(), Some("Requiem v B-moll"));
+        assert_eq!(work("/m/A/03"), None);
+        assert_eq!(work("/m/Gone/01").as_deref(), Some("Requiem v B-moll"));
         assert_eq!(
             recordings("kdf", &all),
             [(

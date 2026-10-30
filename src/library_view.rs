@@ -26,8 +26,6 @@ use crate::{
     work_sections::{WorkSectionModel, same_section_of},
 };
 
-pub use works::recordings_label;
-
 // The covers in the grid grow with the width of the columns, between
 // these sizes
 const MIN_COVER_SIZE: i32 = 160;
@@ -231,6 +229,11 @@ mod imp {
         pub expanded_work: RefCell<Option<super::works::ExpandedWork>>,
         pub work_rows: RefCell<HashMap<String, glib::WeakRef<gtk::Box>>>,
         pub covers_generation: Cell<u32>,
+        // A work to go to once the works are read, and the number of works
+        // gone to, so that a new search's list isn't scrolled to its top
+        // once one was
+        pub pending_work: RefCell<Option<super::works::PendingWork>>,
+        pub works_revealed: Cell<u32>,
         // The ids of the selected albums; a new search clears them, so
         // they're all among the albums it shows
         pub selected: RefCell<HashSet<String>>,
@@ -328,6 +331,8 @@ mod imp {
             if before == page {
                 return;
             }
+            // A work to go to is for the page it was asked for on
+            self.pending_work.take();
             // The Albums and Tracks pages share the grid and its selection,
             // and the Works page selects among the covers of a work
             if before.shows_grid() != page.shows_grid() {
@@ -1420,6 +1425,18 @@ impl LibraryView {
         }
     }
 
+    // Shows all the albums and the works again, without the words of the
+    // search and the composer and the performer picked, as to go to one
+    // they hide
+    fn clear_search(&self) {
+        let imp = self.imp();
+        imp.search_entry.set_text("");
+        imp.composer.replace(None);
+        imp.performer.replace(None);
+        self.update_picks();
+        self.set_search_matches(TrackFilter::default(), None);
+    }
+
     // What the search and the composer and performer picked ask for
     fn wanted_filter(&self) -> TrackFilter {
         let imp = self.imp();
@@ -1579,11 +1596,7 @@ impl LibraryView {
             .as_ref()
             .is_some_and(|m| !m.contains_key(album_id));
         if hidden {
-            imp.search_entry.set_text("");
-            imp.composer.replace(None);
-            imp.performer.replace(None);
-            self.update_picks();
-            self.set_search_matches(TrackFilter::default(), None);
+            self.clear_search();
         }
 
         let model = imp.grid_view.model()?;
@@ -1596,24 +1609,14 @@ impl LibraryView {
     }
 
     // Scrolls the grid to an album, which takes the focus, and opens it, as
-    // a click on its cover does. Scrolling to it only moves the focus there
-    // if the grid has it already (`gtk_list_base_scroll_to`), and otherwise
-    // keeps the album for the grid to give it to when it takes the focus,
-    // which it does once it's laid out, as it was just shown, from the
-    // covers of a work
+    // a click on its cover does; the grid was just shown, from the covers of
+    // a work, see `utils::focus_when_laid_out`
     pub fn open_album(&self, album_id: &str) {
         let Some(album) = self.reveal_album(album_id) else {
             return;
         };
         self.activate_album(&album, self.taken());
-        let laid_out = Cell::new(false);
-        self.imp().grid_view.add_tick_callback(move |grid, _| {
-            if !laid_out.replace(true) {
-                return glib::ControlFlow::Continue;
-            }
-            grid.grab_focus();
-            glib::ControlFlow::Break
-        });
+        utils::focus_when_laid_out(&*self.imp().grid_view);
     }
 
     pub fn focus_search(&self) {

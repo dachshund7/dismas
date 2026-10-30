@@ -8,7 +8,9 @@
 // matches
 
 use super::*;
-use crate::{album_cell::CellWork, play_stats::FavoriteRecording, reveal_bin::RevealBin};
+use crate::{
+    album_cell::CellWork, play_stats::FavoriteRecording, queue_row, reveal_bin::RevealBin,
+};
 
 // The covers of the albums of an open work, smaller than the grid's, as
 // they're in a list
@@ -21,6 +23,16 @@ pub struct ExpandedWork {
     key: String,
     name: String,
     covers: Vec<WorkCover>,
+}
+
+// A work to go to once the works are read for the search as it is, with
+// the album whose cover to point out, and whether the search was cleared
+// for it already, as it hid the work
+#[derive(Debug)]
+pub struct PendingWork {
+    key: String,
+    album: Option<String>,
+    cleared: bool,
 }
 
 // The cover of an album a work is recorded on: how many of the album's
@@ -228,10 +240,10 @@ impl LibraryView {
     // opens it, which closes the work that was open in the same frame. The
     // albums are those of its recordings that the search matches, which
     // are taken whole, as a recording is one piece of music. Opened by the
-    // user, it slides open, and the list glides to show its covers. The
-    // cover of `album`, if any, then takes the focus. Covers selected among
-    // those of another work are unselected, and the same work read again
-    // keeps them
+    // user, it slides open, and the list glides to show its covers; the
+    // cover of `album`, if any, is then pointed out. Read again, the cover
+    // of `album` only takes the focus back. Covers selected among those of
+    // another work are unselected, and the same work read again keeps them
     fn open_work(&self, key: String, name: String, by_user: bool, album: Option<String>) {
         let imp = self.imp();
         let generation = imp.covers_generation.get().wrapping_add(1);
@@ -279,10 +291,9 @@ impl LibraryView {
                 if let Some(row) = this.work_row(&key) {
                     this.update_work_row(&row, &key, by_user);
                     if by_user {
-                        this.show_when_open(&row);
-                    }
-                    if let Some(album) = album {
-                        focus_cover(&row, &album);
+                        this.show_when_open(&row, album);
+                    } else if let Some(cover) = album.and_then(|album| cover_of(&row, &album)) {
+                        cover.grab_focus();
                     }
                 }
             }
@@ -500,8 +511,9 @@ impl LibraryView {
     // from the height of the covers before they open, and at each frame of
     // their slide, the list puts the line that much of the way there, with
     // the slide's easing, which keeps it in place as a work above it closes
-    // at the same time. Its row is laid out open at the frame after the last
-    fn show_when_open(&self, row: &gtk::Box) {
+    // at the same time. Its row is laid out open at the frame after the
+    // last, when the cover of `album`, if any, is pointed out
+    fn show_when_open(&self, row: &gtk::Box, album: Option<String>) {
         let list = self.imp().works_list.get();
         let (Some(bin), Some(line)) = (
             row.last_child().and_downcast::<RevealBin>(),
@@ -519,6 +531,8 @@ impl LibraryView {
             (list.height() as f32 / 2.0 - line.height() as f32 - covers as f32 / 2.0).max(0.0);
         let laid_out = Cell::new(false);
         bin.add_tick_callback(clone!(
+            #[weak(rename_to = this)]
+            self,
             #[weak]
             list,
             #[weak]
@@ -537,12 +551,45 @@ impl LibraryView {
                     adjustment.set_value(adjustment.value() + f64::from(bounds.y() - wanted));
                 }
                 if progress < 1.0 || !laid_out.replace(true) {
-                    glib::ControlFlow::Continue
-                } else {
-                    glib::ControlFlow::Break
+                    return glib::ControlFlow::Continue;
                 }
+                if let Some(cover) = album.as_deref().and_then(|album| cover_of(&row, album)) {
+                    this.point_out_cover(&cover);
+                }
+                glib::ControlFlow::Break
             }
         ));
+    }
+
+    // The cover of the album gone to with a work takes the focus, glides
+    // into view if the work's covers go on below the list, and flashes, as
+    // a track gone to does
+    fn point_out_cover(&self, cover: &gtk::Widget) {
+        cover.grab_focus();
+        let list = &*self.imp().works_list;
+        if let (Some(bounds), Some(adjustment)) = (cover.compute_bounds(list), list.vadjustment()) {
+            let below = bounds.y() + bounds.height() - list.height() as f32;
+            let by = if bounds.y() < 0.0 {
+                bounds.y()
+            } else {
+                below.max(0.0)
+            };
+            if by != 0.0 {
+                queue_row::glide_adjustment(list, &adjustment, adjustment.value() + f64::from(by));
+            }
+        }
+        let Some(cell) = cover.first_child() else {
+            return;
+        };
+        cell.add_css_class("flash");
+        glib::timeout_add_local_once(
+            queue_row::FLASH_DURATION,
+            clone!(
+                #[weak]
+                cell,
+                move || cell.remove_css_class("flash")
+            ),
+        );
     }
 
     // Gives the list of works a new model, which it shows from the top, with
@@ -646,12 +693,22 @@ impl LibraryView {
         // A new search shows what it found from the top, with the header of
         // the first work. The list keeps its place by an item, so it's given
         // a new model, which it shows from the first work, and then it's
-        // scrolled to the top
+        // scrolled to the top, unless a work was gone to meanwhile
         let store = if new_search {
             // The work that was open closes, as the list starts again
             self.close_work(false);
             let store = self.set_works_model();
-            utils::scroll_to_top_when_laid_out(&imp.works_list, || true);
+            let revealed = imp.works_revealed.get();
+            utils::scroll_to_top_when_laid_out(
+                &imp.works_list,
+                clone!(
+                    #[weak(rename_to = this)]
+                    self,
+                    #[upgrade_or]
+                    false,
+                    move || this.imp().works_revealed.get() == revealed
+                ),
+            );
             store
         } else {
             let Some(store) = imp.works.borrow().clone() else {
@@ -687,11 +744,74 @@ impl LibraryView {
                 self.close_work(false);
             }
         }
+        self.reveal_pending_work();
+    }
+
+    // Goes to a work, as from Go to Work in the menu of a track: the list
+    // scrolls to it, it takes the focus, and it opens, pointing out the
+    // cover of `album`, if any, as if it had been clicked. That's once the
+    // works shown are read for the search as it is, and the library, which
+    // can take a moment when the page was just shown
+    pub fn reveal_work(&self, key: &str, album: Option<&str>) {
+        self.imp().pending_work.replace(Some(PendingWork {
+            key: key.to_string(),
+            album: album.map(ToString::to_string),
+            cleared: false,
+        }));
+        self.reveal_pending_work();
+    }
+
+    // Goes to the work asked for, if the works are read for the search and
+    // the library as they are; `show_works` calls it again once they are.
+    // When the work isn't among them, the search, the composer and the
+    // performer picked, and showing only the favorites are cleared once, as
+    // they can hide it, and the works are read again; a work that still
+    // isn't there isn't in the library any more
+    fn reveal_pending_work(&self) {
+        let imp = self.imp();
+        let filter = self.wanted_filter();
+        let read = imp.works_filter.borrow().as_ref()
+            == Some(&(filter.clone(), imp.works_generation.get()));
+        if !read {
+            return;
+        }
+        let Some(mut pending) = imp.pending_work.take() else {
+            return;
+        };
+        if let Some(pos) = self.work_position(&pending.key) {
+            let name = imp
+                .works
+                .borrow()
+                .as_ref()
+                .and_then(|store| store.item(pos))
+                .and_downcast::<glib::BoxedAnyObject>()
+                .map(|work| work.borrow::<library::WorkInfo>().name.clone())
+                .unwrap_or_default();
+            imp.works_revealed
+                .set(imp.works_revealed.get().wrapping_add(1));
+            imp.works_list
+                .scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
+            utils::focus_when_laid_out(&*imp.works_list);
+            self.open_work(pending.key, name, true, pending.album);
+            return;
+        }
+        if pending.cleared || (filter.is_empty() && !imp.favorites_button.is_active()) {
+            return;
+        }
+        pending.cleared = true;
+        imp.pending_work.replace(Some(pending));
+        self.clear_search();
+        if imp.favorites_button.is_active() {
+            // Which reads the works again
+            imp.favorites_button.set_active(false);
+        } else {
+            self.update_works();
+        }
     }
 }
 
 // The number of the recordings of a work, e.g. "3 recordings"
-pub fn recordings_label(n: u32) -> String {
+fn recordings_label(n: u32) -> String {
     ni18n_f(
         // Translators: The '{}' must be left unmodified, and it is
         // expanded to the number of recordings of a work in the music
@@ -1030,27 +1150,21 @@ fn leaves_covers(flowbox: &gtk::FlowBox, up: bool) -> bool {
     }
 }
 
-// Gives the focus to the cover of an album among those of a work's row
-fn focus_cover(row: &gtk::Box, album: &str) {
-    let Some(flowbox) = row
+// The cover of an album among those of a work's row: the flow box's child
+// that holds its cell, which takes the focus
+fn cover_of(row: &gtk::Box, album: &str) -> Option<gtk::Widget> {
+    let flowbox = row
         .last_child()
-        .and_downcast::<RevealBin>()
-        .and_then(|bin| bin.child())
-        .and_downcast::<gtk::FlowBox>()
-    else {
-        return;
-    };
-    let child =
-        std::iter::successors(flowbox.first_child(), WidgetExt::next_sibling).find(|child| {
-            child
-                .first_child()
-                .and_downcast::<AlbumCell>()
-                .and_then(|cell| cell.album())
-                .is_some_and(|cell_album| cell_album.id_str() == album)
-        });
-    if let Some(child) = child {
-        child.grab_focus();
-    }
+        .and_downcast::<RevealBin>()?
+        .child()
+        .and_downcast::<gtk::FlowBox>()?;
+    std::iter::successors(flowbox.first_child(), WidgetExt::next_sibling).find(|child| {
+        child
+            .first_child()
+            .and_downcast::<AlbumCell>()
+            .and_then(|cell| cell.album())
+            .is_some_and(|cell_album| cell_album.id_str() == album)
+    })
 }
 
 #[cfg(test)]

@@ -6,8 +6,8 @@ use super::{adding::Tracks, albums::popup_menu, *};
 impl Window {
     // The menu of a track, at the given point of its row; a row of the
     // queue, rather than of an album's tracks, can be removed. Both can be
-    // played next, added to a playlist, and marked as favorites; a row of
-    // the queue or of a work's recordings goes to its album
+    // played next, added to a playlist, marked as favorites, and go to
+    // their work; a row of the queue goes to its album
     pub(super) fn show_track_menu(&self, row: &QueueRow, x: f64, y: f64, in_queue: bool) {
         let Some(track) = row.track() else {
             return;
@@ -84,9 +84,8 @@ impl Window {
 
         // The album is looked up while the menu opens, and the item stays
         // off for the tracks that are not in the album grid; the tracks of
-        // an album show all of them, scrolled to the track, and those of a
-        // work's recordings show their album
-        if in_queue || album_tracks.shows_work() {
+        // an album show all of them, scrolled to the track
+        if in_queue {
             let album_id: Rc<RefCell<Option<String>>> = Rc::default();
             let go_to_album = gio::SimpleAction::new("go-to-album", None);
             go_to_album.set_enabled(false);
@@ -121,9 +120,8 @@ impl Window {
             section.append(Some(&i18n("Go to Album")), Some("track.go-to-album"));
         }
 
-        // A track of a work, unless the work's recordings are showing
-        if track.has_work() && (in_queue || !album_tracks.shows_work()) {
-            self.add_other_recordings_item(&section, &actions, "track", &track);
+        if track.has_work() {
+            self.add_work_items(&section, &actions, "track", &track, false);
         }
 
         let info = gio::SimpleAction::new("info", None);

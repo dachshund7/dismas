@@ -86,10 +86,10 @@ All notable changes to this project will be documented in this file.
   covers can be selected, as on the Albums page, to play or add the work
   from each of them at once, and Go to Album, in the menu of a cover,
   shows its album on the Albums page and opens it there
-- Other Recordings, in the menu of a track of a work and in the menu of
-  the header of a work, with a right click or a long press, shows all the
-  recordings of the work in the music folders, with the track's own among
-  them
+- Go to Work, in the menu of a track of a work and in the menu of the
+  header of a work, with a right click or a long press, opens the work on
+  the Works page, with the cover of the track's album pointed out among
+  those of its recordings
 - Searching the queue and the albums also finds tracks by the names that
   the Work Hierarchy plugin gives their works, the works those are part
   of and the collections they're in, such as "Well-Tempered" for the
@@ -135,9 +135,9 @@ All notable changes to this project will be documented in this file.
 - The waveform shows when it has the focus. Holding an arrow key seeks
   on, and Home and End go to the start and the end of the track, as in a
   slider, which keeps Home, End, Page Up and Page Down too
-- Show the Playing Track, Show in Playlist, Go to Album and Other
-  Recordings put the focus on the track they show, so that the keys go on
-  from there
+- Show the Playing Track, Show in Playlist and Go to Album put the focus
+  on the track they show, and Go to Work on the cover of its album, so
+  that the keys go on from there
 - Fullscreen, in the main menu, for tablets and phones without F11
 - Add Tracks… and Add Folder…, in the main menu (Ctrl+O and Ctrl+Shift+O),
   add tracks from outside the music folders to the selected playlist, as a
@@ -169,9 +169,9 @@ All notable changes to this project will be documented in this file.
 - Remove All can be undone the same way. The tracks come back with the
   order they had before they were shuffled, and the track that was
   playing comes back paused where it was
-- Playing an album, or a track of an album or of a work's recordings, in
-  place of the queue has an Undo too, when the queue had other tracks;
-  playing another track of the same album doesn't need one
+- Playing an album, or a track of an album, in place of the queue has an
+  Undo too, when the queue had other tracks; playing another track of the
+  same album doesn't need one
 
 ### Changed
 

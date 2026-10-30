@@ -66,11 +66,12 @@ What Dismas adds
   soloists, with what they play or sing, and picking a composer and a
   performer shows the albums where they meet; once one is picked, the
   other list has only the names that go with it. The Works page, next to the
-  albums, lists the works instead, by composer and in the order of their catalogue
-  numbers, with the number of their recordings, and keeps the search and what you picked; open one to compare
-  its recordings, with their performers and years, and play one. Other Recordings, in the menu of a
-  movement, shows the recordings of its work next to whatever you're
-  doing.
+  tracks, lists the works instead, by composer and in the order of their
+  catalogue numbers, with the number of their recordings, and keeps the
+  search and what you picked; open one to see the covers of the albums it's
+  recorded on, with their performers and years, and play, add or select
+  its recordings. Go to Work, in the menu of a movement, opens its work
+  there, with the movement's album pointed out.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
   the Playlists page. Add to Playlist, in the menu of a track, adds it to

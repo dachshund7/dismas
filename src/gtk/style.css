@@ -146,8 +146,7 @@ playbackcontrol button.favorite:checked.keyboard-activating {
   background-color: color-mix(in srgb, currentColor 30%, transparent);
 }
 
-/* The heart of a favorite work, in the list of works, and of a favorite
- * recording, over its tracks */
+/* The heart of a favorite work, in the list of works */
 image.favorite-work {
   color: var(--red-2);
 }
@@ -240,9 +239,10 @@ queuerow.missing stack {
   opacity: 0.55;
 }
 
-/* A track that was gone to, e.g. with "Go to Album", fades in and out
- * twice */
-queuerow.flash {
+/* A track that was gone to, e.g. with "Go to Album", or the album of a
+ * work gone to, fades in and out twice (FLASH_DURATION in queue_row.rs) */
+queuerow.flash,
+.album-cell.flash {
   animation: track-flash 0.6s ease-in-out 2;
 }
 
