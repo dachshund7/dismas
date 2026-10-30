@@ -218,12 +218,14 @@ impl Window {
     }
 
     // Plays tracks in place of the queue, from the one at `start`, as an
-    // album's Play button does
+    // album's Play button does. The toast with an Undo only shows when the
+    // queue had tracks that these leave out: a click on another track of
+    // the album that's playing loses nothing, and the album's tracks are
+    // mostly clicked for that
     fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
-        self.select_queue_to_play();
-        self.clear_queue();
-        self.show_playlist_view();
-        self.queue_tracks(files, QueueMode::Play(start));
+        let replaced = self.replaced_queue();
+        let replaced = replaced.loses_tracks(&files).then_some(replaced);
+        self.replace_queue_with(files, start, replaced, None);
     }
 
     // The menu of a recording of a work in the sidebar, at a point of its

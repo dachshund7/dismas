@@ -427,14 +427,27 @@ impl Window {
         announce: Option<String>,
     ) {
         let replaced = self.replaced_queue();
+        self.replace_queue_with(files, 0, Some(replaced), announce);
+    }
+
+    // Empties the queue for the tracks, selecting it if a saved playlist
+    // was, and plays them from the one at `start`. With `replaced`, the
+    // toast that follows has an Undo that puts it back
+    pub(super) fn replace_queue_with(
+        &self,
+        files: Vec<gio::File>,
+        start: u32,
+        replaced: Option<ReplacedQueue>,
+        announce: Option<String>,
+    ) {
         self.select_queue_to_play();
         self.clear_queue();
         self.show_playlist_view();
         self.load_into_queue(
             files,
-            QueueMode::Play(0),
+            QueueMode::Play(start),
             LoadOptions {
-                replaced: Some(replaced),
+                replaced,
                 announce,
                 ..Default::default()
             },

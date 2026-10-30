@@ -159,6 +159,9 @@ All notable changes to this project will be documented in this file.
 - Remove All can be undone the same way. The tracks come back with the
   order they had before they were shuffled, and the track that was
   playing comes back paused where it was
+- Playing an album, or a track of an album or of a work's recordings, in
+  place of the queue has an Undo too, when the queue had other tracks;
+  playing another track of the same album doesn't need one
 
 ### Changed
 

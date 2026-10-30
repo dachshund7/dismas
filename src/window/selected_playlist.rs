@@ -766,3 +766,41 @@ pub(super) struct ReplacedQueue {
     queue_unshuffled: Option<Vec<gio::File>>,
     queue_point: Option<ResumePoint>,
 }
+
+impl ReplacedQueue {
+    // Whether playing the files in place of the queue loses some of its
+    // tracks, the ones they don't include
+    pub(super) fn loses_tracks(&self, files: &[gio::File]) -> bool {
+        let kept: HashSet<glib::GString> = files.iter().map(FileExt::uri).collect();
+        self.queue.iter().any(|file| !kept.contains(&file.uri()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn files(names: &[&str]) -> Vec<gio::File> {
+        names
+            .iter()
+            .map(|name| gio::File::for_path(format!("/music/{name}.opus")))
+            .collect()
+    }
+
+    fn replaced(queue: &[&str]) -> ReplacedQueue {
+        ReplacedQueue {
+            selected: String::new(),
+            queue: files(queue),
+            queue_unshuffled: None,
+            queue_point: None,
+        }
+    }
+
+    #[test]
+    fn a_queue_is_lost_only_for_tracks_left_out() {
+        // Another track of the album that's queued, in any order
+        assert!(!replaced(&["b", "a"]).loses_tracks(&files(&["a", "b", "c"])));
+        assert!(!replaced(&[]).loses_tracks(&files(&["a"])));
+        assert!(replaced(&["a", "x"]).loses_tracks(&files(&["a", "b"])));
+    }
+}
