@@ -231,7 +231,6 @@ mod imp {
         pub expanded_work: RefCell<Option<super::works::ExpandedWork>>,
         pub work_rows: RefCell<HashMap<String, glib::WeakRef<gtk::Box>>>,
         pub covers_generation: Cell<u32>,
-        pub works_glide: RefCell<Option<adw::TimedAnimation>>,
         // The ids of the selected albums; a new search clears them, so
         // they're all among the albums it shows
         pub selected: RefCell<HashSet<String>>,

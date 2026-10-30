@@ -8,9 +8,7 @@
 // matches
 
 use super::*;
-use crate::{
-    album_cell::CellWork, play_stats::FavoriteRecording, queue_row, reveal_bin::RevealBin,
-};
+use crate::{album_cell::CellWork, play_stats::FavoriteRecording, reveal_bin::RevealBin};
 
 // The covers of the albums of an open work, smaller than the grid's, as
 // they're in a list
@@ -496,17 +494,33 @@ impl LibraryView {
         bin
     }
 
-    // Once a work has opened, the list glides to show its covers in its
-    // middle, as far as its line stays in view, so a work too tall for that
-    // has its line at the top; its row is laid out open at the frame after
+    // As a work opens, the list glides along, so that its covers end in the
+    // middle of the list, as far as its line stays in view, so a work too
+    // tall for that has its line at the top. Where the line ends is known
+    // from the height of the covers before they open, and at each frame of
+    // their slide, the list puts the line that much of the way there, with
+    // the slide's easing, which keeps it in place as a work above it closes
+    // at the same time. Its row is laid out open at the frame after the last
     fn show_when_open(&self, row: &gtk::Box) {
-        let Some(bin) = row.last_child().and_downcast::<RevealBin>() else {
+        let list = self.imp().works_list.get();
+        let (Some(bin), Some(line)) = (
+            row.last_child().and_downcast::<RevealBin>(),
+            row.first_child(),
+        ) else {
             return;
         };
+        let Some(start) = row.compute_bounds(&list).map(|bounds| bounds.y()) else {
+            return;
+        };
+        let covers = bin.child().map_or(0, |covers| {
+            covers.measure(gtk::Orientation::Vertical, row.width()).1
+        });
+        let end =
+            (list.height() as f32 / 2.0 - line.height() as f32 - covers as f32 / 2.0).max(0.0);
         let laid_out = Cell::new(false);
         bin.add_tick_callback(clone!(
-            #[weak(rename_to = this)]
-            self,
+            #[weak]
+            list,
             #[weak]
             row,
             #[upgrade_or]
@@ -515,34 +529,20 @@ impl LibraryView {
                 if !bin.is_revealed() {
                     return glib::ControlFlow::Break;
                 }
-                if bin.progress() < 1.0 || !laid_out.replace(true) {
-                    return glib::ControlFlow::Continue;
+                let progress = bin.progress();
+                if let (Some(bounds), Some(adjustment)) =
+                    (row.compute_bounds(&list), list.vadjustment())
+                {
+                    let wanted = start + (end - start) * progress as f32;
+                    adjustment.set_value(adjustment.value() + f64::from(bounds.y() - wanted));
                 }
-                this.glide_to_row(&row);
-                glib::ControlFlow::Break
+                if progress < 1.0 || !laid_out.replace(true) {
+                    glib::ControlFlow::Continue
+                } else {
+                    glib::ControlFlow::Break
+                }
             }
         ));
-    }
-
-    fn glide_to_row(&self, row: &gtk::Box) {
-        let imp = self.imp();
-        let list = &*imp.works_list;
-        let covers = row.last_child().and_then(|bin| bin.compute_bounds(list));
-        let (Some(bounds), Some(covers), Some(adjustment)) =
-            (row.compute_bounds(list), covers, list.vadjustment())
-        else {
-            return;
-        };
-        let middle = covers.y() + covers.height() / 2.0 - list.height() as f32 / 2.0;
-        let by = middle.min(bounds.y());
-        if by.abs() < 1.0 {
-            return;
-        }
-        let target = adjustment.value() + f64::from(by);
-        let glide = queue_row::glide_adjustment(list, &adjustment, target);
-        if let Some(before) = imp.works_glide.replace(Some(glide)) {
-            before.pause();
-        }
     }
 
     // Gives the list of works a new model, which it shows from the top, with
