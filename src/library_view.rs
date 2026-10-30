@@ -1571,6 +1571,7 @@ impl LibraryView {
                 .collect(),
             composer: imp.composer.borrow().as_ref().map(|c| c.key.clone()),
             performer: imp.performer.borrow().as_ref().map(|p| p.key.clone()),
+            work: None,
         }
     }
 

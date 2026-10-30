@@ -704,22 +704,28 @@ fn main_artists(
 
 // What the tracks taken from albums match: every word of a search, normalized
 // with `normalize_search_text()`, in any of their tags, a composer and a
-// performer, by their keys (`composer_key()`). An empty one matches every
-// track
+// performer, by their keys (`composer_key()`), and a work, by its key (see
+// `work_entry()`), as the covers of a work's albums take its tracks. An
+// empty one matches every track
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
     pub words: Vec<String>,
     pub composer: Option<String>,
     pub performer: Option<String>,
+    pub work: Option<String>,
 }
 
 impl TrackFilter {
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty() && self.composer.is_none() && self.performer.is_none()
+        self.words.is_empty()
+            && self.composer.is_none()
+            && self.performer.is_none()
+            && self.work.is_none()
     }
 
     // The SQL conditions on a track, each after " AND ", and their values;
-    // a track without search text, composers or performers matches nothing
+    // a track without search text, composers, performers or a work matches
+    // nothing
     fn conditions(&self) -> (String, Vec<String>) {
         let mut sql = String::new();
         let mut values = Vec::new();
@@ -734,6 +740,10 @@ impl TrackFilter {
         if let Some(key) = &self.performer {
             sql.push_str(" AND instr(performers, ?) > 0");
             values.push(format!("\t{key}\t"));
+        }
+        if let Some(key) = &self.work {
+            sql.push_str(" AND work_key = ?");
+            values.push(key.clone());
         }
         (sql, values)
     }
@@ -5046,6 +5056,37 @@ mod tests {
                 (None, strings(&["/m/E/03"]), String::new()),
             ]
         );
+        // The tracks of a work on each album, as the covers of the albums of
+        // its recordings take them, alone and with the words of a search
+        let gold = super::TrackFilter {
+            work: Some("gold".to_string()),
+            ..Default::default()
+        };
+        assert!(!gold.is_empty());
+        let albums = |filter: &super::TrackFilter| {
+            let mut albums = super::query_search_albums(&conn, filter, &hidden)
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>();
+            albums.sort();
+            albums
+        };
+        assert_eq!(
+            albums(&gold),
+            [("b".to_string(), (4, 4)), ("e".to_string(), (1, 5))]
+        );
+        let variations = super::TrackFilter {
+            words: vec!["variatio".to_string()],
+            ..gold.clone()
+        };
+        assert_eq!(albums(&variations), [("b".to_string(), (2, 4))]);
+        let tracks = super::query_album_tracks(&conn, "e", &gold, &hidden)
+            .unwrap()
+            .into_iter()
+            .map(|(_, path)| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(tracks, strings(&["/m/E/03"]));
+
         // The other recordings of the work of a track
         let others = |path: &str| {
             super::query_track_work(&conn, Path::new(path), &hidden)
