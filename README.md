@@ -316,7 +316,7 @@ Keyboard shortcuts
 | Ctrl+C                           | Copy the playing track's title and artist      |
 | Ctrl+1 to Ctrl+4                 | Player / albums / tracks / works               |
 | Ctrl+P                           | Playlists                                      |
-| Ctrl+F                           | Search the queue                               |
+| Ctrl+F                           | Search where the focus is: the albums, tracks or works, or the playlist |
 | Ctrl+R                           | Shuffle, or put back the order from before     |
 | Ctrl+L                           | Remove all the tracks of the playlist          |
 | Ctrl+A                           | Select all the tracks or albums                |

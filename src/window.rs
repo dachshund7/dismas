@@ -6,6 +6,7 @@ mod albums;
 mod bindings;
 mod booklets;
 mod favorites;
+mod find;
 mod fullscreen;
 mod loading;
 mod now_playing;
@@ -483,14 +484,12 @@ mod imp {
                 debug!("Window::win.save-queue()");
                 win.show_save_queue_dialog();
             });
-            // The search button toggles the queue search, but its shortcut
-            // goes back to it when it's open; Esc closes it. The pane can
-            // show an album's tracks, which would hide the search
-            klass.install_action("queue.find", None, move |win, _, _| {
-                debug!("Window::queue.find()");
-                win.show_playlist_view();
-                win.set_queue_search(true);
-                win.imp().playlist_view.queue_searchentry().grab_focus();
+            // The search button toggles the queue search, but Ctrl+F goes
+            // back to it when it's open; Esc closes it. On the album pages,
+            // Ctrl+F goes to their search instead, see window/find.rs
+            klass.install_action("win.find", None, move |win, _, _| {
+                debug!("Window::win.find()");
+                win.find();
             });
             klass.install_action("queue.play-results", None, move |win, _, _| {
                 debug!("Window::queue.play-results()");
@@ -1022,6 +1021,7 @@ impl Window {
         win.setup_select_all_shortcut();
         win.setup_key_shortcuts();
         win.setup_edit_shortcuts();
+        win.setup_type_to_search();
         win.setup_track_info_button();
         win.setup_more_button();
         win.setup_library();

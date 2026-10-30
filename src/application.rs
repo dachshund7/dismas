@@ -91,7 +91,7 @@ mod imp {
 
             obj.set_accels_for_action("queue.clear", &["<primary>L"]);
             obj.set_accels_for_action("queue.toggle", &["F9"]);
-            obj.set_accels_for_action("queue.find", &["<primary>F"]);
+            obj.set_accels_for_action("win.find", &["<primary>F"]);
             obj.set_accels_for_action("queue.shuffle", &["<primary>r"]);
 
             // Ctrl+Left and Ctrl+Right seek, see `Window::setup_key_shortcuts()`

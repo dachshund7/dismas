@@ -223,9 +223,19 @@ All notable changes to this project will be documented in this file.
 - Importing a playlist finds its tracks when it was made on another
   computer or on Windows, by the end of their paths, in the playlist's
   folder or in the music folders, whatever the case of their names
+- Ctrl+F and typing go to the search of where the focus is: on the
+  Albums, Tracks and Works pages, their own search, rather than the
+  playlist's, and in the playlist pane, on the player and on the
+  playlists, the playlist's. The cursor moves into the search with what's
+  typed, and typing in the playlist goes on with a search that's open.
+  Ctrl+F selects the text of the search, so that what's typed next starts
+  a new search
 
 ### Fixed
 
+- Ctrl+F did nothing when the playlist's search had been left open and the
+  playlist pane hidden; it shows the pane again, with the cursor in the
+  search
 - Screen readers didn't say which tracks of the queue or of an album, or
   which albums of the grid, were selected in selection mode
 - Playing other tracks in place of the queue a few seconds after the last

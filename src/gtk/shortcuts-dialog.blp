@@ -55,6 +55,11 @@ Adw.ShortcutsDialog shortcuts_dialog {
         }
 
         Adw.ShortcutsItem {
+            title: C_("shortcut window", "Search where the focus is: the albums, tracks or works, or the playlist");
+            action-name: "win.find";
+        }
+
+        Adw.ShortcutsItem {
             title: C_("shortcut window", "Toggle fullscreen");
             action-name: "win.fullscreen";
         }
@@ -96,11 +101,6 @@ Adw.ShortcutsDialog shortcuts_dialog {
         Adw.ShortcutsItem {
             title: C_("shortcut window", "Toggle the playlist pane");
             action-name: "queue.toggle";
-        }
-
-        Adw.ShortcutsItem {
-            title: C_("shortcut window", "Search tracks");
-            action-name: "queue.find";
         }
 
         Adw.ShortcutsItem {

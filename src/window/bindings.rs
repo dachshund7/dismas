@@ -393,11 +393,6 @@ impl Window {
 
             glib::Propagation::Proceed
         });
-
-        self.imp()
-            .playlist_view
-            .queue_searchbar()
-            .set_key_capture_widget(Some(self.upcast_ref::<gtk::Widget>()));
     }
 
     // Seeks to a fraction of the track and plays it, if there is a track
