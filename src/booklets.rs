@@ -17,6 +17,11 @@ use crate::{cue_sheet, i18n::i18n, library::disc_album_folder, utils};
 // The action that opens a booklet, with the URI of its file
 pub const OPEN_ACTION: &str = "win.open-booklet";
 
+// A folder with more PDF files than this isn't an album's, but one like
+// Downloads that a track was opened from: its PDFs aren't booklets, and a
+// menu of them all would be as wide as the longest name
+const MAX_BOOKLETS: usize = 10;
+
 // The PDF files in the folders of the tracks at `paths`, and in the folder
 // of their album when they're in a disc folder, as in Album/CD1, where the
 // album's booklet is often left; in the order a file manager shows their
@@ -46,7 +51,7 @@ fn pdf_files(folder: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return Vec::new();
     };
-    entries
+    let found: Vec<PathBuf> = entries
         .flatten()
         .filter(|entry| {
             let name = entry.file_name();
@@ -59,7 +64,13 @@ fn pdf_files(folder: &Path) -> Vec<PathBuf> {
         .map(|entry| entry.path())
         // Following symbolic links
         .filter(|path| path.is_file())
-        .collect()
+        // Only enough to tell, as such a folder can have thousands
+        .take(MAX_BOOKLETS + 1)
+        .collect();
+    if found.len() > MAX_BOOKLETS {
+        return Vec::new();
+    }
+    found
 }
 
 // The item of a menu that opens the booklets: "Open Booklet" for one, and
@@ -104,7 +115,7 @@ mod tests {
 
     use gtk::glib;
 
-    use super::find;
+    use super::{MAX_BOOKLETS, find};
 
     fn names(dir: &Path, found: &[PathBuf]) -> Vec<String> {
         found
@@ -139,6 +150,20 @@ mod tests {
             names(&dir, &found),
             ["booklet 2.pdf", "booklet 10.PDF", "liner notes - Messe.pdf"]
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_full_of_pdf_files_has_no_booklets() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-booklets-XXXXXX")).unwrap();
+        for i in 0..MAX_BOOKLETS {
+            std::fs::write(dir.join(format!("paper {i}.pdf")), b"").unwrap();
+        }
+        let track = dir.join("talk.mp3");
+        assert_eq!(find(std::slice::from_ref(&track)).len(), MAX_BOOKLETS);
+
+        std::fs::write(dir.join("one more.pdf"), b"").unwrap();
+        assert!(find(&[track]).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
