@@ -94,6 +94,10 @@ pub struct TrackCredits {
     // The work it arranges, if MusicBrainz has it as an arrangement, from
     // the "Work Hierarchy" plugin
     pub work_arrangement: Option<Arrangement>,
+    // The MusicBrainz ids of the parts of the work the track performs, at
+    // every level below the work, from the "Work Hierarchy" plugin, which
+    // an arrangement of one of them finds the work by
+    pub work_part_ids: Vec<String>,
     // Where the movement is in the work, which tells two recordings of a
     // work on one album apart: the positions in each level below the work,
     // empty if they aren't known, and `None` if the track performs the
@@ -221,9 +225,11 @@ impl TrackCredits {
             collection,
             order,
             arrangement,
+            part_ids,
         }) = hierarchy.as_ref().and_then(WorkHierarchy::labels)
         {
             credits.work_arrangement = arrangement;
+            credits.work_part_ids = part_ids;
             credits.work_title = (title != work).then_some(title);
             credits.work = Some(work);
             credits.work_composers = composers;
@@ -265,6 +271,7 @@ impl TrackCredits {
             work_id: None,
             work_collection: None,
             work_arrangement: None,
+            work_part_ids: Vec::new(),
             movement_order,
             work_search: String::new(),
             movement,

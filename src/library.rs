@@ -47,7 +47,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 26;
+const SCHEMA_VERSION: i32 = 27;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -82,7 +82,9 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         label TEXT,
         catalog_number TEXT,
         work_arrangement_of TEXT,
-        work_arrangement TEXT
+        work_arrangement TEXT,
+        work_arrangement_of_id TEXT,
+        work_part_ids TEXT
     );
     CREATE INDEX tracks_album ON tracks (album_id);
     CREATE INDEX tracks_file ON tracks (file);
@@ -194,6 +196,12 @@ struct WorkEntry {
     // is, or "" if MusicBrainz doesn't say, see `Arrangement`
     arrangement_of: Option<String>,
     arrangement: Option<String>,
+    // The MusicBrainz id of the work an arrangement arranges, if the plugin
+    // gave it
+    arrangement_of_id: Option<String>,
+    // The MusicBrainz ids of the parts of the work it performs, at every
+    // level below the work, on a line each, see `WorkLabels::part_ids`
+    part_ids: Option<String>,
 }
 
 // A folder whose albums are in the grid: the path that's read, and the
@@ -1326,6 +1334,7 @@ struct WorkRow {
     performers: Option<String>,
     arrangement_of: Option<String>,
     arrangement: Option<String>,
+    arrangement_of_id: Option<String>,
 }
 
 // Whether a track of the albums of the grid is part of a work, without the
@@ -1398,6 +1407,7 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
         composers: HashMap<&'a str, usize>,
         arrangements_of: HashMap<&'a str, usize>,
         arrangements: HashMap<&'a str, usize>,
+        arrangement_of_ids: HashMap<&'a str, usize>,
     }
     fn count_some<'a>(counts: &mut HashMap<&'a str, usize>, value: Option<&'a str>) {
         if let Some(value) = value {
@@ -1419,6 +1429,10 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
             count_some(&mut work.composers, row.composers.as_deref());
             count_some(&mut work.arrangements_of, row.arrangement_of.as_deref());
             count_some(&mut work.arrangements, row.arrangement.as_deref());
+            count_some(
+                &mut work.arrangement_of_ids,
+                row.arrangement_of_id.as_deref(),
+            );
         }
     }
 
@@ -1437,6 +1451,7 @@ fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
                 collection: most(seen.collections),
                 arrangement: most(seen.arrangements_of).map(|of| Arrangement {
                     of,
+                    of_id: most(seen.arrangement_of_ids),
                     label: most(seen.arrangements),
                 }),
                 composers,
@@ -1660,7 +1675,7 @@ fn query_work_rows(
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, path, work_key, movement_order, {},
                 work, work_title, work_collection, work_composers, album, year, performers,
-                disc, track, work_arrangement_of, work_arrangement
+                disc, track, work_arrangement_of, work_arrangement, work_arrangement_of_id
          FROM tracks
          WHERE album_id IS NOT NULL AND work_key IS NOT NULL{}{key_sql}",
         filter.matches_sql(),
@@ -1693,6 +1708,7 @@ fn query_work_rows(
             performers: row.get(11)?,
             arrangement_of: row.get(14)?,
             arrangement: row.get(15)?,
+            arrangement_of_id: row.get(16)?,
         };
         Ok((track_order, row))
     })?;
@@ -2177,9 +2193,10 @@ fn scan_with(
                  (path, file, mtime, ctime, size, album_id, album, album_artist, artist,
                   artist_sort, year, disc, track, title, search, added, composers, work_key,
                   work, work_title, work_collection, work_composers, movement_order, performers,
-                  label, catalog_number, work_arrangement_of, work_arrangement)
+                  label, catalog_number, work_arrangement_of, work_arrangement,
+                  work_arrangement_of_id, work_part_ids)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
             )?;
             for source in chunk {
                 let key = path_bytes(&source.path);
@@ -2247,6 +2264,8 @@ fn scan_with(
                         tags.catalog_number,
                         work.and_then(|w| w.arrangement_of.as_ref()),
                         work.and_then(|w| w.arrangement.as_ref()),
+                        work.and_then(|w| w.arrangement_of_id.as_ref()),
+                        work.and_then(|w| w.part_ids.as_ref()),
                     ])?;
                     n_changed += 1;
                     // A changed track might have new cover art; new tracks
@@ -2804,6 +2823,11 @@ fn work_entry(
             .work_arrangement
             .as_ref()
             .map(|arrangement| arrangement.label.clone().unwrap_or_default()),
+        arrangement_of_id: credits
+            .work_arrangement
+            .as_ref()
+            .and_then(|arrangement| arrangement.of_id.clone()),
+        part_ids: (!credits.work_part_ids.is_empty()).then(|| credits.work_part_ids.join("\n")),
     })
 }
 
@@ -3088,6 +3112,7 @@ mod tests {
         assert_eq!(movement.key, "1d6a0d5c-0000-0000-0000-000000000000");
         assert_eq!(movement.name, "Requiem in B-flat minor");
         assert_eq!(movement.order.as_deref(), Some("3.1"));
+        assert_eq!(movement.part_ids.as_deref(), Some("s\nd"));
     }
 
     #[test]
@@ -3120,6 +3145,8 @@ mod tests {
         assert_eq!(arrangement.key, CATCH_ALL);
         assert_eq!(arrangement.arrangement_of.as_deref(), Some(prelude));
         assert_eq!(arrangement.arrangement.as_deref(), Some(""));
+        assert_eq!(arrangement.arrangement_of_id.as_deref(), Some(ORIGINAL));
+        assert_eq!(arrangement.part_ids, None);
         // Not when the tags name another work than the plugin
         assert_eq!(work(ORIGINAL).arrangement_of, None);
     }

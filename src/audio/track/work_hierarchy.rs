@@ -99,6 +99,10 @@ pub(super) struct WorkLabels {
     pub(super) order: Option<Vec<u32>>,
     // The work it arranges, if it's an arrangement
     pub(super) arrangement: Option<Arrangement>,
+    // The MusicBrainz ids of the parts of the work the track performs, at
+    // every level below the work, e.g. the Chaconne of a partita, which an
+    // arrangement of a single movement can arrange
+    pub(super) part_ids: Vec<String>,
 }
 
 // A work that MusicBrainz has as an arrangement of another, which the "Work
@@ -110,6 +114,9 @@ pub(super) struct WorkLabels {
 pub struct Arrangement {
     // The title of the work it arranges
     pub of: String,
+    // The MusicBrainz id of the work it arranges, which finds that work in
+    // the library
+    pub of_id: Option<String>,
     // What MusicBrainz says it is, e.g. "for two pianos, Busoni"; `None`
     // for the catch-all for the arrangements of a work, or without a word
     pub label: Option<String>,
@@ -200,6 +207,7 @@ struct HierarchyWork {
 
 #[derive(Debug, Deserialize)]
 struct HierarchyLink {
+    id: Option<String>,
     title: Option<String>,
 }
 
@@ -219,9 +227,10 @@ fn lenient_number<'de, D: serde::Deserializer<'de>>(
 
 impl HierarchyWork {
     fn arrangement(&self) -> Option<Arrangement> {
-        let of = self.arrangement_of.as_ref()?.title.clone()?;
+        let link = self.arrangement_of.as_ref()?;
         Some(Arrangement {
-            of,
+            of: link.title.clone()?,
+            of_id: link.id.clone().filter(|id| !id.is_empty()),
             label: self.arrangement_label().map(ToString::to_string),
         })
     }
@@ -361,6 +370,13 @@ impl WorkHierarchy {
             .first()
             .and_then(|segment| segment.path.get(*depth))
             .and_then(HierarchyWork::arrangement);
+        let part_ids = paths
+            .iter()
+            .flat_map(|(path, _)| &path[depth + 1..])
+            .map(|part| part.id)
+            .unique()
+            .map(ToString::to_string)
+            .collect();
         Some(WorkLabels {
             work: work.name.to_string(),
             title: work.title.to_string(),
@@ -370,6 +386,7 @@ impl WorkHierarchy {
             collection,
             order,
             arrangement,
+            part_ids,
         })
     }
 
@@ -957,6 +974,7 @@ mod tests {
                 arrangement(catch_all),
                 Some(Arrangement {
                     of: partita.to_string(),
+                    of_id: Some("partita".to_string()),
                     label: None
                 }),
                 "{catch_all}"
@@ -1010,6 +1028,7 @@ mod tests {
                 collection: Some("The Well-Tempered Clavier, Book I".to_string()),
                 order: Some(vec![2]),
                 arrangement: None,
+                part_ids: vec!["f".to_string()],
             })
         );
 
@@ -1030,7 +1049,21 @@ mod tests {
                 "1–2. Prelude / Fugue".to_string()
             ))
         );
+        // The ids of the parts of the work, at every level below it, each
+        // once, which an arrangement of one of them finds the work by
+        let part_ids = |paths: &[&[Work]], work_index| {
+            work_hierarchy_labels(&hierarchy_at(paths, work_index)).map(|labels| labels.part_ids)
+        };
+        assert_eq!(
+            part_ids(&[&[wtc, book, pf, prelude], &[wtc, book, pf, fugue]], 2),
+            Some(vec!["p".to_string(), "f".to_string()])
+        );
+        assert_eq!(
+            part_ids(&[&[wtc, book, pf, prelude], &[wtc, book, pf, fugue]], 1),
+            Some(vec!["bwv846".to_string(), "p".to_string(), "f".to_string()])
+        );
         // A whole Prelude and Fugue in one track is a work, not a movement
+        assert_eq!(part_ids(&[&[wtc, book, pf]], 2), Some(Vec::new()));
         assert_eq!(
             labels_at(&[&[wtc, book, pf]], 2),
             Some((
