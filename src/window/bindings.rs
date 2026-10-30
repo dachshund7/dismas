@@ -178,6 +178,19 @@ impl Window {
         );
         self.disconnect_on_close(queue, notify_ntracks_id);
 
+        // Tracks removed from the queue can't be put back once it's emptied
+        // for other tracks, e.g. those of another playlist, so the toast
+        // that offers it goes
+        let notify_generation_id = queue.connect_notify_local(
+            Some("generation"),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, _| win.dismiss_removed_toast()
+            ),
+        );
+        self.disconnect_on_close(queue, notify_generation_id);
+
         // Moving and shuffling tracks change the time left too, as do new
         // tags; the current track can move along with them, which notifies
         // `current` once the tracks are in their places

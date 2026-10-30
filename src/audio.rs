@@ -68,7 +68,7 @@ pub use player::{
     AudioPlayer, PlaybackAction, PlaybackState, RepeatMode, ReplayGainMode, SeekDirection,
     VOLUME_STEP,
 };
-pub use queue::Queue;
+pub use queue::{Queue, RemovedRun};
 pub use sleep_timer::{SleepTimer, TimerEnd};
 pub use state::PlayerState;
 pub use track::{

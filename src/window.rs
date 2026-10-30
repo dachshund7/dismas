@@ -31,12 +31,16 @@ use glib::clone;
 use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
 use pane::PaneHistory;
+use playlist::QueueUndo;
 use selected_playlist::ReplacedQueue;
 use sidebar::SizeLimits;
 
 use crate::{
     album_tracks::AlbumTracks,
-    audio::{AudioPlayer, CoverCache, Missing, RepeatMode, ReplayGainMode, Track, load_tracks},
+    audio::{
+        AudioPlayer, CoverCache, Missing, RemovedRun, RepeatMode, ReplayGainMode, Track,
+        load_tracks,
+    },
     config::APPLICATION_ID,
     cover_backdrop::CoverBackdrop,
     drag_overlay::DragOverlay,
@@ -297,6 +301,9 @@ mod imp {
         // The toast with an Undo button that Ctrl+Z presses, while it's up,
         // which the next one takes the place of
         pub undo_toast: glib::WeakRef<adw::Toast>,
+        // What the Undo of the toast about removed tracks puts back, while
+        // that toast is up
+        pub(super) queue_undo: RefCell<Option<QueueUndo>>,
 
         // The handlers connected to objects that outlive the window, the
         // player's and the style manager, which are disconnected when it
@@ -615,6 +622,7 @@ mod imp {
                 player: std::cell::OnceCell::new(),
                 failed_toast: glib::WeakRef::new(),
                 undo_toast: glib::WeakRef::new(),
+                queue_undo: RefCell::default(),
                 handlers: RefCell::default(),
             }
         }
@@ -1380,7 +1388,7 @@ impl Window {
     // showing, which would then name what came before, and its Undo would
     // put back what was there before that, rather than what Ctrl+Z puts
     // back
-    pub(super) fn add_undo_toast(&self, msg: String, undo: impl Fn(&Self) + 'static) {
+    pub(super) fn add_undo_toast(&self, msg: String, undo: impl Fn(&Self) + 'static) -> adw::Toast {
         if let Some(toast) = self.imp().undo_toast.upgrade() {
             toast.dismiss();
         }
@@ -1395,6 +1403,7 @@ impl Window {
             }
         ));
         self.imp().undo_toast.set(Some(&toast));
+        toast
     }
 
     // Ctrl+Z, while a toast with an Undo button is up, presses it: the

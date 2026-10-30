@@ -19,8 +19,8 @@ use crate::audio::TrayController;
 use crate::{
     application::ApplicationAction,
     audio::{
-        Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, SleepTimer,
-        TimerEnd, Track, TrackSource, WaveformGenerator,
+        Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, RemovedRun,
+        SleepTimer, TimerEnd, Track, TrackSource, WaveformGenerator,
     },
     play_stats::{self, Listen, ListenTracker},
     utils,
@@ -1016,8 +1016,9 @@ impl AudioPlayer {
     // Removes tracks from the queue. When the current track is one of
     // them, playback goes on from the first track after it that stays, as
     // repeating the track would keep playing it after it's gone; that's one
-    // load into the backend, rather than one for each removed track after it
-    pub fn remove_tracks(&self, tracks: &[Track]) {
+    // load into the backend, rather than one for each removed track after
+    // it. Returns the runs of tracks removed, to put them back
+    pub fn remove_tracks(&self, tracks: &[Track]) -> Vec<RemovedRun> {
         let removed: HashSet<&Track> = tracks.iter().collect();
         if let Some(current_track) = self.state.track().filter(|t| removed.contains(t)) {
             current_track.set_playing(false);
@@ -1034,11 +1035,12 @@ impl AudioPlayer {
             }
         }
 
-        self.queue.remove_tracks(tracks);
+        let runs = self.queue.remove_tracks(tracks);
 
         if self.queue.is_empty() {
             self.clear_current_track();
         }
+        runs
     }
 
     // What the backend plays for a track of the queue

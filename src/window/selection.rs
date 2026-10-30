@@ -106,9 +106,6 @@ impl Window {
         let queue = player.queue();
         let tracks = queue.selected_tracks();
         self.remove_tracks(&tracks);
-
-        // Store the current state of the queue
-        self.store_queue();
     }
 
     // Leaves selection mode in the grid, the tracks of an album and the

@@ -35,6 +35,11 @@ mod imp {
         // The tracks Play Next put in, which the next ones go after while
         // they follow the current track
         pub played_next: RefCell<Vec<glib::WeakRef<Track>>>,
+        // Goes up each time the queue is emptied for other tracks, as when
+        // switching playlists, so that tracks removed before can't be put
+        // back among those of another playlist
+        #[property(get)]
+        pub generation: Cell<u64>,
     }
 
     #[glib::object_subclass]
@@ -49,6 +54,7 @@ mod imp {
                 current_pos: Cell::new(None),
                 n_tracks: Default::default(),
                 played_next: RefCell::default(),
+                generation: Cell::new(0),
             }
         }
     }
@@ -164,17 +170,20 @@ impl Queue {
     // them, as `move_tracks()` does; removing them one at a time would make
     // the list, the sections of the works and the window catch up with each
     // one. Removing tracks moves the ones after them, so the current track
-    // is found again first, for the handlers of the number of tracks
-    pub fn remove_tracks(&self, tracks: &[Track]) {
+    // is found again first, for the handlers of the number of tracks.
+    // Returns the runs of tracks removed, in the order of the queue, to put
+    // them back
+    pub fn remove_tracks(&self, tracks: &[Track]) -> Vec<RemovedRun> {
         let removed: HashSet<&Track> = tracks.iter().collect();
         let mut old = self.tracks();
         let Some(start) = old.iter().position(|t| removed.contains(t)) else {
-            return;
+            return Vec::new();
         };
         let end = old
             .iter()
             .rposition(|t| removed.contains(t))
             .unwrap_or(start);
+        let runs = removed_runs(&old, &removed);
         let kept: Vec<Track> = old
             .drain(start..=end)
             .filter(|t| !removed.contains(t))
@@ -186,6 +195,7 @@ impl Queue {
             .splice(start as u32, (end - start + 1) as u32, &kept);
         self.update_current_pos(current);
         self.notify_n_tracks();
+        runs
     }
 
     // Where playback goes when the current track is removed with others:
@@ -382,6 +392,9 @@ impl Queue {
         self.imp().current_pos.replace(None);
         self.imp().store.remove_all();
         self.notify_n_tracks();
+        let generation = &self.imp().generation;
+        generation.set(generation.get() + 1);
+        self.notify_generation();
     }
 
     pub fn skip_track(&self, pos: u32) -> Option<Track> {
@@ -488,6 +501,40 @@ impl Queue {
             .filter(Track::selected)
             .count() as u32
     }
+}
+
+// Tracks that were next to each other in the queue and were removed
+// together, and the track that came right after them, if it stayed, which
+// they go back before: unlike a position, it still holds once other tracks
+// were added, moved or removed
+#[derive(Debug)]
+pub struct RemovedRun {
+    pub tracks: Vec<Track>,
+    pub before: Option<Track>,
+}
+
+// The runs of the removed tracks among the tracks of the queue, in its
+// order
+fn removed_runs(tracks: &[Track], removed: &HashSet<&Track>) -> Vec<RemovedRun> {
+    let mut runs: Vec<RemovedRun> = Vec::new();
+    let mut run: Vec<Track> = Vec::new();
+    for track in tracks {
+        if removed.contains(track) {
+            run.push(track.clone());
+        } else if !run.is_empty() {
+            runs.push(RemovedRun {
+                tracks: std::mem::take(&mut run),
+                before: Some(track.clone()),
+            });
+        }
+    }
+    if !run.is_empty() {
+        runs.push(RemovedRun {
+            tracks: run,
+            before: None,
+        });
+    }
+    runs
 }
 
 // Where Play Next puts tracks among `n_tracks`, as a position to insert
@@ -708,6 +755,64 @@ mod tests {
         assert_eq!(order(&queue, &t), [1, 2]);
         queue.remove_tracks(&[t[2].clone(), t[1].clone()]);
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn removed_tracks_go_back_in_their_places() {
+        let (queue, t) = queue_of(7);
+        let runs = queue.remove_tracks(&[t[5].clone(), t[0].clone(), t[2].clone(), t[3].clone()]);
+        assert_eq!(order(&queue, &t), [1, 4, 6]);
+        // Each run, with the track that came right after it
+        let shown: Vec<(Vec<usize>, Option<usize>)> = runs
+            .iter()
+            .map(|run| {
+                let index = |track: &Track| t.iter().position(|x| x == track).unwrap();
+                (
+                    run.tracks.iter().map(index).collect(),
+                    run.before.as_ref().map(index),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (vec![0], Some(1)),
+                (vec![2, 3], Some(4)),
+                (vec![5], Some(6))
+            ]
+        );
+
+        // Put back the last first, as an Undo does
+        for run in runs.iter().rev() {
+            queue.insert_tracks(&run.tracks, run.before.as_ref());
+        }
+        assert_eq!(order(&queue, &t), [0, 1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn removed_runs_at_the_end_go_back_at_the_end() {
+        let (queue, t) = queue_of(3);
+        let first = queue.remove_tracks(&[t[2].clone()]);
+        assert!(first[0].before.is_none());
+        // The track the first removal goes back before is removed too
+        let second = queue.remove_tracks(&[t[0].clone(), t[1].clone()]);
+        assert!(queue.is_empty());
+
+        for run in first.iter().chain(&second).rev() {
+            queue.insert_tracks(&run.tracks, run.before.as_ref());
+        }
+        assert_eq!(order(&queue, &t), [0, 1, 2]);
+    }
+
+    #[test]
+    fn clearing_raises_the_generation() {
+        let (queue, t) = queue_of(2);
+        let generation = queue.generation();
+        queue.remove_track(&t[0]);
+        queue.add_tracks(&[Track::new(TrackData::default())]);
+        assert_eq!(queue.generation(), generation);
+        queue.clear();
+        assert_eq!(queue.generation(), generation + 1);
     }
 
     #[test]

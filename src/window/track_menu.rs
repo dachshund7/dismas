@@ -190,7 +190,6 @@ impl Window {
                         win.remove_selected_tracks();
                     } else {
                         win.remove_tracks(std::slice::from_ref(&track));
-                        win.store_queue();
                     }
                 }
             ));

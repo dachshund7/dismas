@@ -153,6 +153,9 @@ All notable changes to this project will be documented in this file.
   Synchronized lyrics, in the LRC format or in an MP3's SYLT frame, follow
   the music, with the line sung in the middle, and a click on a line, or
   Enter, plays from it. An album opened over the lyrics goes back to them
+- Removing tracks from the playlist pane can be undone: the toast that
+  says how many went has an Undo, which Ctrl+Z presses too. Tracks removed
+  one after another while it's up come back together, each in its place
 
 ### Changed
 

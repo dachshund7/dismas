@@ -724,11 +724,166 @@ impl Window {
         }
     }
 
-    // Removes tracks from the queue, in a single change
+    // Removes tracks from the queue, in a single change, and saves it; the
+    // toast's Undo puts them back
     pub fn remove_tracks(&self, tracks: &[Track]) {
-        self.player().remove_tracks(tracks);
+        let mut undo = self.take_queue_undo();
+        let runs = self.player().remove_tracks(tracks);
+        if runs.is_empty() {
+            // The toast that's up still puts back what it did
+            if !undo.runs.is_empty() {
+                self.imp().queue_undo.replace(Some(undo));
+            }
+            return;
+        }
         self.update_selected_count();
+        self.store_queue();
+        undo.runs.extend(runs);
+        self.add_removed_toast(undo);
     }
+
+    // The tracks removed while the toast about removed tracks is up are put
+    // back together, so that removing them one at a time doesn't leave only
+    // the last for Undo. It's taken out while tracks are removed, so that
+    // the toast that goes doesn't drop it. Otherwise, a new one keeps how
+    // the window is before the tracks go, in case removing them empties
+    // the queue: the album grid then takes the place of the player, and
+    // the pane closes
+    fn take_queue_undo(&self) -> QueueUndo {
+        let player = self.player();
+        let generation = player.queue().generation();
+        self.imp()
+            .queue_undo
+            .take()
+            .filter(|undo| undo.generation == generation)
+            .unwrap_or_else(|| QueueUndo {
+                toast: glib::WeakRef::new(),
+                generation,
+                runs: Vec::new(),
+                page: self.page(),
+                pane: self.playlist_visible(),
+                resume: player.resume_point(),
+            })
+    }
+
+    fn add_removed_toast(&self, undo: QueueUndo) {
+        let n_tracks: usize = undo.runs.iter().map(|run| run.tracks.len()).sum();
+        let msg = ni18n_f(
+            // Translators: the `{}` must be left unmodified; it will be
+            // expanded to the number of tracks removed from the playlist
+            "Removed one track",
+            "Removed {} tracks",
+            n_tracks as u32,
+            &[&n_tracks.to_string()],
+        );
+        let toast = self.add_undo_toast(msg, Self::undo_removal);
+        // The tracks are let go of once the toast is gone
+        toast.connect_dismissed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |toast| {
+                let queue_undo = &win.imp().queue_undo;
+                let ours = queue_undo
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|undo| undo.toast.upgrade().as_ref() == Some(toast));
+                if ours {
+                    queue_undo.take();
+                }
+            }
+        ));
+        undo.toast.set(Some(&toast));
+        self.imp().queue_undo.replace(Some(undo));
+    }
+
+    pub(super) fn dismiss_removed_toast(&self) {
+        let toast = self
+            .imp()
+            .queue_undo
+            .borrow()
+            .as_ref()
+            .and_then(|undo| undo.toast.upgrade());
+        // Not while it's borrowed: the toast's handler takes it
+        if let Some(toast) = toast {
+            toast.dismiss();
+        }
+    }
+
+    // Puts back the tracks removed while the toast was up. The last removed
+    // go back first, so that each run finds the track it goes before, even
+    // one that was removed after it. Playback stays where it is, unless
+    // removing emptied the queue: then the page, the pane and the track
+    // that was playing, paused where it was, come back too
+    fn undo_removal(&self) {
+        let Some(undo) = self.imp().queue_undo.take() else {
+            return;
+        };
+        let player = self.player();
+        let queue = player.queue();
+        // Emptied since for other tracks, such as those of another playlist
+        if undo.generation != queue.generation() {
+            return;
+        }
+
+        let was_empty = queue.is_empty();
+        let had_current = queue.current().is_some();
+        for run in undo.runs.iter().rev() {
+            // Tracks removed in selection mode would come back selected
+            for track in &run.tracks {
+                track.set_selected(false);
+            }
+            queue.insert_tracks(&run.tracks, run.before.as_ref());
+        }
+        self.store_queue();
+        self.update_selected_count();
+
+        if !had_current {
+            let resume = undo
+                .resume
+                .and_then(|(track, position)| Some((queue.position(&track)?, position)));
+            match resume {
+                Some((pos, position)) if queue.playable_track(pos).is_some() => {
+                    player.skip_to(pos);
+                    player.resume_at(position);
+                }
+                _ => player.skip_to_first(),
+            }
+        }
+        // The album grid took the place of the player, and the pane closed;
+        // a page gone to since stays
+        if was_empty {
+            if undo.page == "player" {
+                self.set_page("player");
+            }
+            self.set_playlist_visible(undo.pane);
+        }
+
+        // The first of them in the playlist, where the list goes to show
+        // them coming back
+        let first = undo
+            .runs
+            .iter()
+            .filter_map(|run| run.tracks.first())
+            .min_by_key(|track| queue.position(track));
+        if let Some(first) = first {
+            self.reveal_queue_track(first);
+        }
+    }
+}
+
+// What the Undo of the toast about removed tracks puts back: the runs of
+// tracks removed while it was up, in the order they were removed, and how
+// the window was before the first of them, for a queue that removing them
+// emptied
+pub(super) struct QueueUndo {
+    toast: glib::WeakRef<adw::Toast>,
+    // The generation of the queue they were removed from
+    generation: u64,
+    runs: Vec<RemovedRun>,
+    page: String,
+    pane: bool,
+    // The track that was playing, and where
+    resume: Option<(Track, u64)>,
 }
 
 // The tracks of a list of results that can play, leaving out those whose
