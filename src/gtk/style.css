@@ -240,12 +240,6 @@ queuerow.missing stack {
   opacity: 0.55;
 }
 
-/* A track of an album that the search doesn't match */
-queuerow.unmatched label,
-queuerow.unmatched stack {
-  opacity: 0.55;
-}
-
 /* A track that was gone to, e.g. with "Go to Album", fades in and out
  * twice */
 queuerow.flash {

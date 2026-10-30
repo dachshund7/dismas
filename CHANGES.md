@@ -73,8 +73,7 @@ All notable changes to this project will be documented in this file.
 - A Tracks page, next to the albums (Ctrl+3), shows the same albums, with
   the same search and the same composer and performer picked, but takes
   only the tracks they match, rather than whole albums: the cover of each
-  album says how many, and an album opened there lists all its tracks,
-  starting at the first one that matches, with the others dimmed
+  album says how many, and an album opened there lists only those tracks
 - A Works page, next to the tracks (Ctrl+4), lists the works of the
   albums under the names of their composers, with the number of their
   recordings. It shares the albums' search and the composer and performer
@@ -83,7 +82,7 @@ All notable changes to this project will be documented in this file.
   recorded on, the oldest recording first, each with its performers and
   the year it was made. A cover takes only the work's tracks from its
   album, as the Tracks page takes the tracks a search matches: its badge
-  says how many, and it opens the album with the others dimmed
+  says how many, and it opens the album with only those tracks
 - Other Recordings, in the menu of a track of a work and in the menu of
   the header of a work, with a right click or a long press, shows all the
   recordings of the work in the music folders, with the track's own among
@@ -192,8 +191,7 @@ All notable changes to this project will be documented in this file.
   Now, as the music folders are watched
 - Whole Albums, next to the album search, is gone, as it made the search
   narrow: during a search, the Albums page takes whole albums, and the new
-  Tracks page only the tracks the search matches. Clicking a dimmed track
-  of an album opened from the Tracks page plays the whole album from it
+  Tracks page only the tracks the search matches
 - In Zen Mode and in fullscreen, pressing a key brings back the controls,
   as moving the pointer does, so that Tab doesn't go through buttons that
   can't be seen
