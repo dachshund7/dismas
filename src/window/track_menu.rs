@@ -98,7 +98,7 @@ impl Window {
                 album_id,
                 move |_, _| {
                     if let Some(album_id) = album_id.borrow().as_deref() {
-                        win.go_to_album(album_id, &track.file());
+                        win.go_to_album(album_id, Some(&track.file()));
                     }
                 }
             ));
@@ -244,14 +244,17 @@ impl Window {
             self,
             async move {
                 if let Some((album_id, file)) = win.playing_album().await {
-                    win.go_to_album(&album_id, &file);
+                    win.go_to_album(&album_id, Some(&file));
                 }
             }
         ));
     }
 
     // Going to the album of the playing track needs it in the album grid,
-    // which is looked up when the menu opens; the item is off until then
+    // which is looked up when the menu opens; the item is off until then.
+    // It's off in fullscreen, where the player shows by itself, as going to
+    // the Albums page there would last until leaving it, which goes back to
+    // the page from before
     pub(super) fn setup_more_button(&self) {
         self.imp()
             .playback_control
@@ -266,7 +269,10 @@ impl Window {
                         win,
                         async move {
                             let found = win.playing_album().await.is_some();
-                            win.action_set_enabled("win.go-to-album", found);
+                            win.action_set_enabled(
+                                "win.go-to-album",
+                                found && !win.is_fullscreen(),
+                            );
                         }
                     ));
                 }

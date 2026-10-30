@@ -29,33 +29,26 @@ impl Window {
         self.open_pane_page(pane::PanePage::Album);
     }
 
-    // Shows all the tracks of an album in the sidebar, scrolled to one of
-    // them, which flashes; the page stays, and the grid only scrolls to the
-    // album when it's showing, as that can clear the search the pages share
-    pub(super) fn go_to_album(&self, album_id: &str, track: &gio::File) {
+    // Goes to an album on the Albums page, as Go to Work goes to a work:
+    // the grid scrolls to it, clearing a search that hides it, and the
+    // whole album opens in the pane. From a track of it, the track flashes
+    // there and takes the focus, as it was asked for; from a work's cover,
+    // the album's cover takes it, as after a click on it
+    pub(super) fn go_to_album(&self, album_id: &str, track: Option<&gio::File>) {
+        self.set_page(LibraryPage::Albums.name());
         let library_view = &self.imp().library_view;
-        let album = if LibraryPage::named(&self.page()).is_some_and(LibraryPage::shows_grid) {
-            library_view.reveal_album(album_id)
-        } else {
-            library_view.album(album_id)
-        };
-        let Some(album) = album else {
+        let Some(track) = track else {
+            library_view.open_album(album_id);
             return;
         };
-        self.show_album_tracks(
-            &album,
-            TrackFilter::default(),
-            PickNames::default(),
-            Some(track),
-        );
-    }
-
-    // Goes to the cover of an album on the Albums page, from the covers of
-    // the albums of a work: the grid shows it, with the focus, and opens
-    // it, as a click on it there would
-    fn go_to_album_cover(&self, album_id: &str) {
-        self.set_page(LibraryPage::Albums.name());
-        self.imp().library_view.open_album(album_id);
+        if let Some(album) = library_view.reveal_album(album_id) {
+            self.show_album_tracks(
+                &album,
+                TrackFilter::default(),
+                PickNames::default(),
+                Some(track),
+            );
+        }
     }
 
     // With an empty queue, there is nothing to play, so the album grid
@@ -301,7 +294,7 @@ impl Window {
             go.connect_activate(clone!(
                 #[weak(rename_to = win)]
                 self,
-                move |_, _| win.go_to_album_cover(&album_id)
+                move |_, _| win.go_to_album(&album_id, None)
             ));
             actions.add_action(&go);
 

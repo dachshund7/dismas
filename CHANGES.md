@@ -175,6 +175,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Go to Album, in the menu of a track of the playlist and in the player's
+  More menu, goes to the Albums page, where the albums scroll to the
+  album, as Go to Work goes to the Works page, and opens the album in the
+  playlist pane with the track flashing, as before. It's off in
+  fullscreen
 - The Works page lists the works of each composer in the order of their
   catalogue numbers, BWV 1004 before BWV 1007, rather than by title: by
   the catalogue that most of the composer's works are in, then by any
