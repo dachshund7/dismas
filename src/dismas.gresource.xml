@@ -10,6 +10,7 @@
     <file alias="go-previous-symbolic.svg">assets/icons/go-previous-symbolic.svg</file>
     <file alias="heart-filled-symbolic.svg">assets/icons/heart-filled-symbolic.svg</file>
     <file alias="heart-outline-symbolic.svg">assets/icons/heart-outline-symbolic.svg</file>
+    <file alias="lyrics-symbolic.svg">assets/icons/lyrics-symbolic.svg</file>
     <file alias="media-playback-pause.svg">assets/icons/media-playback-pause-symbolic.svg</file>
     <file alias="media-playback-start.svg">assets/icons/media-playback-start-symbolic.svg</file>
     <file alias="media-playlist-consecutive.svg">assets/icons/media-playlist-consecutive-symbolic.svg</file>
@@ -28,6 +29,7 @@
     <!-- All UI files are generated in the builddir/src/gtk directory -->
     <file preprocess="xml-stripblanks">album-tracks.ui</file>
     <file preprocess="xml-stripblanks">library-view.ui</file>
+    <file preprocess="xml-stripblanks">lyrics-view.ui</file>
     <file preprocess="xml-stripblanks">page-switcher.ui</file>
     <file preprocess="xml-stripblanks">playback-control.ui</file>
     <file preprocess="xml-stripblanks">playlist-view.ui</file>

@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 John Hamilton
+
+using Gtk 4.0;
+using Adw 1;
+
+template $DismasLyricsView: Widget {
+  Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      [start]
+      Button back_button {
+        icon-name: "go-previous-symbolic";
+        valign: center;
+        tooltip-text: _("Hide Lyrics");
+      }
+
+      title-widget: Adw.WindowTitle window_title {
+        title: _("Lyrics");
+      };
+    }
+
+    content: Stack stack {
+      transition-type: crossfade;
+
+      // While the lyrics of a new track are read
+      StackPage {
+        name: "reading";
+
+        child: Box {};
+      }
+
+      StackPage {
+        name: "plain";
+
+        child: ScrolledWindow {
+          hscrollbar-policy: never;
+          vexpand: true;
+
+          // A text view rather than a label, so that the text can be
+          // selected and copied, and read with a caret by screen readers
+          child: TextView text_view {
+            editable: false;
+            cursor-visible: true;
+            wrap-mode: word_char;
+            top-margin: 12;
+            bottom-margin: 24;
+            left-margin: 18;
+            right-margin: 18;
+            pixels-below-lines: 2;
+
+            buffer: TextBuffer {
+              enable-undo: false;
+            };
+
+            accessibility {
+              label: C_("a11y", "Lyrics");
+            }
+
+            styles [
+              "lyrics",
+            ]
+          };
+        };
+      }
+
+      StackPage {
+        name: "none";
+
+        child: Adw.StatusPage {
+          icon-name: "lyrics-symbolic";
+          title: _("No Lyrics");
+
+          styles [
+            "compact",
+          ]
+        };
+      }
+    };
+  }
+}

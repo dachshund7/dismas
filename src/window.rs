@@ -9,6 +9,7 @@ mod favorites;
 mod fullscreen;
 mod loading;
 mod now_playing;
+mod pane;
 mod playlist;
 mod selected_playlist;
 mod selection;
@@ -29,6 +30,7 @@ use adw::subclass::prelude::*;
 use glib::clone;
 use gtk::{CompositeTemplate, gdk, gio, glib, graphene, prelude::*};
 use log::debug;
+use pane::PaneHistory;
 use selected_playlist::ReplacedQueue;
 use sidebar::SizeLimits;
 
@@ -41,6 +43,7 @@ use crate::{
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album, TrackFilter},
     library_view::{AlbumDrag, LibraryView, PickNames},
+    lyrics_view::LyricsView,
     page_switcher::PageSwitcher,
     play_stats::{self, FavoriteRecording},
     playback_control::PlaybackControl,
@@ -164,6 +167,8 @@ mod imp {
         #[template_child]
         pub album_tracks: TemplateChild<AlbumTracks>,
         #[template_child]
+        pub lyrics_view: TemplateChild<LyricsView>,
+        #[template_child]
         pub playlist_pane: TemplateChild<gtk::Box>,
         #[template_child]
         pub sidebar_handle: TemplateChild<gtk::Box>,
@@ -187,6 +192,9 @@ mod imp {
         // also opens by itself, e.g. to show the tracks added
         #[property(name = "user-playlist-visible", get = Self::user_playlist_visible, set = Self::set_user_playlist_visible, explicit_notify, type = bool)]
         user_playlist_visible: std::marker::PhantomData<bool>,
+        // Whether the pane shows the lyrics of the playing track
+        #[property(name = "lyrics-shown", get = Self::lyrics_shown, set = Self::set_lyrics_shown, explicit_notify, type = bool)]
+        lyrics_shown: std::marker::PhantomData<bool>,
         #[property(get, set = Self::set_queue_selection, explicit_notify)]
         pub queue_selection: Cell<bool>,
         // The last track selected or unselected with a click, where
@@ -244,8 +252,8 @@ mod imp {
         pub last_random_album: RefCell<Option<String>>,
         // The work Random Work played last, by its key, likewise
         pub last_random_work: RefCell<Option<String>>,
-        // Whether the sidebar was showing before the tracks of an album
-        pub sidebar_was_visible: Cell<bool>,
+        // The pages of the pane to go back to, see `PaneHistory`
+        pub pane_history: RefCell<PaneHistory>,
         // Whether the sidebar was showing before the split view collapsed
         pub sidebar_visible_uncollapsed: Cell<bool>,
 
@@ -516,6 +524,7 @@ mod imp {
                 win.fullscreen();
             });
             klass.install_property_action("queue.toggle", "user-playlist-visible");
+            klass.install_property_action("win.lyrics", "lyrics-shown");
             klass.install_property_action("queue.shuffle", "queue-shuffled");
             klass.install_property_action("win.favorite", "track-favorite");
             klass.install_property_action("queue.select", "queue-selection");
@@ -553,6 +562,7 @@ mod imp {
                 playlists_page: TemplateChild::default(),
                 sidebar_stack: TemplateChild::default(),
                 album_tracks: TemplateChild::default(),
+                lyrics_view: TemplateChild::default(),
                 playlist_pane: TemplateChild::default(),
                 sidebar_handle: TemplateChild::default(),
                 narrow_breakpoint: TemplateChild::default(),
@@ -560,6 +570,7 @@ mod imp {
                 track_favorite: Cell::new(false),
                 playlist_visible: Cell::new(true),
                 user_playlist_visible: std::marker::PhantomData,
+                lyrics_shown: std::marker::PhantomData,
                 queue_selection: Cell::new(false),
                 queue_anchor: glib::WeakRef::new(),
                 queue_search: Cell::new(false),
@@ -589,7 +600,7 @@ mod imp {
                 last_random_album: RefCell::default(),
                 last_random_work: RefCell::default(),
                 hide_focus_after_transition: Cell::new(false),
-                sidebar_was_visible: Cell::new(false),
+                pane_history: RefCell::default(),
                 sidebar_visible_uncollapsed: Cell::new(true),
                 zen_timeout: RefCell::default(),
                 zen_animation: RefCell::default(),
@@ -708,11 +719,40 @@ mod imp {
                 }
                 self.obj().notify_playlist_visible();
                 self.obj().notify_user_playlist_visible();
+                self.obj().notify_lyrics_shown();
             }
         }
 
         fn user_playlist_visible(&self) -> bool {
             self.playlist_visible.get()
+        }
+
+        // GTK reads the states of the property actions while the template
+        // is being built, as a widget in it is rooted, before the stack of
+        // the pane is bound
+        fn lyrics_shown(&self) -> bool {
+            self.sidebar_stack.is_bound()
+                && self.playlist_visible.get()
+                && self.obj().lyrics_on_pane()
+        }
+
+        // The lyrics open over the page of the pane, and the pane opens for
+        // them, as for the tracks of an album, without keeping it for the
+        // next start; if they're on the pane already, the pane was hidden,
+        // e.g. with F9, and only shows again. Hiding them goes back to the
+        // page from before
+        fn set_lyrics_shown(&self, shown: bool) {
+            let obj = self.obj();
+            if shown == self.lyrics_shown() {
+                return;
+            }
+            if !shown {
+                obj.show_pane_back();
+            } else if obj.lyrics_on_pane() {
+                obj.set_playlist_visible(true);
+            } else {
+                obj.open_pane_page(pane::PanePage::Lyrics);
+            }
         }
 
         // In the collapsed split view, the pane covers the player for a
@@ -979,6 +1019,7 @@ impl Window {
         win.setup_more_button();
         win.setup_library();
         win.setup_playlists();
+        win.setup_lyrics();
         win.setup_provider();
         win.bind_state();
         win.bind_queue();
@@ -1120,7 +1161,12 @@ impl Window {
             let focus = gtk::prelude::GtkWindowExt::focus(&win);
             let entry = win.focused_editable();
             let in_entry = entry.is_some();
-            let in_text = entry.is_some_and(|entry| !entry.text().is_empty());
+            // The text of the lyrics moves its caret with them, as a search
+            // with text does, and with Page Up and Page Down too, which only
+            // scroll a list; Space still plays and pauses, as the text can't
+            // be edited
+            let in_text_view = focus.as_ref().is_some_and(ObjectExt::is::<gtk::TextView>);
+            let in_text = in_text_view || entry.is_some_and(|entry| !entry.text().is_empty());
             // A slider, or the waveform, takes them to go to its ends
             let in_slider = focus
                 .as_ref()
@@ -1137,11 +1183,11 @@ impl Window {
                 gdk::Key::space => {
                     !in_entry && WidgetExt::activate_action(&win, "win.play", None).is_ok()
                 }
-                gdk::Key::Page_Up | gdk::Key::KP_Page_Up if !in_slider => {
+                gdk::Key::Page_Up | gdk::Key::KP_Page_Up if !in_slider && !in_text_view => {
                     win.scroll_list(focus, gtk::ScrollType::PageBackward);
                     true
                 }
-                gdk::Key::Page_Down | gdk::Key::KP_Page_Down if !in_slider => {
+                gdk::Key::Page_Down | gdk::Key::KP_Page_Down if !in_slider && !in_text_view => {
                     win.scroll_list(focus, gtk::ScrollType::PageForward);
                     true
                 }

@@ -199,6 +199,12 @@ template $DismasWindow: Adw.ApplicationWindow {
 
               child: $DismasAlbumTracks album_tracks {};
             }
+
+            StackPage {
+              name: "lyrics";
+
+              child: $DismasLyricsView lyrics_view {};
+            }
           }
 
           Box sidebar_handle {

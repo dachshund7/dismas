@@ -306,6 +306,12 @@ queuerow.drop-above.first {
   box-shadow: inset 0 0 0 1px var(--accent-bg-color);
 }
 
+/* The lyrics are on the pane's background, not a text field's */
+textview.lyrics,
+textview.lyrics > text {
+  background: none;
+}
+
 /* A track dropped on the header of a work at the top of the queue goes
  * above it */
 listview.track-list > header box.drop-above {

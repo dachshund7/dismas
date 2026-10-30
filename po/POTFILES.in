@@ -3,6 +3,7 @@ data/io.github.dachshund7.Dismas.gschema.xml
 data/io.github.dachshund7.Dismas.metainfo.xml.in.in
 src/gtk/album-tracks.blp
 src/gtk/library-view.blp
+src/gtk/lyrics-view.blp
 src/gtk/page-switcher.blp
 src/gtk/playback-control.blp
 src/gtk/playlist-view.blp

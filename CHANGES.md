@@ -147,6 +147,10 @@ All notable changes to this project will be documented in this file.
   files that GStreamer plays are read with their tags and covers, rather
   than turned away, as long as GStreamer has the plugins to play them: for
   WMA, the ugly plugins and gst-libav
+- Lyrics, in the More menu of the player or with Ctrl+Shift+L, shows the
+  lyrics of the playing track in the playlist pane: those of an LRC file
+  next to it with the same name, or else those in its tags. An album opened
+  over the lyrics goes back to them
 
 ### Changed
 

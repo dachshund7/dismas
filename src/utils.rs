@@ -96,6 +96,30 @@ pub fn focused_child<W: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Opt
     None
 }
 
+// How fast a swipe to the right has to be to go back, in pixels a second
+const SWIPE_BACK_VELOCITY: f64 = 500.0;
+
+// On a touchscreen, a swipe to the right over a page of the playlist pane
+// goes back, as in libadwaita's navigation views. The swipe never claims
+// the touch: a flick up or down is the list's, which cancels it, and the
+// rows' long presses and taps stay theirs. The collapsed split view hides
+// the pane with a swipe to the left, so the two don't meet
+pub fn setup_swipe_back(widget: &impl IsA<gtk::Widget>, back: impl Fn() + 'static) {
+    let swipe = gtk::GestureSwipe::new();
+    swipe.set_touch_only(true);
+    swipe.set_propagation_phase(gtk::PropagationPhase::Capture);
+    swipe.connect_swipe(move |swipe, vx, vy| {
+        let rtl = swipe
+            .widget()
+            .is_some_and(|widget| widget.direction() == gtk::TextDirection::Rtl);
+        let vx = if rtl { -vx } else { vx };
+        if vx > SWIPE_BACK_VELOCITY && vx > 2.0 * vy.abs() {
+            back();
+        }
+    });
+    widget.add_controller(swipe);
+}
+
 // The Menu key and Shift+F10 open the menu of the row or the cell of a
 // list or a grid that has the focus, as a right click on it does. Keys go
 // from the focus up, so the shortcut is on the list rather than the rows

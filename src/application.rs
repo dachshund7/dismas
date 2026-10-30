@@ -105,6 +105,8 @@ mod imp {
             obj.set_accels_for_action("win.add-tracks", &["<primary>o"]);
             obj.set_accels_for_action("win.add-folder", &["<primary><shift>o"]);
             obj.set_accels_for_action("win.track-info", &["<primary>i"]);
+            // Ctrl+L removes all the tracks
+            obj.set_accels_for_action("win.lyrics", &["<primary><shift>l"]);
             obj.set_accels_for_action("win.favorite", &["<primary>d"]);
             obj.set_accels_for_action("win.preferences", &["<primary>comma"]);
             obj.set_accels_for_action("win.fullscreen", &["F11"]);

@@ -434,9 +434,13 @@ impl TrackData {
 
     // Where the track starts and ends in its audio file
     pub fn segment(&self) -> (Duration, Option<Duration>) {
-        self.audio
-            .as_ref()
-            .map_or((Duration::ZERO, None), |audio| (audio.start, audio.end))
+        self.part().unwrap_or((Duration::ZERO, None))
+    }
+
+    // The same for a track of a CUE sheet, which is a part of its audio
+    // file; none for a track that is a whole file
+    pub fn part(&self) -> Option<(Duration, Option<Duration>)> {
+        self.audio.as_ref().map(|audio| (audio.start, audio.end))
     }
 
     // The ReplayGain of a track of a CUE sheet, or of an Opus file whose
@@ -951,6 +955,10 @@ impl Track {
 
     pub fn segment(&self) -> (Duration, Option<Duration>) {
         self.imp().data.borrow().segment()
+    }
+
+    pub fn part(&self) -> Option<(Duration, Option<Duration>)> {
+        self.imp().data.borrow().part()
     }
 
     pub fn gains(&self) -> Option<Gains> {

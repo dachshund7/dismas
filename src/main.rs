@@ -18,6 +18,7 @@ mod i18n;
 mod library;
 mod library_view;
 mod lyrics;
+mod lyrics_view;
 mod marquee;
 mod migrate;
 mod page_switcher;

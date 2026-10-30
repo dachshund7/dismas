@@ -20,6 +20,7 @@ impl Window {
                 win.leave_fullscreen();
             }
             win.update_backdrop();
+            win.update_lyrics_action();
         });
     }
 

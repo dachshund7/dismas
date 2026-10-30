@@ -312,6 +312,13 @@ menu more_menu {
       label: _("Open Directory");
       action: "win.open-directory";
     }
+
+    // Hidden in fullscreen, where the pane doesn't show
+    item {
+      label: _("Lyrics");
+      action: "win.lyrics";
+      hidden-when: "action-disabled";
+    }
   }
 
   // The booklets of the album playing, filled in as the track changes

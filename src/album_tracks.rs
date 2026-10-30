@@ -31,9 +31,6 @@ use crate::{
     },
 };
 
-// How fast a swipe to the right has to be to go back, in pixels a second
-const SWIPE_BACK_VELOCITY: f64 = 500.0;
-
 // The tracks of an album that a search matches, by their URIs, and the
 // number of all its tracks
 #[derive(Debug)]
@@ -445,28 +442,14 @@ impl AlbumTracks {
             move |_| this.emit_by_name::<()>("back", &[])
         ));
 
-        // On a touchscreen, a swipe to the right goes back too, as in
-        // libadwaita's navigation views. The swipe never claims the touch: a
-        // flick up or down is the list's, which cancels it, and the rows'
-        // long presses and taps stay theirs. The collapsed split view hides
-        // the pane with a swipe to the left, so the two don't meet
-        let swipe = gtk::GestureSwipe::new();
-        swipe.set_touch_only(true);
-        swipe.set_propagation_phase(gtk::PropagationPhase::Capture);
-        swipe.connect_swipe(clone!(
-            #[weak(rename_to = this)]
+        utils::setup_swipe_back(
             self,
-            move |_, vx, vy| {
-                let vx = match this.direction() {
-                    gtk::TextDirection::Rtl => -vx,
-                    _ => vx,
-                };
-                if vx > SWIPE_BACK_VELOCITY && vx > 2.0 * vy.abs() {
-                    this.imp().back_button.emit_clicked();
-                }
-            }
-        ));
-        self.add_controller(swipe);
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move || this.imp().back_button.emit_clicked()
+            ),
+        );
 
         imp.add_button.connect_clicked(clone!(
             #[weak(rename_to = this)]

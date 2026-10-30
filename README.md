@@ -135,6 +135,11 @@ What Dismas adds
   Windows Media Player writes them. In Matroska files written by FFmpeg, it
   loses the track number and the date, and it takes a conductor for a
   performer.
+- **Lyrics:** Lyrics, in the More menu of the player (Ctrl+Shift+L), shows
+  the lyrics of the playing track in the playlist pane: those of an LRC file
+  next to it with the same name, as lyrics downloaders write them, or else
+  those in its tags. In the Flatpak, a track opened or dropped from outside
+  the Music folder comes without its LRC file.
 - **Sleep timer:** stops the music after a set number of minutes. It can
   stop right away, or let the track that's playing when time runs out finish
   first. It can also stop the music at the end of the playing track, or at
@@ -301,6 +306,7 @@ Keyboard shortcuts
 | Ctrl+↑ / Ctrl+↓                  | Volume up / down                               |
 | Ctrl+D                           | Mark or unmark the playing track as a favorite |
 | Ctrl+I                           | Track information                              |
+| Ctrl+Shift+L                     | Show or hide the lyrics                        |
 | Ctrl+C                           | Copy the playing track's title and artist      |
 | Ctrl+1 to Ctrl+4                 | Player / albums / works / playlists            |
 | Ctrl+G                           | Search the albums                              |

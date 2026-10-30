@@ -541,6 +541,7 @@ impl Window {
         let player = self.player();
         player.queue().track_changed(track);
         self.imp().album_tracks.track_changed(track);
+        self.imp().lyrics_view.track_changed(track);
         if player.state().track().as_ref() == Some(track) {
             player.current_track_changed();
             self.update_title(Some(track));

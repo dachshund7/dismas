@@ -308,6 +308,10 @@ impl Window {
         if self.imp().pending_playlist.borrow().is_none() {
             self.set_playlist_visible(false);
         }
+        // Without a track, there are no lyrics to show
+        if self.lyrics_on_pane() {
+            self.show_playlist_view();
+        }
         self.set_queue_selection(false);
         self.update_style(None);
     }

@@ -33,16 +33,11 @@ impl Window {
     }
 
     // Shows the pane of the album's tracks in the sidebar, once `show` has
-    // put them in it; going back shows the queue, and closes the sidebar if
-    // it was opened for them
+    // put them in it; going back shows the page from before, and closes the
+    // sidebar if it was opened for them
     fn show_album_pane(&self, show: impl FnOnce(&AlbumTracks)) {
-        let imp = self.imp();
-        if imp.sidebar_stack.visible_child_name().as_deref() != Some("album") {
-            imp.sidebar_was_visible.set(self.playlist_visible());
-        }
-        show(&imp.album_tracks);
-        imp.sidebar_stack.set_visible_child_name("album");
-        self.set_playlist_visible(true);
+        show(&self.imp().album_tracks);
+        self.open_pane_page(pane::PanePage::Album);
     }
 
     // Shows all the tracks of an album in the sidebar, scrolled to one of
@@ -64,19 +59,6 @@ impl Window {
             PickNames::default(),
             Some(track),
         );
-    }
-
-    // Goes back from the tracks of an album to the queue, closing the
-    // sidebar if it was opened for the album
-    fn show_playlist(&self) {
-        self.show_playlist_view();
-        if !self.imp().sidebar_was_visible.get() {
-            self.set_playlist_visible(false);
-        }
-    }
-
-    pub(super) fn show_playlist_view(&self) {
-        self.imp().sidebar_stack.set_visible_child_name("playlist");
     }
 
     // With an empty queue, there is nothing to play, so the album grid
@@ -581,7 +563,7 @@ impl Window {
         album_tracks.connect_back(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_| win.show_playlist()
+            move |_| win.show_pane_back()
         ));
         album_tracks.connect_add(clone!(
             #[weak(rename_to = win)]

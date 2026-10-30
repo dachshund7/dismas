@@ -6,7 +6,23 @@
 //! "[01:23.45]", can have the time of each word in the line, "<01:23.45>",
 //! and start with header lines, like "[ar:Franz Schubert]"
 
-use std::{borrow::Cow, time::Duration};
+use std::{
+    borrow::Cow,
+    io::Read,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use lofty::tag::ItemKey;
+use log::debug;
+
+use crate::{
+    audio::{ReadOptions, read_file_tags},
+    cue_sheet,
+};
+
+// The largest LRC file that's read, as lyrics take a few kilobytes
+const MAX_LRC_FILE_SIZE: u64 = 1024 * 1024;
 
 // The header lines of LRC files: the artist, the album, the title, the
 // author, the lyricist, the maker of the file, the length of the track,
@@ -15,6 +31,75 @@ use std::{borrow::Cow, time::Duration};
 const HEADER_TAGS: [&str; 12] = [
     "ar", "al", "ti", "au", "lr", "by", "length", "offset", "re", "tool", "ve", "#",
 ];
+
+// The lyrics of a track
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lyrics {
+    // Lines of text, without times
+    Plain(String),
+}
+
+// The lyrics of an audio file: those of the LRC file next to it, or else
+// those of its tags. A track of a CUE sheet plays a `part` of its file,
+// whose lyrics are the whole file's, so it gets none. The files are read
+// here, so this doesn't run on the main thread
+pub fn find(audio_file: &Path, part: Option<(Duration, Option<Duration>)>) -> Option<Lyrics> {
+    if part.is_some() {
+        return None;
+    }
+    let text = lrc_file_text(audio_file).or_else(|| tag_text(audio_file))?;
+    // Windows and old Macs end lines in their own ways, which a copy of
+    // the text would keep
+    let text = text_without_times(&text)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let text = text.trim();
+    (!text.is_empty()).then(|| Lyrics::Plain(text.to_string()))
+}
+
+// Where the LRC file of an audio file is: next to it, with the same name
+// and the extension "lrc", e.g. "Die Forelle.lrc" for "Die Forelle.flac"
+pub fn lrc_path(audio_file: &Path) -> PathBuf {
+    audio_file.with_extension("lrc")
+}
+
+// The text of the LRC file of an audio file, whose extension can be in
+// capitals, as programs on Windows write it
+fn lrc_file_text(audio_file: &Path) -> Option<String> {
+    [lrc_path(audio_file), audio_file.with_extension("LRC")]
+        .iter()
+        .find_map(|path| read_text_file(path))
+}
+
+// The text of a file, unless it's too large to be lyrics
+fn read_text_file(path: &Path) -> Option<String> {
+    // Opening a named pipe would wait for something to write to it
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    if metadata.len() > MAX_LRC_FILE_SIZE {
+        debug!("Not reading {path:?}, which is too large to be lyrics");
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_LRC_FILE_SIZE)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    Some(cue_sheet::decode(&bytes).into_owned())
+}
+
+// The lyrics in the tags of an audio file, which can be synchronized too
+fn tag_text(audio_file: &Path) -> Option<String> {
+    let tags = read_file_tags(audio_file, ReadOptions::TAGS)?;
+    [ItemKey::Lyrics, ItemKey::UnsyncLyrics]
+        .into_iter()
+        .filter_map(|key| tags.tag.get_string(key))
+        .find(|text| !text.trim().is_empty())
+        .map(str::to_string)
+}
 
 // The text of lyrics without the times of synchronized lyrics and without
 // their header lines, e.g. for searching, where "[01:12.50]" would match
@@ -163,7 +248,54 @@ fn number(text: &str, max_digits: usize) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    use gtk::glib;
+    use lofty::{
+        id3::v2::Id3v2Tag,
+        tag::{Tag, TagType},
+    };
+
     use super::*;
+
+    #[test]
+    fn the_lrc_file_comes_before_the_tags() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-lyrics-XXXXXX")).unwrap();
+        let audio = dir.join("Die Forelle.wav");
+        crate::utils::write_test_wav(&audio, 1);
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.insert_text(ItemKey::UnsyncLyrics, "Ave Maria".to_string());
+        crate::utils::write_test_id3v2(&audio, &Id3v2Tag::from(tag), false);
+
+        let from_tags = find(&audio, None);
+        // In Latin-1, as some programs on Windows write them
+        std::fs::write(
+            dir.join("Die Forelle.lrc"),
+            b"[ti:Die Forelle]\r\n[00:12.00]In einem B\xe4chlein helle,\r\n[00:16.50]Da scho\xdf in froher Eil\r\n",
+        )
+        .unwrap();
+        let from_file = find(&audio, None);
+        // The part of a file that a track of a CUE sheet plays
+        let part = find(&audio, Some((Duration::from_secs(30), None)));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(from_tags, Some(Lyrics::Plain("Ave Maria".to_string())));
+        assert_eq!(
+            from_file,
+            Some(Lyrics::Plain(
+                "In einem Bächlein helle,\nDa schoß in froher Eil".to_string()
+            ))
+        );
+        assert_eq!(part, None);
+    }
+
+    #[test]
+    fn a_file_too_large_for_lyrics_is_left_out() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-lyrics-XXXXXX")).unwrap();
+        let audio = dir.join("Ave Maria.flac");
+        std::fs::write(lrc_path(&audio), "Ave ".repeat(300_000)).unwrap();
+        let found = find(&audio, None);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found, None);
+    }
 
     #[test]
     fn times_are_taken_out_of_lines() {
