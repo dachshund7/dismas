@@ -42,10 +42,10 @@ impl Window {
 
     // Shows all the tracks of an album in the sidebar, scrolled to one of
     // them, which flashes; the page stays, and the grid only scrolls to the
-    // album when it's showing
+    // album when it's showing, as that can clear the search the pages share
     pub(super) fn go_to_album(&self, album_id: &str, track: &gio::File) {
         let library_view = &self.imp().library_view;
-        let album = if self.library_visible() {
+        let album = if LibraryPage::named(&self.page()).is_some_and(LibraryPage::shows_grid) {
             library_view.reveal_album(album_id)
         } else {
             library_view.album(album_id)

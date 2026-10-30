@@ -56,6 +56,39 @@ const DRAG_COVER_SIZE: i32 = 64;
 // between the pages would read it each time
 const UNWATCHED_RESCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
+// The pages of the window that this view shows: the albums of the music
+// folders, or their works. They're one widget, which keeps the search, the
+// composer and the performer picked from one page to the other
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, glib::Enum)]
+#[enum_type(name = "DismasLibraryPage")]
+pub enum LibraryPage {
+    #[default]
+    Albums,
+    Works,
+}
+
+impl LibraryPage {
+    // The name of the window's page
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Albums => "albums",
+            Self::Works => "works",
+        }
+    }
+
+    // The page with the name of a window's page, if it's one of these
+    pub fn named(name: &str) -> Option<Self> {
+        [Self::Albums, Self::Works]
+            .into_iter()
+            .find(|page| page.name() == name)
+    }
+
+    // Whether the page shows the grid of the albums
+    pub fn shows_grid(self) -> bool {
+        self != Self::Works
+    }
+}
+
 // The albums dragged from the grid, with the words of the search each was
 // selected in, like the ones the Add button adds, and whether they are
 // the selected ones; only Dismas takes them
@@ -165,12 +198,10 @@ mod imp {
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
         pub selection_mode: Cell<bool>,
-        // Whether the page shows the works rather than the albums: the
-        // window's Albums and Works pages are both this one, which keeps
-        // the search, the composer and the performer picked from one to the
-        // other. The works are only shown while a track is part of one
-        #[property(get, set = Self::set_works_view, explicit_notify)]
-        pub works_view: Cell<bool>,
+        // The page shown; the works are only shown while a track is part
+        // of one
+        #[property(get, set = Self::set_page, explicit_notify, builder(LibraryPage::default()))]
+        pub page: Cell<LibraryPage>,
         #[property(get)]
         pub has_works: Cell<bool>,
         // The works the search finds, and the filter and the generation of
@@ -276,12 +307,12 @@ mod imp {
             self.obj().notify_selection_mode();
         }
 
-        fn set_works_view(&self, works: bool) {
-            if self.works_view.replace(works) == works {
+        fn set_page(&self, page: LibraryPage) {
+            if self.page.replace(page) == page {
                 return;
             }
             self.obj().update_view();
-            self.obj().notify_works_view();
+            self.obj().notify_page();
         }
     }
 
@@ -1102,8 +1133,7 @@ impl LibraryView {
 
     // Whether the page shows the works, rather than the albums
     pub fn shows_works(&self) -> bool {
-        let imp = self.imp();
-        imp.has_works.get() && imp.works_view.get()
+        self.imp().page.get() == LibraryPage::Works
     }
 
     // The Works page is only there while a track is part of a work, and
@@ -1113,8 +1143,8 @@ impl LibraryView {
         if imp.has_works.replace(available) != available {
             self.notify_has_works();
         }
-        if !available {
-            self.set_works_view(false);
+        if !available && self.shows_works() {
+            self.set_page(LibraryPage::Albums);
         }
         self.update_view();
     }

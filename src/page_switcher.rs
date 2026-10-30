@@ -58,7 +58,7 @@ mod imp {
             klass.set_css_name("pageswitcher");
 
             // The items of the menu of the pages
-            for page in ["player", "library", "works", "playlists"] {
+            for page in ["player", "albums", "works", "playlists"] {
                 klass.install_action(&format!("switcher.{page}"), None, move |obj, _, _| {
                     obj.show_page(page);
                 });
@@ -176,7 +176,7 @@ mod imp {
                 win.bind_property("page", &*self.pages_menu_icon, "icon-name")
                     .transform_to(|_, page: String| {
                         Some(match page.as_str() {
-                            "library" => "view-grid-symbolic",
+                            "albums" => "view-grid-symbolic",
                             "works" => "sheet-music-symbolic",
                             "playlists" => "view-list-bullet-symbolic",
                             _ => "audio-x-generic-symbolic",

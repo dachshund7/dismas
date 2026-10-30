@@ -37,7 +37,7 @@ template $DismasPageSwitcher: Widget {
     ToggleButton {
       focus-on-click: false;
       action-name: "win.page";
-      action-target: "'library'";
+      action-target: "'albums'";
       tooltip-text: _("Albums");
 
       styles [
@@ -113,7 +113,7 @@ menu pages_menu {
 
     item {
       label: _("_Albums");
-      action: "switcher.library";
+      action: "switcher.albums";
     }
 
     item {
