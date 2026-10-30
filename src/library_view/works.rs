@@ -496,8 +496,9 @@ impl LibraryView {
         bin
     }
 
-    // Once a work has opened, the list glides to show its covers, as far as
-    // its line stays in view; its row is laid out open at the frame after
+    // Once a work has opened, the list glides to show its covers in its
+    // middle, as far as its line stays in view, so a work too tall for that
+    // has its line at the top; its row is laid out open at the frame after
     fn show_when_open(&self, row: &gtk::Box) {
         let Some(bin) = row.last_child().and_downcast::<RevealBin>() else {
             return;
@@ -526,13 +527,15 @@ impl LibraryView {
     fn glide_to_row(&self, row: &gtk::Box) {
         let imp = self.imp();
         let list = &*imp.works_list;
-        let (Some(bounds), Some(adjustment)) = (row.compute_bounds(list), list.vadjustment())
+        let covers = row.last_child().and_then(|bin| bin.compute_bounds(list));
+        let (Some(bounds), Some(covers), Some(adjustment)) =
+            (row.compute_bounds(list), covers, list.vadjustment())
         else {
             return;
         };
-        let below = bounds.y() + bounds.height() - list.height() as f32;
-        let by = below.min(bounds.y());
-        if by <= 0.0 {
+        let middle = covers.y() + covers.height() / 2.0 - list.height() as f32 / 2.0;
+        let by = middle.min(bounds.y());
+        if by.abs() < 1.0 {
             return;
         }
         let target = adjustment.value() + f64::from(by);

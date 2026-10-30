@@ -681,9 +681,10 @@ flowbox.work-covers .album-cell {
   color: var(--red-2);
 }
 
-/* The covers of the albums of an open work, under its line */
+/* The covers of the albums of an open work, under its line, set apart from
+ * it and from the next work */
 flowbox.work-covers {
-  padding: 3px 12px 9px 0;
+  padding: 12px 12px 24px 0;
 }
 
 flowbox.work-covers > flowboxchild {
