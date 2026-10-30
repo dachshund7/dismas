@@ -5,6 +5,7 @@
 //! The text that searching the queue and the album grid looks into
 
 use super::*;
+use crate::lyrics;
 
 // Makes searching insensitive to case and accents, e.g. "Gemüte" becomes
 // "gemute", so it can be found by typing it without the accent
@@ -73,7 +74,7 @@ pub fn track_search_text(tag: &Tag, credits: &TrackCredits) -> String {
 // leaves out the tags that only contain identifiers, numbers or technical
 // data, as they would make short searches, like "op 29", match by accident
 fn tag_search_text(tag: &Tag) -> String {
-    let mut text = tag
+    let texts: Vec<Cow<str>> = tag
         .items()
         .filter(|item| {
             !matches!(
@@ -122,11 +123,22 @@ fn tag_search_text(tag: &Tag) -> String {
                     | ItemKey::ComposerSortOrder
             )
         })
-        .filter_map(|item| item.value().text())
-        .map(|text| text_start(text, MAX_SEARCHED_TEXT))
+        .filter_map(|item| {
+            let text = text_start(item.value().text()?, MAX_SEARCHED_TEXT);
+            // The times of synchronized lyrics would make searching for
+            // a number match them. They're taken out of the start that's
+            // kept, which is never longer than it
+            Some(match item.key() {
+                ItemKey::Lyrics | ItemKey::UnsyncLyrics => lyrics::text_without_times(text),
+                _ => Cow::Borrowed(text),
+            })
+        })
+        .collect();
+    let mut text = texts
+        .iter()
         // Links, like the one to the video of a download from YouTube,
         // would make searching for their site match every track from it
-        .flat_map(str::split_whitespace)
+        .flat_map(|text| text.split_whitespace())
         .filter(|word| !is_link(word))
         .join(" ");
 
@@ -249,6 +261,21 @@ mod tests {
         assert!(text.len() < 16 * 1024 + 100);
         assert_eq!(text_start("éa", 1), "");
         assert_eq!(text_start("éa", 3), "éa");
+    }
+
+    #[test]
+    fn search_text_has_no_times_of_lyrics() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(
+            ItemKey::Lyrics,
+            "[ti:Die Forelle]\n[00:12.00]In einem Bächlein helle".to_string(),
+        );
+        tag.insert_text(
+            ItemKey::UnsyncLyrics,
+            "[00:16.50]Da schoß in <00:17.00>froher Eil".to_string(),
+        );
+        let text = tag_search_text(&tag);
+        assert_eq!(text, "In einem Bächlein helle Da schoß in froher Eil");
     }
 
     #[test]

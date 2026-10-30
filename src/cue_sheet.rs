@@ -551,15 +551,18 @@ impl Claims {
 }
 
 // The items of an audio file that are about all of it, rather than about
-// one of the tracks of the sheet that splits it. Its track gain stays for
-// the tracks the sheet has none for: it's the one the file plays with
-const FILE_ITEMS: [ItemKey; 6] = [
+// one of the tracks of the sheet that splits it, like the lyrics of the
+// whole file. Its track gain stays for the tracks the sheet has none for:
+// it's the one the file plays with
+const FILE_ITEMS: [ItemKey; 8] = [
     ItemKey::TrackTitle,
     ItemKey::TrackNumber,
     ItemKey::TrackTotal,
     ItemKey::Isrc,
     ItemKey::MusicBrainzRecordingId,
     ItemKey::MusicBrainzTrackId,
+    ItemKey::Lyrics,
+    ItemKey::UnsyncLyrics,
 ];
 
 fn set(tag: &mut Tag, key: ItemKey, value: Option<&String>) {
@@ -918,10 +921,13 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         file_tag.insert_text(ItemKey::Label, "EMI".to_string());
         file_tag.insert_text(ItemKey::TrackNumber, "1".to_string());
         file_tag.insert_text(ItemKey::ReplayGainTrackGain, "-6.00 dB".to_string());
+        file_tag.insert_text(ItemKey::UnsyncLyrics, "Ave Maria".to_string());
 
         let album = album_tag(Some(&file_tag), &sheet);
         assert_eq!(album.album().as_deref(), Some("Elgar: Enigma Variations"));
         assert_eq!(album.title(), None);
+        // The lyrics of the whole file aren't any track's
+        assert_eq!(album.get_string(ItemKey::UnsyncLyrics), None);
         assert_eq!(album.get_string(ItemKey::Label), Some("EMI"));
         assert_eq!(album.get_string(ItemKey::RecordingDate), Some("1963"));
         assert_eq!(album.get_string(ItemKey::Barcode), Some("5099909654523"));

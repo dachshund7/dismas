@@ -242,6 +242,10 @@ All notable changes to this project will be documented in this file.
   when it read or played the file, outside the Flatpak
 - Ctrl+F, while the playlist pane showed the tracks of an album, opened the
   playlist's search behind them rather than showing it
+- Searching for a number found tracks by the times in their synchronized
+  lyrics, such as "[01:12.50]" for "12"
+- Searching found every track that a CUE sheet splits from one file by the
+  lyrics of the whole file
 
 ### Removed
 
