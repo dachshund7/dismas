@@ -240,6 +240,8 @@ All notable changes to this project will be documented in this file.
 - A file in the music folders named as an audio file but holding an HLS,
   DASH or Smooth Streaming playlist made Dismas fetch the addresses in it
   when it read or played the file, outside the Flatpak
+- Ctrl+F, while the playlist pane showed the tracks of an album, opened the
+  playlist's search behind them rather than showing it
 
 ### Removed
 

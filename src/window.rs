@@ -469,9 +469,11 @@ mod imp {
                 win.show_save_queue_dialog();
             });
             // The search button toggles the queue search, but its shortcut
-            // goes back to it when it's open; Esc closes it
+            // goes back to it when it's open; Esc closes it. The pane can
+            // show an album's tracks, which would hide the search
             klass.install_action("queue.find", None, move |win, _, _| {
                 debug!("Window::queue.find()");
+                win.show_playlist_view();
                 win.set_queue_search(true);
                 win.imp().playlist_view.queue_searchentry().grab_focus();
             });
