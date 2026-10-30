@@ -7,7 +7,7 @@
 // the work's tracks from them, as the Tracks page takes those a search
 // matches
 
-use super::*;
+use super::{work_row::WorkRow, *};
 use crate::{
     album_cell::CellWork, play_stats::FavoriteRecording, queue_row, reveal_bin::RevealBin,
 };
@@ -54,20 +54,9 @@ impl LibraryView {
     // activating one opens or closes it
     pub(super) fn setup_works(&self) {
         let imp = self.imp();
-        let factory = work_factory(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |widget: &gtk::Widget, x, y, work: &library::WorkInfo| {
-                let item = glib::BoxedAnyObject::new(work.clone());
-                this.emit_by_name::<()>("work-menu-requested", &[&item, widget, &x, &y]);
-            }
-        ));
-        self.setup_work_rows(&factory);
-        imp.works_list.set_factory(Some(&factory));
-        // The rows' menus open with the Menu key too, through their action
-        utils::setup_menu_key(&*imp.works_list, |row: &gtk::Box| {
-            let _ = row.activate_action("work-row.menu", None);
-        });
+        imp.works_list.set_factory(Some(&self.work_factory()));
+        // The rows' menus open with the Menu key too
+        utils::setup_menu_key(&*imp.works_list, WorkRow::request_menu);
         // Showing only the favorite works reads them again
         imp.favorites_button.connect_toggled(clone!(
             #[weak(rename_to = this)]
@@ -95,20 +84,26 @@ impl LibraryView {
         ));
     }
 
-    // The row of each work keeps the key of its work, to be found when the
-    // work opens or closes, and is open while its work is
-    fn setup_work_rows(&self, factory: &gtk::SignalListItemFactory) {
-        // A row is bound before the list takes its item's widget, which
-        // tells screen readers whether its work is open, so the widget
-        // only gets it once the row is on screen
+    // The rows of the list of works, see `WorkRow`. The rows are all one
+    // line high, as measuring wrapped text made scrolling slow; the tooltip
+    // has the full title. Each row keeps the key of its work, to be found
+    // when the work opens or closes, and is open while its work is
+    fn work_factory(&self) -> gtk::SignalListItemFactory {
+        let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(clone!(
             #[weak(rename_to = this)]
             self,
             move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-                let Some(row) = item.child() else {
-                    return;
-                };
+                let row = WorkRow::new();
+                item.set_child(Some(&row));
+                utils::set_row_tooltip(row.line(), item, |object| {
+                    let work = object.downcast_ref::<glib::BoxedAnyObject>()?;
+                    Some(work_tooltip(&work.borrow::<library::WorkInfo>()))
+                });
+                // A row is bound before the list takes its item's widget,
+                // which tells screen readers whether its work is open, so
+                // the widget only gets it once the row is on screen
                 row.connect_map(clone!(
                     #[weak]
                     this,
@@ -120,6 +115,18 @@ impl LibraryView {
                         }
                     }
                 ));
+                row.connect_menu_requested(clone!(
+                    #[weak]
+                    this,
+                    #[weak]
+                    item,
+                    move |row, x, y| {
+                        if let Some(work) = item.item().and_downcast::<glib::BoxedAnyObject>() {
+                            let line = row.line().upcast_ref::<gtk::Widget>();
+                            this.emit_by_name::<()>("work-menu-requested", &[&work, line, &x, &y]);
+                        }
+                    }
+                ));
             }
         ));
         factory.connect_bind(clone!(
@@ -127,10 +134,15 @@ impl LibraryView {
             self,
             move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-                let (Some(row), Some(key)) =
-                    (item.child().and_downcast::<gtk::Box>(), work_key(item))
-                else {
+                let row = item.child().and_downcast::<WorkRow>();
+                let work = item.item().and_downcast::<glib::BoxedAnyObject>();
+                let (Some(row), Some(work)) = (row, work) else {
                     return;
+                };
+                let key = {
+                    let work = work.borrow::<library::WorkInfo>();
+                    row.show(&work);
+                    work.key.clone()
                 };
                 let rows = &this.imp().work_rows;
                 rows.borrow_mut().insert(key.clone(), row.downgrade());
@@ -143,7 +155,7 @@ impl LibraryView {
             move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().unwrap();
                 let (Some(row), Some(key)) =
-                    (item.child().and_downcast::<gtk::Box>(), work_key(item))
+                    (item.child().and_downcast::<WorkRow>(), work_key(item))
                 else {
                     return;
                 };
@@ -153,10 +165,11 @@ impl LibraryView {
                 }
             }
         ));
+        factory
     }
 
     // The row the list shows a work in, if it's bound to it
-    fn work_row(&self, key: &str) -> Option<gtk::Box> {
+    fn work_row(&self, key: &str) -> Option<WorkRow> {
         self.imp().work_rows.borrow().get(key)?.upgrade()
     }
 
@@ -292,7 +305,7 @@ impl LibraryView {
                     this.update_work_row(&row, &key, by_user);
                     if by_user {
                         this.show_when_open(&row, album);
-                    } else if let Some(cover) = album.and_then(|album| cover_of(&row, &album)) {
+                    } else if let Some(cover) = album.and_then(|album| row.cover_of(&album)) {
                         cover.grab_focus();
                     }
                 }
@@ -362,23 +375,17 @@ impl LibraryView {
 
     // Opens the row of a work while it's the open one, with the covers of
     // its albums, and closes it otherwise
-    fn update_work_row(&self, row: &gtk::Box, key: &str, animate: bool) {
+    fn update_work_row(&self, row: &WorkRow, key: &str, animate: bool) {
         self.update_item_state(row, key);
         let expanded = self.imp().expanded_work.borrow();
-        let open = expanded.as_ref().filter(|work| work.key == key);
-        let bin = row.last_child().and_downcast::<RevealBin>();
-        match open {
+        match expanded.as_ref().filter(|work| work.key == key) {
             Some(work) => {
-                let bin = bin.unwrap_or_else(|| {
-                    let bin = self.work_covers_bin();
-                    row.append(&bin);
-                    bin
-                });
+                let bin = row.covers_or_insert(|| self.work_covers_bin());
                 fill_work_covers(self, &bin, work);
                 bin.set_revealed(true, animate);
             }
             None => {
-                if let Some(bin) = bin {
+                if let Some(bin) = row.covers() {
                     bin.set_revealed(false, animate);
                 }
             }
@@ -507,14 +514,12 @@ impl LibraryView {
     // the slide's easing, which keeps it in place as a work above it closes
     // at the same time. Its row is laid out open at the frame after the
     // last, when the cover of `album`, if any, is pointed out
-    fn show_when_open(&self, row: &gtk::Box, album: Option<String>) {
+    fn show_when_open(&self, row: &WorkRow, album: Option<String>) {
         let list = self.imp().works_list.get();
-        let (Some(bin), Some(line)) = (
-            row.last_child().and_downcast::<RevealBin>(),
-            row.first_child(),
-        ) else {
+        let Some(bin) = row.covers() else {
             return;
         };
+        let line = row.line();
         let Some(start) = row.compute_bounds(&list).map(|bounds| bounds.y()) else {
             return;
         };
@@ -547,7 +552,7 @@ impl LibraryView {
                 if progress < 1.0 || !laid_out.replace(true) {
                     return glib::ControlFlow::Continue;
                 }
-                if let Some(cover) = album.as_deref().and_then(|album| cover_of(&row, album)) {
+                if let Some(cover) = album.as_deref().and_then(|album| row.cover_of(album)) {
                     this.point_out_cover(&cover);
                 }
                 glib::ControlFlow::Break
@@ -722,7 +727,7 @@ impl LibraryView {
         for item in merge_works(&store, works) {
             let work = item.borrow::<library::WorkInfo>();
             if let Some(row) = self.work_row(&work.key) {
-                refresh_work_row(row.upcast_ref(), &work);
+                row.show(&work);
             }
         }
 
@@ -819,148 +824,29 @@ fn recordings_label(n: u32) -> String {
     )
 }
 
-// The rows of the list of works: the name of the work, then, dimmed, the
-// work or the collection it's part of, if any, which the end of a long row
-// cuts off first, and the number of its recordings. The rows are all one
-// line high, as measuring wrapped text made scrolling slow; the tooltip has
-// the full title
-fn work_factory(
-    on_menu: impl Fn(&gtk::Widget, f64, f64, &library::WorkInfo) + 'static,
-) -> gtk::SignalListItemFactory {
-    let factory = name_count_factory::<library::WorkInfo>(
-        |work| {
-            let recordings = recordings_label(work.recordings);
-            let arrangement = work.arrangement.as_ref().map(|arrangement| {
-                i18n_k(
-                    // Translators: `{work}` must be left unmodified; it is
-                    // expanded to the title of the work an arrangement
-                    // arranges
-                    "Arrangement of {work}",
-                    &[("work", &arrangement.of)],
-                )
-            });
-            let text = [
-                Some(work.title.as_deref().unwrap_or(&work.name)),
-                arrangement.as_deref(),
-                work.collection.as_deref(),
-                Some(&recordings),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("\n");
-            Some(text)
-        },
-        show_work_labels,
-    );
-
-    // A heart before the number of recordings of a favorite work, and the
-    // row's menu, with a right click or a long press, and with the Menu key
-    // through the row's action, as keys go to the list
-    let on_menu = Rc::new(on_menu);
-    factory.connect_setup(move |_, item| {
-        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let Some(row) = item.child().and_downcast::<gtk::Box>() else {
-            return;
-        };
-        let Some(line) = row.first_child().and_downcast::<gtk::Box>() else {
-            return;
-        };
-        let heart = gtk::Image::builder()
-            .icon_name("heart-filled-symbolic")
-            .css_classes(["favorite-work"])
-            .visible(false)
-            .build();
-        heart.update_property(&[gtk::accessible::Property::Label(&i18n("Favorite"))]);
-        if let Some(name) = line.first_child() {
-            line.insert_child_after(&heart, Some(&name));
-        }
-
-        let open = Rc::new(clone!(
-            #[weak]
-            item,
-            #[strong]
-            on_menu,
-            move |widget: &gtk::Widget, x: f64, y: f64| {
-                if let Some(object) = item.item().and_downcast::<glib::BoxedAnyObject>() {
-                    on_menu(widget, x, y, &object.borrow::<library::WorkInfo>());
-                }
-            }
-        ));
-        utils::setup_context_menu(
-            &line,
-            clone!(
-                #[weak]
-                line,
-                #[strong]
-                open,
-                move |x, y| open(line.upcast_ref(), x, y)
-            ),
-        );
-        let menu = gio::SimpleAction::new("menu", None);
-        menu.connect_activate(clone!(
-            #[weak]
-            line,
-            move |_, _| {
-                let (x, y) = (
-                    f64::from(line.width()) / 2.0,
-                    f64::from(line.height()) / 2.0,
-                );
-                open(line.upcast_ref(), x, y);
-            }
-        ));
-        let actions = gio::SimpleActionGroup::new();
-        actions.add_action(&menu);
-        row.insert_action_group("work-row", Some(&actions));
+// The tooltip of a work's row: its full title, what it arranges, the
+// collection it's in, and the number of its recordings, a line each
+fn work_tooltip(work: &library::WorkInfo) -> String {
+    let recordings = recordings_label(work.recordings);
+    let arrangement = work.arrangement.as_ref().map(|arrangement| {
+        i18n_k(
+            // Translators: `{work}` must be left unmodified; it is
+            // expanded to the title of the work an arrangement
+            // arranges
+            "Arrangement of {work}",
+            &[("work", &arrangement.of)],
+        )
     });
-    factory.connect_bind(|_, item| {
-        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let heart = item.child().as_ref().and_then(work_heart);
-        let work = item.item().and_downcast::<glib::BoxedAnyObject>();
-        if let (Some(heart), Some(work)) = (heart, work) {
-            heart.set_visible(work.borrow::<library::WorkInfo>().favorite);
-        }
-    });
-    factory
-}
-
-// The name of a work, then, dimmed, what it arranges and the collection
-// it's in, and the number of its recordings
-fn show_work_labels(work: &library::WorkInfo, name: &gtk::Label, count: &gtk::Label) {
-    // What an arrangement is, e.g. "for two pianos, Busoni", tells it from
-    // the work it arranges, whose title it often has
-    let arrangement = work.arrangement.as_ref().map(Arrangement::shown);
-    let more = [arrangement.as_deref(), work.collection.as_deref()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" · ");
-    name.set_markup(&with_dimmed(&work.name, &more));
-    count.set_label(&work.recordings.to_string());
-}
-
-// The heart of a favorite work, after its name on the line of its row
-fn work_heart(row: &gtk::Widget) -> Option<gtk::Image> {
-    row.first_child()?
-        .first_child()?
-        .next_sibling()
-        .and_downcast::<gtk::Image>()
-}
-
-// Shows a work that changed in the row bound to it, as the list binds the
-// row again only for another item
-fn refresh_work_row(row: &gtk::Widget, work: &library::WorkInfo) {
-    let Some(line) = row.first_child() else {
-        return;
-    };
-    let name = line.first_child().and_downcast::<gtk::Label>();
-    let count = line.last_child().and_downcast::<gtk::Label>();
-    if let (Some(name), Some(count)) = (name, count) {
-        show_work_labels(work, &name, &count);
-    }
-    if let Some(heart) = work_heart(row) {
-        heart.set_visible(work.favorite);
-    }
+    [
+        Some(work.title.as_deref().unwrap_or(&work.name)),
+        arrangement.as_deref(),
+        work.collection.as_deref(),
+        Some(&recordings),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 // The headers of the list of works: the names of the composers
@@ -1144,23 +1030,6 @@ fn leaves_covers(flowbox: &gtk::FlowBox, up: bool) -> bool {
     } else {
         lines.all(|line| line <= focus + 1.0)
     }
-}
-
-// The cover of an album among those of a work's row: the flow box's child
-// that holds its cell, which takes the focus
-fn cover_of(row: &gtk::Box, album: &str) -> Option<gtk::Widget> {
-    let flowbox = row
-        .last_child()
-        .and_downcast::<RevealBin>()?
-        .child()
-        .and_downcast::<gtk::FlowBox>()?;
-    std::iter::successors(flowbox.first_child(), WidgetExt::next_sibling).find(|child| {
-        child
-            .first_child()
-            .and_downcast::<AlbumCell>()
-            .and_then(|cell| cell.album())
-            .is_some_and(|cell_album| cell_album.id_str() == album)
-    })
 }
 
 #[cfg(test)]

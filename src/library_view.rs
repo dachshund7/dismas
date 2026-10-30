@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+mod work_row;
 mod works;
 
 use std::{
@@ -227,7 +228,7 @@ mod imp {
         // covers of a work are read, so that those of one opened before
         // are dropped
         pub expanded_work: RefCell<Option<super::works::ExpandedWork>>,
-        pub work_rows: RefCell<HashMap<String, glib::WeakRef<gtk::Box>>>,
+        pub work_rows: RefCell<HashMap<String, glib::WeakRef<work_row::WorkRow>>>,
         pub covers_generation: Cell<u32>,
         // A work to go to once the works are read, and the number of works
         // gone to, so that a new search's list isn't scrolled to its top
@@ -2102,11 +2103,30 @@ pub struct PickNames {
     pub work: Option<String>,
 }
 
-// The rows of the lists of composers, performers and works: a line with a
-// name, which the end of a long row cuts off, and a number, which `bind`
-// sets from the `T` of the item, a `BoxedAnyObject`; `tooltip` makes the
-// line's tooltip from it when it shows. A work's row opens under its line
-// to show the covers of its albums
+// The line of a row of the lists of composers, performers and works: a
+// name, which the end of a long row cuts off, and a number. The scrollbar
+// is drawn over the right edge of the list. The line is as high as the
+// theme makes a row at least, so that its text is in the middle of the row
+// rather than at its top, and the line of an open work, with its covers
+// below it, is as high (style.css)
+fn fill_name_count_line(line: &gtk::Box, name: &gtk::Label, count: &gtk::Label) {
+    name.set_xalign(0.0);
+    name.set_hexpand(true);
+    name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    count.add_css_class("dim-label");
+    count.add_css_class("numeric");
+    line.set_spacing(12);
+    line.set_margin_end(12);
+    line.set_vexpand(true);
+    line.add_css_class("row-line");
+    line.append(name);
+    line.append(count);
+}
+
+// The rows of the lists of composers and performers: a line with a name
+// and a number, which `bind` sets from the `T` of the item, a
+// `BoxedAnyObject`; `tooltip` makes the line's tooltip from it when it
+// shows. Their line is in a box, as a work's is in its row
 fn name_count_factory<T: 'static>(
     tooltip: fn(&T) -> Option<String>,
     bind: fn(&T, &gtk::Label, &gtk::Label),
@@ -2114,26 +2134,8 @@ fn name_count_factory<T: 'static>(
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(move |_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let name = gtk::Label::builder()
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        let count = gtk::Label::builder()
-            .css_classes(["dim-label", "numeric"])
-            .build();
-        // The scrollbar is drawn over the right edge of the list. The line
-        // is as high as the theme makes a row at least, so that its text is
-        // in the middle of the row rather than at its top, and the line of
-        // an open work, with its covers below it, is as high (style.css)
-        let line = gtk::Box::builder()
-            .spacing(12)
-            .margin_end(12)
-            .vexpand(true)
-            .css_classes(["row-line"])
-            .build();
-        line.append(&name);
-        line.append(&count);
+        let (line, name, count) = Default::default();
+        fill_name_count_line(&line, &name, &count);
         utils::set_row_tooltip(&line, item, move |object| {
             tooltip(&object.downcast_ref::<glib::BoxedAnyObject>()?.borrow::<T>())
         });
