@@ -783,7 +783,7 @@ const SIZE_WAIT_FRAMES: u32 = 60;
 // How long gliding to a track takes, however far it is: the list gets up
 // to speed quickly, most of the way goes by in the first half, and the
 // second half settles on the track (`ease`)
-const GLIDE_DURATION: std::time::Duration = std::time::Duration::from_millis(350);
+pub const GLIDE_DURATION: std::time::Duration = std::time::Duration::from_millis(350);
 
 // Scrolls a list to a track, gliding to it, places it in the middle of the
 // list, if it can scroll that far, and makes it flash for a moment, like

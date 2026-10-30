@@ -308,8 +308,31 @@ queuerow.drop-above.first {
 
 /* The lyrics are on the pane's background, not a text field's */
 textview.lyrics,
-textview.lyrics > text {
+textview.lyrics > text,
+list.synced-lyrics {
   background: none;
+}
+
+/* The lines of synchronized lyrics: the one sung is in the accent color,
+ * and the others are dimmed, which leaves the height of the rows alone */
+list.synced-lyrics > row {
+  padding: 6px 18px;
+}
+
+list.synced-lyrics > row > label {
+  opacity: 0.55;
+  transition: opacity 200ms ease, color 200ms ease;
+}
+
+list.synced-lyrics > row.current > label {
+  opacity: 1;
+  color: var(--accent-color);
+}
+
+@media (prefers-contrast: more) {
+  list.synced-lyrics > row > label {
+    opacity: 0.8;
+  }
 }
 
 /* A track dropped on the header of a work at the top of the queue goes

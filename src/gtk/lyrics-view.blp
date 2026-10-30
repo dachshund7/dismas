@@ -64,6 +64,31 @@ template $DismasLyricsView: Widget {
         };
       }
 
+      // Synchronized lyrics, with the line sung highlighted in the middle;
+      // a line is a row, so that the keys go from line to line, and a
+      // line that's activated is sung from its start
+      StackPage {
+        name: "synced";
+
+        child: ScrolledWindow synced_scrolled {
+          hscrollbar-policy: never;
+          vexpand: true;
+
+          child: ListBox lines_box {
+            selection-mode: none;
+            activate-on-single-click: true;
+
+            accessibility {
+              label: C_("a11y", "Lyrics");
+            }
+
+            styles [
+              "synced-lyrics",
+            ]
+          };
+        };
+      }
+
       StackPage {
         name: "none";
 

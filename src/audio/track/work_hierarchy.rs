@@ -1203,7 +1203,7 @@ mod tests {
         let mut id3v2 = Id3v2Tag::new();
         let _ = id3v2.insert_user_text("work_hierarchy".to_string(), json.to_string());
         assert_eq!(
-            ExtraComments::from_id3v2(Some(&id3v2))
+            ExtraComments::from_id3v2(Some(&id3v2), false)
                 .work_hierarchy
                 .as_deref(),
             Some(json)
@@ -1224,7 +1224,7 @@ mod tests {
         );
 
         assert_eq!(
-            ExtraComments::from_id3v2(Some(&Id3v2Tag::new())).work_hierarchy,
+            ExtraComments::from_id3v2(Some(&Id3v2Tag::new()), false).work_hierarchy,
             None
         );
         assert_eq!(ExtraComments::from_mp4(None).work_hierarchy, None);
@@ -1258,7 +1258,7 @@ mod tests {
         let mut id3v2 = Id3v2Tag::new();
         let _ = id3v2.insert_user_text("RECORDINGDATE".to_string(), date.to_string());
         assert_eq!(
-            ExtraComments::from_id3v2(Some(&id3v2))
+            ExtraComments::from_id3v2(Some(&id3v2), false)
                 .recording_date
                 .as_deref(),
             Some(date)

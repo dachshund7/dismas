@@ -138,8 +138,12 @@ What Dismas adds
 - **Lyrics:** Lyrics, in the More menu of the player (Ctrl+Shift+L), shows
   the lyrics of the playing track in the playlist pane: those of an LRC file
   next to it with the same name, as lyrics downloaders write them, or else
-  those in its tags. In the Flatpak, a track opened or dropped from outside
-  the Music folder comes without its LRC file.
+  those in its tags. Synchronized lyrics, in the LRC format or in an MP3's
+  SYLT frame, follow the music, with the line sung in the middle; a click on
+  a line, or Enter, plays from it, and scrolling them lets them be for a few
+  seconds. A track of a CUE sheet shows the part of its file's synchronized
+  lyrics that it plays. In the Flatpak, a track opened or dropped from
+  outside the Music folder comes without its LRC file.
 - **Sleep timer:** stops the music after a set number of minutes. It can
   stop right away, or let the track that's playing when time runs out finish
   first. It can also stop the music at the end of the playing track, or at

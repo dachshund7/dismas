@@ -127,6 +127,17 @@ impl Window {
             self,
             move |_| win.show_pane_back()
         ));
+        // A line of synchronized lyrics that's activated plays from its
+        // start, as a click on the waveform plays from there
+        imp.lyrics_view.connect_seek(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_, time| {
+                let player = win.player();
+                player.seek_position_abs(time);
+                player.play();
+            }
+        ));
         imp.sidebar_stack.connect_visible_child_name_notify(clone!(
             #[weak(rename_to = win)]
             self,

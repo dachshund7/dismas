@@ -696,6 +696,23 @@ mod tests {
     }
 
     #[test]
+    fn lyrics_come_through_as_the_lyrics_tag() {
+        gst::init().unwrap();
+        let lrc = "[00:01.00]Ave Maria!\n[00:04.00]Jungfrau mild,";
+        let mut tags = gst::TagList::new();
+        tags.get_mut()
+            .unwrap()
+            .add::<gst::tags::Lyrics>(&lrc, gst::TagMergeMode::Append);
+        let (comments, _) = comments(&tags, false);
+        let read = Discovered {
+            comments,
+            ..Default::default()
+        }
+        .into_file_tags();
+        assert_eq!(read.tag.get_string(ItemKey::Lyrics), Some(lrc));
+    }
+
+    #[test]
     fn only_lossless_codecs_have_a_bit_depth() {
         gst::init().unwrap();
         let wma = |version: i32| {

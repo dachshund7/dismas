@@ -149,8 +149,10 @@ All notable changes to this project will be documented in this file.
   WMA, the ugly plugins and gst-libav
 - Lyrics, in the More menu of the player or with Ctrl+Shift+L, shows the
   lyrics of the playing track in the playlist pane: those of an LRC file
-  next to it with the same name, or else those in its tags. An album opened
-  over the lyrics goes back to them
+  next to it with the same name, or else those in its tags. Synchronized
+  lyrics, in the LRC format or in an MP3's SYLT frame, follow the music,
+  with the line sung in the middle, and a click on a line, or Enter, plays
+  from it. An album opened over the lyrics goes back to them
 
 ### Changed
 

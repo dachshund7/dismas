@@ -144,9 +144,12 @@ impl Window {
     pub(super) fn select_all(&self) -> bool {
         let imp = self.imp();
         let focus = gtk::prelude::GtkWindowExt::focus(self);
-        // The text of the lyrics selects all of itself
-        if focus.as_ref().is_some_and(ObjectExt::is::<gtk::TextView>) {
-            return false;
+        // The text of the lyrics selects all of itself, and the lines of
+        // synchronized lyrics can't be selected
+        if let Some(focus) = &focus
+            && focus.is_ancestor(&*imp.lyrics_view)
+        {
+            return !focus.is::<gtk::TextView>();
         }
         let focus_in = |widget: &gtk::Widget| focus.as_ref().is_some_and(|f| f.is_ancestor(widget));
         let sidebar_page = imp.sidebar_stack.visible_child_name();

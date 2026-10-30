@@ -4,21 +4,36 @@
 // The lyrics of the playing track, in the playlist pane. They're only read
 // while the pane shows them: when it opens, when the track changes, and
 // when the track's tags or its LRC file change, as a program that finds
-// lyrics can write the file while the track plays
+// lyrics can write the file while the track plays. Synchronized lyrics
+// show the line sung in the middle, and follow the music
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::{
+    cell::{Cell, OnceCell, RefCell},
+    time::Duration,
+};
 
 use adw::{prelude::*, subclass::prelude::*};
 use glib::{clone, subclass::Signal};
-use gtk::{CompositeTemplate, gio, glib};
+use gtk::{CompositeTemplate, gdk, gio, glib, pango};
 use log::debug;
 use std::sync::LazyLock;
 
 use crate::{
     audio::{PlayerState, Track},
-    lyrics::{self, Lyrics},
+    i18n::pi18n,
+    lyrics::{self, Line, Lyrics},
+    queue_row::GLIDE_DURATION,
     utils,
 };
+
+// How far a position can be before the line that shows and still keep it:
+// the next line shows at its time, ahead of the next position the player
+// reports, which can be from a little before it
+const BACK_TOLERANCE: Duration = Duration::from_millis(300);
+
+// How long the lines stay where the user scrolled them, before they follow
+// the music again
+const FOLLOW_PAUSE: Duration = Duration::from_secs(4);
 
 mod imp {
     use super::*;
@@ -34,6 +49,10 @@ mod imp {
         pub stack: TemplateChild<gtk::Stack>,
         #[template_child]
         pub text_view: TemplateChild<gtk::TextView>,
+        #[template_child]
+        pub synced_scrolled: TemplateChild<gtk::ScrolledWindow>,
+        #[template_child]
+        pub lines_box: TemplateChild<gtk::ListBox>,
 
         pub state: OnceCell<PlayerState>,
         // The track whose lyrics show, or are being read
@@ -42,9 +61,19 @@ mod imp {
         // other read started after it, as the same track can be read again
         // before the read before is done, e.g. when its tags change
         pub reads: Cell<u64>,
+        // The lines of the synchronized lyrics that show, and the one sung
+        pub lines: RefCell<Vec<Line>>,
+        pub current: Cell<Option<usize>>,
+
         // While the view is mapped
-        pub track_handler: RefCell<Option<glib::SignalHandlerId>>,
+        pub handlers: RefCell<Vec<glib::SignalHandlerId>>,
         pub lrc_monitor: RefCell<Option<gio::FileMonitor>>,
+        // When the line sung changes next, while the track plays, between
+        // the positions the player reports
+        pub next_change: RefCell<Option<glib::SourceId>>,
+        // While the lines stay where the user scrolled them
+        pub follow_pause: RefCell<Option<glib::SourceId>>,
+        pub glide: RefCell<Option<adw::TimedAnimation>>,
     }
 
     #[glib::object_subclass]
@@ -90,11 +119,20 @@ mod imp {
                     move || obj.imp().back_button.emit_clicked()
                 ),
             );
+            obj.setup_lines();
         }
 
         fn signals() -> &'static [Signal] {
-            static SIGNALS: LazyLock<Vec<Signal>> =
-                LazyLock::new(|| vec![Signal::builder("back").build()]);
+            static SIGNALS: LazyLock<Vec<Signal>> = LazyLock::new(|| {
+                vec![
+                    Signal::builder("back").build(),
+                    // A line was activated: where to play from, in
+                    // milliseconds from the start of the track
+                    Signal::builder("seek")
+                        .param_types([u64::static_type()])
+                        .build(),
+                ]
+            });
             SIGNALS.as_ref()
         }
     }
@@ -141,6 +179,17 @@ impl LyricsView {
         )
     }
 
+    pub fn connect_seek<F: Fn(&Self, Duration) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "seek",
+            false,
+            glib::closure_local!(move |view: &Self, millis: u64| f(
+                view,
+                Duration::from_millis(millis)
+            )),
+        )
+    }
+
     // The tags of a track were read again; if it's the one whose lyrics
     // show, its lyrics are too. Once the view is shown again, they're read
     // anyway
@@ -158,27 +207,45 @@ impl LyricsView {
         let Some(state) = imp.state.get() else {
             return;
         };
-        if imp.track_handler.borrow().is_none() {
-            let handler = state.connect_track_notify(clone!(
-                #[weak(rename_to = view)]
-                self,
-                move |_| view.follow_track()
-            ));
-            imp.track_handler.replace(Some(handler));
+        if imp.handlers.borrow().is_empty() {
+            let handlers = vec![
+                state.connect_track_notify(clone!(
+                    #[weak(rename_to = view)]
+                    self,
+                    move |_| view.follow_track()
+                )),
+                state.connect_position_notify(clone!(
+                    #[weak(rename_to = view)]
+                    self,
+                    move |state| view.follow(state.position_time())
+                )),
+                state.connect_playing_notify(clone!(
+                    #[weak(rename_to = view)]
+                    self,
+                    move |state| view.follow(state.position_time())
+                )),
+            ];
+            imp.handlers.replace(handlers);
         }
         self.follow_track();
+        self.center_when_laid_out();
     }
 
     fn stop_following(&self) {
         let imp = self.imp();
-        if let Some(handler) = imp.track_handler.take()
-            && let Some(state) = imp.state.get()
-        {
-            state.disconnect(handler);
+        if let Some(state) = imp.state.get() {
+            for handler in imp.handlers.take() {
+                state.disconnect(handler);
+            }
         }
         if let Some(monitor) = imp.lrc_monitor.take() {
             monitor.cancel();
         }
+        if let Some(source) = imp.next_change.take() {
+            source.remove();
+        }
+        self.resume_following();
+        self.stop_glide();
     }
 
     fn follow_track(&self) {
@@ -278,7 +345,9 @@ impl LyricsView {
     fn show(&self, lyrics: Option<Lyrics>) {
         let imp = self.imp();
         match lyrics {
+            Some(Lyrics::Synced(lines)) => self.show_lines(lines),
             Some(Lyrics::Plain(text)) => {
+                self.clear_lines();
                 let buffer = imp.text_view.buffer();
                 let (start, end) = buffer.bounds();
                 // The same lyrics, read again, keep their place and the
@@ -293,7 +362,393 @@ impl LyricsView {
                 }
                 imp.stack.set_visible_child_name("plain");
             }
-            None => imp.stack.set_visible_child_name("none"),
+            None => {
+                self.clear_lines();
+                imp.stack.set_visible_child_name("none");
+            }
         }
+    }
+
+    // Synchronized lyrics: a row for each line. The same lines, read
+    // again, keep their rows and their place
+    fn show_lines(&self, lines: Vec<Line>) {
+        let imp = self.imp();
+        if *imp.lines.borrow() != lines {
+            self.clear_lines();
+            for line in &lines {
+                let label = gtk::Label::builder()
+                    .label(&line.text)
+                    .wrap(true)
+                    .wrap_mode(pango::WrapMode::WordChar)
+                    .xalign(0.0)
+                    .build();
+                let row = gtk::ListBoxRow::builder().child(&label).build();
+                // Screen readers read the row, which has no name of its own
+                row.update_property(&[gtk::accessible::Property::Label(&line.text)]);
+                imp.lines_box.append(&row);
+            }
+            imp.lines.replace(lines);
+            self.center_when_laid_out();
+        }
+        imp.stack.set_visible_child_name("synced");
+        if let Some(state) = imp.state.get() {
+            self.follow(state.position_time());
+        }
+    }
+
+    fn clear_lines(&self) {
+        let imp = self.imp();
+        if imp.lines.borrow().is_empty() {
+            return;
+        }
+        if let Some(source) = imp.next_change.take() {
+            source.remove();
+        }
+        imp.current.set(None);
+        imp.lines.replace(Vec::new());
+        imp.lines_box.remove_all();
+    }
+
+    // Shows the line sung at a position, and when the next one will be,
+    // while the track plays
+    fn follow(&self, position: Duration) {
+        let imp = self.imp();
+        let line = {
+            let lines = imp.lines.borrow();
+            // A position a little before the line that shows keeps it, see
+            // `BACK_TOLERANCE`; seeking and starting over go back further
+            let keep = imp.current.get().is_some_and(|current| {
+                let time = lines[current].time;
+                position < time && time - position <= BACK_TOLERANCE
+            });
+            if keep {
+                imp.current.get()
+            } else {
+                lyrics::line_at(&lines, position)
+            }
+        };
+        self.set_current(line);
+        self.schedule_next_change(position);
+    }
+
+    // The player reports the position four times a second, so the next
+    // line shows at its time with a timeout, rather than at the next
+    // position after it
+    fn schedule_next_change(&self, position: Duration) {
+        let imp = self.imp();
+        if let Some(source) = imp.next_change.take() {
+            source.remove();
+        }
+        let playing = imp.state.get().is_some_and(PlayerState::playing);
+        if !playing || !self.is_mapped() {
+            return;
+        }
+        let Some(at) = lyrics::next_change(&imp.lines.borrow(), position) else {
+            return;
+        };
+        let source = glib::timeout_add_local_once(
+            at - position,
+            clone!(
+                #[weak(rename_to = view)]
+                self,
+                move || {
+                    view.imp().next_change.take();
+                    view.follow(at);
+                }
+            ),
+        );
+        imp.next_change.replace(Some(source));
+    }
+
+    fn row(&self, line: usize) -> Option<gtk::ListBoxRow> {
+        self.imp().lines_box.row_at_index(i32::try_from(line).ok()?)
+    }
+
+    // The line sung is highlighted, and screen readers describe it as such,
+    // without announcing each line
+    fn set_current(&self, line: Option<usize>) {
+        let imp = self.imp();
+        let before = imp.current.replace(line);
+        if before == line {
+            return;
+        }
+        if let Some(row) = before.and_then(|line| self.row(line)) {
+            row.remove_css_class("current");
+            row.reset_property(gtk::AccessibleProperty::Description);
+        }
+        if let Some(row) = line.and_then(|line| self.row(line)) {
+            row.add_css_class("current");
+            row.update_property(&[gtk::accessible::Property::Description(&pi18n(
+                "a11y",
+                "Current line",
+            ))]);
+            if imp.follow_pause.borrow().is_none() {
+                self.center_current(true);
+            }
+        }
+    }
+
+    // Scrolls the line sung to the middle, as far as the list scrolls,
+    // gliding to it like the queue to a track; libadwaita jumps instead
+    // when animations are off
+    fn center_current(&self, glide: bool) {
+        let imp = self.imp();
+        self.stop_glide();
+        let Some(row) = imp.current.get().and_then(|line| self.row(line)) else {
+            return;
+        };
+        let Some(bounds) = row.compute_bounds(&*imp.lines_box) else {
+            return;
+        };
+        let adjustment = imp.synced_scrolled.vadjustment();
+        let middle = f64::from(bounds.y() + bounds.height() / 2.0);
+        let last = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+        let target = (middle - adjustment.page_size() / 2.0).clamp(adjustment.lower(), last);
+        if !glide {
+            adjustment.set_value(target);
+            return;
+        }
+        let animation = adw::TimedAnimation::new(
+            &*imp.synced_scrolled,
+            adjustment.value(),
+            target,
+            GLIDE_DURATION.as_millis() as u32,
+            adw::PropertyAnimationTarget::new(&adjustment, "value"),
+        );
+        animation.set_easing(adw::Easing::Ease);
+        animation.play();
+        imp.glide.replace(Some(animation));
+    }
+
+    fn stop_glide(&self) {
+        if let Some(animation) = self.imp().glide.take() {
+            animation.pause();
+        }
+    }
+
+    // New lines are only laid out at the next frame, as is the list once
+    // it's shown again, so they're centered at the one after
+    fn center_when_laid_out(&self) {
+        let laid_out = Cell::new(false);
+        self.add_tick_callback(move |view, _| {
+            if !laid_out.replace(true) {
+                return glib::ControlFlow::Continue;
+            }
+            if view.imp().follow_pause.borrow().is_none() {
+                view.center_current(false);
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    // The lines stay where the user scrolls them for a while, see
+    // `FOLLOW_PAUSE`, and then glide back to the line sung
+    fn pause_following(&self) {
+        let imp = self.imp();
+        self.stop_glide();
+        if let Some(source) = imp.follow_pause.take() {
+            source.remove();
+        }
+        let source = glib::timeout_add_local_once(
+            FOLLOW_PAUSE,
+            clone!(
+                #[weak(rename_to = view)]
+                self,
+                move || {
+                    view.imp().follow_pause.take();
+                    view.center_current(true);
+                }
+            ),
+        );
+        imp.follow_pause.replace(Some(source));
+    }
+
+    fn resume_following(&self) {
+        if let Some(source) = self.imp().follow_pause.take() {
+            source.remove();
+        }
+    }
+
+    fn setup_lines(&self) {
+        let imp = self.imp();
+
+        // A line activated with Enter, a click or a tap is sung from its
+        // start
+        imp.lines_box.connect_row_activated(clone!(
+            #[weak(rename_to = view)]
+            self,
+            move |_, row| view.activate_line(row.index())
+        ));
+        // Enter on the line with the focus, which the list leaves to the
+        // window, where it would press the play button
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, modifiers| {
+                let enter = matches!(
+                    key,
+                    gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::ISO_Enter
+                );
+                let row = view
+                    .imp()
+                    .lines_box
+                    .focus_child()
+                    .and_downcast::<gtk::ListBoxRow>();
+                match row {
+                    Some(row)
+                        if enter
+                            && (modifiers & gtk::accelerator_get_default_mod_mask()).is_empty() =>
+                    {
+                        view.activate_line(row.index());
+                        glib::Propagation::Stop
+                    }
+                    _ => glib::Propagation::Proceed,
+                }
+            }
+        ));
+        imp.lines_box.add_controller(keys);
+
+        // The list follows a change of its size, e.g. as the window is
+        // resized, right away
+        imp.synced_scrolled.vadjustment().connect_changed(clone!(
+            #[weak(rename_to = view)]
+            self,
+            move |_| {
+                let imp = view.imp();
+                if imp.follow_pause.borrow().is_none()
+                    && imp.stack.visible_child_name().as_deref() == Some("synced")
+                {
+                    view.center_current(false);
+                }
+            }
+        ));
+
+        // What the user does to scroll the lines, rather than their value
+        // changing, which it also does with new lines and a new size: the
+        // wheel and the touchpad, whose scrolling goes on after the fingers
+        // leave it
+        let scroll = gtk::EventControllerScroll::new(
+            gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::KINETIC,
+        );
+        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        scroll.connect_scroll(clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, _, _| {
+                view.pause_following();
+                glib::Propagation::Proceed
+            }
+        ));
+        scroll.connect_decelerate(clone!(
+            #[weak(rename_to = view)]
+            self,
+            move |_, _, _| view.pause_following()
+        ));
+        imp.synced_scrolled.add_controller(scroll);
+
+        // A finger dragging the lines, which the list goes on scrolling
+        // after it lets go, and which never claims the touch, as a tap
+        // activates a line
+        let drag = gtk::GestureDrag::new();
+        drag.set_touch_only(true);
+        drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pause = clone!(
+            #[weak(rename_to = view)]
+            self,
+            move || view.pause_following()
+        );
+        drag.connect_drag_begin(clone!(
+            #[strong]
+            pause,
+            move |_, _, _| pause()
+        ));
+        drag.connect_drag_end(clone!(
+            #[strong]
+            pause,
+            move |_, _, _| pause()
+        ));
+        drag.connect_cancel(clone!(
+            #[strong]
+            pause,
+            move |_, _| pause()
+        ));
+        imp.synced_scrolled.add_controller(drag);
+
+        // The scrollbar
+        let scrollbar_drag = gtk::GestureDrag::new();
+        scrollbar_drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+        scrollbar_drag.connect_drag_begin(clone!(
+            #[strong]
+            pause,
+            move |_, _, _| pause()
+        ));
+        scrollbar_drag.connect_drag_end(clone!(
+            #[strong]
+            pause,
+            move |_, _, _| pause()
+        ));
+        imp.synced_scrolled
+            .vscrollbar()
+            .add_controller(scrollbar_drag);
+
+        // Page Up, Page Down, Home and End, which the window gives the
+        // list, and the arrows, which move the focus from line to line
+        imp.synced_scrolled.connect_scroll_child(clone!(
+            #[strong]
+            pause,
+            move |_, _, _| {
+                pause();
+                false
+            }
+        ));
+        imp.lines_box
+            .connect_move_cursor(move |_, _, _, _, _| pause());
+
+        // Tab into the lines goes to the line sung, rather than to the
+        // first or the last line, which the list would scroll to
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_enter(clone!(
+            #[weak(rename_to = view)]
+            self,
+            move |_| view.focus_current_line()
+        ));
+        imp.lines_box.add_controller(focus);
+    }
+
+    // Only for the keys, which show the focus: a click on a line keeps the
+    // focus on it
+    fn focus_current_line(&self) {
+        let keys = self
+            .root()
+            .and_downcast::<gtk::Window>()
+            .is_some_and(|window| window.gets_focus_visible());
+        let Some(row) = self.imp().current.get().and_then(|line| self.row(line)) else {
+            return;
+        };
+        if keys && !row.has_focus() {
+            // Once the focus has finished moving into the list
+            glib::idle_add_local_once(move || {
+                row.grab_focus();
+            });
+        }
+    }
+
+    fn activate_line(&self, line: i32) {
+        let imp = self.imp();
+        let Some(time) = usize::try_from(line)
+            .ok()
+            .and_then(|line| imp.lines.borrow().get(line).map(|line| line.time))
+        else {
+            return;
+        };
+        self.resume_following();
+        self.set_current(usize::try_from(line).ok());
+        let millis = u64::try_from(time.as_millis()).unwrap_or(u64::MAX);
+        self.emit_by_name::<()>("seek", &[&millis]);
     }
 }

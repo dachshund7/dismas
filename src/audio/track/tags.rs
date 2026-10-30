@@ -6,7 +6,11 @@
 
 use std::{borrow::Cow, collections::HashSet};
 
-use lofty::{properties::FileProperties, tag::TagType};
+use lofty::{
+    id3::v2::{Frame, SyncTextContentType, SynchronizedTextFrame, TimestampFormat},
+    properties::FileProperties,
+    tag::TagType,
+};
 
 use super::*;
 
@@ -26,6 +30,10 @@ pub struct ExtraComments {
     // place of ReplayGain tags, e.g. "-1536"; see `ReplayGain::r128`
     pub(super) r128_track_gain: Option<String>,
     pub(super) r128_album_gain: Option<String>,
+    // The synchronized lyrics of an ID3v2 SYLT frame: the time of each
+    // entry and its text, as the frame has them, which can be a line or a
+    // word. Only read when asked, see `ReadOptions::lyrics`
+    pub synced_lyrics: Option<Vec<(Duration, String)>>,
 }
 
 // The name of the tag of the "Work Hierarchy" plugin; MusicBrainz Picard
@@ -38,6 +46,38 @@ const WORK_HIERARCHY: &str = "work_hierarchy";
 
 // The name of the tag with the recording date, written the same way
 const RECORDING_DATE: &str = "recordingdate";
+
+// The synchronized lyrics of an ID3v2 tag, from a SYLT frame whose times
+// are in milliseconds, as those in MPEG frames would need the frame rate.
+// A frame of lyrics or of a transcription comes before the others, as
+// another can hold the chords, say
+fn synced_lyrics(tag: &Id3v2Tag) -> Option<Vec<(Duration, String)>> {
+    let frames: Vec<SynchronizedTextFrame> = tag
+        .into_iter()
+        .filter_map(|frame| match frame {
+            Frame::Binary(binary) if binary.id().as_str() == "SYLT" => {
+                SynchronizedTextFrame::parse(&binary.data, binary.flags()).ok()
+            }
+            _ => None,
+        })
+        .filter(|frame| frame.timestamp_format == TimestampFormat::MS)
+        .collect();
+    let frame = frames
+        .iter()
+        .find(|frame| {
+            matches!(
+                frame.content_type,
+                SyncTextContentType::Lyrics | SyncTextContentType::TextTranscription
+            )
+        })
+        .or(frames.first())?;
+    let entries = frame
+        .content
+        .iter()
+        .map(|(ms, text)| (Duration::from_millis(u64::from(*ms)), text.clone()))
+        .collect();
+    Some(entries)
+}
 
 impl ExtraComments {
     // The items of a file with a "Work Hierarchy" tag, for the tests of
@@ -68,6 +108,7 @@ impl ExtraComments {
             cue_sheet: get("CUESHEET"),
             r128_track_gain: get("R128_TRACK_GAIN"),
             r128_album_gain: get("R128_ALBUM_GAIN"),
+            synced_lyrics: None,
         }
     }
 
@@ -92,7 +133,7 @@ impl ExtraComments {
 
     // The descriptions of "TXXX" frames are compared as they are, and other
     // taggers write them in capitals
-    pub(super) fn from_id3v2(tag: Option<&Id3v2Tag>) -> Self {
+    pub(super) fn from_id3v2(tag: Option<&Id3v2Tag>, lyrics: bool) -> Self {
         let get = |name: &str| {
             let tag = tag?;
             tag.get_user_text(name)
@@ -102,6 +143,7 @@ impl ExtraComments {
         ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
             recording_date: get(RECORDING_DATE),
+            synced_lyrics: tag.filter(|_| lyrics).and_then(synced_lyrics),
             ..Default::default()
         }
     }
@@ -145,8 +187,11 @@ impl LeftOut {
         Self(ExtraComments::from_ape(tag), Fills::from_ape(tag))
     }
 
-    fn id3v2(tag: Option<&Id3v2Tag>) -> Self {
-        Self(ExtraComments::from_id3v2(tag), Fills::from_id3v2(tag))
+    fn id3v2(tag: Option<&Id3v2Tag>, lyrics: bool) -> Self {
+        Self(
+            ExtraComments::from_id3v2(tag, lyrics),
+            Fills::from_id3v2(tag),
+        )
     }
 
     fn mp4(ilst: Option<&Ilst>) -> Self {
@@ -159,17 +204,28 @@ impl LeftOut {
 pub struct ReadOptions {
     pub covers: bool,
     pub properties: bool,
+    // The synchronized lyrics of ID3v2 tags, which only the lyrics of the
+    // playing track need
+    pub lyrics: bool,
 }
 
 impl ReadOptions {
     pub const ALL: Self = Self {
         covers: true,
         properties: true,
+        lyrics: false,
     };
     // Without the covers and the properties, which the library doesn't keep
     pub const TAGS: Self = Self {
         covers: false,
         properties: false,
+        lyrics: false,
+    };
+    // The tags with the synchronized lyrics
+    pub const LYRICS: Self = Self {
+        covers: false,
+        properties: false,
+        lyrics: true,
     };
 
     // Each of lofty's setters returns a copy, so they're chained on a value
@@ -259,7 +315,7 @@ pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
         debug!("Read {path:?} with GStreamer, as lofty only guessed it was MPEG audio");
         return Some(tags);
     }
-    match read_tagged_file(probe, parse_options) {
+    match read_tagged_file(probe, options) {
         Ok((file, left_out)) => Some(FileTags::new(file, left_out)),
         Err(e) => {
             let tags = discovered::discover(path, options);
@@ -296,18 +352,20 @@ fn merged_tag(tags: Vec<Tag>) -> Option<Tag> {
 // Reads a file, and what lofty leaves out of its tag
 fn read_tagged_file(
     probe: Probe<BufReader<File>>,
-    options: ParseOptions,
+    read_options: ReadOptions,
 ) -> Result<(TaggedFile, LeftOut), FileParseError> {
     fn read<F: AudioFile + Into<TaggedFile>>(
         probe: Probe<BufReader<File>>,
         options: ParseOptions,
-        left_out: fn(&F) -> LeftOut,
+        left_out: impl Fn(&F) -> LeftOut,
     ) -> Result<(TaggedFile, LeftOut), FileParseError> {
         let file = F::read_from(&mut probe.into_inner(), options)?;
         let left_out = left_out(&file);
         Ok((file.into(), left_out))
     }
 
+    let options = read_options.parse_options();
+    let lyrics = read_options.lyrics;
     match probe.file_type() {
         Some(FileType::Opus) => read(probe, options, |f: &OpusFile| {
             LeftOut::vorbis(Some(f.vorbis_comments()))
@@ -324,10 +382,18 @@ fn read_tagged_file(
         Some(FileType::Ape) => read(probe, options, |f: &ApeFile| LeftOut::ape(f.ape())),
         Some(FileType::WavPack) => read(probe, options, |f: &WavPackFile| LeftOut::ape(f.ape())),
         Some(FileType::Mpc) => read(probe, options, |f: &MpcFile| LeftOut::ape(f.ape())),
-        Some(FileType::Mpeg) => read(probe, options, |f: &MpegFile| LeftOut::id3v2(f.id3v2())),
-        Some(FileType::Aiff) => read(probe, options, |f: &AiffFile| LeftOut::id3v2(f.id3v2())),
-        Some(FileType::Wav) => read(probe, options, |f: &WavFile| LeftOut::id3v2(f.id3v2())),
-        Some(FileType::Aac) => read(probe, options, |f: &AacFile| LeftOut::id3v2(f.id3v2())),
+        Some(FileType::Mpeg) => read(probe, options, |f: &MpegFile| {
+            LeftOut::id3v2(f.id3v2(), lyrics)
+        }),
+        Some(FileType::Aiff) => read(probe, options, |f: &AiffFile| {
+            LeftOut::id3v2(f.id3v2(), lyrics)
+        }),
+        Some(FileType::Wav) => read(probe, options, |f: &WavFile| {
+            LeftOut::id3v2(f.id3v2(), lyrics)
+        }),
+        Some(FileType::Aac) => read(probe, options, |f: &AacFile| {
+            LeftOut::id3v2(f.id3v2(), lyrics)
+        }),
         Some(FileType::Mp4) => read(probe, options, |f: &Mp4File| LeftOut::mp4(f.ilst())),
         _ => probe.options(options).read().map(|f| {
             let left_out = LeftOut(ExtraComments::default(), Fills::default());
