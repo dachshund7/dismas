@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The pages of the playlist pane: the queue, the tracks of an album or the
-// recordings of a work, and the lyrics of the playing track. An album and
-// the lyrics open over the page that shows, and going back shows that page
-// again, so that an album opened while the lyrics show goes back to them
+// The pages of the playlist pane: the queue, the tracks of an album, and
+// the lyrics of the playing track. An album and the lyrics open over the
+// page that shows, and going back shows that page again, so that an album
+// opened while the lyrics show goes back to them
 
 use super::*;
 

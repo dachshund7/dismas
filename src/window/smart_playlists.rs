@@ -6,22 +6,45 @@ use std::{collections::HashMap, path::PathBuf};
 use adw::prelude::*;
 
 use super::*;
-use crate::{audio::shuffle, play_stats::FavoriteItem};
+use crate::{
+    audio::shuffle,
+    play_stats::{FavoriteItem, TrackStats},
+};
 
 impl Window {
     // Plays the tracks of a smart playlist in place of the queue, like
     // dropped files, with an Undo. They're read from the play stats, or
-    // the favorites, each time, so it's never the selected playlist
+    // the favorites, each time, so it's never the selected playlist.
+    // Favorite Works plays the favorite works and recordings in the order
+    // they were marked: each recording marked, and for a work marked
+    // without one, a recording of it picked as Random Work picks one, so
+    // that they take turns
     pub(super) fn play_smart_playlist(&self, name: &str) {
-        let (query, empty): (fn() -> Vec<String>, _) = match name {
+        type Query = Box<dyn FnOnce() -> Vec<String> + Send>;
+        let (query, empty): (Query, _) = match name {
             "random-album" => return self.play_random(Random::Album),
             "random-work" => return self.play_random(Random::Work),
-            "favorite-works" => return self.play_favorite_works(),
-            "favorites" => (play_stats::favorites, i18n("No favorite tracks yet")),
-            "recently-played" => (play_stats::recently_played, i18n("No tracks played yet")),
-            "most-played" => (play_stats::most_played, i18n("No tracks played yet")),
+            "favorite-works" => {
+                let hidden = self.imp().library_view.hidden_folders();
+                (
+                    Box::new(move || uris_of(&favorite_works_paths(&hidden))),
+                    i18n("No favorite works yet"),
+                )
+            }
+            "favorites" => (
+                Box::new(play_stats::favorites),
+                i18n("No favorite tracks yet"),
+            ),
+            "recently-played" => (
+                Box::new(play_stats::recently_played),
+                i18n("No tracks played yet"),
+            ),
+            "most-played" => (
+                Box::new(play_stats::most_played),
+                i18n("No tracks played yet"),
+            ),
             "not-heard-lately" => (
-                play_stats::not_heard_lately,
+                Box::new(play_stats::not_heard_lately),
                 i18n("No often played tracks have gone 2 months unheard yet"),
             ),
             _ => return,
@@ -73,30 +96,6 @@ impl Window {
                 let files = picked.paths.into_iter().map(gio::File::for_path).collect();
                 let message = random.announce(&picked.name);
                 win.play_announced_in_place_of_queue(files, Some(message));
-            }
-        ));
-    }
-
-    // Plays the favorite works and recordings in place of the queue, with
-    // an Undo, in the order they were marked: each recording marked, and
-    // for a work marked without one, a recording of it picked as Random
-    // Work picks one, so that they take turns
-    fn play_favorite_works(&self) {
-        // What was heard of the track playing counts, as for the lists
-        self.player().save_listen();
-        let hidden = self.imp().library_view.hidden_folders();
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = win)]
-            self,
-            async move {
-                let paths = gio::spawn_blocking(move || favorite_works_paths(&hidden))
-                    .await
-                    .unwrap_or_default();
-                if paths.is_empty() {
-                    win.add_toast(i18n("No favorite works yet"));
-                    return;
-                }
-                win.play_in_place_of_queue(paths.into_iter().map(gio::File::for_path).collect());
             }
         ));
     }
@@ -222,12 +221,7 @@ fn pick_album(hidden: &[PathBuf], last: Option<&str>) -> Option<Picked> {
 
     let uris: Vec<Vec<String>> = albums.iter().map(|(_, paths)| uris_of(paths)).collect();
     let stats = play_stats::track_stats(&uris.concat());
-    let now = play_stats::now();
-    let weights: Vec<f64> = uris
-        .iter()
-        .map(|uris| shuffle::weight(uris.iter().filter_map(|uri| stats.get(uri).copied()), now))
-        .collect();
-    let pos = shuffle::weighted_pick(&weights, &mut rand::rng())?;
+    let pos = pick_heard(&uris, &stats, play_stats::now(), &mut rand::rng())?;
     let (album, paths) = albums.swap_remove(pos);
     Some(Picked {
         id: album.id,
@@ -257,24 +251,42 @@ fn pick_work(hidden: &[PathBuf], last: Option<&str>) -> Option<Picked> {
     let mut rng = rand::rng();
     let weights: Vec<f64> = uris
         .iter()
-        .map(|recordings| {
-            let heard = recordings.iter().flatten();
-            shuffle::weight(heard.filter_map(|uri| stats.get(uri).copied()), now)
-        })
+        .map(|recordings| heard_weight(recordings.iter().flatten(), &stats, now))
         .collect();
     let pos = shuffle::weighted_pick(&weights, &mut rng)?;
     let (work, mut recordings) = works.swap_remove(pos);
 
-    let weights: Vec<f64> = uris[pos]
-        .iter()
-        .map(|uris| shuffle::weight(uris.iter().filter_map(|uri| stats.get(uri).copied()), now))
-        .collect();
-    let pos = shuffle::weighted_pick(&weights, &mut rng)?;
+    let pos = pick_heard(&uris[pos], &stats, now, &mut rng)?;
     Some(Picked {
         id: work.key,
         name: work.name,
         paths: recordings.swap_remove(pos),
     })
+}
+
+// The weight of some tracks, by what was heard of them, see
+// `shuffle::weight`
+fn heard_weight<'a>(
+    uris: impl Iterator<Item = &'a String> + Clone,
+    stats: &HashMap<String, TrackStats>,
+    now: i64,
+) -> f64 {
+    shuffle::weight(uris.filter_map(|uri| stats.get(uri).copied()), now)
+}
+
+// The position of one of the groups of tracks, such as albums or the
+// recordings of a work, picked at random by what was heard of each
+fn pick_heard(
+    groups: &[Vec<String>],
+    stats: &HashMap<String, TrackStats>,
+    now: i64,
+    rng: &mut impl rand::Rng,
+) -> Option<usize> {
+    let weights: Vec<f64> = groups
+        .iter()
+        .map(|uris| heard_weight(uris.iter(), stats, now))
+        .collect();
+    shuffle::weighted_pick(&weights, rng)
 }
 
 // The tracks Favorite Works plays, outside the `hidden` folders; this
@@ -305,13 +317,7 @@ fn favorite_works_paths(hidden: &[PathBuf]) -> Vec<PathBuf> {
         |recordings| {
             let uris: Vec<Vec<String>> = recordings.iter().map(|paths| uris_of(paths)).collect();
             let stats = play_stats::track_stats(&uris.concat());
-            let weights: Vec<f64> = uris
-                .iter()
-                .map(|uris| {
-                    shuffle::weight(uris.iter().filter_map(|uri| stats.get(uri).copied()), now)
-                })
-                .collect();
-            let pos = shuffle::weighted_pick(&weights, &mut rng)?;
+            let pos = pick_heard(&uris, &stats, now, &mut rng)?;
             recordings.get(pos).cloned()
         },
     )

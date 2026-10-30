@@ -118,8 +118,8 @@ impl RevealBin {
     }
 
     // Opens or closes the bin, sliding it as its child moves to its new
-    // place, or at once; the animation, if any, says when it's done
-    pub fn set_revealed(&self, revealed: bool, animate: bool) -> Option<adw::TimedAnimation> {
+    // place, or at once
+    pub fn set_revealed(&self, revealed: bool, animate: bool) {
         let imp = self.imp();
         imp.revealed.set(revealed);
         if let Some(animation) = imp.animation.take() {
@@ -128,7 +128,7 @@ impl RevealBin {
         let target = if revealed { 1.0 } else { 0.0 };
         if !animate || imp.progress.get() == target {
             self.set_progress(target);
-            return None;
+            return;
         }
         let animation = adw::TimedAnimation::new(
             self,
@@ -143,13 +143,14 @@ impl RevealBin {
         );
         animation.set_easing(SLIDE_EASING);
         animation.play();
-        imp.animation.replace(Some(animation.clone()));
-        Some(animation)
+        imp.animation.replace(Some(animation));
     }
 
     fn set_progress(&self, progress: f64) {
         let imp = self.imp();
-        imp.progress.set(progress);
+        if imp.progress.replace(progress) == progress {
+            return;
+        }
         if let Some(child) = imp.child.borrow().as_ref() {
             // Closed, its child can't be focused, and isn't read out
             child.set_child_visible(progress > 0.0);

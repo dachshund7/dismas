@@ -779,13 +779,8 @@ impl Window {
             .take()
             .filter(|undo| undo.generation == generation)
             .unwrap_or_else(|| QueueUndo {
-                toast: glib::WeakRef::new(),
                 generation,
-                runs: Vec::new(),
-                page: String::new(),
-                pane: false,
-                resume: None,
-                unshuffled: None,
+                ..Default::default()
             });
         undo.page = self.page();
         undo.pane = self.playlist_visible();
@@ -913,6 +908,7 @@ impl Window {
 // tracks removed while it was up, in the order they were removed, and how
 // the window was before the last of them, for a queue that removing them
 // emptied
+#[derive(Default)]
 pub(super) struct QueueUndo {
     toast: glib::WeakRef<adw::Toast>,
     // The generation of the queue they were removed from

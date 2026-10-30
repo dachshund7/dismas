@@ -15,17 +15,12 @@ impl Window {
         picks: PickNames,
         reveal: Option<&gio::File>,
     ) {
-        let hidden = self.imp().library_view.hidden_folders();
-        self.show_album_pane(|album_tracks| {
-            album_tracks.show_album(album, filter, picks, hidden, reveal);
-        });
-    }
-
-    // Shows the pane of the album's tracks in the sidebar, once `show` has
-    // put them in it; going back shows the page from before, and closes the
-    // sidebar if it was opened for them
-    fn show_album_pane(&self, show: impl FnOnce(&AlbumTracks)) {
-        show(&self.imp().album_tracks);
+        let imp = self.imp();
+        let hidden = imp.library_view.hidden_folders();
+        imp.album_tracks
+            .show_album(album, filter, picks, hidden, reveal);
+        // Going back shows the page from before, and closes the sidebar if
+        // it was opened for them
         self.open_pane_page(pane::PanePage::Album);
     }
 
@@ -165,10 +160,10 @@ impl Window {
                     return;
                 };
                 if favorite {
-                    let item = win.favorite_work_item(&actions, &prefix, &work.key);
+                    let item = win.favorite_work_item(&actions, &prefix, &work);
                     section.insert_item(position, &item);
                 }
-                let _ = found.set((work.key, album));
+                let _ = found.set((work, album));
                 action.set_enabled(true);
             }
         ));
@@ -230,8 +225,13 @@ impl Window {
     // the album that's playing loses nothing, and the album's tracks are
     // mostly clicked for that
     fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
-        let replaced = self.replaced_queue();
-        let replaced = replaced.loses_tracks(&files).then_some(replaced);
+        // With the queue selected, its tracks are the ones in the player,
+        // and the queue as it was is only read for an Undo that would show
+        let keeps_queue = self.selected_playlist().is_empty()
+            && !selected_playlist::loses_tracks(&self.player().queue().files(), &files);
+        let replaced = (!keeps_queue)
+            .then(|| self.replaced_queue())
+            .filter(|replaced| replaced.loses_tracks(&files));
         self.replace_queue_with(files, start, replaced, None);
     }
 
@@ -298,26 +298,23 @@ impl Window {
             ));
             actions.add_action(&go);
 
-            let favorite = work
-                .recordings
-                .iter()
-                .any(play_stats::is_favorite_recording);
+            // As its heart shows, when any of them is
+            let favorite = cell.is_favorite();
             let mark = gio::SimpleAction::new("favorite-recording", None);
             mark.connect_activate(clone!(
                 #[weak(rename_to = win)]
                 self,
                 move |_, _| {
-                    if !favorite {
-                        if let Some(first) = work.recordings.first() {
-                            win.mark_favorite_recording(first, true);
-                        }
-                        return;
-                    }
-                    for recording in &work.recordings {
-                        if play_stats::is_favorite_recording(recording) {
-                            win.mark_favorite_recording(recording, false);
-                        }
-                    }
+                    // The first is marked, and all are unmarked
+                    let recordings = if favorite {
+                        work.recordings.as_slice()
+                    } else {
+                        work.recordings
+                            .first()
+                            .map(std::slice::from_ref)
+                            .unwrap_or_default()
+                    };
+                    win.mark_favorite_recordings(recordings, !favorite);
                 }
             ));
             actions.add_action(&mark);
@@ -464,13 +461,8 @@ impl Window {
                 win.queue_tracks(album_tracks.files(), QueueMode::Add);
             }
         ));
-        // The Play button plays the tracks it takes from their start
-        album_tracks.connect_play_shown(clone!(
-            #[weak(rename_to = win)]
-            self,
-            move |album_tracks| win.play_shown_tracks(album_tracks.files(), 0)
-        ));
-        // A track plays the tracks the Play button would take, from it
+        // The Play button plays the tracks it takes from their start, and a
+        // track the same tracks from it
         album_tracks.connect_play(clone!(
             #[weak(rename_to = win)]
             self,
@@ -607,8 +599,8 @@ pub(super) fn popup_menu(
     popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
     // The menu item is activated after the popover closes, so it can only
     // go once the action ran. The widget it's on is kept until then, as the
-    // action can take it away: Go to Album does with the header of a work's
-    // recording. A button freed with the popover still on it leaves the
+    // action can take it away: unmarking a work while only the favorites
+    // show does with its row. A button freed with the popover still on it leaves the
     // popover with a parent that's gone, and letting go of it then crashed
     popover.connect_closed(|popover| {
         let popover = popover.clone();

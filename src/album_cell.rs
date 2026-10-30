@@ -8,7 +8,7 @@
 // them, and among the covers of the albums of a work, whether one of its
 // recordings there is a favorite
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::cell::{Cell, RefCell};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -17,6 +17,7 @@ use crate::{
     library::Album,
     play_stats::FavoriteRecording,
     square_bin::SquareBin,
+    utils,
 };
 
 // The work whose tracks a cell takes from its album, among the covers of the
@@ -44,7 +45,7 @@ mod imp {
         pub matching: Cell<u32>,
         #[property(get, set = Self::set_total)]
         pub total: Cell<u32>,
-        pub picture: OnceCell<gtk::Picture>,
+        pub picture: gtk::Picture,
         pub badge: gtk::Label,
         pub heart: gtk::Image,
         pub work: RefCell<Option<CellWork>>,
@@ -114,11 +115,10 @@ impl AlbumCell {
         cell.add_css_class("album-cell");
         let imp = cell.imp();
 
-        let picture = gtk::Picture::builder()
-            .content_fit(gtk::ContentFit::Cover)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
+        let picture = &imp.picture;
+        picture.set_content_fit(gtk::ContentFit::Cover);
+        picture.set_hexpand(true);
+        picture.set_vexpand(true);
         let placeholder = gtk::Image::builder()
             .icon_name("folder-music-symbolic")
             .pixel_size(48)
@@ -131,7 +131,7 @@ impl AlbumCell {
             .css_classes(["album-cover"])
             .child(&placeholder)
             .build();
-        overlay.add_overlay(&picture);
+        overlay.add_overlay(picture);
 
         // The number of the tracks taken and of all of them, e.g. "9 of 12"
         let badge = &imp.badge;
@@ -154,7 +154,6 @@ impl AlbumCell {
         heart.add_css_class("favorite-recording");
         heart.update_property(&[gtk::accessible::Property::Label(&i18n("Favorite"))]);
         overlay.add_overlay(heart);
-        imp.picture.set(picture).unwrap();
 
         let title = &imp.title;
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -184,7 +183,7 @@ impl AlbumCell {
     }
 
     pub fn picture(&self) -> &gtk::Picture {
-        self.imp().picture.get().unwrap()
+        &self.imp().picture
     }
 
     // Shows the title and the artist of an album, and no cover until it's
@@ -208,6 +207,10 @@ impl AlbumCell {
 
     pub fn set_favorite(&self, favorite: bool) {
         self.imp().heart.set_visible(favorite);
+    }
+
+    pub fn is_favorite(&self) -> bool {
+        self.imp().heart.is_visible()
     }
 
     pub fn work(&self) -> Option<CellWork> {
@@ -250,15 +253,9 @@ impl AlbumCell {
     // Screen readers present the item of the grid or of the flow box that
     // the cell is in, so it says whether the album is selected, in
     // selection mode; otherwise, it's not, as the grid itself says (see
-    // `utils::keep_selected_state`). It's only taken while the cell is on
-    // screen: a list binds a cell before it takes the item it's in, which is
-    // still floating then, and a reference to it would sink it, so that the
-    // list would lose it when the reference is dropped
+    // `utils::keep_selected_state`)
     fn update_selected_state(&self) {
-        if !self.is_mapped() {
-            return;
-        }
-        let Some(item) = self.parent() else {
+        let Some(item) = utils::list_item_of(self) else {
             return;
         };
         let imp = self.imp();

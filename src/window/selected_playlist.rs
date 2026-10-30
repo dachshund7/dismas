@@ -765,11 +765,17 @@ pub(super) struct ReplacedQueue {
 
 impl ReplacedQueue {
     // Whether playing the files in place of the queue loses some of its
-    // tracks, the ones they don't include
+    // tracks
     pub(super) fn loses_tracks(&self, files: &[gio::File]) -> bool {
-        let kept: HashSet<glib::GString> = files.iter().map(FileExt::uri).collect();
-        self.queue.iter().any(|file| !kept.contains(&file.uri()))
+        loses_tracks(&self.queue, files)
     }
+}
+
+// Whether playing the files in place of a queue loses some of its tracks,
+// the ones they don't include
+pub(super) fn loses_tracks(queue: &[gio::File], files: &[gio::File]) -> bool {
+    let kept: HashSet<glib::GString> = files.iter().map(FileExt::uri).collect();
+    queue.iter().any(|file| !kept.contains(&file.uri()))
 }
 
 #[cfg(test)]

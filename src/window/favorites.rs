@@ -38,9 +38,16 @@ impl Window {
         self.imp().library_view.refresh_favorites();
     }
 
-    // The Works page shows it with a heart, on its work and on its cover
-    pub(super) fn mark_favorite_recording(&self, recording: &FavoriteRecording, favorite: bool) {
-        play_stats::set_favorite_recording(recording, favorite);
+    // Marks recordings as favorites, or unmarks them; the Works page shows
+    // them with a heart, on their work and on their cover
+    pub(super) fn mark_favorite_recordings(
+        &self,
+        recordings: &[FavoriteRecording],
+        favorite: bool,
+    ) {
+        for recording in recordings {
+            play_stats::set_favorite_recording(recording, favorite);
+        }
         self.imp().library_view.refresh_favorites();
     }
 

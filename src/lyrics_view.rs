@@ -22,7 +22,7 @@ use crate::{
     audio::{PlayerState, Track},
     i18n::pi18n,
     lyrics::{self, Line, Lyrics},
-    queue_row::glide_adjustment,
+    queue_row::{glide_adjustment, within_scroll},
     utils,
 };
 
@@ -507,8 +507,7 @@ impl LyricsView {
         };
         let adjustment = imp.synced_scrolled.vadjustment();
         let middle = f64::from(bounds.y() + bounds.height() / 2.0);
-        let last = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
-        let target = (middle - adjustment.page_size() / 2.0).clamp(adjustment.lower(), last);
+        let target = within_scroll(&adjustment, middle - adjustment.page_size() / 2.0);
         if !glide {
             adjustment.set_value(target);
             return;
@@ -526,15 +525,10 @@ impl LyricsView {
     // New lines are only laid out at the next frame, as is the list once
     // it's shown again, so they're centered at the one after
     fn center_when_laid_out(&self) {
-        let laid_out = Cell::new(false);
-        self.add_tick_callback(move |view, _| {
-            if !laid_out.replace(true) {
-                return glib::ControlFlow::Continue;
-            }
+        utils::when_laid_out(self, |view| {
             if view.imp().follow_pause.borrow().is_none() {
                 view.center_current(false);
             }
-            glib::ControlFlow::Break
         });
     }
 

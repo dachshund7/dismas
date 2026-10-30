@@ -785,19 +785,28 @@ fn query_search_albums(
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<HashMap<String, (u32, u32)>> {
+    // For a work, only the albums of its tracks, which its index finds,
+    // rather than all of them
+    let (of_work, work) = match &filter.work {
+        Some(work) => (
+            " AND album_id IN (SELECT album_id FROM tracks WHERE work_key = ?)",
+            Some(rusqlite::types::Value::Text(work.clone())),
+        ),
+        None => ("", None),
+    };
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, SUM({}) AS matching, COUNT(*)
          FROM tracks
-         WHERE album_id IS NOT NULL{}
+         WHERE album_id IS NOT NULL{}{of_work}
          GROUP BY album_id
          HAVING matching > 0",
         filter.matches_sql(),
         hidden_condition("file", hidden).0
     ))?;
-    stmt.query_map(
-        rusqlite::params_from_iter(filter_values(filter, hidden)),
-        |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))),
-    )?
+    let values = filter_values(filter, hidden).into_iter().chain(work);
+    stmt.query_map(rusqlite::params_from_iter(values), |row| {
+        Ok((row.get(0)?, (row.get(1)?, row.get(2)?)))
+    })?
     .collect()
 }
 
@@ -1041,11 +1050,15 @@ fn query_composers(
 // Of the values counted, the most common, and of those the first in
 // alphabetical order
 fn most_common<S: Ord + Into<String>>(counts: HashMap<S, usize>) -> String {
+    most_counted(counts).map(Into::into).unwrap_or_default()
+}
+
+// The same, if anything was counted
+fn most_counted<S: Ord>(counts: HashMap<S, usize>) -> Option<S> {
     counts
         .into_iter()
         .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-        .map(|(value, _)| value.into())
-        .unwrap_or_default()
+        .map(|(value, _)| value)
 }
 
 // The lists of composers and performers go through the values of every
@@ -1287,7 +1300,6 @@ pub struct WorkComposer {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkRecording {
     pub album_id: String,
-    pub album: Option<String>,
     pub year: Option<String>,
     // The conductors and performers of its tracks, as the credits line of
     // a track names them, see `performers_line()`
@@ -1479,13 +1491,7 @@ fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
     }
     let main: HashMap<&str, &'static str> = counts
         .into_iter()
-        .filter_map(|(composer, counts)| {
-            let catalogue = counts
-                .into_iter()
-                .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(a.0)))?
-                .0;
-            Some((composer, catalogue))
-        })
+        .filter_map(|(composer, counts)| Some((composer, most_counted(counts)?)))
         .collect();
 
     let mut sorted: Vec<_> = works
@@ -1517,9 +1523,9 @@ fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
     sorted.into_iter().map(|(_, work)| work).collect()
 }
 
-// The work of a track, if it's part of one in the library, as the Works
-// page lists it, without the tracks in the `hidden` folders
-pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<WorkInfo> {
+// The key of the work of a track, if it's part of one in the library, as
+// the Works page lists it, without the tracks in the `hidden` folders
+pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<String> {
     query_or_default("look up the work of a track", |conn| {
         query_track_work(conn, path, hidden)
     })
@@ -1529,7 +1535,7 @@ fn query_track_work(
     conn: &Connection,
     path: &Path,
     hidden: &[PathBuf],
-) -> rusqlite::Result<Option<WorkInfo>> {
+) -> rusqlite::Result<Option<String>> {
     let key: Option<String> = conn
         .query_row(
             "SELECT work_key FROM tracks WHERE path = ?1 AND work_key IS NOT NULL",
@@ -1541,9 +1547,7 @@ fn query_track_work(
         return Ok(None);
     };
     let rows = query_work_rows(conn, &TrackFilter::default(), Some(&key), hidden)?;
-    Ok(works_of_rows(&rows)
-        .into_iter()
-        .find(|work| work.key == key))
+    Ok((!rows.is_empty()).then_some(key))
 }
 
 // A recording marked as a favorite, among the recordings of its work
@@ -1607,11 +1611,10 @@ fn query_work_recordings(
         .map(|recording| recording.into_iter().map(|i| &rows[i]).collect::<Vec<_>>())
         .filter(|rows| rows.iter().any(|row| row.matching))
         .map(|rows| {
-            let album = rows.iter().find_map(|row| row.album.clone());
-            let collation = glib::CollationKey::from(album.as_deref().unwrap_or_default());
+            let album = rows.iter().find_map(|row| row.album.as_deref());
+            let collation = glib::CollationKey::from(album.unwrap_or_default());
             let recording = WorkRecording {
                 album_id: rows[0].album_id.clone(),
-                album,
                 year: rows
                     .iter()
                     .filter_map(|row| row.year.as_deref())
@@ -5084,15 +5087,11 @@ mod tests {
         assert_eq!(tracks, strings(&["/m/E/03"]));
 
         // The work of a track
-        let work = |path: &str| {
-            super::query_track_work(&conn, Path::new(path), &hidden)
-                .unwrap()
-                .map(|work| work.name)
-        };
-        assert_eq!(work("/m/B/04").as_deref(), Some("Goldberg Variations"));
-        assert_eq!(work("/m/A/01").as_deref(), Some("Requiem v B-moll"));
+        let work = |path: &str| super::query_track_work(&conn, Path::new(path), &hidden).unwrap();
+        assert_eq!(work("/m/B/04").as_deref(), Some("gold"));
+        assert_eq!(work("/m/A/01").as_deref(), Some("req"));
         assert_eq!(work("/m/A/03"), None);
-        assert_eq!(work("/m/Gone/01").as_deref(), Some("Requiem v B-moll"));
+        assert_eq!(work("/m/Gone/01").as_deref(), Some("req"));
         assert_eq!(
             recordings("kdf", &all),
             [(

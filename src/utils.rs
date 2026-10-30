@@ -80,10 +80,7 @@ pub fn focused_child<W: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Opt
     }
     // Only from an item of a list, as the first rows of a list with the
     // focus itself aren't the ones with it
-    if !focus
-        .parent()
-        .is_some_and(|parent| parent.is::<gtk::ListBase>() || parent.is::<gtk::FlowBox>())
-    {
+    if !focus.parent().is_some_and(|parent| holds_items(&parent)) {
         return None;
     }
     let mut child = focus.first_child();
@@ -94,6 +91,31 @@ pub fn focused_child<W: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Opt
         }
     }
     None
+}
+
+// The child of a list, a grid or a flow box that a widget is in: the list's
+// item, or the flow box's, which screen readers present, so it's the one
+// that says e.g. whether the widget's item is selected. Only while the
+// widget is on screen: a list binds a row before it takes the item the row
+// is in, which is still floating then, and a reference to it would sink
+// it, so that the list would lose it when the reference is dropped, which
+// crashed GTK
+pub fn list_item_of(widget: &impl IsA<gtk::Widget>) -> Option<gtk::Widget> {
+    if !widget.is_mapped() {
+        return None;
+    }
+    let mut item = widget.upcast_ref::<gtk::Widget>().clone();
+    loop {
+        let parent = item.parent()?;
+        if holds_items(&parent) {
+            return Some(item);
+        }
+        item = parent;
+    }
+}
+
+fn holds_items(widget: &gtk::Widget) -> bool {
+    widget.is::<gtk::ListBase>() || widget.is::<gtk::FlowBox>()
 }
 
 // How fast a swipe to the right has to be to go back, in pixels a second
@@ -215,19 +237,14 @@ pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
 // nothing, or makes a long list go to its end (GTK 4.22)
 pub fn scroll_to_top_when_laid_out(
     list: &gtk::ListView,
-    still_wanted: impl Fn() -> bool + 'static,
+    still_wanted: impl FnOnce() -> bool + 'static,
 ) {
-    let laid_out = Cell::new(false);
-    list.add_tick_callback(move |list, _| {
-        if !laid_out.replace(true) {
-            return glib::ControlFlow::Continue;
-        }
+    when_laid_out(list, move |list| {
         if still_wanted()
             && let Some(adjustment) = list.vadjustment()
         {
             adjustment.set_value(0.0);
         }
-        glib::ControlFlow::Break
     });
 }
 
@@ -237,12 +254,24 @@ pub fn scroll_to_top_when_laid_out(
 // otherwise keeps the item for when the list takes it, and a list that was
 // just shown, as with another page, lays out its items at the next frame
 pub fn focus_when_laid_out(list: &impl IsA<gtk::Widget>) {
+    when_laid_out(list, |list| {
+        list.grab_focus();
+    });
+}
+
+// Runs `f` at the frame after the next one, once the widget is laid out:
+// a list lays out the items that changed, and a widget that was just shown
+// its children, at the next frame
+pub fn when_laid_out<W: IsA<gtk::Widget>>(widget: &W, f: impl FnOnce(&W) + 'static) {
     let laid_out = Cell::new(false);
-    list.add_tick_callback(move |list, _| {
+    let f = Cell::new(Some(f));
+    widget.add_tick_callback(move |widget, _| {
         if !laid_out.replace(true) {
             return glib::ControlFlow::Continue;
         }
-        list.grab_focus();
+        if let Some(f) = f.take() {
+            f(widget);
+        }
         glib::ControlFlow::Break
     });
 }

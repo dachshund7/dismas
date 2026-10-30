@@ -387,15 +387,9 @@ impl LibraryView {
 
     // The list's item that a work's row is in, which has the focus, tells
     // screen readers whether the work is open, and isn't lit up as a whole
-    // under the pointer then. It's only taken while the row is on screen:
-    // while the row is bound for the first time, the list doesn't have the
-    // item yet, which is still floating, and a reference to it would sink
-    // it, so that the list would lose it when the reference is dropped
+    // under the pointer then
     fn update_item_state(&self, row: &impl IsA<gtk::Widget>, key: &str) {
-        if !row.is_mapped() {
-            return;
-        }
-        let Some(item) = row.parent() else {
+        let Some(item) = utils::list_item_of(row) else {
             return;
         };
         let open = self.is_work_open(key);
@@ -598,14 +592,16 @@ impl LibraryView {
     fn set_works_model(&self) -> gio::ListStore {
         let imp = self.imp();
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
-        let sections = WorkSectionModel::new(&store);
-        sections.set_same_section(Some(same_section_of(
-            |previous: &glib::BoxedAnyObject, work: &glib::BoxedAnyObject| {
-                let previous = previous.borrow::<library::WorkInfo>();
-                let work = work.borrow::<library::WorkInfo>();
-                previous.composer_keys().eq(work.composer_keys())
-            },
-        )));
+        let sections = WorkSectionModel::with_same_section(
+            &store,
+            same_section_of(
+                |previous: &glib::BoxedAnyObject, work: &glib::BoxedAnyObject| {
+                    let previous = previous.borrow::<library::WorkInfo>();
+                    let work = work.borrow::<library::WorkInfo>();
+                    previous.composer_keys().eq(work.composer_keys())
+                },
+            ),
+        );
         imp.works_list
             .set_model(Some(&gtk::NoSelection::new(Some(sections))));
         imp.works.replace(Some(store.clone()));

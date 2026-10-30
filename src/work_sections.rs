@@ -8,8 +8,8 @@
 // movements gets its own section. So does each recording of the work, and
 // each time it's played again: a movement that doesn't come after the one
 // above it on their album starts a new section. A list can go by its own
-// sections instead, as the recordings of a work do, and the list of works,
-// by their composers (`set_same_section`).
+// sections instead, as the album's tracks do, by disc too, and the list of
+// works, by their composers (`with_same_section`).
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -139,14 +139,12 @@ impl WorkSectionModel {
         res
     }
 
-    // Puts the items in sections by `same`, or the tracks by their works
-    // with None
-    pub fn set_same_section(&self, same: Option<SameSection>) {
-        self.imp().same_section.replace(same);
-        let n_items = self.n_items();
-        if n_items > 0 {
-            self.sections_changed(0, n_items);
-        }
+    // Puts the items in sections by `same`, rather than the tracks by
+    // their works
+    pub fn with_same_section(model: &impl IsA<gio::ListModel>, same: SameSection) -> Self {
+        let res = Self::new(model);
+        res.imp().same_section.replace(Some(same));
+        res
     }
 }
 

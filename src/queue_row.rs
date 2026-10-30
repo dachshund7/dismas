@@ -596,23 +596,12 @@ impl QueueRow {
         if !self.starts_work() {
             return None;
         }
-        let item = self.list_child()?;
+        // The list's item, which the row is in, in the queue inside the bin
+        // that slides it, see `SlideBin`
+        let item = utils::list_item_of(self)?;
         let view = item.parent().and_downcast::<gtk::ListView>()?;
         let top = item.compute_bounds(&view)?.y();
         header_above(&view, top).map(|(header, _)| header)
-    }
-
-    // The child of the list holding the row: the list's item, which the row
-    // is in, in the queue inside the bin that slides it, see `SlideBin`
-    fn list_child(&self) -> Option<gtk::Widget> {
-        let view = self.ancestor(gtk::ListView::static_type())?;
-        let mut item = self.clone().upcast::<gtk::Widget>();
-        while let Some(parent) = item.parent()
-            && parent != view
-        {
-            item = parent;
-        }
-        Some(item)
     }
 
     // Whether the row is the first movement of a work, under its header
@@ -750,16 +739,9 @@ impl QueueRow {
 
     // Screen readers present the list's item holding the row, so it says
     // whether the track is selected, in selection mode; otherwise, it's
-    // not, as the list itself says (see `utils::keep_selected_state`). It's
-    // only taken while the row is on screen: a list binds a row before it
-    // takes the item, which is still floating then, and a reference to it
-    // would sink it, so that the list would lose it when the reference is
-    // dropped, which crashed GTK as tracks moved in selection mode
+    // not, as the list itself says (see `utils::keep_selected_state`)
     fn update_selected_state(&self) {
-        if !self.is_mapped() {
-            return;
-        }
-        let Some(item) = self.list_child() else {
+        let Some(item) = utils::list_item_of(self) else {
             return;
         };
         let imp = self.imp();
@@ -1160,7 +1142,8 @@ fn estimated_value(view: &gtk::ListView, adjustment: &gtk::Adjustment, pos: u32)
     within_scroll(adjustment, middle - adjustment.page_size() / 2.0)
 }
 
-fn within_scroll(adjustment: &gtk::Adjustment, value: f64) -> f64 {
+// A value of a scrolled list's adjustment, as far as the list scrolls
+pub fn within_scroll(adjustment: &gtk::Adjustment, value: f64) -> f64 {
     let last = adjustment.upper() - adjustment.page_size();
     value.min(last).max(adjustment.lower())
 }

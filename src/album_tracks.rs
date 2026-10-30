@@ -5,7 +5,7 @@
 // queue, so they can be played or added to it
 
 use std::{
-    cell::{Cell, OnceCell, RefCell},
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
 };
@@ -74,16 +74,11 @@ mod imp {
 
         pub tracks: RefCell<Option<gio::ListStore>>,
         pub files: RefCell<Vec<gio::File>>,
-        // The folders whose tracks are hidden, as in the album grid
-        pub hidden: RefCell<Vec<PathBuf>>,
         // Whether the album is on more than one disc, whose sections then
         // start with each disc
         pub multi_disc: Rc<Cell<bool>>,
-        // The sections of the list, under the headers of the album's works
-        pub sections: OnceCell<WorkSectionModel>,
-        // The album that is showing, and the search, and the composer and
-        // performer, it was shown for, with their names
-        pub album: RefCell<Option<Album>>,
+        // The search, and the composer and performer, the album that is
+        // showing was shown for, with their names
         pub filter: RefCell<TrackFilter>,
         pub picks: RefCell<PickNames>,
         // While the search leaves out some of the tracks, which aren't
@@ -156,10 +151,8 @@ mod imp {
                 vec![
                     Signal::builder("back").build(),
                     Signal::builder("add").build(),
-                    // The Play button: the tracks it takes play, see
-                    // `files()`
-                    Signal::builder("play-shown").build(),
-                    // The position of the track to start playing from
+                    // The tracks the Play button takes play, see `files()`,
+                    // from the position of the track to start playing from
                     Signal::builder("play")
                         .param_types([u32::static_type()])
                         .build(),
@@ -214,14 +207,6 @@ impl AlbumTracks {
     pub fn connect_add<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "add",
-            false,
-            glib::closure_local!(move |view: &Self| f(view)),
-        )
-    }
-
-    pub fn connect_play_shown<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
-        self.connect_closure(
-            "play-shown",
             false,
             glib::closure_local!(move |view: &Self| f(view)),
         )
@@ -318,9 +303,17 @@ impl AlbumTracks {
         ));
 
         let tracks = gio::ListStore::new::<Track>();
-        let sections = WorkSectionModel::new(&tracks);
+        // A work that goes on to the next disc starts a section again
+        let multi_disc = imp.multi_disc.clone();
+        let sections = WorkSectionModel::with_same_section(
+            &tracks,
+            same_section_of(move |previous: &Track, track: &Track| {
+                shares_section(previous, track)
+                    && (!multi_disc.get() || previous.disc() == track.disc())
+            }),
+        );
         imp.tracks_view
-            .set_model(Some(&gtk::NoSelection::new(Some(sections.clone()))));
+            .set_model(Some(&gtk::NoSelection::new(Some(sections))));
         imp.tracks_view.set_factory(Some(&factory));
         utils::setup_menu_key(&*imp.tracks_view, QueueRow::request_menu);
         let work_headers = work_header_factory(
@@ -345,15 +338,6 @@ impl AlbumTracks {
             ),
         );
         imp.tracks_view.set_header_factory(Some(&work_headers));
-        // A work that goes on to the next disc starts a section again
-        let multi_disc = imp.multi_disc.clone();
-        sections.set_same_section(Some(same_section_of(
-            move |previous: &Track, track: &Track| {
-                shares_section(previous, track)
-                    && (!multi_disc.get() || previous.disc() == track.disc())
-            },
-        )));
-        let _ = imp.sections.set(sections);
 
         imp.tracks.replace(Some(tracks));
     }
@@ -385,7 +369,7 @@ impl AlbumTracks {
         imp.play_button.connect_clicked(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.emit_by_name::<()>("play-shown", &[])
+            move |_| this.emit_by_name::<()>("play", &[&0u32])
         ));
 
         imp.select_all_button.connect_clicked(clone!(
@@ -583,11 +567,9 @@ impl AlbumTracks {
         imp.album_info.set_label(&info);
         imp.album_info.set_visible(!info.is_empty());
 
-        imp.album.replace(Some(album.clone()));
         imp.filter.replace(filter);
         imp.picks.replace(picks);
-        imp.hidden.replace(hidden);
-        self.load(reveal);
+        self.load(album.id(), hidden, reveal);
     }
 
     // Says how many of the tracks the search matches while it leaves out
@@ -681,14 +663,13 @@ impl AlbumTracks {
     }
 
     // Reads the tracks of the album, keeping the ones that match the
-    // search
-    fn load(&self, reveal: Option<&gio::File>) {
+    // search, and leaving out those in the `hidden` folders
+    fn load(&self, album_id: String, hidden: Vec<PathBuf>, reveal: Option<&gio::File>) {
         let imp = self.imp();
         self.set_selection_mode(false);
         self.show_booklets(&[]);
 
-        let (Some(tracks), Some(album)) = (imp.tracks.borrow().clone(), imp.album.borrow().clone())
-        else {
+        let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
         tracks.remove_all();
@@ -703,13 +684,11 @@ impl AlbumTracks {
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
         let filter = imp.filter.borrow().clone();
-        let hidden = imp.hidden.borrow().clone();
         let reveal = reveal.cloned();
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
-                let album_id = album.id();
                 // With a search, only the tracks it matches are shown
                 let (all, matching, discs) = gio::spawn_blocking(move || {
                     let (all, discs) = library::album_tracks_and_discs(&album_id, &hidden);

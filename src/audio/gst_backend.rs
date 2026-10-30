@@ -255,22 +255,11 @@ fn is_redirect(msg: &gst::MessageRef) -> bool {
     }
 }
 
-// A number of seconds as a clock time. Seek offsets come from other
-// programs over MPRIS, and lengths from the headers of files, so a value
-// too large for a clock time becomes the largest one rather than a panic
-fn seconds(seconds: u64) -> gst::ClockTime {
-    let nseconds = seconds
-        .saturating_mul(gst::ClockTime::SECOND.nseconds())
-        .min(gst::ClockTime::MAX.nseconds());
-    gst::ClockTime::from_nseconds(nseconds)
-}
-
-// A duration as a clock time, the same way
+// A duration as a clock time. Seek offsets come from other programs over
+// MPRIS, and lengths from the headers of files, so a duration too long for
+// a clock time becomes the longest one rather than a panic
 fn clock_time(duration: Duration) -> gst::ClockTime {
-    let nseconds = u64::try_from(duration.as_nanos())
-        .unwrap_or(u64::MAX)
-        .min(gst::ClockTime::MAX.nseconds());
-    gst::ClockTime::from_nseconds(nseconds)
+    gst::ClockTime::try_from(duration).unwrap_or(gst::ClockTime::MAX)
 }
 
 // Where a seek of `offset` seconds from `position` goes, in seconds from
@@ -843,7 +832,7 @@ impl GstBackend {
         direction: SeekDirection,
     ) -> Option<Duration> {
         let destination = seek_destination(position, duration, offset, direction)?;
-        self.seek_to(seconds(destination))
+        self.seek_to(clock_time(Duration::from_secs(destination)))
     }
 
     pub fn seek_position(&self, position: Duration) -> Option<Duration> {
@@ -1278,6 +1267,7 @@ mod tests {
 
     #[test]
     fn large_seconds_saturate() {
+        let seconds = |seconds| clock_time(Duration::from_secs(seconds));
         assert_eq!(seconds(90), gst::ClockTime::from_seconds(90));
         assert_eq!(seconds(u64::MAX), gst::ClockTime::MAX);
         assert_eq!(
