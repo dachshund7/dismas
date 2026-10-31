@@ -10,6 +10,10 @@
 //!
 //! Decoding waits for the sandboxed loader, so none of this should be used
 //! on the main thread.
+//!
+//! The album grid's thumbnails are the exception (`read_thumbnail`): Dismas
+//! makes them itself, from pixels decoded in the sandbox, so they're read
+//! in the process, as GTK would read them.
 
 use std::{io::Cursor, path::Path, time::Duration};
 
@@ -280,6 +284,22 @@ impl CoverImage {
         glib::file_set_contents(path, &data).map_err(|e| e.to_string())
     }
 
+    fn from_image(image: image::DynamicImage) -> Self {
+        let (width, height) = (image.width(), image.height());
+        let has_alpha = image.color().has_alpha();
+        let pixels = if has_alpha {
+            image.into_rgba8().into_raw()
+        } else {
+            image.into_rgb8().into_raw()
+        };
+        CoverImage {
+            width,
+            height,
+            has_alpha,
+            pixels,
+        }
+    }
+
     pub fn into_texture(self) -> gdk::Texture {
         let (format, bytes_per_pixel) = if self.has_alpha {
             (gdk::MemoryFormat::R8g8b8a8, 4)
@@ -297,6 +317,23 @@ impl CoverImage {
         )
         .into()
     }
+}
+
+// One of the album grid's thumbnails, scaled down to `size` when it's
+// larger, as when the grid shows its covers smaller than it can, or on a
+// monitor with a smaller scale than another one connected: a texture of
+// the whole thumbnail would take more memory than the grid has for it.
+// Those up to a tenth larger are read as they are, which is quicker
+pub fn read_thumbnail(path: &Path, size: u32) -> Option<gdk::Texture> {
+    let (width, height) = image::ImageReader::open(path)
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if u64::from(width.max(height)) * 10 <= u64::from(size) * 11 {
+        return gdk::Texture::from_filename(path).ok();
+    }
+    let image = image::ImageReader::open(path).ok()?.decode().ok()?;
+    Some(CoverImage::from_image(image).scaled(size)?.into_texture())
 }
 
 // Colors less chromatic than this, in OKLCH, look grey; a cover with only
@@ -403,7 +440,7 @@ where
 mod tests {
     use gtk::{gdk, glib, prelude::*};
 
-    use super::{CoverImage, accent_color, oklch_chroma};
+    use super::{CoverImage, accent_color, oklch_chroma, read_thumbnail};
 
     fn rgb(hex: u32) -> gdk::RGBA {
         let [_, r, g, b] = hex.to_be_bytes();
@@ -620,6 +657,36 @@ mod tests {
         };
         assert!(transparent.save_jpeg(&path).is_err());
         assert!(!path.exists());
+        std::fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn thumbnails_are_read_at_the_size_shown() {
+        let (width, height) = (240, 160);
+        let image = CoverImage {
+            width,
+            height,
+            has_alpha: false,
+            pixels: (0..width * height)
+                .flat_map(|i| [(i % 256) as u8, 128, 64])
+                .collect(),
+        };
+        let dir = glib::mkdtemp("dismas-thumbnail-XXXXXX").unwrap();
+        let path = dir.join("album-240.jpg");
+        image.save_jpeg(&path).unwrap();
+
+        let size = |max| {
+            let texture = read_thumbnail(&path, max).unwrap();
+            (texture.width(), texture.height())
+        };
+        // Scaled down, keeping its shape
+        assert_eq!(size(120), (120, 80));
+        // A little larger than shown, or smaller, it's read as it is
+        assert_eq!(size(220), (240, 160));
+        assert_eq!(size(480), (240, 160));
+
+        assert!(read_thumbnail(&dir.join("missing.jpg"), 120).is_none());
+        std::fs::remove_file(&path).unwrap();
         std::fs::remove_dir(&dir).unwrap();
     }
 

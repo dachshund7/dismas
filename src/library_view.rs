@@ -7,7 +7,7 @@ mod works;
 use std::{
     cell::{Cell, OnceCell, RefCell},
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
@@ -22,6 +22,7 @@ use std::sync::LazyLock;
 use crate::{
     album_cell::AlbumCell,
     audio::{Arrangement, PerformerKind, normalize_search_text},
+    cover_image,
     i18n::{i18n, i18n_k, ni18n_f},
     library::{self, Album, AlbumSort, Counted, Favorites, ScanEvent, ScanResult, TrackFilter},
     play_stats, utils,
@@ -39,9 +40,11 @@ const MAX_COVER_SIZE: i32 = 240;
 const COVER_SPACING: i32 = 2 * (8 + 8);
 const GRID_PADDING: i32 = 12;
 
-// The number of covers kept in memory: the ones on screen, the ones read
-// ahead a screenful above and below them, and the last ones scrolled past;
-// keeping all of them would take hundreds of megabytes
+// The number of covers kept in memory at the largest size the grid shows
+// them: the ones on screen, the ones read ahead a screenful above and below
+// them, and the last ones scrolled past; keeping all of them would take
+// hundreds of megabytes. Smaller covers take less, so more of them are
+// kept, as more fit on screen (`cache_capacity`)
 const MAX_CACHED_COVERS: usize = 150;
 
 // The cells waiting for each cover to load, with the ID of the album each
@@ -112,10 +115,21 @@ pub struct AlbumDrag {
 }
 
 // The covers loaded most recently
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TextureCache {
     textures: HashMap<String, gdk::Texture>,
     order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl Default for TextureCache {
+    fn default() -> Self {
+        Self {
+            textures: HashMap::new(),
+            order: VecDeque::new(),
+            capacity: MAX_CACHED_COVERS,
+        }
+    }
 }
 
 impl TextureCache {
@@ -133,11 +147,20 @@ impl TextureCache {
         if self.textures.insert(path.clone(), texture).is_none() {
             self.order.push_back(path);
         }
-        while self.order.len() > MAX_CACHED_COVERS {
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        while self.order.len() > self.capacity {
             if let Some(oldest) = self.order.pop_front() {
                 self.textures.remove(&oldest);
             }
         }
+    }
+
+    // The covers it keeps, which take about the same memory at any size
+    fn capacity(&self) -> usize {
+        self.capacity
     }
 
     // Whether the cover is in the cache, without counting it as used
@@ -277,6 +300,9 @@ mod imp {
         pub performer: RefCell<Option<library::PerformerInfo>>,
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
+        // Bumped when the size the covers are read at changes, so that the
+        // covers still being read at the size before aren't kept
+        pub cover_generation: Cell<u32>,
         // The cells of the grid that are mapped, which are about the ones
         // on screen
         pub mapped_cells: Cell<u32>,
@@ -389,6 +415,8 @@ mod imp {
             obj.setup_lost_focus();
             obj.setup_works();
             obj.connect_signals();
+            // Moved to a monitor with another scale
+            obj.connect_scale_factor_notify(super::LibraryView::reset_covers);
             // It names the selected playlist
             crate::utils::wrap_tooltip(&*self.add_albums_button);
         }
@@ -982,10 +1010,8 @@ impl LibraryView {
         let Some(model) = imp.grid_view.model() else {
             return;
         };
-        let screenful = imp
-            .mapped_cells
-            .get()
-            .clamp(1, (MAX_CACHED_COVERS / 3) as u32);
+        let capacity = imp.textures.borrow().capacity();
+        let screenful = imp.mapped_cells.get().clamp(1, (capacity / 3) as u32);
         let end = position
             .saturating_add(screenful)
             .min(model.n_items().saturating_sub(1));
@@ -1021,19 +1047,26 @@ impl LibraryView {
         }
         pending.insert(path.clone(), waiting.into_iter().collect());
 
+        let size = self.cover_pixels();
+        let generation = imp.cover_generation.get();
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
                 let texture = {
                     let path = path.clone();
-                    gio::spawn_blocking(move || gdk::Texture::from_filename(path).ok())
+                    gio::spawn_blocking(move || cover_image::read_thumbnail(Path::new(&path), size))
                         .await
                         .ok()
                         .flatten()
                 };
 
                 let imp = this.imp();
+                // Read at a size the covers are no longer shown at; the
+                // cells waiting for it read it again
+                if imp.cover_generation.get() != generation {
+                    return;
+                }
                 let waiting = imp.pending_covers.borrow_mut().remove(&path);
                 let Some(texture) = texture else {
                     return;
@@ -1050,6 +1083,26 @@ impl LibraryView {
                 imp.textures.borrow_mut().insert(path, texture);
             }
         ));
+    }
+
+    // The width the covers are read at, in the pixels of the screen the
+    // grid is on: as large as the grid shows them
+    fn cover_pixels(&self) -> u32 {
+        (MAX_COVER_SIZE * self.scale_factor()).max(1) as u32
+    }
+
+    // The covers in the cache are at a size they're no longer shown at:
+    // they're read again for the cells on screen, which keep the ones they
+    // show until then, and the covers still being read are dropped
+    fn reset_covers(&self) {
+        let imp = self.imp();
+        imp.cover_generation
+            .set(imp.cover_generation.get().wrapping_add(1));
+        imp.textures.borrow_mut().clear();
+        imp.pending_covers.borrow_mut().clear();
+        for cell in mapped_album_cells(self.upcast_ref()) {
+            self.show_cover(&cell);
+        }
     }
 
     fn connect_signals(&self) {
@@ -2695,6 +2748,24 @@ fn first_track_uri(album_id: &str) -> Option<String> {
         .into_iter()
         .next()?;
     Some(gio::File::for_path(path).uri().to_string())
+}
+
+// The cells under the widget that show an album's cover, the grid's and
+// those of an open work, which are mapped; GridView keeps the cells off
+// screen bound, but unmapped
+fn mapped_album_cells(widget: &gtk::Widget) -> Vec<AlbumCell> {
+    let mut cells = Vec::new();
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        match widget.downcast_ref::<AlbumCell>() {
+            Some(cell) if cell.picture().is_mapped() => cells.push(cell.clone()),
+            Some(_) => {}
+            None if widget.is_mapped() => cells.extend(mapped_album_cells(&widget)),
+            None => {}
+        }
+        child = widget.next_sibling();
+    }
+    cells
 }
 
 // The width the covers of the grid are made at: the largest the grid shows
