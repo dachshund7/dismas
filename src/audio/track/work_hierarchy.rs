@@ -1004,6 +1004,38 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_part_that_arranges_a_work_says_what_it_arranges() {
+        // A part of Busoni's set of chorale preludes, which the plugin picks
+        // as the work, as it arranges a whole chorale
+        let set = "10 Choral Preludes, BV B 27";
+        let chorale = "Nun komm' der Heiden Heiland, BWV 659, BV B 27/3";
+        let original = "Nun komm, der Heiden Heiland, BWV 659.2";
+        let json = serde_json::json!({ "version": 1, "segments": [{ "work_index": 1, "path": [
+            { "id": "set", "title": set, "name": set, "disambiguation": "",
+              "arrangement_of": null },
+            { "id": "chorale", "title": chorale, "name": chorale, "number": 3, "position": 3,
+              "disambiguation": "for piano, Busoni",
+              "arrangement_of": { "id": "bwv659", "title": original } },
+        ]}]});
+        let labels = work_hierarchy_labels(&json.to_string()).unwrap();
+        assert_eq!(
+            (labels.id.as_str(), labels.work.as_str()),
+            ("chorale", chorale)
+        );
+        assert!(labels.movement.is_none());
+        assert_eq!(labels.order, None);
+        assert_eq!(labels.collection.as_deref(), Some(set));
+        assert_eq!(
+            labels.arrangement,
+            Some(Arrangement {
+                of: original.to_string(),
+                of_id: Some("bwv659".to_string()),
+                label: Some("for piano, Busoni".to_string()),
+            })
+        );
+    }
+
+    #[test]
     fn the_work_is_the_one_the_plugin_picks() {
         // A Prelude and Fugue of The Well-Tempered Clavier, which has a
         // catalogue number of its own
