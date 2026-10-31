@@ -230,20 +230,46 @@ pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
     }
 }
 
+// The frames a list scrolled to its top is kept there at most, while the
+// heights of its rows settle
+const TOP_FRAMES: u32 = 10;
+
 // Scrolls a list to its very top, with the header of its first section,
-// once it's laid out, if it's `still_wanted` then. GTK keeps a list's place
-// by an item: once the items change, it shows the first one at the top,
-// with its header out of view, and setting the top in the same frame does
-// nothing, or makes a long list go to its end (GTK 4.22)
+// once it's laid out, as long as it's `still_wanted`. GTK keeps a list's
+// place by an item: once the items change, it shows the first one at the
+// top, with its header out of view, and setting the top in the same frame
+// does nothing, or makes a long list go to its end (GTK 4.22). In the
+// frames after, while the heights of the rows it hadn't measured settle,
+// GTK can put the first item back at the top, below its header, as after
+// sorting a long queue, so the top is set again until it stays there for
+// two frames in a row
 pub fn scroll_to_top_when_laid_out(
     list: &gtk::ListView,
-    still_wanted: impl FnOnce() -> bool + 'static,
+    still_wanted: impl Fn() -> bool + 'static,
 ) {
     when_laid_out(list, move |list| {
-        if still_wanted()
-            && let Some(adjustment) = list.vadjustment()
-        {
-            adjustment.set_value(0.0);
+        let frames = Cell::new(0);
+        let stayed = Cell::new(0);
+        let keep_at_top = move |list: &gtk::ListView| {
+            let Some(adjustment) = list.vadjustment().filter(|_| still_wanted()) else {
+                return glib::ControlFlow::Break;
+            };
+            frames.set(frames.get() + 1);
+            if adjustment.value() > adjustment.lower() + 0.5 {
+                adjustment.set_value(adjustment.lower());
+                stayed.set(0);
+            } else {
+                stayed.set(stayed.get() + 1);
+            }
+            if stayed.get() >= 2 || frames.get() >= TOP_FRAMES {
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        };
+        // Right away, as the list would otherwise be drawn where it was
+        if keep_at_top(list) == glib::ControlFlow::Continue {
+            list.add_tick_callback(move |list, _| keep_at_top(list));
         }
     });
 }
