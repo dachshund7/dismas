@@ -53,6 +53,11 @@ if [ -f "$build/meson-info/meson-info.json" ]; then
 else
     meson setup "$build" "$src" --prefix=/usr/local -Dprofile=default
 fi
+# The binary that's shipped is optimized across crates, which makes it
+# smaller, and has no symbol table, as meson install doesn't strip Cargo's
+# output. Local builds leave both out, to rebuild quickly and to keep the
+# function names for profiling
+export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_STRIP=symbols
 meson compile -C "$build"
 
 stage=$build/stage

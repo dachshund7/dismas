@@ -247,6 +247,10 @@ All notable changes to this project will be documented in this file.
   typed, and typing in the playlist goes on with a search that's open.
   Ctrl+F selects the text of the search, so that what's typed next starts
   a new search
+- The binary in the prebuilt tarball is about half the size, 12 MB rather
+  than 21 MB, and the Flatpak's is smaller too: both are optimized across
+  the crates they're built from, and the tarball's leaves out its symbol
+  table
 
 ### Fixed
 
