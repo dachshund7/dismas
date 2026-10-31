@@ -374,17 +374,6 @@ mod imp {
                 debug!("Window::win.track-info()");
                 win.show_track_info();
             });
-            // GTK's own `window.close` would close the window under a
-            // dialog, which quits unless playing in the background, so the
-            // dialog that shows closes first, as with Esc
-            klass.install_action("win.close", None, move |win, _, _| {
-                debug!("Window::win.close()");
-                if let Some(dialog) = win.visible_dialog() {
-                    adw::prelude::AdwDialogExt::close(&dialog);
-                } else {
-                    win.close();
-                }
-            });
             klass.install_action("win.preferences", None, move |win, _, _| {
                 debug!("Window::win.preferences()");
                 win.show_preferences();
@@ -690,11 +679,31 @@ mod imp {
             if !self.settings.boolean("move-from-header-bars") {
                 utils::set_window_drag(self.obj().upcast_ref(), false);
             }
-            self.obj().connect_visible_dialog_notify(|win| {
-                if let Some(dialog) = win.visible_dialog()
-                    && !win.imp().settings.boolean("move-from-header-bars")
-                {
-                    utils::set_window_drag(dialog.upcast_ref(), false);
+            // A dialog keeps its keys from the window's controllers, as a
+            // modal window would (libadwaita sets its `limit-events`), so
+            // the accels don't run in it: Ctrl+W, which closes the window
+            // otherwise, is a shortcut of the dialog that shows, which
+            // closes it as Esc does. A dialog over another takes it while
+            // it's on top
+            let close_dialog = gtk::ShortcutController::new();
+            close_dialog.add_shortcut(gtk::Shortcut::new(
+                gtk::ShortcutTrigger::parse_string("<Control>w"),
+                Some(gtk::CallbackAction::new(|widget, _| {
+                    if let Some(dialog) = widget.downcast_ref::<adw::Dialog>() {
+                        adw::prelude::AdwDialogExt::close(dialog);
+                    }
+                    glib::Propagation::Stop
+                })),
+            ));
+            self.obj().connect_visible_dialog_notify(move |win| {
+                if let Some(shown) = close_dialog.widget() {
+                    shown.remove_controller(&close_dialog);
+                }
+                if let Some(dialog) = win.visible_dialog() {
+                    dialog.add_controller(close_dialog.clone());
+                    if !win.imp().settings.boolean("move-from-header-bars") {
+                        utils::set_window_drag(dialog.upcast_ref(), false);
+                    }
                 }
             });
 
