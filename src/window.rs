@@ -374,6 +374,17 @@ mod imp {
                 debug!("Window::win.track-info()");
                 win.show_track_info();
             });
+            // GTK's own `window.close` would close the window under a
+            // dialog, which quits unless playing in the background, so the
+            // dialog that shows closes first, as with Esc
+            klass.install_action("win.close", None, move |win, _, _| {
+                debug!("Window::win.close()");
+                if let Some(dialog) = win.visible_dialog() {
+                    adw::prelude::AdwDialogExt::close(&dialog);
+                } else {
+                    win.close();
+                }
+            });
             klass.install_action("win.preferences", None, move |win, _, _| {
                 debug!("Window::win.preferences()");
                 win.show_preferences();

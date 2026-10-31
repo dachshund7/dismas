@@ -165,6 +165,9 @@ All notable changes to this project will be documented in this file.
   easier to grab, and over a narrow window, a swipe that starts on the edge
   of the pane hides it, rather than resizing it
 - Ctrl+T changes the repeat mode, and Ctrl+M mutes and unmutes
+- Ctrl+W closes the window, as in other GNOME apps, or the dialog that's
+  open over it. While playing in the background, the window hides and the
+  music goes on, as with its close button
 - Copy, in the menu of a track, copies its details. Ctrl+C does the same
   for the track that has the focus in the playlist pane or an album's
   tracks, rather than copying the playing track's, which it still does

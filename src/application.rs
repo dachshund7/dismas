@@ -88,6 +88,7 @@ mod imp {
             obj.setup_command_line();
 
             obj.set_accels_for_action("app.quit", &["<primary>q"]);
+            obj.set_accels_for_action("win.close", &["<primary>w"]);
 
             obj.set_accels_for_action("queue.clear", &["<primary>L"]);
             obj.set_accels_for_action("queue.toggle", &["F9"]);
