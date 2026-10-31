@@ -16,9 +16,7 @@ pub struct Credit {
 impl Credit {
     // MusicBrainz Picard stores performers as "Name (role)"
     pub(super) fn parse(s: &str) -> Self {
-        if let Some(name) = s.strip_suffix(')')
-            && let Some((name, role)) = name.rsplit_once(" (")
-        {
+        if let Some((name, role)) = split_role(s) {
             return Credit {
                 name: name.trim().to_string(),
                 role: Some(role.trim().to_string()),
@@ -45,6 +43,24 @@ impl Credit {
             .as_deref()
             .is_some_and(|r| r.ends_with("vocals") && !GROUP_ROLES.contains(&r))
     }
+}
+
+// The name and the role in "Name (role)": the role is what the parentheses
+// at the end hold, which can have parentheses of their own, as MusicBrainz
+// names some instruments, e.g. "drums (drum set)" in "Aaron Sterling (drums
+// (drum set))", so they're the ones the last ")" closes
+fn split_role(s: &str) -> Option<(&str, &str)> {
+    let inner = s.strip_suffix(')')?;
+    let mut depth = 0usize;
+    for (i, c) in inner.char_indices().rev() {
+        match c {
+            ')' => depth += 1,
+            '(' if depth > 0 => depth -= 1,
+            '(' => return Some((inner[..i].strip_suffix(' ')?, &inner[i + 1..])),
+            _ => {}
+        }
+    }
+    None
 }
 
 // The roles Picard gives a group rather than a player, e.g. "La

@@ -340,6 +340,11 @@ All notable changes to this project will be documented in this file.
 - Starting Dismas by opening a file, as from a file manager, opened the
   playlist pane even when it had been hidden, and made the window wider by
   the pane, which it then kept the next time
+- A player credited with an instrument whose name has parentheses of its
+  own, as MusicBrainz names a drum kit "drums (drum set)", showed in Track
+  Information with half the instrument in their name and a role ending in
+  ")", and counted as a second player, which could put the album artist in
+  place of a list of five players
 
 ### Removed
 

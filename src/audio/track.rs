@@ -1809,6 +1809,52 @@ mod tests {
     }
 
     #[test]
+    fn roles_can_have_parentheses_of_their_own() {
+        let credit = |s: &str| {
+            let credit = Credit::parse(s);
+            (credit.name, credit.role)
+        };
+        let named =
+            |name: &str, role: Option<&str>| (name.to_string(), role.map(ToString::to_string));
+
+        // MusicBrainz names a drum kit "drums (drum set)"
+        assert_eq!(
+            credit("Aaron Sterling (drums (drum set))"),
+            named("Aaron Sterling", Some("drums (drum set)"))
+        );
+        assert_eq!(
+            credit("La Serenissima (orchestra)"),
+            named("La Serenissima", Some("orchestra"))
+        );
+        assert_eq!(credit("Janet Baker"), named("Janet Baker", None));
+        // Only parentheses after a space hold a role
+        assert_eq!(credit("Name(role)"), named("Name(role)", None));
+        assert_eq!(credit("Name (a) b)"), named("Name (a) b)", None));
+
+        // A drummer who also plays percussion is one player, so five players
+        // are still named rather than the album artist
+        let five = TrackCredits {
+            album_artist: Some("Ella Langley".to_string()),
+            performers: [
+                "Tom Bukovac (electric guitar)",
+                "Spencer Cullum (pedal steel guitar)",
+                "David Dorn (Hammond organ)",
+                "Rachel Loy (bass guitar)",
+                "Aaron Sterling (drums (drum set))",
+                "Aaron Sterling (percussion)",
+            ]
+            .iter()
+            .map(|p| Credit::parse(p))
+            .collect(),
+            ..Default::default()
+        };
+        assert_eq!(
+            five.summary(Some("Ella Langley")),
+            "Tom Bukovac, Spencer Cullum, David Dorn, Rachel Loy, Aaron Sterling"
+        );
+    }
+
+    #[test]
     fn groups_are_named_in_place_of_their_players() {
         let credits = |album_artist: &str, conductors: &[&str], performers: &[&str]| TrackCredits {
             album_artist: Some(album_artist.to_string()),
