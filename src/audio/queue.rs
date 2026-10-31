@@ -4,6 +4,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
+    hash::Hash,
 };
 
 use gtk::{gio, glib, prelude::*, subclass::prelude::*};
@@ -319,12 +320,21 @@ impl Queue {
     pub fn restore_order(&self, saved: &[String]) {
         let tracks = self.tracks();
         let uris: Vec<String> = tracks.iter().map(Track::uri).collect();
-        let restored: Vec<Track> = restored_order(&uris, saved)
-            .into_iter()
-            .map(|i| tracks[i].clone())
-            .collect();
-        if restored != tracks {
-            self.replace_order(&restored);
+        self.put_in_order(&tracks, &restored_order(&uris, saved));
+    }
+
+    // Puts the tracks back in an order they had, in a single change, as
+    // `restore_order()` does, but by the tracks themselves rather than
+    // their URIs, so that copies of a file go back to their own places
+    pub fn restore_tracks(&self, saved: &[Track]) {
+        let tracks = self.tracks();
+        self.put_in_order(&tracks, &restored_order(&tracks, saved));
+    }
+
+    fn put_in_order(&self, tracks: &[Track], order: &[usize]) {
+        let ordered: Vec<Track> = order.iter().map(|&i| tracks[i].clone()).collect();
+        if ordered != tracks {
+            self.replace_order(&ordered);
         }
     }
 
@@ -594,19 +604,20 @@ fn play_next_pos(
         .unwrap_or(n_tracks)
 }
 
-// The order of the tracks of the queue, by their URIs, put back in the
-// order saved before they were shuffled: the nth copy of a file takes the
-// place of the nth one in it, the tracks that aren't in it, added since,
-// go after those in the order they have, and the ones that are only in
-// it, removed since, stay out. Returns the positions of the tracks
-fn restored_order(current: &[String], saved: &[String]) -> Vec<usize> {
-    let mut copies: HashMap<&str, VecDeque<usize>> = HashMap::new();
-    for (pos, uri) in current.iter().enumerate() {
-        copies.entry(uri).or_default().push_back(pos);
+// The order of the tracks of the queue, by their URIs or the tracks
+// themselves, put back in an order saved before, as before they were
+// shuffled: the nth copy of a file takes the place of the nth one in it,
+// the tracks that aren't in it, added since, go after those in the order
+// they have, and the ones that are only in it, removed since, stay out.
+// Returns the positions of the tracks
+fn restored_order<T: Eq + Hash>(current: &[T], saved: &[T]) -> Vec<usize> {
+    let mut copies: HashMap<&T, VecDeque<usize>> = HashMap::new();
+    for (pos, item) in current.iter().enumerate() {
+        copies.entry(item).or_default().push_back(pos);
     }
     let mut order: Vec<usize> = saved
         .iter()
-        .filter_map(|uri| copies.get_mut(uri.as_str())?.pop_front())
+        .filter_map(|item| copies.get_mut(item)?.pop_front())
         .collect();
 
     let mut placed = vec![false; current.len()];
@@ -1002,6 +1013,22 @@ mod tests {
         // A copy added: the extra one goes at the end
         let current = uris(&["a", "a", "b", "a", "c"]);
         assert_eq!(restored_order(&current, &saved), [0, 2, 1, 4, 3]);
+    }
+
+    #[test]
+    fn restore_tracks_puts_back_copies_in_their_places() {
+        // Two copies of a file, as the same file added twice, which their
+        // URIs can't tell apart
+        let (queue, t) = queue_of(3);
+        let (a, b, a2) = (&t[0], &t[1], &t[2]);
+        queue.set_current_track(Some(a2.clone()));
+        let reversed = [a2.clone(), b.clone(), a.clone()];
+        queue.restore_tracks(&reversed);
+        assert_eq!(order(&queue, &t), [2, 1, 0]);
+
+        queue.restore_tracks(&t);
+        assert_eq!(order(&queue, &t), [0, 1, 2]);
+        assert_eq!(queue.current().as_ref(), Some(a2));
     }
 
     #[test]

@@ -38,7 +38,7 @@ use crate::{
     audio::{
         Arrangement, CoverCache, ExtraComments, FileTags, ListedPerformer, PerformerKind,
         ReadOptions, TrackCredits, normalize_search_text, plain_commas, read_file_tags, search_key,
-        split_composers, title_from_file_name, track_search_text, track_title,
+        title_from_file_name, track_search_text, track_title,
     },
     catalogue::{self, CatalogueNumber},
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
@@ -1678,12 +1678,56 @@ enum CatalogueOrder {
 // and the works of each by their catalogue numbers, then by name, "no. 2"
 // before "no. 10"
 fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
+    let orders = {
+        let to_order: Vec<WorkToOrder> = works
+            .iter()
+            .map(|work| WorkToOrder {
+                key: &work.key,
+                composers: &work.composers,
+                name: &work.name,
+                title: work.title.as_deref(),
+            })
+            .collect();
+        work_orders(&to_order)
+    };
+    let mut sorted: Vec<(WorkOrder, WorkInfo)> = orders.into_iter().zip(works).collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
+    sorted.into_iter().map(|(_, work)| work).collect()
+}
+
+// A work to put in order among others, see `work_orders()`
+pub(crate) struct WorkToOrder<'a> {
+    // What tells the work apart, so that it counts once for the catalogue
+    // of its composers however many times it's there
+    pub key: &'a str,
+    pub composers: &'a [WorkComposer],
+    pub name: &'a str,
+    // Its full title, whose catalogue numbers count when its name has none
+    pub title: Option<&'a str>,
+}
+
+// Where a work goes among others, see `work_orders()`
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct WorkOrder {
+    no_composers: bool,
+    first_composer: Option<glib::CollationKey>,
+    composers: String,
+    catalogue: CatalogueOrder,
+    name: glib::FilenameCollationKey,
+}
+
+// Where each work goes among the others, as the Works page lists them: by
+// the sort name of their first composer, then their composers, those
+// without any last, and the works of each composer by their catalogue
+// numbers, then by name. The playlist's Composer sort goes by it too, so
+// a composer's works are in the same order in both
+pub(crate) fn work_orders(works: &[WorkToOrder]) -> Vec<WorkOrder> {
     // The numbers in the name of each work, or else in its full title
     let numbers: Vec<Vec<CatalogueNumber>> = works
         .iter()
         .map(|work| {
-            let numbers = catalogue::catalogue_numbers(&work.name);
-            match &work.title {
+            let numbers = catalogue::catalogue_numbers(work.name);
+            match work.title {
                 Some(title) if numbers.is_empty() => catalogue::catalogue_numbers(title),
                 _ => numbers,
             }
@@ -1691,14 +1735,20 @@ fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
         .collect();
     let composers: Vec<String> = works
         .iter()
-        .map(|work| work.composer_keys().join("\x1f"))
+        .map(|work| work.composers.iter().map(|c| c.key.as_str()).join("\x1f"))
         .collect();
 
     // The catalogue of each composer's works, the one the most of them are
     // in, as Dvořák's opus numbers or Beethoven's; an even count goes to
-    // the first in the list of catalogues, which is the same every time
+    // the first in the list of catalogues, which is the same every time.
+    // Each work counts once, as a playlist can have several recordings
+    // of one
+    let mut counted: HashSet<(&str, &str)> = HashSet::new();
     let mut counts: HashMap<&str, HashMap<&'static str, usize>> = HashMap::new();
-    for (composer, numbers) in composers.iter().zip(&numbers) {
+    for ((work, composer), numbers) in works.iter().zip(&composers).zip(&numbers) {
+        if !counted.insert((composer.as_str(), work.key)) {
+            continue;
+        }
         let counts = counts.entry(composer).or_default();
         for catalogue in numbers.iter().map(|n| n.catalogue).unique() {
             *counts.entry(catalogue).or_default() += 1;
@@ -1709,33 +1759,31 @@ fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
         .filter_map(|(composer, counts)| Some((composer, most_counted(counts)?)))
         .collect();
 
-    let mut sorted: Vec<_> = works
-        .into_iter()
+    works
+        .iter()
         .zip(numbers)
         .zip(&composers)
         .map(|((work, numbers), composer)| {
             let main = main.get(composer.as_str());
-            let order = match numbers.iter().find(|n| Some(&n.catalogue) == main) {
+            let catalogue = match numbers.iter().find(|n| Some(&n.catalogue) == main) {
                 Some(number) => CatalogueOrder::Main(number.order.clone()),
                 None => numbers
                     .into_iter()
                     .next()
                     .map_or(CatalogueOrder::None, CatalogueOrder::Other),
             };
-            let sort_key = (
-                work.composers.is_empty(),
-                work.composers
+            WorkOrder {
+                no_composers: work.composers.is_empty(),
+                first_composer: work
+                    .composers
                     .first()
                     .map(|composer| glib::CollationKey::from(composer.sort.as_str())),
-                composer,
-                order,
-                glib::FilenameCollationKey::from(work.name.as_str()),
-            );
-            (sort_key, work)
+                composers: composer.clone(),
+                catalogue,
+                name: glib::FilenameCollationKey::from(work.name),
+            }
         })
-        .collect();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.key.cmp(&b.1.key)));
-    sorted.into_iter().map(|(_, work)| work).collect()
+        .collect()
 }
 
 // The key of the work of a track, if it's part of one in the library,
@@ -2967,9 +3015,6 @@ impl TrackTags {
             folder_album.as_deref(),
         );
 
-        let names = &credits.composers;
-        let sorts = split_composers(tag.get_strings(ItemKey::ComposerSortOrder));
-
         TrackTags {
             album_id: Some(album_id),
             album: album.or(folder_album),
@@ -2982,8 +3027,8 @@ impl TrackTags {
             track: tag.track(),
             title,
             search: Some(search),
-            composers: composer_entries(names, &sorts),
-            work: work_entry(&credits, artist, names, &sorts),
+            composers: composer_entries(&credits.composers, &credits.composer_sorts),
+            work: work_entry(&credits, artist),
             performers: performer_entries(&credits.listed_performers()),
             label: credits.labels.into_iter().next(),
             catalog_number: credits.catalog_numbers.into_iter().next(),
@@ -3000,36 +3045,16 @@ impl TrackTags {
 // recordings of the work without MusicBrainz ids. Without one, works with
 // the same name and composers are the same, as the queue's headers take
 // them to be
-fn work_entry(
-    credits: &TrackCredits,
-    artist: Option<&str>,
-    names: &[String],
-    sorts: &[String],
-) -> Option<WorkEntry> {
+fn work_entry(credits: &TrackCredits, artist: Option<&str>) -> Option<WorkEntry> {
     let name = credits.work.as_deref()?.trim();
     if name.is_empty() {
         return None;
     }
     let is_movement = credits.is_movement();
 
-    // The composers of the work, as `TrackData::work_composers()` finds them,
-    // sorted by their own sort names if the tags have them
-    let only_artist;
-    let mut work_names = credits.work_composer_names();
-    if work_names.is_empty() {
-        only_artist = artist.map(ToString::to_string);
-        work_names = only_artist.as_slice();
-    }
-    let sort_of = |composer: &String| {
-        names
-            .iter()
-            .position(|name| composer_key(name) == composer_key(composer))
-            .and_then(|i| sorts.get(i))
-            .filter(|_| sorts.len() == names.len())
-            .cloned()
-            .unwrap_or_else(|| sort_name(composer))
-    };
-    let work_sorts = work_names.iter().map(sort_of).collect::<Vec<_>>();
+    let composers = credited_work_composers(credits, artist);
+    let work_names: Vec<String> = composers.iter().map(|c| c.name.clone()).collect();
+    let work_sorts: Vec<String> = composers.into_iter().map(|c| c.sort).collect();
 
     let key = credits
         .work_id
@@ -3060,7 +3085,7 @@ fn work_entry(
         name: name.to_string(),
         title: credits.work_title.clone(),
         collection: credits.work_collection.clone(),
-        composers: composer_entries(work_names, &work_sorts),
+        composers: composer_entries(&work_names, &work_sorts),
         order,
         arrangement_of: credits
             .work_arrangement
@@ -3076,6 +3101,44 @@ fn work_entry(
             .and_then(|arrangement| arrangement.of_id.clone()),
         part_ids: (!credits.work_part_ids.is_empty()).then(|| credits.work_part_ids.join("\n")),
     })
+}
+
+// The composers a track's work is listed under, as the queue's headers
+// find them (`TrackData::work_composers()`): the work's own, or else the
+// track's, or else the artist, whom classical releases often credit as
+// the composer. Each has the sort name its tags give it, matched by name,
+// when they give as many as there are composers, or else one worked out
+// from the name. A track that isn't part of a work is given no artist, so
+// that its composers are only the ones the tags name
+pub(crate) fn credited_work_composers(
+    credits: &TrackCredits,
+    artist: Option<&str>,
+) -> Vec<WorkComposer> {
+    let names = &credits.composers;
+    let sorts = &credits.composer_sorts;
+    let sort_of = |composer: &str| {
+        names
+            .iter()
+            .position(|name| composer_key(name) == composer_key(composer))
+            .and_then(|i| sorts.get(i))
+            .filter(|_| sorts.len() == names.len())
+            .cloned()
+            .unwrap_or_else(|| sort_name(composer))
+    };
+    let work_names = credits.work_composer_names();
+    let named: Vec<&str> = if work_names.is_empty() {
+        artist.into_iter().collect()
+    } else {
+        work_names.iter().map(String::as_str).collect()
+    };
+    named
+        .into_iter()
+        .map(|name| WorkComposer {
+            key: composer_key(name),
+            name: name.to_string(),
+            sort: sort_of(name),
+        })
+        .collect()
 }
 
 // The conductors and performers of a track, as the library keeps them: a
@@ -4473,6 +4536,59 @@ mod tests {
             .as_deref(),
             Some("\nantonin dvorak\tAntonín Dvořák\t\njosef suk\tJosef Suk\t\n")
         );
+    }
+
+    #[test]
+    fn the_composers_of_a_work_take_the_sort_names_of_their_tags() {
+        use super::credited_work_composers;
+        use crate::audio::TrackCredits;
+        let names = |names: &[&str]| names.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let sorts = |credits: &TrackCredits, artist| {
+            credited_work_composers(credits, artist)
+                .into_iter()
+                .map(|composer| (composer.key, composer.sort))
+                .collect::<Vec<_>>()
+        };
+
+        // The work's composers, matched to the track's sort names by name
+        let requiem = TrackCredits {
+            composers: names(&["Franz Xaver Süßmayr", "Wolfgang Amadeus Mozart"]),
+            composer_sorts: names(&["Süßmayr, Franz Xaver", "Mozart, W. A."]),
+            work_composers: names(&["Wolfgang Amadeus Mozart"]),
+            ..Default::default()
+        };
+        assert_eq!(
+            sorts(&requiem, None),
+            [(
+                "wolfgang amadeus mozart".to_string(),
+                "Mozart, W. A.".to_string()
+            )]
+        );
+
+        // Without as many sort names as names, they're worked out
+        let suk = TrackCredits {
+            composers: names(&["Antonín Dvořák", "Josef Suk"]),
+            composer_sorts: names(&["Suk, Josef"]),
+            ..Default::default()
+        };
+        assert_eq!(
+            sorts(&suk, None),
+            [
+                ("antonin dvorak".to_string(), "Dvořák, Antonín".to_string()),
+                ("josef suk".to_string(), "Suk, Josef".to_string())
+            ]
+        );
+
+        // Without composers, the artist, if one is given
+        let untagged = TrackCredits::default();
+        assert_eq!(
+            sorts(&untagged, Some("Arcangelo Corelli")),
+            [(
+                "arcangelo corelli".to_string(),
+                "Corelli, Arcangelo".to_string()
+            )]
+        );
+        assert!(sorts(&untagged, None).is_empty());
     }
 
     #[test]

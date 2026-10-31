@@ -77,35 +77,42 @@ pub fn shuffled_order(
         .collect()
 }
 
-// The tracks in units: the movements of the same work next to each other
-// are one, and every other track is one of its own
-fn units(entries: &[Entry], now: i64) -> Vec<Unit> {
-    let mut artists: HashMap<String, usize> = HashMap::new();
-    let mut units: Vec<Unit> = Vec::new();
-    for (pos, entry) in entries.iter().enumerate() {
+// The positions of the tracks in units: the movements of the same work
+// next to each other are one, and every other track is one of its own.
+// `continues_work` says for each track whether it continues the work of
+// the track before it. Sorting moves the same units
+pub(super) fn work_units(continues_work: impl IntoIterator<Item = bool>) -> Vec<Range<usize>> {
+    let mut units: Vec<Range<usize>> = Vec::new();
+    for (pos, continues) in continues_work.into_iter().enumerate() {
         match units.last_mut() {
-            Some(unit) if entry.continues_work => unit.tracks.end = pos + 1,
-            _ => {
-                let artist = entry.artist.as_ref().map(|artist| {
-                    let next = artists.len();
-                    *artists.entry(artist.to_lowercase()).or_insert(next)
-                });
-                units.push(Unit {
-                    tracks: pos..pos + 1,
-                    artist,
-                    weight: 0.0,
-                });
-            }
+            Some(unit) if continues => unit.end = pos + 1,
+            _ => units.push(pos..pos + 1),
         }
     }
-
-    for unit in &mut units {
-        let stats = entries[unit.tracks.clone()]
-            .iter()
-            .filter_map(|entry| entry.stats);
-        unit.weight = weight(stats, now);
-    }
     units
+}
+
+// The units of the tracks, each with the artist of its first track and the
+// weight of all its tracks
+fn units(entries: &[Entry], now: i64) -> Vec<Unit> {
+    let mut artists: HashMap<String, usize> = HashMap::new();
+    work_units(entries.iter().map(|entry| entry.continues_work))
+        .into_iter()
+        .map(|tracks| {
+            let artist = entries[tracks.start].artist.as_ref().map(|artist| {
+                let next = artists.len();
+                *artists.entry(artist.to_lowercase()).or_insert(next)
+            });
+            let stats = entries[tracks.clone()]
+                .iter()
+                .filter_map(|entry| entry.stats);
+            Unit {
+                weight: weight(stats, now),
+                tracks,
+                artist,
+            }
+        })
+        .collect()
 }
 
 // How likely tracks heard together are to come early, like the movements
@@ -411,6 +418,16 @@ mod tests {
             .map(|unit| unit.tracks)
             .collect();
         assert_eq!(units, [0..3, 3..6]);
+    }
+
+    #[test]
+    fn work_units_join_the_movements_that_continue_a_work() {
+        let units = work_units([false, true, true, false, false, true]);
+        assert_eq!(units, [0..3, 3..4, 4..6]);
+        // A first track that says it continues one has nothing to continue
+        let units = work_units([true, true]);
+        assert_eq!((units.len(), &units[0]), (1, &(0..2)));
+        assert_eq!(work_units([]), Vec::<Range<usize>>::new());
     }
 
     #[test]

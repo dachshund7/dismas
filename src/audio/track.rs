@@ -58,7 +58,7 @@ mod tags;
 mod work_hierarchy;
 
 use credits::is_composer;
-pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits, split_composers};
+pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
@@ -1075,7 +1075,7 @@ mod tests {
 
     #[test]
     fn composers_joined_in_one_value_are_split() {
-        use super::split_composers;
+        use super::credits::split_composers;
         let split = |values: &[&str]| split_composers(values.iter().copied());
         assert_eq!(
             split(&["John Lennon & Paul McCartney"]),
@@ -1102,6 +1102,27 @@ mod tests {
         tag.insert_text(ItemKey::Composer, "Rodgers & Hammerstein".to_string());
         let credits = TrackCredits::from_tag(&tag, &Default::default());
         assert_eq!(credits.composers, ["Rodgers", "Hammerstein"]);
+    }
+
+    #[test]
+    fn the_sort_names_of_the_artist_and_the_composers_are_read() {
+        // An ID3v2 tag, where lofty maps both itself (see `lofty_gaps` for
+        // COMPOSERSORT in Vorbis comments)
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackArtistSortOrder, "Beatles, The".to_string());
+        tag.insert_text(
+            ItemKey::ComposerSortOrder,
+            "Lennon, John & McCartney, Paul".to_string(),
+        );
+        let credits = TrackCredits::from_tag(&tag, &Default::default());
+        assert_eq!(credits.artist_sort.as_deref(), Some("Beatles, The"));
+        assert_eq!(credits.composer_sorts, ["Lennon, John", "McCartney, Paul"]);
+
+        // An empty one is none
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::TrackArtistSortOrder, " ".to_string());
+        let credits = TrackCredits::from_tag(&tag, &Default::default());
+        assert_eq!(credits.artist_sort, None);
     }
 
     #[test]

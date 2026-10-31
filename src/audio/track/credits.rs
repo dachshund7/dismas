@@ -114,6 +114,13 @@ pub struct TrackCredits {
     // on separate lines, as the movement would be cut off
     pub movement_levels: Option<(String, String)>,
     pub composers: Vec<String>,
+    // The sort names of the composers, e.g. "Bach, Johann Sebastian", as
+    // the tags give them; they go with the composers only when there are
+    // as many of each, see `library::credited_work_composers()`
+    pub composer_sorts: Vec<String>,
+    // The name the artist is sorted by, e.g. "Beatles, The", as the tags
+    // give it
+    pub artist_sort: Option<String>,
     // The composers of the work, from the "Work Hierarchy" plugin; empty
     // if it didn't record them. Its movements can credit others too, e.g.
     // the author of the hymn in a chorale of a Bach cantata, or Süßmayr in
@@ -278,6 +285,12 @@ impl TrackCredits {
             movement_number,
             movement_levels: None,
             composers: split_composers(tag.get_strings(ItemKey::Composer)),
+            composer_sorts: split_composers(tag.get_strings(ItemKey::ComposerSortOrder)),
+            artist_sort: tag
+                .get_string(ItemKey::TrackArtistSortOrder)
+                .map(str::trim)
+                .filter(|sort| !sort.is_empty())
+                .map(ToString::to_string),
             work_composers: Vec::new(),
             lyricists: tag_strings(tag, ItemKey::Lyricist),
             arrangers: tag_strings(tag, ItemKey::Arranger),
