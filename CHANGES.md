@@ -60,7 +60,9 @@ All notable changes to this project will be documented in this file.
   albums. On the Tracks page, it shows the albums with favorite tracks,
   and takes only those tracks from them: an album opened there lists only
   its favorite tracks, under a bar that says how many of its tracks they
-  are. The page says how to mark favorites when there are none
+  are. The page says how to mark favorites when there are none. Favorite
+  Albums, on the Playlists page, plays the favorite albums whole, in the
+  order they were marked
 - Random Work, below Random Album, plays a recording of a work picked at
   random in the same way. A work that hasn't been heard lately in any of
   its recordings is more likely to be picked, and so is a recording of it

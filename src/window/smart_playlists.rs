@@ -8,22 +8,30 @@ use adw::prelude::*;
 use super::*;
 use crate::{
     audio::shuffle,
-    play_stats::{FavoriteItem, TrackStats},
+    play_stats::{FavoriteAlbum, FavoriteItem, TrackStats},
 };
 
 impl Window {
     // Plays the tracks of a smart playlist in place of the queue, like
     // dropped files, with an Undo. They're read from the play stats, or
     // the favorites, each time, so it's never the selected playlist.
-    // Favorite Works plays the favorite works and recordings in the order
-    // they were marked: each recording marked, and for a work marked
-    // without one, a recording of it picked as Random Work picks one, so
-    // that they take turns
+    // Favorite Albums plays the favorite albums whole, in the order they
+    // were marked. Favorite Works plays the favorite works and recordings
+    // in the order they were marked: each recording marked, and for a work
+    // marked without one, a recording of it picked as Random Work picks
+    // one, so that they take turns
     pub(super) fn play_smart_playlist(&self, name: &str) {
         type Query = Box<dyn FnOnce() -> Vec<String> + Send>;
         let (query, empty): (Query, _) = match name {
             "random-album" => return self.play_random(Random::Album),
             "random-work" => return self.play_random(Random::Work),
+            "favorite-albums" => {
+                let hidden = self.imp().library_view.hidden_folders();
+                (
+                    Box::new(move || uris_of(&favorite_albums_paths(&hidden))),
+                    i18n("No favorite albums yet"),
+                )
+            }
             "favorite-works" => {
                 let hidden = self.imp().library_view.hidden_folders();
                 (
@@ -289,6 +297,35 @@ fn pick_heard(
     shuffle::weighted_pick(&weights, rng)
 }
 
+// The tracks Favorite Albums plays, outside the `hidden` folders; this
+// blocks
+fn favorite_albums_paths(hidden: &[PathBuf]) -> Vec<PathBuf> {
+    let favorites = play_stats::favorite_albums();
+    if favorites.is_empty() {
+        return Vec::new();
+    }
+    favorite_album_paths(
+        &favorites,
+        library::album_track_paths(hidden).into_iter().collect(),
+    )
+}
+
+// The tracks of the favorite albums, in the order they were marked, each
+// album's in its order, from the `tracks` of the albums by their ids. An
+// album that's gone, or in a hidden folder, gives none. One whose id
+// changed with its tags was moved to its new id when the library was read
+// again after the scan, see `LibraryView::reload`
+fn favorite_album_paths(
+    favorites: &[FavoriteAlbum],
+    mut tracks: HashMap<String, Vec<PathBuf>>,
+) -> Vec<PathBuf> {
+    favorites
+        .iter()
+        .filter_map(|favorite| tracks.remove(&favorite.id))
+        .flatten()
+        .collect()
+}
+
 // The tracks Favorite Works plays, outside the `hidden` folders; this
 // blocks
 fn favorite_works_paths(hidden: &[PathBuf]) -> Vec<PathBuf> {
@@ -357,8 +394,29 @@ fn uris_of(paths: &[PathBuf]) -> Vec<String> {
 mod tests {
     use std::path::PathBuf;
 
-    use super::favorite_paths;
-    use crate::play_stats::{FavoriteItem, FavoriteRecording};
+    use super::{favorite_album_paths, favorite_paths};
+    use crate::play_stats::{FavoriteAlbum, FavoriteItem, FavoriteRecording};
+
+    #[test]
+    fn favorite_albums_play_whole_in_the_order_they_were_marked() {
+        let paths = |names: &[&str]| names.iter().map(PathBuf::from).collect::<Vec<_>>();
+        let favorite = |id: &str| FavoriteAlbum {
+            id: id.to_string(),
+            uri: None,
+        };
+        let tracks = [
+            ("a", paths(&["/m/A/01", "/m/A/02"])),
+            ("b", paths(&["/m/B/01"])),
+            ("c", paths(&["/m/C/01"])),
+        ]
+        .into_iter()
+        .map(|(id, paths)| (id.to_string(), paths))
+        .collect();
+        // Marked b, then a; "gone" left the library, or is in a hidden
+        // folder, and c isn't a favorite
+        let found = favorite_album_paths(&[favorite("b"), favorite("gone"), favorite("a")], tracks);
+        assert_eq!(found, paths(&["/m/B/01", "/m/A/01", "/m/A/02"]));
+    }
 
     #[test]
     fn favorites_play_their_recording_or_one_picked() {
