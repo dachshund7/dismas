@@ -51,6 +51,15 @@ impl Window {
         self.imp().library_view.refresh_favorites();
     }
 
+    // Marks albums as favorites, or unmarks them; their covers in the grid
+    // show it, and so does the album pane if it shows one of them
+    pub(super) fn mark_favorite_albums(&self, ids: &[String], favorite: bool) {
+        play_stats::set_favorite_albums(ids, favorite);
+        let imp = self.imp();
+        imp.library_view.favorite_albums_changed(ids, favorite);
+        imp.album_tracks.show_favorite(ids, favorite);
+    }
+
     // The item of a menu that marks a work as a favorite or unmarks it,
     // with its action in `actions`, under `prefix`
     pub(super) fn favorite_work_item(

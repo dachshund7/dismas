@@ -299,7 +299,7 @@ impl Window {
             actions.add_action(&go);
 
             // As its heart shows, when any of them is
-            let favorite = cell.is_favorite();
+            let favorite = cell.favorite();
             let mark = gio::SimpleAction::new("favorite-recording", None);
             mark.connect_activate(clone!(
                 #[weak(rename_to = win)]
@@ -326,6 +326,44 @@ impl Window {
             let section = gio::Menu::new();
             section.append(Some(&i18n("Go to Album")), Some("album.go-to-album"));
             section.append(Some(&label), Some("album.favorite-recording"));
+            menu.append_section(None, &section);
+        }
+        // An album of the grid, or the selected ones, can be marked as
+        // favorites; they're unmarked when they all are. Not among the
+        // covers of a work, where the heart is a favorite recording's
+        if cell.work().is_none() {
+            let ids: Vec<String> = if selection {
+                library_view
+                    .selected_albums()
+                    .into_iter()
+                    .map(|(id, _)| id)
+                    .collect()
+            } else {
+                vec![album.id()]
+            };
+            let favorite = ids.iter().all(|id| library_view.is_favorite_album(id));
+            let label = match (ids.len() > 1, favorite) {
+                (false, false) => i18n("Add Album to Favorites"),
+                (false, true) => i18n("Remove Album from Favorites"),
+                (true, false) => i18n("Add Albums to Favorites"),
+                (true, true) => i18n("Remove Albums from Favorites"),
+            };
+            let mark = gio::SimpleAction::new("favorite-album", None);
+            mark.connect_activate(clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[strong]
+                albums,
+                move |_, _| {
+                    // Taken like the other items take them, which leaves
+                    // selection mode
+                    let ids: Vec<String> = albums(&win).into_iter().map(|(id, _)| id).collect();
+                    win.mark_favorite_albums(&ids, !favorite);
+                }
+            ));
+            actions.add_action(&mark);
+            let section = gio::Menu::new();
+            section.append(Some(&label), Some("album.favorite-album"));
             menu.append_section(None, &section);
         }
         // Its folder, and its booklets once they're found, for an album of
@@ -467,6 +505,13 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |album_tracks, pos| win.play_shown_tracks(album_tracks.files(), pos)
+        ));
+        album_tracks.connect_favorite_toggled(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |album_tracks, favorite| {
+                win.mark_favorite_albums(&[album_tracks.album_id()], favorite);
+            }
         ));
         album_tracks.connect_work_menu_requested(clone!(
             #[weak(rename_to = win)]

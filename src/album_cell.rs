@@ -5,8 +5,8 @@
 // highlights the album when it's selected in selection mode, and has the
 // item it's in tell screen readers whether it's selected. The cover says
 // how many of the album's tracks are taken from it, when it's only some of
-// them, and among the covers of the albums of a work, whether one of its
-// recordings there is a favorite
+// them, and with a heart, whether the album is a favorite; among the covers
+// of the albums of a work, whether one of its recordings there is one
 
 use std::cell::{Cell, RefCell};
 
@@ -49,6 +49,10 @@ mod imp {
         pub matching: Cell<u32>,
         #[property(get, set = Self::set_total)]
         pub total: Cell<u32>,
+        // Whether the heart shows: in the grid, for a favorite album, and
+        // among the covers of a work, for a favorite recording
+        #[property(get, set = Self::set_favorite)]
+        pub favorite: Cell<bool>,
         pub picture: gtk::Picture,
         pub badge: gtk::Label,
         pub heart: gtk::Image,
@@ -99,6 +103,11 @@ mod imp {
         fn set_total(&self, total: u32) {
             self.total.set(total);
             self.obj().update_badge();
+        }
+
+        fn set_favorite(&self, favorite: bool) {
+            self.favorite.set(favorite);
+            self.heart.set_visible(favorite);
         }
     }
 }
@@ -155,7 +164,7 @@ impl AlbumCell {
         heart.set_margin_top(6);
         heart.set_can_target(false);
         heart.set_visible(false);
-        heart.add_css_class("favorite-recording");
+        heart.add_css_class("favorite");
         heart.update_property(&[gtk::accessible::Property::Label(&i18n("Favorite"))]);
         overlay.add_overlay(heart);
 
@@ -215,14 +224,6 @@ impl AlbumCell {
     // The line under the title, in place of the artist
     pub fn set_subtitle(&self, subtitle: &str) {
         self.imp().artist.set_label(subtitle);
-    }
-
-    pub fn set_favorite(&self, favorite: bool) {
-        self.imp().heart.set_visible(favorite);
-    }
-
-    pub fn is_favorite(&self) -> bool {
-        self.imp().heart.is_visible()
     }
 
     pub fn work(&self) -> Option<CellWork> {

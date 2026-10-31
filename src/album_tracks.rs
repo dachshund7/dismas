@@ -42,6 +42,8 @@ mod imp {
         #[template_child]
         pub album_info: TemplateChild<gtk::Label>,
         #[template_child]
+        pub favorite_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
         pub booklet_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub booklets_button: TemplateChild<gtk::MenuButton>,
@@ -72,6 +74,8 @@ mod imp {
         // Tracks are being added to the queue
         pub loading: Cell<bool>,
 
+        // The id of the album that is showing
+        pub album_id: RefCell<String>,
         pub tracks: RefCell<Option<gio::ListStore>>,
         pub files: RefCell<Vec<gio::File>>,
         // Whether the album is on more than one disc, whose sections then
@@ -151,6 +155,11 @@ mod imp {
                 vec![
                     Signal::builder("back").build(),
                     Signal::builder("add").build(),
+                    // The heart was clicked, to mark the album as a
+                    // favorite or unmark it
+                    Signal::builder("favorite-toggled")
+                        .param_types([bool::static_type()])
+                        .build(),
                     // The tracks the Play button takes play, see `files()`,
                     // from the position of the track to start playing from
                     Signal::builder("play")
@@ -209,6 +218,17 @@ impl AlbumTracks {
             "add",
             false,
             glib::closure_local!(move |view: &Self| f(view)),
+        )
+    }
+
+    pub fn connect_favorite_toggled<F: Fn(&Self, bool) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "favorite-toggled",
+            false,
+            glib::closure_local!(move |view: &Self, favorite: bool| f(view, favorite)),
         )
     }
 
@@ -364,6 +384,26 @@ impl AlbumTracks {
             #[weak(rename_to = this)]
             self,
             move |_| this.emit_by_name::<()>("add", &[])
+        ));
+
+        // The heart is filled for a favorite, and the tooltip says what a
+        // click does, as on the player's. Only a click marks the album, as
+        // the heart is also set to show one marked elsewhere
+        imp.favorite_button.connect_active_notify(|button| {
+            let (icon, tooltip) = if button.is_active() {
+                ("heart-filled-symbolic", i18n("Remove Album from Favorites"))
+            } else {
+                ("heart-outline-symbolic", i18n("Add Album to Favorites"))
+            };
+            button.set_icon_name(icon);
+            button.set_tooltip_text(Some(&tooltip));
+        });
+        imp.favorite_button.connect_clicked(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |button| {
+                this.emit_by_name::<()>("favorite-toggled", &[&button.is_active()]);
+            }
         ));
 
         imp.play_button.connect_clicked(clone!(
@@ -566,10 +606,26 @@ impl AlbumTracks {
             .join(" · ");
         imp.album_info.set_label(&info);
         imp.album_info.set_visible(!info.is_empty());
+        imp.album_id.replace(album.id());
+        imp.favorite_button.set_active(album.favorite());
 
         imp.filter.replace(filter);
         imp.picks.replace(picks);
         self.load(album.id(), hidden, reveal);
+    }
+
+    // The id of the album that is showing
+    pub fn album_id(&self) -> String {
+        self.imp().album_id.borrow().clone()
+    }
+
+    // Shows whether the album is a favorite, when it's one of the albums
+    // marked or unmarked elsewhere
+    pub fn show_favorite(&self, album_ids: &[String], favorite: bool) {
+        let imp = self.imp();
+        if album_ids.contains(&imp.album_id.borrow()) {
+            imp.favorite_button.set_active(favorite);
+        }
     }
 
     // Says how many of the tracks the search matches while it leaves out

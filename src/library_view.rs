@@ -6,7 +6,7 @@ mod works;
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
@@ -238,6 +238,8 @@ mod imp {
         // The ids of the selected albums; a new search clears them, so
         // they're all among the albums it shows
         pub selected: RefCell<HashSet<String>>,
+        // The ids of the albums marked as favorites
+        pub favorite_albums: RefCell<BTreeSet<String>>,
         // The last album selected or unselected with a click, where
         // Shift+click starts selecting from
         pub selection_anchor: glib::WeakRef<Album>,
@@ -708,6 +710,12 @@ impl LibraryView {
                 album.chain_property::<Album>("track-count").bind(
                     &content,
                     "total",
+                    gtk::Widget::NONE,
+                );
+                // The covers of the favorite albums have a heart
+                album.chain_property::<Album>("favorite").bind(
+                    &content,
+                    "favorite",
                     gtk::Widget::NONE,
                 );
             }
@@ -1586,6 +1594,67 @@ impl LibraryView {
             .find(|a| a.id_str() == album_id)
     }
 
+    // Whether an album is marked as a favorite
+    pub fn is_favorite_album(&self, album_id: &str) -> bool {
+        self.imp().favorite_albums.borrow().contains(album_id)
+    }
+
+    // Follows albums marked as favorites or unmarked: the hearts of their
+    // covers, and for those marked, the first track, which finds an album
+    // again once a change to its tags gives it another id. That's looked up
+    // in the library in another thread, so that marking doesn't wait for it
+    pub fn favorite_albums_changed(&self, ids: &[String], favorite: bool) {
+        {
+            let mut favorites = self.imp().favorite_albums.borrow_mut();
+            for id in ids {
+                if favorite {
+                    favorites.insert(id.clone());
+                } else {
+                    favorites.remove(id);
+                }
+            }
+        }
+        self.apply_favorite_albums();
+        if !favorite {
+            return;
+        }
+
+        let ids = ids.to_vec();
+        glib::spawn_future_local(async move {
+            let Ok(uris) = gio::spawn_blocking(move || {
+                ids.into_iter()
+                    .filter_map(|id| {
+                        let uri = first_track_uri(&id)?;
+                        Some((id, uri))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            else {
+                return;
+            };
+            play_stats::update_favorite_albums(&play_stats::FavoriteAlbumUpdates {
+                uris,
+                ..Default::default()
+            });
+        });
+    }
+
+    // Shows the hearts of the favorite albums of the grid
+    fn apply_favorite_albums(&self) {
+        let imp = self.imp();
+        let favorites = imp.favorite_albums.borrow();
+        let Some(model) = imp.model.borrow().clone() else {
+            return;
+        };
+        for album in model.iter::<Album>().flatten() {
+            let favorite = favorites.contains(album.id_str());
+            if album.favorite() != favorite {
+                album.set_favorite(favorite);
+            }
+        }
+    }
+
     // Scrolls the grid to an album, clearing the search if it hides it
     pub fn reveal_album(&self, album_id: &str) -> Option<Album> {
         let imp = self.imp();
@@ -1825,7 +1894,7 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let (hidden, albums, has_composers, has_performers, has_works) =
+                let (hidden, albums, has_composers, has_performers, has_works, favorites) =
                     gio::spawn_blocking(move || {
                         let roots = library::roots(&folders);
                         let hidden = [roots.unavailable, roots.excluded].concat();
@@ -1833,13 +1902,37 @@ impl LibraryView {
                         let has_composers = library::has_composers(&hidden);
                         let has_performers = library::has_performers(&hidden);
                         let has_works = library::has_works(&hidden);
-                        (hidden, albums, has_composers, has_performers, has_works)
+                        let shown = albums.iter().map(|album| album.id.as_str()).collect();
+                        let favorites = favorite_album_updates(
+                            &play_stats::favorite_albums(),
+                            &shown,
+                            album_of_uri,
+                            first_track_uri,
+                        );
+                        (
+                            hidden,
+                            albums,
+                            has_composers,
+                            has_performers,
+                            has_works,
+                            favorites,
+                        )
                     })
                     .await
                     .unwrap_or_default();
                 if this.imp().reload_generation.get() == generation {
+                    play_stats::update_favorite_albums(&favorites);
+                    // Read again here, rather than kept from the other
+                    // thread, which would leave out an album marked while
+                    // the albums were read
+                    this.imp()
+                        .favorite_albums
+                        .replace(play_stats::favorite_album_ids());
                     this.imp().hidden_folders.replace(hidden);
                     this.show_albums(albums);
+                    // Also when the albums are the same, and the grid keeps
+                    // them
+                    this.apply_favorite_albums();
                     this.set_pickers_available(has_composers, has_performers);
                     // The works are read again, as the tracks or the hidden
                     // folders can have changed
@@ -2258,6 +2351,53 @@ fn performer_section_factory() -> gtk::SignalListItemFactory {
     factory
 }
 
+// What follows the favorite albums through changes to the library: the
+// albums whose ids changed, and the first tracks of the albums marked since
+// they were last looked up. An album whose id isn't among the `shown` ones
+// has another id if its first track, by `album_of_uri`, does; if that's the
+// same, the album is only hidden, as on a drive that isn't mounted.
+// `first_track_uri` gives the URI of an album's first track, by its id
+fn favorite_album_updates(
+    favorites: &[play_stats::FavoriteAlbum],
+    shown: &HashSet<&str>,
+    album_of_uri: impl Fn(&str) -> Option<String>,
+    first_track_uri: impl Fn(&str) -> Option<String>,
+) -> play_stats::FavoriteAlbumUpdates {
+    let mut updates = play_stats::FavoriteAlbumUpdates::default();
+    for favorite in favorites {
+        match &favorite.uri {
+            None => {
+                if let Some(uri) = first_track_uri(&favorite.id) {
+                    updates.uris.push((favorite.id.clone(), uri));
+                }
+            }
+            Some(uri) if !shown.contains(favorite.id.as_str()) => {
+                if let Some(id) = album_of_uri(uri).filter(|id| *id != favorite.id) {
+                    updates.moves.push((favorite.id.clone(), id));
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    updates
+}
+
+// The album of the track with a URI, in the library, whether its folder is
+// hidden or not; this blocks
+fn album_of_uri(uri: &str) -> Option<String> {
+    let path = gio::File::for_uri(uri).path()?;
+    library::track_album(&path, &[])
+}
+
+// The URI of the first track of an album, whether its folder is hidden or
+// not; this blocks
+fn first_track_uri(album_id: &str) -> Option<String> {
+    let path = library::album_tracks(album_id, &TrackFilter::default(), &[])
+        .into_iter()
+        .next()?;
+    Some(gio::File::for_path(path).uri().to_string())
+}
+
 // The width the covers of the grid are made at: the largest the grid shows
 // them, in the pixels of the monitor with the largest scale. A cover twice
 // as large as it's shown takes four times the memory, and the time to read
@@ -2324,4 +2464,42 @@ fn album_drag_icon(cover: Option<&gdk::Paintable>, n_albums: usize) -> gtk::Widg
         );
     }
     icon.upcast()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn favorite_albums_are_followed_to_their_new_ids() {
+        let favorite = |id: &str, uri: Option<&str>| play_stats::FavoriteAlbum {
+            id: id.to_string(),
+            uri: uri.map(ToString::to_string),
+        };
+        let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
+        let favorites = [
+            // Shown, with its first track
+            favorite("shown", Some("file:///m/shown/01")),
+            // Retagged: its first track is in another album now
+            favorite("old", Some("file:///m/retagged/01")),
+            // Hidden: its first track is still in it
+            favorite("hidden", Some("file:///m/hidden/01")),
+            // Gone, with its first track
+            favorite("gone", Some("file:///m/gone/01")),
+            // Marked, but its first track not looked up yet
+            favorite("new", None),
+        ];
+        let shown = HashSet::from(["shown", "new", "retagged"]);
+        let album_of_uri = |uri: &str| match uri {
+            "file:///m/shown/01" => Some("shown".to_string()),
+            "file:///m/retagged/01" => Some("retagged".to_string()),
+            "file:///m/hidden/01" => Some("hidden".to_string()),
+            _ => None,
+        };
+        let first_track_uri = |id: &str| (id == "new").then(|| "file:///m/new/01".to_string());
+
+        let updates = favorite_album_updates(&favorites, &shown, album_of_uri, first_track_uri);
+        assert_eq!(updates.moves, [pair("old", "retagged")]);
+        assert_eq!(updates.uris, [pair("new", "file:///m/new/01")]);
+    }
 }

@@ -78,6 +78,10 @@ mod imp {
         pub matching_tracks: Cell<u32>,
         #[property(get, set)]
         pub track_count: Cell<u32>,
+        // Whether the album is marked as a favorite, which the grid shows
+        // with a heart on its cover
+        #[property(get, set)]
+        pub favorite: Cell<bool>,
 
         // The keys the grid is sorted by, in the order of the locale
         pub artist_key: OnceCell<glib::CollationKey>,

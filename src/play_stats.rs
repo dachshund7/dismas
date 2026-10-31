@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! What has been played, and the favorite tracks, for the smart playlists
+//! What has been played, and the favorites, for the smart playlists
 //!
 //! Each listen to a track is logged with the seconds heard, in a database
 //! of its own: the library's is a cache that is made again when its schema
@@ -11,7 +11,7 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -21,7 +21,7 @@ use gtk::glib;
 use log::{debug, warn};
 use rusqlite::{Connection, TransactionBehavior, params};
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 // Tracks are told apart by their URI, as for the resume points; a moved
 // or renamed file starts with no stats
@@ -58,6 +58,16 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS listens (
         uri TEXT NOT NULL,
         added INTEGER NOT NULL,
         PRIMARY KEY (work_key, album_id, uri)
+    );
+    CREATE TABLE IF NOT EXISTS favorite_albums (
+        -- What the library tells the album apart by, see
+        -- `library::AlbumInfo`
+        album_id TEXT PRIMARY KEY,
+        -- The URI of its first track when it was marked, which finds the
+        -- album again once a change to its tags gives it another id; NULL
+        -- until it's been looked up in the library
+        uri TEXT,
+        added INTEGER NOT NULL
     );";
 
 const DAY: i64 = 24 * 60 * 60;
@@ -202,9 +212,10 @@ fn open() -> rusqlite::Result<Connection> {
 }
 
 // Unlike the library, the tables are never made again: a later version
-// changes them in place. Version 2 only adds the favorites table, and
-// version 3 the favorite works and recordings, as each statement of the
-// schema leaves a table that's already there as it is.
+// changes them in place. Version 2 only adds the favorites table,
+// version 3 the favorite works and recordings, and version 4 the favorite
+// albums, as each statement of the schema leaves a table that's already
+// there as it is.
 // A database from a newer Dismas is left as it is
 fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -642,6 +653,118 @@ fn query_favorite_items(conn: &Connection) -> rusqlite::Result<Vec<FavoriteItem>
     .collect()
 }
 
+// An album marked as a favorite, and the URI of its first track, once it's
+// been looked up in the library
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FavoriteAlbum {
+    pub id: String,
+    pub uri: Option<String>,
+}
+
+// The favorite albums are read and written on the main thread too, like
+// the favorite tracks. Albums marked together, from a selection, keep the
+// order they're given in
+pub fn set_favorite_albums(ids: &[String], favorite: bool) {
+    let result = with_connection(|conn| set_albums(conn, ids, favorite, now()));
+    if let Err(e) = result {
+        warn!("Unable to change whether albums are favorites: {e}");
+    }
+}
+
+// Marking one again keeps its place in the list, and its first track
+fn set_albums(
+    conn: &mut Connection,
+    ids: &[String],
+    favorite: bool,
+    added: i64,
+) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    for id in ids {
+        if favorite {
+            tx.execute(
+                "INSERT OR IGNORE INTO favorite_albums (album_id, added) VALUES (?1, ?2)",
+                params![id, added],
+            )?;
+        } else {
+            tx.execute("DELETE FROM favorite_albums WHERE album_id = ?1", [id])?;
+        }
+    }
+    tx.commit()
+}
+
+// The ids of the favorite albums, in a set whose order doesn't change
+pub fn favorite_album_ids() -> BTreeSet<String> {
+    with_connection(|conn| {
+        let mut stmt = conn.prepare("SELECT album_id FROM favorite_albums")?;
+        stmt.query_map([], |row| row.get(0))?.collect()
+    })
+    .unwrap_or_else(|e| {
+        warn!("Unable to load the favorite albums: {e}");
+        Default::default()
+    })
+}
+
+// The favorite albums, in the order they were marked
+pub fn favorite_albums() -> Vec<FavoriteAlbum> {
+    with_connection(|conn| query_favorite_albums(conn)).unwrap_or_else(|e| {
+        warn!("Unable to load the favorite albums: {e}");
+        Vec::new()
+    })
+}
+
+fn query_favorite_albums(conn: &Connection) -> rusqlite::Result<Vec<FavoriteAlbum>> {
+    let mut stmt =
+        conn.prepare("SELECT album_id, uri FROM favorite_albums ORDER BY added, rowid")?;
+    stmt.query_map([], |row| {
+        Ok(FavoriteAlbum {
+            id: row.get(0)?,
+            uri: row.get(1)?,
+        })
+    })?
+    .collect()
+}
+
+// What follows the favorite albums through changes to the library: the
+// albums whose ids changed, as (old id, new id), and the URIs of the first
+// tracks of the albums looked up since they were marked, as (id, URI)
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FavoriteAlbumUpdates {
+    pub moves: Vec<(String, String)>,
+    pub uris: Vec<(String, String)>,
+}
+
+// Follows the favorite albums to their new ids, and keeps the URIs of their
+// first tracks. An album unmarked meanwhile stays unmarked, and one that
+// moves onto a favorite stays in that one's place
+pub fn update_favorite_albums(updates: &FavoriteAlbumUpdates) {
+    if updates.moves.is_empty() && updates.uris.is_empty() {
+        return;
+    }
+    let result = with_connection(|conn| update_albums(conn, updates));
+    if let Err(e) = result {
+        warn!("Unable to update the favorite albums: {e}");
+    }
+}
+
+fn update_albums(conn: &mut Connection, updates: &FavoriteAlbumUpdates) -> rusqlite::Result<()> {
+    let FavoriteAlbumUpdates { moves, uris } = updates;
+    let tx = conn.transaction()?;
+    for (old, new) in moves {
+        tx.execute(
+            "UPDATE OR IGNORE favorite_albums SET album_id = ?2 WHERE album_id = ?1",
+            [old, new],
+        )?;
+        tx.execute("DELETE FROM favorite_albums WHERE album_id = ?1", [old])?;
+    }
+    for (id, uri) in uris {
+        tx.execute(
+            "UPDATE favorite_albums SET uri = ?2 WHERE album_id = ?1 AND uri IS NULL",
+            [id, uri],
+        )?;
+    }
+    tx.commit()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,6 +1161,103 @@ mod tests {
     }
 
     #[test]
+    fn version_3_gains_the_favorite_albums_and_keeps_the_other_favorites() {
+        let mut conn = test_db();
+        insert_favorite(&conn, "file:///music/a.flac", 1).unwrap();
+        set_work(&conn, "work", true, 2).unwrap();
+        conn.execute_batch(
+            "DROP TABLE favorite_albums;
+             PRAGMA user_version = 3;",
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+        set_albums(&mut conn, &["album".to_string()], true, 3).unwrap();
+        assert_eq!(query_favorites(&conn).unwrap(), ["file:///music/a.flac"]);
+        assert_eq!(
+            query_favorite_items(&conn).unwrap(),
+            [FavoriteItem::Work("work".to_string())]
+        );
+        assert_eq!(
+            query_favorite_albums(&conn).unwrap(),
+            [FavoriteAlbum {
+                id: "album".to_string(),
+                uri: None
+            }]
+        );
+    }
+
+    fn album_ids(conn: &Connection) -> Vec<String> {
+        query_favorite_albums(conn)
+            .unwrap()
+            .into_iter()
+            .map(|album| album.id)
+            .collect()
+    }
+
+    #[test]
+    fn favorite_albums_are_in_the_order_they_were_marked() {
+        let mut conn = test_db();
+        let ids = |ids: &[&str]| ids.iter().map(ToString::to_string).collect::<Vec<_>>();
+        set_albums(&mut conn, &ids(&["c"]), true, 10).unwrap();
+        // Marked together, in the order of the grid
+        set_albums(&mut conn, &ids(&["b", "a"]), true, 20).unwrap();
+        // Marking one again keeps its place
+        set_albums(&mut conn, &ids(&["c"]), true, 30).unwrap();
+        assert_eq!(album_ids(&conn), ["c", "b", "a"]);
+
+        set_albums(&mut conn, &ids(&["b", "c"]), false, 0).unwrap();
+        assert_eq!(album_ids(&conn), ["a"]);
+    }
+
+    #[test]
+    fn favorite_albums_follow_their_new_ids() {
+        let mut conn = test_db();
+        let ids = |ids: &[&str]| ids.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
+        set_albums(&mut conn, &ids(&["a", "b", "c"]), true, 10).unwrap();
+        let uris = |uris: Vec<(String, String)>| FavoriteAlbumUpdates {
+            uris,
+            ..Default::default()
+        };
+        update_albums(
+            &mut conn,
+            &uris(vec![
+                pair("a", "file:///music/a/01.flac"),
+                pair("b", "file:///b"),
+            ]),
+        )
+        .unwrap();
+        // A URI looked up again doesn't replace the one kept
+        update_albums(&mut conn, &uris(vec![pair("a", "file:///music/a/02.flac")])).unwrap();
+
+        // "a" is now "x", and "c" is now "b", which is a favorite already
+        let moves = FavoriteAlbumUpdates {
+            moves: vec![pair("a", "x"), pair("c", "b")],
+            ..Default::default()
+        };
+        update_albums(&mut conn, &moves).unwrap();
+        assert_eq!(
+            query_favorite_albums(&conn).unwrap(),
+            [
+                FavoriteAlbum {
+                    id: "x".to_string(),
+                    uri: Some("file:///music/a/01.flac".to_string())
+                },
+                FavoriteAlbum {
+                    id: "b".to_string(),
+                    uri: Some("file:///b".to_string())
+                },
+            ]
+        );
+
+        // Unmarked before its URI was kept, it stays unmarked
+        set_albums(&mut conn, &ids(&["b"]), false, 0).unwrap();
+        update_albums(&mut conn, &uris(vec![pair("b", "file:///b")])).unwrap();
+        assert_eq!(album_ids(&conn), ["x"]);
+    }
+
+    #[test]
     fn favorite_works_and_recordings_are_in_the_order_they_were_marked() {
         let conn = test_db();
         let recording = |work_key: &str, uri: &str| FavoriteRecording {
@@ -1117,12 +1337,14 @@ mod tests {
         insert_listen(&mut conn, &listen("a", now - 100, 60)).unwrap();
         insert_listen(&mut conn, &listen("b", now - 50, 60)).unwrap();
         insert_favorite(&conn, "a", now).unwrap();
+        set_albums(&mut conn, &["album".to_string()], true, now).unwrap();
 
         delete_history(&mut conn).unwrap();
         assert!(query_recently_played(&conn).unwrap().is_empty());
         let uris = ["a".to_string(), "b".to_string()];
         assert!(query_track_stats(&mut conn, &uris).unwrap().is_empty());
         assert_eq!(query_favorites(&conn).unwrap(), ["a"]);
+        assert_eq!(album_ids(&conn), ["album"]);
 
         // Listening again starts it over
         insert_listen(&mut conn, &listen("b", now, 60)).unwrap();

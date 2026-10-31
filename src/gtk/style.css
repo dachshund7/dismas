@@ -151,8 +151,26 @@ image.favorite-work {
   color: var(--red-2);
 }
 
-playbackcontrol button.favorite:checked > image {
+playbackcontrol button.favorite:checked > image,
+albumtracks button.favorite:checked > image {
   color: var(--red-2);
+}
+
+/* So is the album's, in the header bar of the album pane, which keeps the
+ * background of an unchecked flat button. libadwaita's rules for the
+ * buttons of header bars list these exceptions, so these rules list them
+ * too, to take precedence over them */
+albumtracks headerbar button.favorite:checked:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  background: none;
+}
+
+albumtracks headerbar button.favorite:checked:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+albumtracks headerbar button.favorite:checked:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+albumtracks headerbar button.favorite:checked.keyboard-activating:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
 /* The title of the playlist pane switches playlists; it's only a little
@@ -679,9 +697,10 @@ flowbox.work-covers .album-cell {
   font-size: 85%;
 }
 
-/* A favorite recording among the covers of the albums of a work, on a
- * circle that shows it over any cover */
-.album-cell .album-cover image.favorite-recording {
+/* The heart of a favorite album in the grid, or of a favorite recording
+ * among the covers of the albums of a work, on a circle that shows it over
+ * any cover */
+.album-cell .album-cover image.favorite {
   padding: 4px;
   border-radius: 999px;
   background-color: var(--window-bg-color);
