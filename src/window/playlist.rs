@@ -437,6 +437,37 @@ impl Window {
         }
     }
 
+    // After the order of the whole queue changed, as with a sort or its
+    // Undo: the track playing, or paused partway, stays in view, as
+    // following it does, and otherwise the list goes to its top, with the
+    // header of its first work, which GTK leaves out of view once all its
+    // items change. A place asked for since, like a track skipped to,
+    // wins
+    pub(super) fn show_queue_after_reorder(&self) {
+        let player = self.player();
+        let state = player.state();
+        let current = player
+            .queue()
+            .current()
+            .filter(|_| state.playing() || state.position() > 0);
+        if let Some(track) = current {
+            self.reveal_queue_track(&track);
+            return;
+        }
+        self.set_queue_scroll(None);
+        let view = self.imp().playlist_view.queue_view();
+        utils::scroll_to_top_when_laid_out(
+            &view,
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[upgrade_or]
+                false,
+                move || win.imp().queue_scroll_tick.borrow().is_none()
+            ),
+        );
+    }
+
     // Shows a track in the queue once it's laid out, keeping the rows
     // around it in view
     pub(super) fn reveal_queue_track(&self, track: &Track) {
@@ -816,6 +847,12 @@ impl Window {
         ));
         undo.toast.set(Some(&toast));
         self.imp().queue_undo.replace(Some(undo));
+    }
+
+    pub(super) fn dismiss_sort_toast(&self) {
+        if let Some(toast) = self.imp().sort_toast.upgrade() {
+            toast.dismiss();
+        }
     }
 
     pub(super) fn dismiss_removed_toast(&self) {

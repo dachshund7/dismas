@@ -27,6 +27,8 @@ mod imp {
         #[template_child]
         pub back_button: TemplateChild<gtk::Button>,
         #[template_child]
+        pub sort_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
         pub queue_scrolled: TemplateChild<gtk::ScrolledWindow>,
         #[template_child]
         pub queue_view: TemplateChild<gtk::ListView>,
@@ -265,6 +267,10 @@ impl PlaylistView {
 
     pub fn back_button(&self) -> gtk::Button {
         self.imp().back_button.get()
+    }
+
+    pub fn sort_button(&self) -> gtk::MenuButton {
+        self.imp().sort_button.get()
     }
 
     pub fn queue_actionbar(&self) -> gtk::ActionBar {

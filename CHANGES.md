@@ -196,6 +196,12 @@ All notable changes to this project will be documented in this file.
 - Playing an album, or a track of an album, in place of the queue has an
   Undo too, when the queue had other tracks; playing another track of the
   same album doesn't need one
+- The sort button in the playlist pane puts the playlist in order once,
+  by album, artist, composer, title, year or file name, or reverses it.
+  Composers go by their sort names, and a composer's works by catalogue
+  number, as on the Works page. The movements of a work stay together, in
+  their order. The toast's Undo, or Ctrl+Z, puts the order back. Sorting a
+  shuffled playlist turns shuffle off, and Undo turns it back on
 
 ### Changed
 

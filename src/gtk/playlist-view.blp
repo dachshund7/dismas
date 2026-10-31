@@ -8,7 +8,7 @@ template $DismasPlaylistView: Widget {
   Adw.ToolbarView {
     [top]
     // The time left often makes the title wider than the room between the
-    // one button at the start and the two at the end, which pushed it off
+    // two buttons at the start and the two at the end, which pushed it off
     // center; it's shortened instead. The back button of the collapsed
     // split view makes the end side wider still, so the title is only
     // kept in the middle while it's hidden (playlist_view.rs)
@@ -21,6 +21,16 @@ template $DismasPlaylistView: Widget {
         action-name: "queue.search";
         valign: center;
         tooltip-text: _("Search Tracks");
+      }
+
+      // Sorts the tracks once, with an Undo; the menu's actions are the
+      // window's, which also turns the button off (bindings.rs)
+      [start]
+      MenuButton sort_button {
+        icon-name: "view-sort-ascending-symbolic";
+        valign: center;
+        tooltip-text: _("Sort Tracks");
+        menu-model: sort_menu;
       }
 
       // The title switches to another playlist, as going back to the
@@ -195,5 +205,55 @@ template $DismasPlaylistView: Widget {
     styles [
       "playlist-background",
     ]
+  }
+}
+
+menu sort_menu {
+  section {
+    label: _("Sort By");
+
+    item {
+      label: _("Album");
+      action: "queue.sort";
+      target: "album";
+    }
+
+    item {
+      label: _("Artist");
+      action: "queue.sort";
+      target: "artist";
+    }
+
+    item {
+      label: _("Composer");
+      action: "queue.sort";
+      target: "composer";
+    }
+
+    item {
+      label: _("Title");
+      action: "queue.sort";
+      target: "title";
+    }
+
+    item {
+      label: _("Year");
+      action: "queue.sort";
+      target: "year";
+    }
+
+    item {
+      label: _("File Name");
+      action: "queue.sort";
+      target: "file-name";
+    }
+  }
+
+  section {
+    item {
+      label: _("Reverse Order");
+      action: "queue.sort";
+      target: "reverse";
+    }
   }
 }

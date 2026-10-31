@@ -918,7 +918,7 @@ fn query_album_track_paths(
 // own whose track numbers start again, then by track number, and then by
 // file name in the order a file manager shows them, "2" before "10"
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct TrackOrder {
+pub(crate) struct TrackOrder {
     disc: i64,
     folder: Option<(bool, glib::FilenameCollationKey)>,
     track: i64,
@@ -926,7 +926,7 @@ struct TrackOrder {
 }
 
 impl TrackOrder {
-    fn new(path: &Path, disc: Option<i64>, track: Option<i64>) -> Self {
+    pub(crate) fn new(path: &Path, disc: Option<i64>, track: Option<i64>) -> Self {
         let name = |path: Option<&Path>| {
             utils::file_name_key(&path.map(Path::to_string_lossy).unwrap_or_default())
         };
@@ -2940,7 +2940,7 @@ pub fn album_folder_entry(path: &Path) -> &Path {
 
 // The folder of the album a track is in; the discs of an album are often
 // in their own folders
-fn album_folder(path: &Path) -> Option<&Path> {
+pub(crate) fn album_folder(path: &Path) -> Option<&Path> {
     let parent = path.parent()?;
     if is_disc_folder(parent.file_name()?) {
         parent.parent()

@@ -228,6 +228,114 @@ impl Window {
         playlists::drop_unshuffled(&name);
     }
 
+    // Sorts the tracks of the selected playlist once, see `Queue::sort()`,
+    // and saves them; the toast's Undo puts back the order they had. A
+    // shuffled playlist is no longer shuffled, and the order it had before
+    // is dropped, which the Undo puts back too. As in a shuffle, the track
+    // playing, or paused partway, goes on from where it is, and otherwise
+    // the first of the sorted tracks is ready to play
+    pub(super) fn sort_queue(&self, key: SortKey) {
+        let player = self.player();
+        let queue = player.queue();
+        // While tracks are read, the queue doesn't have them all yet
+        let name = self.selected_playlist();
+        if queue.n_tracks() < 2
+            || self.imp().loads.get() > 0
+            || (!name.is_empty() && !playlists::exists(&name))
+        {
+            return;
+        }
+
+        let order: Vec<Track> = queue.model().iter::<Track>().flatten().collect();
+        let shuffled = playlists::is_shuffled(&name);
+        let unshuffled = shuffled
+            .then(|| playlists::load_unshuffled(&name))
+            .flatten();
+        if !queue.sort(key) && !shuffled {
+            // Said at once, rather than after the toast of a sort before,
+            // whose Undo comes back after it and still puts back its order
+            let toast = utils::plain_toast(&if key == SortKey::Reverse {
+                // A playlist that is a single work, whose movements stay in
+                // their order
+                i18n("The movements of a work stay in their order")
+            } else {
+                i18n("The tracks are already in that order")
+            });
+            toast.set_priority(adw::ToastPriority::High);
+            self.imp().toast_overlay.add_toast(toast);
+            return;
+        }
+
+        let state = player.state();
+        let mut current = None;
+        if !state.playing() && state.position() == 0 {
+            let before = queue.current();
+            player.skip_to_first();
+            if let (Some(before), Some(picked)) = (before, queue.current())
+                && before != picked
+            {
+                current = Some((before, picked));
+            }
+        }
+        self.store_queue();
+        // Only once the sorted order is saved, so that a crash in between
+        // can't lose it
+        if shuffled {
+            playlists::drop_unshuffled(&name);
+            self.sync_queue_shuffled();
+        }
+
+        let undo = SortUndo {
+            generation: queue.generation(),
+            order,
+            unshuffled,
+            current,
+        };
+        let toast = self.add_undo_toast(sorted_message(key), move |win| win.undo_sort(&undo));
+        self.imp().sort_toast.set(Some(&toast));
+        self.show_queue_after_reorder();
+    }
+
+    // Puts back the order the tracks had before they were sorted; the
+    // tracks added since go at the end, and those removed since stay out.
+    // The track that was current comes back, unless one played since
+    fn undo_sort(&self, undo: &SortUndo) {
+        let player = self.player();
+        let queue = player.queue();
+        let name = self.selected_playlist();
+        // Emptied since for other tracks, such as those of another playlist
+        if self.imp().loads.get() > 0
+            || undo.generation != queue.generation()
+            || (!name.is_empty() && !playlists::exists(&name))
+        {
+            return;
+        }
+
+        // Kept first, so that a crash in between can't lose it; not over
+        // the order of a shuffle since
+        if let Some(files) = &undo.unshuffled
+            && !playlists::is_shuffled(&name)
+            && let Err(e) = playlists::save_unshuffled(&name, files)
+        {
+            log::warn!("Unable to keep the order of the playlist '{name}': {e}");
+        }
+        queue.restore_tracks(&undo.order);
+
+        let state = player.state();
+        if let Some((before, picked)) = &undo.current
+            && !state.playing()
+            && state.position() == 0
+            && queue.current().as_ref() == Some(picked)
+            && let Some(pos) = queue.position(before)
+            && queue.playable_track(pos).is_some()
+        {
+            player.skip_to(pos);
+        }
+        self.store_queue();
+        self.sync_queue_shuffled();
+        self.show_queue_after_reorder();
+    }
+
     // Playing tracks right away replaces those of the queue, rather than
     // those of a saved playlist
     pub(super) fn select_queue_to_play(&self) {
@@ -704,6 +812,31 @@ impl Window {
             }
         };
         self.add_toast(message);
+    }
+}
+
+// What the Undo of a sort puts back: the tracks in the order they had,
+// the order they had before they were shuffled, if they were, and, if the
+// sort made another track current, the one that was and the one it made
+struct SortUndo {
+    // The generation of the queue they were sorted in
+    generation: u64,
+    order: Vec<Track>,
+    unshuffled: Option<Vec<gio::File>>,
+    current: Option<(Track, Track)>,
+}
+
+// What the toast of a sort says, a whole sentence for each, so that
+// translations can put each in their own words
+fn sorted_message(key: SortKey) -> String {
+    match key {
+        SortKey::Album => i18n("Sorted by album"),
+        SortKey::Artist => i18n("Sorted by artist"),
+        SortKey::Composer => i18n("Sorted by composer"),
+        SortKey::Title => i18n("Sorted by title"),
+        SortKey::Year => i18n("Sorted by year"),
+        SortKey::FileName => i18n("Sorted by file name"),
+        SortKey::Reverse => i18n("Reversed the order"),
     }
 }
 

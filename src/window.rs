@@ -39,7 +39,7 @@ use sidebar::SizeLimits;
 use crate::{
     album_tracks::AlbumTracks,
     audio::{
-        AudioPlayer, CoverCache, Missing, RemovedRun, RepeatMode, ReplayGainMode, Track,
+        AudioPlayer, CoverCache, Missing, RemovedRun, RepeatMode, ReplayGainMode, SortKey, Track,
         load_tracks,
     },
     config::APPLICATION_ID,
@@ -305,6 +305,9 @@ mod imp {
         // What the Undo of the toast about removed tracks puts back, while
         // that toast is up
         pub(super) queue_undo: RefCell<Option<QueueUndo>>,
+        // The toast whose Undo puts back the order from before a sort,
+        // which goes when the order changes otherwise, see `sort_queue()`
+        pub sort_toast: glib::WeakRef<adw::Toast>,
 
         // The handlers connected to objects that outlive the window, the
         // player's and the style manager, which are disconnected when it
@@ -412,6 +415,19 @@ mod imp {
                 debug!("Window::queue.clear()");
                 win.remove_all_tracks();
             });
+            klass.install_action(
+                "queue.sort",
+                Some(glib::VariantTy::STRING),
+                move |win, _, param| {
+                    debug!("Window::queue.sort()");
+                    let key = param
+                        .and_then(glib::Variant::str)
+                        .and_then(SortKey::from_nick);
+                    if let Some(key) = key {
+                        win.sort_queue(key);
+                    }
+                },
+            );
             klass.install_action(
                 "win.select-playlist",
                 Some(glib::VariantTy::STRING),
@@ -622,6 +638,7 @@ mod imp {
                 failed_toast: glib::WeakRef::new(),
                 undo_toast: glib::WeakRef::new(),
                 queue_undo: RefCell::default(),
+                sort_toast: glib::WeakRef::new(),
                 handlers: RefCell::default(),
             }
         }
@@ -806,6 +823,9 @@ mod imp {
             if shuffled == self.queue_shuffled.get() {
                 return;
             }
+            // The order the sort's Undo would put back is no longer the
+            // one before the last change
+            obj.dismiss_sort_toast();
             if shuffled {
                 obj.shuffle_queue();
             } else {

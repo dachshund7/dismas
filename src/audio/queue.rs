@@ -12,8 +12,9 @@ use rand::Rng;
 
 use crate::{
     audio::{
-        RepeatMode, Track,
+        RepeatMode, SortKey, Track,
         shuffle::{Entry, shuffled_order},
+        sort,
     },
     play_stats::TrackStats,
     utils,
@@ -313,6 +314,32 @@ impl Queue {
             .map(|pos| tracks[pos].clone())
             .collect();
         self.replace_order(&shuffled);
+    }
+
+    // Sorts the tracks, in a single change, see `sorted_order()`; the
+    // current track stays current, wherever it goes. Says whether the order
+    // changed. The tracks Play Next put in are forgotten, as they're no
+    // longer after the current track
+    pub fn sort(&self, key: SortKey) -> bool {
+        let tracks = self.tracks();
+        let entries: Vec<sort::Entry> = tracks
+            .iter()
+            .enumerate()
+            .map(|(pos, track)| sort::Entry {
+                continues_work: pos > 0 && continues_work(&tracks[pos - 1], track),
+                ..track.sort_entry()
+            })
+            .collect();
+        let sorted: Vec<Track> = sort::sorted_order(&entries, key)
+            .into_iter()
+            .map(|pos| tracks[pos].clone())
+            .collect();
+        if sorted == tracks {
+            return false;
+        }
+        self.forget_played_next();
+        self.replace_order(&sorted);
+        true
     }
 
     // Puts the tracks back in the order of the URIs saved before they were
@@ -971,6 +998,69 @@ mod tests {
 
         queue.shuffle(None, &HashMap::new(), 0, &mut seeded(1));
         assert_eq!(*changes.borrow(), [(0, 5, 5)]);
+    }
+
+    #[test]
+    fn sort_is_one_change() {
+        let (queue, _) = queue_of(4);
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        queue.model().connect_items_changed({
+            let changes = changes.clone();
+            move |_, position, removed, added| changes.borrow_mut().push((position, removed, added))
+        });
+
+        assert!(queue.sort(SortKey::Reverse));
+        assert_eq!(*changes.borrow(), [(0, 4, 4)]);
+    }
+
+    #[test]
+    fn sort_keeps_the_current_track() {
+        let (queue, t) = queue_of(3);
+        queue.set_current_track(Some(t[0].clone()));
+        queue.sort(SortKey::Reverse);
+        assert_eq!(order(&queue, &t), [2, 1, 0]);
+        assert_eq!(queue.current().as_ref(), Some(&t[0]));
+        assert_eq!(queue.current_track_index(), Some(2));
+    }
+
+    #[test]
+    fn sort_says_whether_the_order_changed() {
+        // Tracks that sort the same keep their order
+        let (queue, t) = queue_of(3);
+        let changes = Rc::new(RefCell::new(0));
+        queue.model().connect_items_changed({
+            let changes = changes.clone();
+            move |_, _, _, _| *changes.borrow_mut() += 1
+        });
+        assert!(!queue.sort(SortKey::Album));
+        assert_eq!(order(&queue, &t), [0, 1, 2]);
+        assert_eq!(*changes.borrow(), 0);
+        assert!(queue.sort(SortKey::Reverse));
+    }
+
+    #[test]
+    fn sort_forgets_the_tracks_played_next() {
+        let (queue, t) = queue_of(4);
+        queue.skip_track(0);
+        queue.mark_played_next(&t[1..3]);
+        queue.sort(SortKey::Reverse);
+        assert!(queue.imp().played_next.borrow().is_empty());
+
+        // Unless nothing moved
+        queue.mark_played_next(&t[1..2]);
+        queue.sort(SortKey::Album);
+        assert_eq!(queue.imp().played_next.borrow().len(), 1);
+    }
+
+    #[test]
+    fn restore_tracks_undoes_a_reverse_with_copies() {
+        // The tracks have the same URI, as copies of a file
+        let (queue, t) = queue_of(3);
+        queue.set_current_track(Some(t[2].clone()));
+        queue.sort(SortKey::Reverse);
+        queue.restore_tracks(&t);
+        assert_eq!(order(&queue, &t), [0, 1, 2]);
+        assert_eq!(queue.current_track_index(), Some(2));
     }
 
     fn uris(uris: &[&str]) -> Vec<String> {

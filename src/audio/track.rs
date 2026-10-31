@@ -44,7 +44,7 @@ use crate::{
     audio::cover_cache::{AlbumCover, CoverArt, CoverCache},
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::{i18n, i18n_f},
-    library::{Disc, folder_album_title, is_mbid},
+    library::{self, Disc, folder_album_title, is_mbid},
     utils::{self, ATTRIBUTE_HOST_PATH},
 };
 
@@ -935,6 +935,62 @@ impl Track {
         self.imp().data.borrow().credits().disc_subtitle.clone()
     }
 
+    // What sorting the playlist goes by, see `sort::sorted_order()`, under
+    // a single borrow of the tags, as every track of the queue is asked at
+    // once. Whether the track continues the work of the one before it is
+    // left to the queue, which knows that track
+    pub(super) fn sort_entry(&self) -> super::sort::Entry {
+        let data = self.imp().data.borrow();
+        let credits = data.credits();
+        let path = data
+            .file
+            .path()
+            .unwrap_or_else(|| PathBuf::from(data.uri()));
+        // The folder the sheet of a track of a sheet is in, worked out from
+        // the path alone, without asking the disk
+        let file =
+            cue_sheet::missing_location_parts(&path).map_or(path.as_path(), |(sheet, _)| sheet);
+        let folder = library::album_folder(file).map(Path::to_path_buf);
+        // The artist only stands in for the composers of a work
+        let artist = data.artist().filter(|_| credits.work.is_some());
+        let composers = library::credited_work_composers(credits, artist);
+        let work_name = credits
+            .work
+            .clone()
+            .unwrap_or_else(|| data.shown_title().to_string());
+        // As the library tells works apart without the plugin's id
+        let work_key = credits.work_id.clone().unwrap_or_else(|| {
+            let composers = composers
+                .iter()
+                .map(|composer| composer.key.as_str())
+                .sorted()
+                .join("\x1f");
+            format!("t:{}\x1f{composers}", library::composer_key(&work_name))
+        });
+        super::sort::Entry {
+            continues_work: false,
+            album: data.album().map(ToString::to_string),
+            shown_album: data.shown_album().to_string(),
+            album_artist: credits.album_artist.clone(),
+            release: credits.musicbrainz.release.clone(),
+            folder,
+            disc: credits.disc_number,
+            track: credits.track_number,
+            artist: data.artist().map(ToString::to_string),
+            artist_sort: credits.artist_sort.clone(),
+            composers,
+            work_key,
+            work_name,
+            work_title: credits.work_title.clone(),
+            heading: credits
+                .movement_work()
+                .unwrap_or_else(|| data.shown_title())
+                .to_string(),
+            year: credits.year(),
+            path,
+        }
+    }
+
     // The artist that shuffling keeps from coming twice in a row: the
     // composers of a movement, as its work shows them, and otherwise the
     // artist in the tags
@@ -1009,7 +1065,9 @@ impl Track {
 
 #[cfg(test)]
 mod tests {
-    use gtk::gio::prelude::*;
+    use std::path::Path;
+
+    use gtk::gio::{self, prelude::*};
     use itertools::Itertools;
     use lofty::tag::{ItemKey, Tag, TagType};
 
@@ -1102,6 +1160,47 @@ mod tests {
         tag.insert_text(ItemKey::Composer, "Rodgers & Hammerstein".to_string());
         let credits = TrackCredits::from_tag(&tag, &Default::default());
         assert_eq!(credits.composers, ["Rodgers", "Hammerstein"]);
+    }
+
+    #[test]
+    fn a_movement_sorts_by_its_work_and_the_works_composers() {
+        let requiem = TrackData {
+            title: Some("Lacrimosa".to_string()),
+            artist: Some("Wiener Philharmoniker".to_string()),
+            album: Some("Requiem".to_string()),
+            credits: TrackCredits {
+                work: Some("Requiem in D minor, K. 626".to_string()),
+                movement: Some("Lacrimosa".to_string()),
+                composers: vec![
+                    "Wolfgang Amadeus Mozart".to_string(),
+                    "Franz Xaver Süßmayr".to_string(),
+                ],
+                work_composers: vec!["Wolfgang Amadeus Mozart".to_string()],
+                ..Default::default()
+            },
+            file: gio::File::for_path("/music/Requiem/08.flac"),
+            ..Default::default()
+        };
+        let entry = Track::new(requiem).sort_entry();
+        assert_eq!(entry.heading, "Requiem in D minor, K. 626");
+        assert_eq!(entry.work_name, "Requiem in D minor, K. 626");
+        let composers: Vec<&str> = entry.composers.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(composers, ["Wolfgang Amadeus Mozart"]);
+        assert_eq!(entry.folder.as_deref(), Some(Path::new("/music/Requiem")));
+        assert_eq!(entry.album.as_deref(), Some("Requiem"));
+    }
+
+    #[test]
+    fn a_track_whose_file_is_missing_sorts_by_its_file_alone() {
+        let file = gio::File::for_path("/music/Album/03 Song.flac");
+        let entry = Track::new(TrackData::missing(file, Missing::NotFound)).sort_entry();
+        assert_eq!(entry.album, None);
+        assert_eq!(entry.artist, None);
+        assert_eq!(entry.year, None);
+        assert!(entry.composers.is_empty());
+        // The title from its file name, as it's shown
+        assert!(entry.heading.contains("Song"), "{}", entry.heading);
+        assert_eq!(entry.path, Path::new("/music/Album/03 Song.flac"));
     }
 
     #[test]

@@ -60,6 +60,7 @@ mod player;
 mod queue;
 pub mod shuffle;
 mod sleep_timer;
+mod sort;
 mod state;
 mod track;
 mod waveform_generator;
@@ -70,6 +71,7 @@ pub use player::{
 };
 pub use queue::{Queue, RemovedRun};
 pub use sleep_timer::{SleepTimer, TimerEnd};
+pub use sort::SortKey;
 pub use state::PlayerState;
 pub use track::{
     Arrangement, ExtraComments, FileDetails, FileTags, Gains, ListedPerformer, Missing,

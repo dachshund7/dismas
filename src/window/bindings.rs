@@ -179,14 +179,17 @@ impl Window {
         self.disconnect_on_close(queue, notify_ntracks_id);
 
         // Tracks removed from the queue can't be put back once it's emptied
-        // for other tracks, e.g. those of another playlist, so the toast
-        // that offers it goes
+        // for other tracks, e.g. those of another playlist, nor the order
+        // from before a sort, so the toasts that offer them go
         let notify_generation_id = queue.connect_notify_local(
             Some("generation"),
             clone!(
                 #[weak(rename_to = win)]
                 self,
-                move |_, _| win.dismiss_removed_toast()
+                move |_, _| {
+                    win.dismiss_removed_toast();
+                    win.dismiss_sort_toast();
+                }
             ),
         );
         self.disconnect_on_close(queue, notify_generation_id);
@@ -408,10 +411,10 @@ impl Window {
     }
 
     // The pane's Remove All and Select buttons do nothing without
-    // tracks, and Remove All waits for the tracks being loaded. So does
-    // shuffling, which saves the tracks of the queue: while they're read,
-    // it doesn't have them all. A shuffled playlist can always be put back
-    // in order, even with a single track left
+    // tracks, and Remove All waits for the tracks being loaded. So do
+    // shuffling and sorting, which save the tracks of the queue: while
+    // they're read, it doesn't have them all. A shuffled playlist can
+    // always be put back in order, even with a single track left
     pub(super) fn update_queue_actions(&self) {
         let n_tracks = self.player().queue().n_tracks();
         let loading = self.imp().loads.get() > 0;
@@ -419,6 +422,14 @@ impl Window {
         self.action_set_enabled("queue.select", n_tracks > 0);
         let can_shuffle = n_tracks > 1 || (n_tracks > 0 && self.queue_shuffled());
         self.action_set_enabled("queue.shuffle", can_shuffle && !loading);
+        // The button that opens the sorts has no action of its own, and a
+        // greyed out button tells screen readers it's off
+        let can_sort = n_tracks > 1 && !loading;
+        self.action_set_enabled("queue.sort", can_sort);
+        self.imp()
+            .playlist_view
+            .sort_button()
+            .set_sensitive(can_sort);
         // Playing the tracks a search found needs some that can play, and
         // the search would only find some of those being read
         self.action_set_enabled(
