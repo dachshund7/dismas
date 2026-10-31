@@ -251,6 +251,12 @@ All notable changes to this project will be documented in this file.
   than 21 MB, and the Flatpak's is smaller too: both are optimized across
   the crates they're built from, and the tarball's leaves out its symbol
   table
+- The desktop's media controls and the tray icon's tooltip name the
+  composer of a classical track after the performers, or the performers
+  after the composer, as Copy does, rather than only the artist; the
+  artist stays first, for scrobblers that take only the first. Programs
+  that read MPRIS also get the composers, the album artist, the lyricists,
+  the genres, the track and disc numbers, the date and the file
 
 ### Fixed
 

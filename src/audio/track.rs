@@ -325,6 +325,25 @@ impl TrackData {
         }
     }
 
+    // The artists for the desktop's media controls: the artist, then the
+    // names that Copy adds to it, the performers after a composer or the
+    // composers of classical music. The artist stays first, as scrobblers
+    // can take only the first one
+    pub fn credited_artists(&self) -> Vec<&str> {
+        let artist = self.artist();
+        let others = match self.credits.performer_names_of_composer(artist) {
+            Some(performers) => performers,
+            None => self
+                .credits
+                .listed_composer_names(artist)
+                .unwrap_or_default()
+                .iter()
+                .map(String::as_str)
+                .collect(),
+        };
+        artist.into_iter().chain(others).collect()
+    }
+
     pub fn uuid(&self) -> Option<&str> {
         self.uuid.as_deref()
     }
@@ -767,6 +786,24 @@ impl Track {
         self.imp().data.borrow().copied_details()
     }
 
+    // The artists for MPRIS and the tray, or the artist shown if there are
+    // none, as the controls would show no one
+    pub fn credited_artists(&self) -> Vec<String> {
+        let names = self
+            .imp()
+            .data
+            .borrow()
+            .credited_artists()
+            .into_iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if names.is_empty() {
+            vec![self.artist()]
+        } else {
+            names
+        }
+    }
+
     pub fn file_details(&self) -> FileDetails {
         self.imp().data.borrow().details().clone()
     }
@@ -1199,6 +1236,77 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(duet.copied_details(), "Song — Singer");
+    }
+
+    #[test]
+    fn credited_artists_add_the_names_copy_adds_after_the_artist() {
+        let song = TrackData {
+            artist: Some("The Beatles".to_string()),
+            credits: TrackCredits {
+                composers: vec!["John Lennon".to_string(), "Paul McCartney".to_string()],
+                performers: vec![Credit::parse("John Lennon (vocals)")],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(song.credited_artists(), ["The Beatles"]);
+
+        // The composers of classical music after the performers, or alone
+        let madrigal = TrackData {
+            artist: Some("Núria Rial, Oleguer Aymamí".to_string()),
+            credits: TrackCredits {
+                composers: vec!["Claudio Monteverdi".to_string()],
+                genres: vec!["Classical".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            madrigal.credited_artists(),
+            ["Núria Rial, Oleguer Aymamí", "Claudio Monteverdi"]
+        );
+        let untagged = TrackData {
+            artist: None,
+            ..madrigal
+        };
+        assert_eq!(untagged.credited_artists(), ["Claudio Monteverdi"]);
+
+        // The performers after the composer, from the album artist as it's
+        // written, or one by one from the track's tags
+        let requiem = TrackData {
+            artist: Some("Johannes Brahms".to_string()),
+            credits: TrackCredits {
+                album_artist: Some(
+                    "Johannes Brahms; Kammerchor Stuttgart & Frieder Bernius".to_string(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            requiem.credited_artists(),
+            ["Johannes Brahms", "Kammerchor Stuttgart & Frieder Bernius"]
+        );
+        let requiem = TrackData {
+            credits: TrackCredits {
+                composers: vec!["Johannes Brahms".to_string()],
+                conductors: vec!["Frieder Bernius".to_string()],
+                performers: vec![Credit::parse("Kammerchor Stuttgart (choir vocals)")],
+                ..requiem.credits
+            },
+            ..requiem
+        };
+        assert_eq!(
+            requiem.credited_artists(),
+            ["Johannes Brahms", "Frieder Bernius", "Kammerchor Stuttgart"]
+        );
+
+        // Nobody, without an artist or credits
+        let nobody = TrackData {
+            artist: None,
+            ..Default::default()
+        };
+        assert!(nobody.credited_artists().is_empty());
     }
 
     #[test]
@@ -1935,13 +2043,15 @@ mod tests {
             ..dates(Some("1989"), Some("1938"))
         };
         assert_eq!(recorded.year().as_deref(), Some("1937"));
+        assert_eq!(recorded.year_date(), Some("1937-11-08/1938-03-08"));
         // A date that doesn't start with a year is skipped
         let odd = TrackCredits {
             recording_date: Some("autumn".to_string()),
-            release_date: Some("2020-01-17".to_string()),
+            release_date: Some(" 2020-01-17".to_string()),
             ..Default::default()
         };
         assert_eq!(odd.year().as_deref(), Some("2020"));
+        assert_eq!(odd.year_date(), Some("2020-01-17"));
         assert_eq!(TrackCredits::default().year(), None);
     }
 

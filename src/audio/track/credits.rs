@@ -336,6 +336,14 @@ impl TrackCredits {
     // it was first released, as the date of a reissue says nothing of the
     // recording, or else the year of the release
     pub fn year(&self) -> Option<String> {
+        self.year_date()
+            .and_then(|date| date.get(..4))
+            .map(ToString::to_string)
+    }
+
+    // The date `year()` takes the year from, as the tag has it, e.g.
+    // "1937-11-08/1938-03-08" for a recording made over several months
+    pub fn year_date(&self) -> Option<&str> {
         [
             &self.recording_date,
             &self.original_date,
@@ -344,11 +352,10 @@ impl TrackCredits {
         ]
         .into_iter()
         .flatten()
-        .find_map(|date| {
-            let year = date.trim().get(..4)?;
-            year.chars()
-                .all(|c| c.is_ascii_digit())
-                .then(|| year.to_string())
+        .map(|date| date.trim())
+        .find(|date| {
+            date.get(..4)
+                .is_some_and(|year| year.chars().all(|c| c.is_ascii_digit()))
         })
     }
 
@@ -366,6 +373,12 @@ impl TrackCredits {
     // a larger work, unless the artist already names them; only for
     // classical music, as for popular music they are the songwriters
     pub fn listed_composers(&self, artist: Option<&str>) -> Option<String> {
+        self.listed_composer_names(artist)
+            .map(|composers| composers.join(", "))
+    }
+
+    // The composers `listed_composers()` names, one by one
+    pub fn listed_composer_names(&self, artist: Option<&str>) -> Option<&[String]> {
         let classical = self
             .genres
             .iter()
@@ -374,7 +387,7 @@ impl TrackCredits {
         if !classical || self.composers.is_empty() || named {
             return None;
         }
-        Some(self.composers.join(", "))
+        Some(&self.composers)
     }
 
     // The movement, with its number if any, e.g. "2. Adagio"; only set if
@@ -424,7 +437,30 @@ impl TrackCredits {
     // artist performs too, as songwriters do, whose band would only
     // clutter the row
     pub fn performers_of_composer(&self, artist: Option<&str>) -> Option<String> {
-        let artist = artist?;
+        let artist = artist.filter(|a| self.only_names_composer(a))?;
+        Some(self.summary(Some(artist)))
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                self.album_performers_of_composer(artist)
+                    .map(ToString::to_string)
+            })
+    }
+
+    // The performers `performers_of_composer()` names, one by one; the
+    // performers in the album artist are one name, as they are written
+    pub fn performer_names_of_composer(&self, artist: Option<&str>) -> Option<Vec<&str>> {
+        let artist = artist.filter(|a| self.only_names_composer(a))?;
+        let (conductors, performers) = self.summary_names(Some(artist));
+        let names = conductors.into_iter().chain(performers).collect::<Vec<_>>();
+        if names.is_empty() {
+            self.album_performers_of_composer(artist).map(|p| vec![p])
+        } else {
+            Some(names)
+        }
+    }
+
+    // Whether the artist is the composer, and none of the performers
+    fn only_names_composer(&self, artist: &str) -> bool {
         // Without composers in the tags, the album artist tells whether the
         // artist is the composer
         let is_composer = if self.composers.is_empty() {
@@ -432,20 +468,11 @@ impl TrackCredits {
         } else {
             self.artist_is_composer(artist)
         };
-        if !is_composer
-            || self
+        is_composer
+            && !self
                 .performers
                 .iter()
                 .any(|p| artist.contains(p.name.as_str()))
-        {
-            return None;
-        }
-        Some(self.summary(Some(artist)))
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                self.album_performers_of_composer(artist)
-                    .map(ToString::to_string)
-            })
     }
 
     // The performers in the album artist, when the artist is one of the
@@ -559,30 +586,34 @@ impl TrackCredits {
     // the featured ones, or the ones in the album artist in place of a
     // long list of players
     pub fn summary(&self, artist: Option<&str>) -> String {
+        let (conductors, performers) = self.summary_names(artist);
+        [conductors.join(", "), performers.join(", ")]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .join(" · ")
+    }
+
+    // The conductors and the performers that `summary()` names, apart
+    fn summary_names(&self, artist: Option<&str>) -> (Vec<&str>, Vec<&str>) {
         let ensemble = self.ensemble_in_album_artist();
         let conductors = self
             .conductors
             .iter()
-            .filter(|c| {
-                Some(c.as_str()) != artist && !ensemble.is_some_and(|e| e.contains(c.as_str()))
-            })
-            .join(", ");
+            .map(String::as_str)
+            .filter(|c| Some(*c) != artist && !ensemble.is_some_and(|e| e.contains(c)))
+            .collect();
         let performers = match ensemble {
-            Some(ensemble) if Some(ensemble) == artist => String::new(),
-            Some(ensemble) => ensemble.to_string(),
+            Some(ensemble) if Some(ensemble) == artist => Vec::new(),
+            Some(ensemble) => vec![ensemble],
             None => self
                 .featured_performers()
                 .into_iter()
                 .map(|p| p.name.as_str())
                 .filter(|name| Some(*name) != artist && !self.conductors.iter().any(|c| c == name))
                 .unique()
-                .join(", "),
+                .collect(),
         };
-
-        [conductors, performers]
-            .iter()
-            .filter(|s| !s.is_empty())
-            .join(" · ")
+        (conductors, performers)
     }
 
     // The conductors and performers that the credits line names, for the

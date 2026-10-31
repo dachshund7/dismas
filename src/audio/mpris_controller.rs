@@ -161,12 +161,29 @@ impl MprisController {
             Err(e) => error!("Invalid MPRIS track id: {e}"),
         }
 
-        metadata.set_artist(Some(vec![track.artist()]));
+        // Desktop widgets show the title and the artists, so the artists
+        // name the composer or the performers too, as the player does
+        metadata.set_artist(Some(track.credited_artists()));
         metadata.set_title(Some(track.title()));
         metadata.set_album(Some(track.album()));
+        metadata.set_url(Some(track.audio_uri()));
 
         let length = time(track.duration());
         metadata.set_length(Some(length));
+
+        // For the bars and widgets that can show more
+        let credits = track.credit_details();
+        // The start of a recording made over several months
+        let date = credits.year_date().and_then(|d| d.split('/').next());
+        metadata.set_content_created(date.map(ToString::to_string));
+        let names = |names: Vec<String>| Some(names).filter(|n| !n.is_empty());
+        metadata.set_composer(names(credits.composers));
+        metadata.set_lyricist(names(credits.lyricists));
+        metadata.set_genre(names(credits.genres));
+        metadata.set_album_artist(credits.album_artist.map(|a| vec![a]));
+        let number = |n: Option<u32>| n.and_then(|n| i32::try_from(n).ok());
+        metadata.set_track_number(number(credits.track_number));
+        metadata.set_disc_number(number(credits.disc_number));
 
         // MPRIS should really support passing a bytes buffer for the cover
         // art, instead of requiring this ridiculous charade
