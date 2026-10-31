@@ -2098,6 +2098,142 @@ mod tests {
     }
 
     #[test]
+    fn a_songwriter_who_performs_stands_for_the_session_players() {
+        let parse = |performers: &[&str]| performers.iter().map(|p| Credit::parse(p)).collect();
+        let split = |names: &str| {
+            names
+                .split(", ")
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        // The line the player shows under the artist
+        let credits_line = |artist: &str, credits: &TrackCredits| {
+            Track::new(TrackData {
+                artist: Some(artist.to_string()),
+                credits: credits.clone(),
+                ..Default::default()
+            })
+            .property::<String>("credits")
+        };
+
+        // Ten players and no group, on a song the singer wrote with others,
+        // as Picard tags "Loving Life Again"
+        let song = TrackCredits {
+            album_artist: Some("Ella Langley".to_string()),
+            composers: split("Devin Dawson, ERNEST, Ella Langley"),
+            performers: parse(&[
+                "Tom Bukovac (electric guitar)",
+                "Devin Dawson (electric guitar)",
+                "Ben Flanders (electric guitar)",
+                "Spencer Cullum (pedal steel guitar)",
+                "Devin Dawson (acoustic guitar)",
+                "Charlie Worsham (acoustic guitar)",
+                "Devin Dawson (baritone guitar)",
+                "David Dorn (Hammond organ)",
+                "David Dorn (synthesizer)",
+                "Rachel Loy (bass guitar)",
+                "Aaron Sterling (drums (drum set))",
+                "Aaron Sterling (percussion)",
+                "Charlie Worsham (mandolin)",
+                "ERNEST (background vocals)",
+                "Ella Langley (background vocals)",
+                "Ella Langley (lead vocals)",
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(song.summary(Some("Ella Langley")), "");
+        assert_eq!(credits_line("Ella Langley", &song), "");
+        // She's listed with both her roles, and the session players aren't
+        let listed = song
+            .listed_performers()
+            .into_iter()
+            .map(|p| (p.kind, p.name, p.role))
+            .collect::<Vec<_>>();
+        let singer = |role: &str| {
+            (
+                PerformerKind::Soloist,
+                "Ella Langley".to_string(),
+                Some(role.to_string()),
+            )
+        };
+        assert_eq!(listed, [singer("background vocals"), singer("lead vocals")]);
+        // As the line names her without an artist
+        assert_eq!(song.summary(None), "Ella Langley");
+
+        // Also when the artist names someone with her, as "Butterfly
+        // Season" does
+        let duet = TrackCredits {
+            composers: split("Luke Dick, Miranda Lambert, Ella Langley, Joybeth Taylor"),
+            performers: song
+                .performers
+                .iter()
+                .cloned()
+                .chain(parse(&[
+                    "Miranda Lambert (background vocals)",
+                    "Miranda Lambert (lead vocals)",
+                ]))
+                .collect(),
+            ..song.clone()
+        };
+        assert_eq!(
+            credits_line("Ella Langley feat. Miranda Lambert", &duet),
+            ""
+        );
+
+        // A composer who conducts performs too
+        let players = parse(&[
+            "Elin Fleischer (concertmaster)",
+            "Jörgen Ådvall (tuba)",
+            "Simon Fröh (tuba)",
+            "Bo Åhgren (wind instruments)",
+            "Per Fastrup (wind instruments)",
+            "Ebba Eriksson (clarinet)",
+        ]);
+        let conducted = TrackCredits {
+            album_artist: Some("Pierre Boulez, Ensemble intercontemporain".to_string()),
+            composers: vec!["Pierre Boulez".to_string()],
+            conductors: vec!["Pierre Boulez".to_string()],
+            performers: players.clone(),
+            ..Default::default()
+        };
+        assert_eq!(
+            conducted.summary(Some("Pierre Boulez")),
+            "Pierre Boulez, Ensemble intercontemporain"
+        );
+
+        // But the players of a composer who doesn't perform are still named,
+        // even when the album artist names one of them too
+        let serenade = TrackCredits {
+            album_artist: Some(
+                "Wolfgang Amadeus Mozart, Ensemble Zefiro, Alfredo Bernardini".to_string(),
+            ),
+            composers: vec!["Wolfgang Amadeus Mozart".to_string()],
+            performers: parse(&["Alfredo Bernardini (oboe)"])
+                .into_iter()
+                .chain(players.clone())
+                .collect(),
+            ..Default::default()
+        };
+        assert_eq!(
+            serenade.summary(Some("Wolfgang Amadeus Mozart")),
+            "Alfredo Bernardini, Elin Fleischer, Jörgen Ådvall, Simon Fröh, Bo Åhgren, \
+             Per Fastrup, Ebba Eriksson"
+        );
+        assert_eq!(serenade.listed_performers().len(), 7);
+        let dvorak = TrackCredits {
+            album_artist: Some("Antonín Dvořák".to_string()),
+            composers: vec!["Antonín Dvořák".to_string()],
+            performers: players,
+            ..Default::default()
+        };
+        assert_eq!(
+            dvorak.summary(Some("Antonín Dvořák")),
+            "Elin Fleischer, Jörgen Ådvall, Simon Fröh, Bo Åhgren, Per Fastrup, \
+             Ebba Eriksson"
+        );
+    }
+
+    #[test]
     fn listed_performers_are_conductors_ensembles_and_soloists() {
         let listed = |album_artist: &str, conductors: &[&str], performers: &[&str]| {
             TrackCredits {

@@ -345,6 +345,10 @@ All notable changes to this project will be documented in this file.
   Information with half the instrument in their name and a role ending in
   ")", and counted as a second player, which could put the album artist in
   place of a list of five players
+- The player listed every session player of a song that its singer had
+  written, as the singer's name among the composers kept the album artist
+  from standing in for a list of more than five players; for a song by
+  another writer, it already did, and the line was left out
 
 ### Removed
 

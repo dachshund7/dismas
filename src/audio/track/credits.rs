@@ -587,9 +587,13 @@ impl TrackCredits {
     // Bernardini" for the fourteen players of a wind band on "Wolfgang
     // Amadeus Mozart; Ensemble Zefiro, Alfredo Bernardini"; the players of
     // a quintet still fit in the line, and larger groups are usually
-    // orchestras. They're after the last semicolon, or the whole album
-    // artist if it has none and doesn't name a composer, e.g. "Sol
-    // Gabetta"
+    // orchestras. They're after the last semicolon, or else the whole album
+    // artist, e.g. "Sol Gabetta", unless it names a composer who doesn't
+    // perform, as "Ludwig van Beethoven, Ensemble Zefiro" or "Antonín
+    // Dvořák" do, whose players are then named. A songwriter who sings
+    // their own song, e.g. "Ella Langley", is the performer the album
+    // artist names, so their session players aren't named, as they aren't
+    // for a song by another writer
     fn ensemble_in_album_artist(&self) -> Option<&str> {
         let players = self.performers.iter().map(|p| &p.name).unique().count();
         if players <= 5 || self.performers.iter().any(|p| self.is_group(p)) {
@@ -601,13 +605,22 @@ impl TrackCredits {
             None if self
                 .composers
                 .iter()
-                .any(|c| names_composer(album_artist, c)) =>
+                .any(|c| names_composer(album_artist, c) && !self.performs(c)) =>
             {
                 return None;
             }
             None => album_artist.trim(),
         };
         (!performers.is_empty() && performers != "Various Artists").then_some(performers)
+    }
+
+    // Whether a composer conducts or plays the track, named in full or
+    // shortened, as `is_composer()` matches them
+    fn performs(&self, composer: &str) -> bool {
+        self.conductors
+            .iter()
+            .chain(self.performers.iter().map(|p| &p.name))
+            .any(|name| is_composer(name, composer))
     }
 
     // A single line with the conductors and performers, skipping the
@@ -632,7 +645,9 @@ impl TrackCredits {
             .filter(|c| Some(*c) != artist && !ensemble.is_some_and(|e| e.contains(c)))
             .collect();
         let performers = match ensemble {
-            Some(ensemble) if Some(ensemble) == artist => Vec::new(),
+            // The artist can name others with it, e.g. "Ella Langley feat.
+            // Miranda Lambert" on an album by "Ella Langley"
+            Some(ensemble) if artist.is_some_and(|a| a.contains(ensemble)) => Vec::new(),
             Some(ensemble) => vec![ensemble],
             None => self
                 .featured_performers()
@@ -662,24 +677,31 @@ impl TrackCredits {
 
         if let Some(ensemble) = self.ensemble_in_album_artist() {
             // The names in the album artist that the tags credit are the
-            // conductors and players they say; the others are taken to be
-            // groups, although they can be players that the tags of other
-            // tracks credit, which the list of performers puts right
+            // conductors and players they say, with each of their roles,
+            // e.g. both "lead vocals" and "background vocals" for a singer;
+            // the others are taken to be groups, although they can be
+            // players that the tags of other tracks credit, which the list
+            // of performers puts right
             for name in ensemble.split(", ").flat_map(|part| part.split(" & ")) {
                 let name = name.trim();
                 if name.is_empty() || self.conductors.iter().any(|c| c == name) {
                     continue;
                 }
-                let performer = self.performers.iter().find(|p| p.name == name);
-                listed.push(ListedPerformer {
-                    kind: if performer.is_some() {
-                        PerformerKind::Soloist
-                    } else {
-                        PerformerKind::Ensemble
-                    },
-                    name: name.to_string(),
-                    role: performer.and_then(|p| p.role.clone()),
-                });
+                let credited = listed.len();
+                listed.extend(self.performers.iter().filter(|p| p.name == name).map(|p| {
+                    ListedPerformer {
+                        kind: PerformerKind::Soloist,
+                        name: name.to_string(),
+                        role: p.role.clone(),
+                    }
+                }));
+                if listed.len() == credited {
+                    listed.push(ListedPerformer {
+                        kind: PerformerKind::Ensemble,
+                        name: name.to_string(),
+                        role: None,
+                    });
+                }
             }
             return listed;
         }
