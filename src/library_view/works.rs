@@ -61,12 +61,6 @@ impl LibraryView {
         imp.works_list.set_factory(Some(&self.work_factory()));
         // The rows' menus open with the Menu key too
         utils::setup_menu_key(&*imp.works_list, WorkRow::request_menu);
-        // Showing only the favorite works reads them again
-        imp.favorites_button.connect_toggled(clone!(
-            #[weak(rename_to = this)]
-            self,
-            move |_| this.refresh_favorites()
-        ));
         imp.works_list
             .set_header_factory(Some(&work_section_factory()));
         self.set_works_model();
@@ -712,7 +706,7 @@ impl LibraryView {
     }
 
     // Reads the works again, after a work or a recording was marked as a
-    // favorite or unmarked, or the list was set to show only the favorites
+    // favorite or unmarked
     pub fn refresh_favorites(&self) {
         let generation = &self.imp().works_generation;
         generation.set(generation.get().wrapping_add(1));
@@ -784,6 +778,7 @@ impl LibraryView {
                 None => self.close_work(false),
             }
         }
+        self.update_stack();
         self.reveal_pending_work();
     }
 
@@ -833,11 +828,10 @@ impl LibraryView {
         }
         pending.cleared = true;
         imp.pending_work.replace(Some(pending));
+        // Turning off the heart reads the works again itself
+        let favorites = imp.favorites_button.is_active();
         self.clear_search();
-        if imp.favorites_button.is_active() {
-            // Which reads the works again
-            imp.favorites_button.set_active(false);
-        } else {
+        if !favorites {
             self.update_works();
         }
     }

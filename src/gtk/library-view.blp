@@ -43,14 +43,6 @@ template $DismasLibraryView: Widget {
         active: bind template.selection-mode bidirectional;
         tooltip-text: _("Select Albums");
       }
-
-      // In their place on the Works page, which has neither
-      [end]
-      ToggleButton favorites_button {
-        visible: false;
-        icon-name: "heart-outline-symbolic";
-        tooltip-text: _("Show Only Favorite Works");
-      }
     }
 
     // An open search bar, so that the entry has the same spacing as the
@@ -148,6 +140,18 @@ template $DismasLibraryView: Widget {
               };
             };
           }
+
+          // Shows only the favorites of the page; its tooltip, which names
+          // it, says which, see `LibraryView::update_view()`
+          ToggleButton favorites_button {
+            margin-start: 6;
+            icon-name: "heart-outline-symbolic";
+            tooltip-text: _("Show Only Favorite Albums");
+
+            styles [
+              "favorites-filter",
+            ]
+          }
         };
       };
     }
@@ -238,6 +242,16 @@ template $DismasLibraryView: Widget {
               ]
             };
           };
+        };
+      }
+
+      // The heart beside the search finds nothing on the page, see
+      // `LibraryView::update_stack()`
+      StackPage {
+        name: "no-favorites";
+
+        child: Adw.StatusPage no_favorites_page {
+          icon-name: "heart-outline-symbolic";
         };
       }
     };

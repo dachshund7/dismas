@@ -652,7 +652,13 @@ pub(super) fn popup_menu(
         let parent = popover.parent();
         glib::idle_add_local_once(move || {
             popover.unparent();
-            drop(parent);
+            // The focus doesn't come back to the row or the cell when the
+            // action took it away, or the album it was on, so the list item
+            // would keep it as its focus child, and refuse the focus
+            if let Some(parent) = parent {
+                let focus = parent.root().and_then(|root| root.focus());
+                utils::forget_focus_above(&parent, focus.as_ref());
+            }
         });
     });
     popover.popup();

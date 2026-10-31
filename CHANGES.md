@@ -45,8 +45,8 @@ All notable changes to this project will be documented in this file.
   Works page, with a right click, a long press or the Menu key, and Add
   Recording to Favorites in the menu of the cover of a work's album. The
   Works page shows a heart on the rows of favorite works, and on the
-  covers of the favorite recordings of an open work, and its heart button
-  shows only them. Favorite Works, on the Playlists page, plays them in
+  covers of the favorite recordings of an open work, and the heart beside
+  its search shows only them. Favorite Works, on the Playlists page, plays them in
   the order they were marked: each recording marked, and for a work, a
   recording of it picked as Random Work picks one
 - Albums can be favorites too: Add Album to Favorites is in the menu of an
@@ -55,7 +55,9 @@ All notable changes to this project will be documented in this file.
   header of an album's tracks marks the album. Favorite albums have a heart
   on their cover. An album stays a favorite when a change to its tags, such
   as a new title or a MusicBrainz id, makes it another album to the
-  library, as long as the file of its first track stays where it was
+  library, as long as the file of its first track stays where it was. On
+  the Albums page, the heart beside the search shows only the favorite
+  albums, and the page says how to mark them when there are none
 - Random Work, below Random Album, plays a recording of a work picked at
   random in the same way. A work that hasn't been heard lately in any of
   its recordings is more likely to be picked, and so is a recording of it

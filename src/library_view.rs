@@ -22,7 +22,7 @@ use crate::{
     album_cell::AlbumCell,
     audio::{Arrangement, PerformerKind, normalize_search_text},
     i18n::{i18n, i18n_k, ni18n_f},
-    library::{self, Album, AlbumSort, Counted, ScanEvent, ScanResult, TrackFilter},
+    library::{self, Album, AlbumSort, Counted, Favorites, ScanEvent, ScanResult, TrackFilter},
     play_stats, utils,
     work_sections::{WorkSectionModel, same_section_of},
 };
@@ -190,6 +190,8 @@ mod imp {
         #[template_child]
         pub albums_stack: TemplateChild<gtk::Stack>,
         #[template_child]
+        pub no_favorites_page: TemplateChild<adw::StatusPage>,
+        #[template_child]
         pub scan_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
         pub update_progress: TemplateChild<gtk::ProgressBar>,
@@ -240,6 +242,9 @@ mod imp {
         pub selected: RefCell<HashSet<String>>,
         // The ids of the albums marked as favorites
         pub favorite_albums: RefCell<BTreeSet<String>>,
+        // Whether the focus of the window is followed, see
+        // `setup_lost_focus()`
+        pub follows_focus: Cell<bool>,
         // The last album selected or unselected with a click, where
         // Shift+click starts selecting from
         pub selection_anchor: glib::WeakRef<Album>,
@@ -342,6 +347,11 @@ mod imp {
                 self.obj().set_selection_mode(false);
             }
             self.obj().update_view();
+            // The heart beside the search shows the favorites of each page,
+            // so the albums it shows are searched for again
+            if self.favorites_button.is_active() {
+                self.obj().update_album_matches();
+            }
             self.obj().notify_page();
         }
     }
@@ -364,6 +374,8 @@ mod imp {
             obj.setup_actions();
             obj.setup_watch();
             obj.setup_pickers();
+            obj.setup_favorites_filter();
+            obj.setup_lost_focus();
             obj.setup_works();
             obj.connect_signals();
             // It names the selected playlist
@@ -1122,12 +1134,74 @@ impl LibraryView {
         imp.search_entry
             .update_property(&[gtk::accessible::Property::Label(&search)]);
         imp.sort_button.set_visible(!works);
-        imp.favorites_button.set_visible(works);
+        // It names what it shows, for screen readers too
+        let favorites = match imp.page.get() {
+            LibraryPage::Albums => Some(i18n("Show Only Favorite Albums")),
+            LibraryPage::Tracks => None,
+            LibraryPage::Works => Some(i18n("Show Only Favorite Works")),
+        };
+        imp.favorites_button.set_visible(favorites.is_some());
+        imp.favorites_button.set_tooltip_text(favorites.as_deref());
         self.update_match_counts();
         self.update_select_button();
         self.update_selection();
         self.update_stack();
         self.update_works();
+    }
+
+    // The heart beside the search shows only the favorites: the albums on
+    // the Albums page, and the works on the Works page. It's filled and
+    // highlighted while it does
+    fn setup_favorites_filter(&self) {
+        self.imp().favorites_button.connect_toggled(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |button| {
+                button.set_icon_name(if button.is_active() {
+                    "heart-filled-symbolic"
+                } else {
+                    "heart-outline-symbolic"
+                });
+                // The works are read again, as for a favorite marked
+                let generation = &this.imp().works_generation;
+                generation.set(generation.get().wrapping_add(1));
+                this.update_search();
+                this.update_stack();
+            }
+        ));
+    }
+
+    // The album or the work that had the focus can go from the grid or the
+    // list of works, as the last favorite unmarked from its menu does,
+    // leaving the focus nowhere, and with it the page it was on; so the
+    // stack and its pages drop the focus children that don't lead to the
+    // window's focus each time it changes, see `utils::forget_focus_below`.
+    // The lists then focus the item they last focused when the keys come in
+    fn setup_lost_focus(&self) {
+        self.connect_map(|this| {
+            let imp = this.imp();
+            if imp.follows_focus.get() {
+                return;
+            }
+            let Some(window) = this.root().and_downcast::<gtk::Window>() else {
+                return;
+            };
+            imp.follows_focus.set(true);
+            window.connect_focus_widget_notify(clone!(
+                #[weak]
+                this,
+                move |window| {
+                    let focus = GtkWindowExt::focus(window);
+                    let stack = this.imp().albums_stack.upcast_ref::<gtk::Widget>();
+                    utils::forget_focus_below(stack, focus.as_ref());
+                    let mut page = stack.first_child();
+                    while let Some(child) = page {
+                        utils::forget_focus_below(&child, focus.as_ref());
+                        page = child.next_sibling();
+                    }
+                }
+            ));
+        });
     }
 
     // The lists of composers and of performers next to the search:
@@ -1367,19 +1441,30 @@ impl LibraryView {
         }
     }
 
-    // Whether only the albums of a composer or a performer are shown
+    // Whether only the albums of a composer or a performer, or only the
+    // favorites, are shown
     pub fn has_picks(&self) -> bool {
+        self.has_composer_or_performer() || self.imp().favorites_button.is_active()
+    }
+
+    fn has_composer_or_performer(&self) -> bool {
         let imp = self.imp();
         imp.composer.borrow().is_some() || imp.performer.borrow().is_some()
     }
 
-    // Shows the albums of all the composers and performers again
+    // Shows the albums of all the composers and performers again, and not
+    // only the favorites
     pub fn clear_picks(&self) {
         let imp = self.imp();
         imp.composer.replace(None);
         imp.performer.replace(None);
         self.update_picks();
-        self.update_search();
+        if imp.favorites_button.is_active() {
+            // Which searches again
+            imp.favorites_button.set_active(false);
+        } else {
+            self.update_search();
+        }
     }
 
     // The composer and the performer whose albums are shown are under the
@@ -1435,20 +1520,25 @@ impl LibraryView {
     }
 
     // Shows all the albums and the works again, without the words of the
-    // search and the composer and the performer picked, as to go to one
-    // they hide
+    // search, the composer and the performer picked, and the heart, as to
+    // go to one they hide. Turning off the heart reads the works again
     fn clear_search(&self) {
         let imp = self.imp();
         imp.search_entry.set_text("");
         imp.composer.replace(None);
         imp.performer.replace(None);
         self.update_picks();
+        imp.favorites_button.set_active(false);
         self.set_search_matches(TrackFilter::default(), None);
     }
 
-    // What the search and the composer and performer picked ask for
+    // What the search, the composer and performer picked, and the heart
+    // ask for. On the Works page, the heart's works are kept from those
+    // read, see `update_works`
     fn wanted_filter(&self) -> TrackFilter {
         let imp = self.imp();
+        let favorites = (imp.favorites_button.is_active() && imp.page.get() == LibraryPage::Albums)
+            .then(|| Favorites::Albums(imp.favorite_albums.borrow().iter().cloned().collect()));
         TrackFilter {
             words: normalize_search_text(&imp.search_entry.text())
                 .split_whitespace()
@@ -1457,14 +1547,21 @@ impl LibraryView {
             composer: imp.composer.borrow().as_ref().map(|c| c.key.clone()),
             performer: imp.performer.borrow().as_ref().map(|p| p.key.clone()),
             works: Vec::new(),
+            favorites,
         }
     }
 
     // Looks for the albums with a track that contains every word of the
     // search, in any of its tags, like searching the queue, and that's by
-    // the composer picked, with the performer picked, if any
+    // the composer picked, with the performer picked, if any, and among the
+    // favorites while the heart is on; and for the works
     fn update_search(&self) {
         self.update_works();
+        self.update_album_matches();
+    }
+
+    // Looks for the albums of the search, see `update_search`
+    fn update_album_matches(&self) {
         let filter = self.wanted_filter();
         if filter.is_empty() {
             self.set_search_matches(TrackFilter::default(), None);
@@ -1507,6 +1604,7 @@ impl LibraryView {
         if let Some(filter) = self.imp().filter.borrow().as_ref() {
             filter.changed(gtk::FilterChange::Different);
         }
+        self.update_stack();
     }
 
     // The covers of the albums the search matches only partly say how many
@@ -1615,6 +1713,10 @@ impl LibraryView {
             }
         }
         self.apply_favorite_albums();
+        // The albums the heart shows changed
+        if self.wanted_filter().favorites.is_some() {
+            self.update_album_matches();
+        }
         if !favorite {
             return;
         }
@@ -1660,11 +1762,14 @@ impl LibraryView {
         let imp = self.imp();
         let album = self.album(album_id)?;
 
+        // The heart hides the albums that aren't favorites, whose matches
+        // can still be read, as when it's gone to from the Works page
         let hidden = imp
             .search_matches
             .borrow()
             .as_ref()
-            .is_some_and(|m| !m.contains_key(album_id));
+            .is_some_and(|m| !m.contains_key(album_id))
+            || (self.wanted_filter().favorites.is_some() && !self.is_favorite_album(album_id));
         if hidden {
             self.clear_search();
         }
@@ -1996,7 +2101,10 @@ impl LibraryView {
     fn update_stack(&self) {
         let imp = self.imp();
         let n_albums = imp.model.borrow().as_ref().map_or(0, ListModelExt::n_items);
-        let page = if n_albums > 0 && self.shows_works() {
+        let page = if n_albums > 0 && self.finds_no_favorites() {
+            self.update_no_favorites_page();
+            "no-favorites"
+        } else if n_albums > 0 && self.shows_works() {
             "works"
         } else if n_albums > 0 {
             "albums"
@@ -2005,12 +2113,82 @@ impl LibraryView {
         } else {
             "empty"
         };
-        imp.albums_stack.set_visible_child_name(page);
+        let stack = &*imp.albums_stack;
+        if stack.visible_child_name().as_deref() != Some(page) {
+            // The empty page of the heart has nothing to focus, so the focus
+            // goes to the search beside the heart, when it was on the page
+            // that goes, or on an album that went just before, as the last
+            // favorite unmarked from its menu does. That leaves it nowhere,
+            // or on the item of the menu, which is hidden then
+            let focus = self.root().and_then(|root| root.focus());
+            let lost = focus
+                .as_ref()
+                .is_none_or(|focus| focus.is_ancestor(stack) || !focus.is_drawable());
+            stack.set_visible_child_name(page);
+            if lost && page == "no-favorites" {
+                imp.search_entry.grab_focus();
+            }
+        }
 
         // When the grid is already showing, a thin bar at the bottom is
         // enough
         imp.update_progress
             .set_visible(n_albums > 0 && imp.scanning.get());
+    }
+
+    // Whether the heart beside the search finds nothing on the page, once
+    // what it finds is read: there are no favorites, or none that the rest
+    // of the search matches
+    fn finds_no_favorites(&self) -> bool {
+        let imp = self.imp();
+        if !imp.favorites_button.is_active() || !imp.favorites_button.is_visible() {
+            return false;
+        }
+        if self.shows_works() {
+            imp.works_filter.borrow().is_some()
+                && imp
+                    .works
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|works| works.n_items() == 0)
+        } else {
+            imp.search_filter.borrow().favorites.is_some()
+                && imp
+                    .search_matches
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(HashMap::is_empty)
+        }
+    }
+
+    // The page says so, and how to mark favorites if there are none
+    fn update_no_favorites_page(&self) {
+        let imp = self.imp();
+        let searched =
+            !imp.search_entry.text().trim().is_empty() || self.has_composer_or_performer();
+        let works = self.shows_works();
+        let (title, description) = match (works, searched) {
+            (false, false) => (
+                i18n("No Favorite Albums"),
+                i18n(
+                    "Mark an album as a favorite from its menu, or with the heart over its tracks",
+                ),
+            ),
+            (true, false) => (
+                i18n("No Favorite Works"),
+                i18n("Mark a work or one of its recordings as a favorite from its menu"),
+            ),
+            (false, true) => (
+                i18n("No Results Found"),
+                i18n("None of the favorite albums match the search"),
+            ),
+            (true, true) => (
+                i18n("No Results Found"),
+                i18n("None of the favorite works match the search"),
+            ),
+        };
+        imp.no_favorites_page.set_title(&title);
+        imp.no_favorites_page.set_description(Some(&description));
     }
 
     // Files that come, go or change in the music folders are read once

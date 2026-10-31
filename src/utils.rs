@@ -248,6 +248,37 @@ pub fn scroll_to_top_when_laid_out(
     });
 }
 
+// When the focus is lost rather than moved, as when the album or the work
+// that had it goes from a list, or a menu closes whose item was taken away,
+// GTK keeps the chain of focus children that led to it. A list item whose
+// focus child can't take the focus refuses it, and the containers of a
+// chain that leads nowhere let the keys skip them, or stop at them without
+// moving the focus. These drop the links that don't lead to the window's
+// focus, `focus`, as GTK does when the focus moves: from `widget` down,
+// and from `widget` up to the window
+pub fn forget_focus_below(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
+    let mut parent = widget.clone();
+    while let Some(child) = parent.focus_child() {
+        if focus.is_some_and(|focus| *focus == child || focus.is_ancestor(&child)) {
+            break;
+        }
+        parent.set_focus_child(None::<&gtk::Widget>);
+        parent = child;
+    }
+}
+
+pub fn forget_focus_above(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
+    let mut child = widget.clone();
+    while let Some(parent) = child.parent() {
+        if parent.focus_child().as_ref() == Some(&child)
+            && !focus.is_some_and(|focus| *focus == child || focus.is_ancestor(&child))
+        {
+            parent.set_focus_child(None::<&gtk::Widget>);
+        }
+        child = parent;
+    }
+}
+
 // Gives the focus to the item a list or a grid was scrolled to with
 // `ListScrollFlags::FOCUS`, once it's laid out. Scrolling only moves the
 // focus there if the list has it already (`gtk_list_base_scroll_to`), and

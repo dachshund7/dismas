@@ -103,10 +103,12 @@ playbackcontrol {
 
 /* The sleep timer button is filled while the timer is on, the shuffle
  * button while the playlist is shuffled, the composers button while the
- * grid shows the albums of one, as the grey of a checked button hardly
+ * grid shows the albums of one, the heart beside the album search while it
+ * shows only the favorites, as the grey of a checked button hardly
  * differs from the one of the others, and a colored icon alone would
  * hardly show */
 libraryview menubutton.filtering > button,
+libraryview button.favorites-filter:checked,
 playbackcontrol menubutton.sleep-timer-on > button,
 playbackcontrol button.stop-after:checked,
 playbackcontrol button.shuffle:checked {
@@ -115,6 +117,7 @@ playbackcontrol button.shuffle:checked {
 }
 
 libraryview menubutton.filtering > button:hover,
+libraryview button.favorites-filter:checked:hover,
 playbackcontrol menubutton.sleep-timer-on > button:hover,
 playbackcontrol button.stop-after:checked:hover,
 playbackcontrol button.shuffle:checked:hover {
@@ -123,6 +126,7 @@ playbackcontrol button.shuffle:checked:hover {
 
 libraryview menubutton.filtering > button:active,
 libraryview menubutton.filtering > button:checked,
+libraryview button.favorites-filter:checked:active,
 playbackcontrol menubutton.sleep-timer-on > button:active,
 playbackcontrol menubutton.sleep-timer-on > button:checked,
 playbackcontrol button.stop-after:checked:active,
@@ -157,19 +161,19 @@ albumtracks button.favorite:checked > image {
 }
 
 /* So is the album's, in the header bar of the album pane, which keeps the
- * background of an unchecked flat button. libadwaita's rules for the
- * buttons of header bars list these exceptions, so these rules list them
- * too, to take precedence over them */
-albumtracks headerbar button.favorite:checked:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+ * background of an unchecked flat button there. The app's stylesheet comes
+ * before libadwaita's whatever their selectors, as GTK goes by the priority
+ * of their providers first */
+albumtracks button.favorite:checked {
   background: none;
 }
 
-albumtracks headerbar button.favorite:checked:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+albumtracks button.favorite:checked:hover {
   background: color-mix(in srgb, currentColor 7%, transparent);
 }
 
-albumtracks headerbar button.favorite:checked:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
-albumtracks headerbar button.favorite:checked.keyboard-activating:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+albumtracks button.favorite:checked:active,
+albumtracks button.favorite:checked.keyboard-activating {
   background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
