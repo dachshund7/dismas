@@ -94,13 +94,16 @@ mod imp {
             obj.set_accels_for_action("queue.clear", &["<primary>L"]);
             obj.set_accels_for_action("queue.toggle", &["F9"]);
             obj.set_accels_for_action("win.find", &["<primary>F"]);
-            obj.set_accels_for_action("queue.shuffle", &["<primary>r"]);
+            // Ctrl+S, as in other music players: Dismas has nothing to save
+            obj.set_accels_for_action("queue.shuffle", &["<primary>s"]);
+            // The HIG's Reload, and F5, as in file managers and browsers
+            obj.set_accels_for_action("win.rescan-library", &["<primary>r", "F5"]);
 
             // Ctrl+Left and Ctrl+Right seek, see `Window::setup_key_shortcuts()`
             obj.set_accels_for_action("win.volume-up", &["<primary>Up"]);
             obj.set_accels_for_action("win.volume-down", &["<primary>Down"]);
             obj.set_accels_for_action("win.toggle-mute", &["<primary>m"]);
-            // Ctrl+R is shuffling's
+            // Ctrl+R scans the music folders
             obj.set_accels_for_action("queue.repeat-mode", &["<primary>t"]);
             obj.set_accels_for_action("win.previous", &["<Alt>Left"]);
             obj.set_accels_for_action("win.next", &["<Alt>Right"]);

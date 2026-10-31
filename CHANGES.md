@@ -205,6 +205,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Ctrl+S turns shuffling on and off, as in other music players, rather
+  than Ctrl+R. Ctrl+R and F5 now scan the music folders for changes, as
+  Reload does in other GNOME apps
 - When there are no albums to show, the album page says which folder
   Dismas looked in, or that the music folders are missing or empty, as
   when their drive isn't plugged in, rather than only "No Albums". Its
