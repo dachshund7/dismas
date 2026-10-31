@@ -180,8 +180,13 @@ impl Window {
         }
 
         self.set_loading(true);
-        // At startup, the pane is as the user last showed or hid it
-        if mode != QueueMode::Quiet && !(mode == QueueMode::Restore && self.imp().starting.get()) {
+        // At startup, the pane is as the user last showed or hid it, with the
+        // queue of the last session or with the files Dismas was opened
+        // with. Opening it as the window first shows would also make the
+        // window wider by the pane, which it would keep
+        let at_startup =
+            self.imp().starting.get() && matches!(mode, QueueMode::Restore | QueueMode::Show);
+        if mode != QueueMode::Quiet && !at_startup {
             self.set_playlist_visible(true);
         }
 

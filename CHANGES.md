@@ -302,6 +302,9 @@ All notable changes to this project will be documented in this file.
   lyrics of the whole file
 - A click on the waveform, or a position set from the desktop's media
   controls, went to the whole second before it
+- Starting Dismas by opening a file, as from a file manager, opened the
+  playlist pane even when it had been hidden, and made the window wider by
+  the pane, which it then kept the next time
 
 ### Removed
 
