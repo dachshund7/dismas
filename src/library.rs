@@ -727,11 +727,24 @@ pub struct TrackFilter {
 }
 
 // The favorites that the tracks have to be among. An empty list matches no
-// track, as there are no favorites to show
+// track, as there are no favorites to show. Each is a value bound to the
+// statement, and SQLite takes up to 32,766 of them, far more favorites
+// than anyone marks; past that, the search fails and finds nothing
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Favorites {
     // The tracks of the favorite albums, by their ids
     Albums(Arc<[String]>),
+    // The favorite tracks, by their paths in the library
+    Tracks(Arc<[PathBuf]>),
+}
+
+impl Favorites {
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Albums(ids) => ids.is_empty(),
+            Self::Tracks(paths) => paths.is_empty(),
+        }
+    }
 }
 
 impl TrackFilter {
@@ -771,10 +784,18 @@ impl TrackFilter {
             values.extend(self.works.iter().cloned().map(Value::Text));
         }
         match &self.favorites {
-            Some(Favorites::Albums(ids)) if ids.is_empty() => sql.push_str(" AND 0"),
+            Some(favorites) if favorites.is_empty() => sql.push_str(" AND 0"),
             Some(Favorites::Albums(ids)) => {
                 sql.push_str(&format!(" AND album_id IN ({})", placeholders(ids.len())));
                 values.extend(ids.iter().cloned().map(Value::Text));
+            }
+            Some(Favorites::Tracks(paths)) => {
+                sql.push_str(&format!(" AND path IN ({})", placeholders(paths.len())));
+                values.extend(
+                    paths
+                        .iter()
+                        .map(|path| Value::Blob(path_bytes(path).to_vec())),
+                );
             }
             None => {}
         }
@@ -4651,6 +4672,66 @@ mod tests {
             super::query_composers(&conn, &[], &filter, super::Counted::Albums).unwrap();
         assert_eq!(composers.len(), 1);
         assert_eq!(composers[0].count, 1);
+
+        // Without favorites, nothing
+        let filter = super::TrackFilter {
+            favorites: favorites(&[]),
+            ..Default::default()
+        };
+        assert!(albums(&filter).is_empty());
+    }
+
+    #[test]
+    fn the_favorite_tracks_are_found_with_the_other_filters() {
+        let conn = test_db();
+        for (path, album, search) in [
+            ("/m/A/01.opus", "a", "bwv 1001"),
+            ("/m/A/02.opus", "a", "bwv 1002"),
+            ("/m/B/01.opus", "b", "bwv 1003"),
+            ("/m/C/01.opus", "c", "bwv 1004"),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, search)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3)",
+                rusqlite::params![path.as_bytes(), album, search],
+            )
+            .unwrap();
+        }
+        let favorites = |paths: &[&str]| {
+            Some(super::Favorites::Tracks(
+                paths.iter().map(PathBuf::from).collect(),
+            ))
+        };
+        let albums = |filter: &super::TrackFilter| {
+            let mut albums: Vec<(String, (u32, u32))> =
+                super::query_search_albums(&conn, filter, &[])
+                    .unwrap()
+                    .into_iter()
+                    .collect();
+            albums.sort();
+            albums
+        };
+
+        // One of the two tracks of an album, and the only one of another
+        let filter = super::TrackFilter {
+            favorites: favorites(&["/m/A/02.opus", "/m/C/01.opus"]),
+            ..Default::default()
+        };
+        assert_eq!(
+            albums(&filter),
+            [("a".to_string(), (1, 2)), ("c".to_string(), (1, 1))]
+        );
+        // and only that track is taken from the album
+        let tracks = super::query_album_tracks(&conn, "a", &filter, &[]).unwrap();
+        assert_eq!(tracks, [(None, PathBuf::from("/m/A/02.opus"))]);
+
+        // With the words of a search, only the favorites they match
+        let words = |words: &[&str]| super::TrackFilter {
+            words: words.iter().map(ToString::to_string).collect(),
+            ..filter.clone()
+        };
+        assert_eq!(albums(&words(&["1004"])), [("c".to_string(), (1, 1))]);
+        assert!(albums(&words(&["1001"])).is_empty());
 
         // Without favorites, nothing
         let filter = super::TrackFilter {

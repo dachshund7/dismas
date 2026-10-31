@@ -17,8 +17,9 @@ impl Window {
         self.action_set_enabled("win.favorite", track.is_some());
     }
 
-    // Marks any track, e.g. from its menu; the heart button follows when
-    // it's the playing one
+    // Marks any track, from its menu or with the heart button; the heart
+    // button follows when it's the playing one, and so does the heart beside
+    // the search on the Tracks page
     pub(super) fn mark_favorite(&self, track: &Track, favorite: bool) {
         let uri = track.uri();
         play_stats::set_favorite(&uri, favorite);
@@ -30,6 +31,7 @@ impl Window {
         if playing && favorite != self.imp().track_favorite.replace(favorite) {
             self.notify_track_favorite();
         }
+        self.imp().library_view.favorite_tracks_changed();
     }
 
     // Marks a work as a favorite, or unmarks it; the Works page shows it

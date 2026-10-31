@@ -9,6 +9,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     path::PathBuf,
     rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -242,6 +243,9 @@ mod imp {
         pub selected: RefCell<HashSet<String>>,
         // The ids of the albums marked as favorites
         pub favorite_albums: RefCell<BTreeSet<String>>,
+        // The paths of the favorite tracks, read when the heart first needs
+        // them, see `favorite_tracks()`
+        pub favorite_tracks: RefCell<Option<Arc<[PathBuf]>>>,
         // Whether the focus of the window is followed, see
         // `setup_lost_focus()`
         pub follows_focus: Cell<bool>,
@@ -1136,12 +1140,11 @@ impl LibraryView {
         imp.sort_button.set_visible(!works);
         // It names what it shows, for screen readers too
         let favorites = match imp.page.get() {
-            LibraryPage::Albums => Some(i18n("Show Only Favorite Albums")),
-            LibraryPage::Tracks => None,
-            LibraryPage::Works => Some(i18n("Show Only Favorite Works")),
+            LibraryPage::Albums => i18n("Show Only Favorite Albums"),
+            LibraryPage::Tracks => i18n("Show Only Favorite Tracks"),
+            LibraryPage::Works => i18n("Show Only Favorite Works"),
         };
-        imp.favorites_button.set_visible(favorites.is_some());
-        imp.favorites_button.set_tooltip_text(favorites.as_deref());
+        imp.favorites_button.set_tooltip_text(Some(&favorites));
         self.update_match_counts();
         self.update_select_button();
         self.update_selection();
@@ -1150,8 +1153,9 @@ impl LibraryView {
     }
 
     // The heart beside the search shows only the favorites: the albums on
-    // the Albums page, and the works on the Works page. It's filled and
-    // highlighted while it does
+    // the Albums page, the albums with favorite tracks on the Tracks page,
+    // and the works on the Works page. It's filled and highlighted while it
+    // does
     fn setup_favorites_filter(&self) {
         self.imp().favorites_button.connect_toggled(clone!(
             #[weak(rename_to = this)]
@@ -1537,8 +1541,15 @@ impl LibraryView {
     // read, see `update_works`
     fn wanted_filter(&self) -> TrackFilter {
         let imp = self.imp();
-        let favorites = (imp.favorites_button.is_active() && imp.page.get() == LibraryPage::Albums)
-            .then(|| Favorites::Albums(imp.favorite_albums.borrow().iter().cloned().collect()));
+        let favorites = if self.heart_filters(LibraryPage::Albums) {
+            Some(Favorites::Albums(
+                imp.favorite_albums.borrow().iter().cloned().collect(),
+            ))
+        } else if self.heart_filters(LibraryPage::Tracks) {
+            Some(Favorites::Tracks(self.favorite_tracks()))
+        } else {
+            None
+        };
         TrackFilter {
             words: normalize_search_text(&imp.search_entry.text())
                 .split_whitespace()
@@ -1548,6 +1559,35 @@ impl LibraryView {
             performer: imp.performer.borrow().as_ref().map(|p| p.key.clone()),
             works: Vec::new(),
             favorites,
+        }
+    }
+
+    // Whether the heart shows only the favorites of `page`, which is the
+    // one shown
+    fn heart_filters(&self, page: LibraryPage) -> bool {
+        let imp = self.imp();
+        imp.favorites_button.is_active() && imp.page.get() == page
+    }
+
+    // The paths of the favorite tracks. They're read on the main thread,
+    // where they're marked, the first time the heart needs them, and kept
+    // until one is marked or unmarked, see `favorite_tracks_changed()`
+    fn favorite_tracks(&self) -> Arc<[PathBuf]> {
+        self.imp()
+            .favorite_tracks
+            .borrow_mut()
+            .get_or_insert_with(|| favorite_track_paths(&play_stats::favorites()))
+            .clone()
+    }
+
+    // Follows tracks marked as favorites or unmarked, from their menu or
+    // with the player's heart: the albums the heart shows on the Tracks
+    // page change. An album's tracks open in the pane stay as they were,
+    // as they do for a new search
+    pub fn favorite_tracks_changed(&self) {
+        self.imp().favorite_tracks.replace(None);
+        if self.heart_filters(LibraryPage::Tracks) {
+            self.update_album_matches();
         }
     }
 
@@ -1714,7 +1754,7 @@ impl LibraryView {
         }
         self.apply_favorite_albums();
         // The albums the heart shows changed
-        if self.wanted_filter().favorites.is_some() {
+        if self.heart_filters(LibraryPage::Albums) {
             self.update_album_matches();
         }
         if !favorite {
@@ -1763,13 +1803,16 @@ impl LibraryView {
         let album = self.album(album_id)?;
 
         // The heart hides the albums that aren't favorites, whose matches
-        // can still be read, as when it's gone to from the Works page
+        // can still be read, as when it's gone to from the Works page. Gone
+        // to from the Tracks page, the matches are still those of its
+        // favorite tracks, so a favorite album without one clears the heart,
+        // though the Albums page would show it
         let hidden = imp
             .search_matches
             .borrow()
             .as_ref()
             .is_some_and(|m| !m.contains_key(album_id))
-            || (self.wanted_filter().favorites.is_some() && !self.is_favorite_album(album_id));
+            || (self.heart_filters(LibraryPage::Albums) && !self.is_favorite_album(album_id));
         if hidden {
             self.clear_search();
         }
@@ -2138,10 +2181,11 @@ impl LibraryView {
 
     // Whether the heart beside the search finds nothing on the page, once
     // what it finds is read: there are no favorites, or none that the rest
-    // of the search matches
+    // of the search matches. Just after the Albums and Tracks pages switch,
+    // the matches are still those of the other page's favorites
     fn finds_no_favorites(&self) -> bool {
         let imp = self.imp();
-        if !imp.favorites_button.is_active() || !imp.favorites_button.is_visible() {
+        if !imp.favorites_button.is_active() {
             return false;
         }
         if self.shows_works() {
@@ -2152,7 +2196,7 @@ impl LibraryView {
                     .as_ref()
                     .is_some_and(|works| works.n_items() == 0)
         } else {
-            imp.search_filter.borrow().favorites.is_some()
+            *imp.search_filter.borrow() == self.wanted_filter()
                 && imp
                     .search_matches
                     .borrow()
@@ -2166,25 +2210,30 @@ impl LibraryView {
         let imp = self.imp();
         let searched =
             !imp.search_entry.text().trim().is_empty() || self.has_composer_or_performer();
-        let works = self.shows_works();
-        let (title, description) = match (works, searched) {
-            (false, false) => (
+        let (title, description) = match (imp.page.get(), searched) {
+            (LibraryPage::Albums, false) => (
                 i18n("No Favorite Albums"),
                 i18n(
                     "Mark an album as a favorite from its menu, or with the heart over its tracks",
                 ),
             ),
-            (true, false) => (
+            (LibraryPage::Tracks, false) => (
+                i18n("No Favorite Tracks"),
+                i18n(
+                    "Mark a track as a favorite from its menu, or with the heart next to the sleep timer",
+                ),
+            ),
+            (LibraryPage::Works, false) => (
                 i18n("No Favorite Works"),
                 i18n("Mark a work or one of its recordings as a favorite from its menu"),
             ),
-            (false, true) => (
+            (_, true) => (
                 i18n("No Results Found"),
-                i18n("None of the favorite albums match the search"),
-            ),
-            (true, true) => (
-                i18n("No Results Found"),
-                i18n("None of the favorite works match the search"),
+                match imp.page.get() {
+                    LibraryPage::Albums => i18n("None of the favorite albums match the search"),
+                    LibraryPage::Tracks => i18n("None of the favorite tracks match the search"),
+                    LibraryPage::Works => i18n("None of the favorite works match the search"),
+                },
             ),
         };
         imp.no_favorites_page.set_title(&title);
@@ -2560,6 +2609,14 @@ fn favorite_album_updates(
     updates
 }
 
+// The paths of the favorite tracks, from their URIs, as the library keeps
+// them; a track of a CUE sheet has its path under the sheet in both
+fn favorite_track_paths(uris: &[String]) -> Arc<[PathBuf]> {
+    uris.iter()
+        .filter_map(|uri| gio::File::for_uri(uri).path())
+        .collect()
+}
+
 // The album of the track with a URI, in the library, whether its folder is
 // hidden or not; this blocks
 fn album_of_uri(uri: &str) -> Option<String> {
@@ -2647,6 +2704,26 @@ fn album_drag_icon(cover: Option<&gdk::Paintable>, n_albums: usize) -> gtk::Widg
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn favorite_tracks_are_found_by_their_paths() {
+        let uris = [
+            "file:///m/Bach/02%20Fuga%20%C3%A0%203.flac",
+            // A track of a CUE sheet, under the sheet, as the library has it
+            "file:///m/Album/Album.cue/track03",
+            // Not a file, in a scheme no GIO module takes, so that gvfs
+            // can't give it a path of its own
+            "x-none://example.org/track.flac",
+        ]
+        .map(ToString::to_string);
+        assert_eq!(
+            *favorite_track_paths(&uris),
+            [
+                PathBuf::from("/m/Bach/02 Fuga à 3.flac"),
+                PathBuf::from("/m/Album/Album.cue/track03"),
+            ]
+        );
+    }
 
     #[test]
     fn favorite_albums_are_followed_to_their_new_ids() {

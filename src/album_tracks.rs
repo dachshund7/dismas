@@ -630,7 +630,8 @@ impl AlbumTracks {
 
     // Says how many of the tracks the search matches while it leaves out
     // some, which don't show. With only a composer or a performer picked,
-    // and no words to search for, it says how many are theirs
+    // or only the favorites, and no words to search for, it says how many
+    // are theirs, or favorites
     fn update_filter_bar(&self) {
         let imp = self.imp();
         let Some((matching, total)) = imp.matching.get() else {
@@ -638,7 +639,10 @@ impl AlbumTracks {
             return;
         };
         let picks = imp.picks.borrow();
-        let words = !imp.filter.borrow().words.is_empty();
+        let filter = imp.filter.borrow();
+        // The tracks of a composer or a performer counted with words or the
+        // favorites would only be some of theirs
+        let searched = !filter.words.is_empty() || filter.favorites.is_some();
         let label = if let Some(work) = picks.work.as_deref() {
             ni18n_k(
                 // Translators: `{n}`, `{total}` and `{work}` must be left
@@ -656,7 +660,7 @@ impl AlbumTracks {
             )
         } else {
             match (picks.composer.as_deref(), picks.performer.as_deref()) {
-                (Some(composer), Some(performer)) if !words => ni18n_k(
+                (Some(composer), Some(performer)) if !searched => ni18n_k(
                     // Translators: `{n}`, `{total}`, `{composer}` and
                     // `{performer}` must be left unmodified; they are expanded
                     // to the number of tracks of the album by a composer with a
@@ -673,7 +677,7 @@ impl AlbumTracks {
                         ("performer", performer),
                     ],
                 ),
-                (None, Some(performer)) if !words => ni18n_k(
+                (None, Some(performer)) if !searched => ni18n_k(
                     // Translators: `{n}`, `{total}` and `{performer}` must be
                     // left unmodified; they are expanded to the number of
                     // tracks of the album with a performer, the number of all
@@ -688,7 +692,7 @@ impl AlbumTracks {
                         ("performer", performer),
                     ],
                 ),
-                (Some(composer), None) if !words => ni18n_k(
+                (Some(composer), None) if !searched => ni18n_k(
                     // Translators: `{n}`, `{total}` and `{composer}` must be
                     // left unmodified; they are expanded to the number of
                     // tracks of the album by a composer, the number of all of
@@ -702,6 +706,16 @@ impl AlbumTracks {
                         ("total", &total.to_string()),
                         ("composer", composer),
                     ],
+                ),
+                (None, None) if filter.words.is_empty() && filter.favorites.is_some() => ni18n_k(
+                    // Translators: `{n}` and `{total}` must be left unmodified;
+                    // they are expanded to the number of tracks of the album
+                    // marked as favorites, and the number of all of them. The
+                    // plural follows `{n}`
+                    "{n} of the {total} tracks is a favorite",
+                    "{n} of the {total} tracks are favorites",
+                    matching,
+                    &[("n", &matching.to_string()), ("total", &total.to_string())],
                 ),
                 _ => ni18n_f(
                     // Translators: The first '{}' is the number of tracks of the

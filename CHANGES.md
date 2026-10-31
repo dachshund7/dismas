@@ -57,7 +57,10 @@ All notable changes to this project will be documented in this file.
   as a new title or a MusicBrainz id, makes it another album to the
   library, as long as the file of its first track stays where it was. On
   the Albums page, the heart beside the search shows only the favorite
-  albums, and the page says how to mark them when there are none
+  albums. On the Tracks page, it shows the albums with favorite tracks,
+  and takes only those tracks from them: an album opened there lists only
+  its favorite tracks, under a bar that says how many of its tracks they
+  are. The page says how to mark favorites when there are none
 - Random Work, below Random Album, plays a recording of a work picked at
   random in the same way. A work that hasn't been heard lately in any of
   its recordings is more likely to be picked, and so is a recording of it

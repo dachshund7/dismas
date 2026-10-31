@@ -824,9 +824,7 @@ mod imp {
             let Some(track) = obj.player().state().track() else {
                 return;
             };
-            play_stats::set_favorite(&track.uri(), favorite);
-            self.track_favorite.set(favorite);
-            obj.notify_track_favorite();
+            obj.mark_favorite(&track, favorite);
         }
 
         fn set_queue_selection(&self, selection: bool) {
