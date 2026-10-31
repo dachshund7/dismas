@@ -690,8 +690,8 @@ impl QueueRow {
         )
     }
 
-    // The current track shows a pause icon while the player is paused. The
-    // icon of the other rows is see-through, to keep its room, so it has no
+    // The current track shows a pause icon over its cover while the player
+    // is paused. The icon of the other rows is see-through, so it has no
     // name there, as a screen reader would read it on every row; GTK still
     // presents an icon with the hidden state
     fn update_playing_icon(&self) {

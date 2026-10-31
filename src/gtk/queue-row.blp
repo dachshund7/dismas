@@ -20,34 +20,59 @@ template $DismasQueueRow: Widget {
       }
     }
 
-    Stack track_cover_stack {
-      StackPage {
-        name: "no-cover";
+    // Centered, so the icon of the playing track covers the cover alone,
+    // not the height of a row whose text takes more lines
+    Overlay {
+      valign: center;
 
-        child: Image {
-          icon-name: "folder-music-symbolic";
-          pixel-size: 32;
+      child: Stack track_cover_stack {
+        StackPage {
+          name: "no-cover";
 
-          styles [
-            "dim-label",
-            "cover-placeholder",
-            "small",
-          ]
+          child: Image {
+            icon-name: "folder-music-symbolic";
+            pixel-size: 32;
 
-          accessibility {
-            label: C_("a11y", "No cover available");
-          }
-        };
-      }
+            styles [
+              "dim-label",
+              "cover-placeholder",
+              "small",
+            ]
 
-      StackPage {
-        name: "cover";
+            accessibility {
+              label: C_("a11y", "No cover available");
+            }
+          };
+        }
 
-        child: $DismasCoverPicture track_cover_image {
-          cover-size: "1";
-          halign: "center";
-          valign: "center";
-        };
+        StackPage {
+          name: "cover";
+
+          child: $DismasCoverPicture track_cover_image {
+            cover-size: "1";
+            halign: "center";
+            valign: "center";
+          };
+        }
+      };
+
+      // Over the cover of the track playing, rather than at the end of the
+      // row, where every other row kept its room empty; it takes no input,
+      // so a click or a long press on the cover still reaches the row
+      [overlay]
+      Image track_playing_image {
+        icon-name: "media-playback-start-symbolic";
+        pixel-size: 16;
+        opacity: 0;
+        can-target: false;
+
+        styles [
+          "playing-indicator",
+        ]
+
+        accessibility {
+          label: C_("a11y", "Currently playing");
+        }
       }
     }
 
@@ -87,19 +112,6 @@ template $DismasQueueRow: Widget {
         ]
       }
 
-    }
-
-    [end]
-    Image track_playing_image {
-      icon-name: "media-playback-start-symbolic";
-      pixel-size: 16;
-      halign: center;
-      valign: center;
-      opacity: 0;
-
-      accessibility {
-        label: C_("a11y", "Currently playing");
-      }
     }
 
     styles [

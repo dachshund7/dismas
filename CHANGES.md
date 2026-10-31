@@ -263,6 +263,10 @@ All notable changes to this project will be documented in this file.
   artist stays first, for scrobblers that take only the first. Programs
   that read MPRIS also get the composers, the album artist, the lyricists,
   the genres, the track and disc numbers, the date and the file
+- The icon of the track playing, or paused, is over its cover in the
+  playlist pane and in an album's tracks, rather than at the end of the
+  row, where every other row kept room for it, so the titles and the names
+  under them have more room
 
 ### Fixed
 

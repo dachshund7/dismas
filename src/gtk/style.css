@@ -374,6 +374,20 @@ queuerow image.cover-placeholder {
   border-radius: 4px;
 }
 
+/* The icon of the track playing, or paused, is over its cover, on a
+ * scrim with the cover's corners, so that it shows on any cover */
+queuerow image.playing-indicator {
+  background-color: rgb(0 0 0 / 50%);
+  color: white;
+  border-radius: 4px;
+}
+
+@media (prefers-contrast: more) {
+  queuerow image.playing-indicator {
+    background-color: rgb(0 0 0 / 75%);
+  }
+}
+
 dragoverlay {
   box-shadow: none;
 }
