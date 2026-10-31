@@ -245,6 +245,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Enter on a row of the preferences, or of another dialog, played or paused
+  the music, rather than turning its switch, picking its option or
+  pressing its button
 - Ctrl+F did nothing when the playlist's search had been left open and the
   playlist pane hidden; it shows the pane again, with the cursor in the
   search

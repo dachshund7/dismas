@@ -696,6 +696,7 @@ mod imp {
                 })),
             ));
             self.obj().connect_visible_dialog_notify(move |win| {
+                win.update_default_widget();
                 if let Some(shown) = close_dialog.widget() {
                     shown.remove_controller(&close_dialog);
                 }
@@ -1053,9 +1054,21 @@ impl Window {
         win.connect_signals();
         win.restore_window_state();
         win.set_initial_state();
-        win.set_default_widget(Some(&win.imp().playback_control.play_button()));
+        win.update_default_widget();
 
         win
+    }
+
+    // Enter plays or pauses where the focused widget doesn't take it, as
+    // the play button is the default widget. A dialog inside the window
+    // passes Enter on to the window, where it played or paused from a row
+    // of the preferences, so while one shows the window has no default
+    // widget, and Enter activates the row with the focus
+    fn update_default_widget(&self) {
+        let play = adw::prelude::AdwApplicationWindowExt::visible_dialog(self)
+            .is_none()
+            .then(|| self.imp().playback_control.play_button());
+        self.set_default_widget(play.as_ref());
     }
 
     // Saves where playback is in the selected playlist, right away
