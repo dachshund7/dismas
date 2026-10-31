@@ -267,6 +267,10 @@ All notable changes to this project will be documented in this file.
   playlist pane and in an album's tracks, rather than at the end of the
   row, where every other row kept room for it, so the titles and the names
   under them have more room
+- In the playlist pane and in an album's tracks, a long title, and the
+  artist, the parts of a work or the performers under it, go on to a
+  second line rather than being cut short after a few words in a narrow
+  pane
 
 ### Fixed
 

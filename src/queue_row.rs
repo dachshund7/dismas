@@ -43,27 +43,27 @@ mod imp {
         #[template_child]
         #[property(
             name = "track-title",
-            get = |imp: &Self| imp.track_title_label.text().unwrap_or_default().into(),
+            get = |imp: &Self| imp.track_title_label.label().into(),
             set = Self::set_track_title,
             type = String,
         )]
-        pub track_title_label: TemplateChild<gtk::Inscription>,
+        pub track_title_label: TemplateChild<gtk::Label>,
         #[template_child]
         #[property(
             name = "track-artist",
-            get = |imp: &Self| imp.track_artist_label.text().unwrap_or_default().into(),
+            get = |imp: &Self| imp.track_artist_label.label().into(),
             set = Self::set_track_artist,
             type = String,
         )]
-        pub track_artist_label: TemplateChild<gtk::Inscription>,
+        pub track_artist_label: TemplateChild<gtk::Label>,
         #[template_child]
         #[property(
             name = "track-credits",
-            get = |imp: &Self| imp.track_credits_label.text().unwrap_or_default().into(),
+            get = |imp: &Self| imp.track_credits_label.label().into(),
             set = Self::set_track_credits,
             type = String,
         )]
-        pub track_credits_label: TemplateChild<gtk::Inscription>,
+        pub track_credits_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub track_playing_image: TemplateChild<gtk::Image>,
         #[template_child]
@@ -225,16 +225,16 @@ mod imp {
         }
 
         fn set_track_title(&self, title: String) {
-            self.track_title_label.set_text(Some(&title));
+            self.track_title_label.set_label(&title);
         }
 
         fn set_track_artist(&self, artist: String) {
-            self.track_artist_label.set_text(Some(&artist));
+            self.track_artist_label.set_label(&artist);
         }
 
         fn set_track_credits(&self, credits: String) {
             self.track_credits_label.set_visible(!credits.is_empty());
-            self.track_credits_label.set_text(Some(&credits));
+            self.track_credits_label.set_label(&credits);
         }
 
         fn set_track_cover(&self, cover: Option<gdk::Texture>) {
@@ -401,7 +401,22 @@ impl QueueRow {
                 icon.set_track_credits(this.track_credits());
                 icon.set_track_cover(this.track_cover());
                 icon.set_reorderable(true);
-                icon.set_width_request(this.width());
+                // The drag icon takes the natural width of the copy, which
+                // for a label is its whole text on one line, so the clamp
+                // keeps the copy to the row's width, with its lines wrapped
+                // as in the row. The width is the row's bounds, padding
+                // included, as the size request is; `width()` leaves the
+                // padding out
+                let width = this
+                    .compute_bounds(&this)
+                    .map_or(this.width(), |bounds| bounds.width().round() as i32);
+                icon.set_width_request(width);
+                let clamp = adw::Clamp::builder()
+                    .maximum_size(width)
+                    .tightening_threshold(width)
+                    .unit(adw::LengthUnit::Px)
+                    .child(&icon)
+                    .build();
                 icon.add_css_class("drag-icon");
                 if this.display().is_composited() {
                     icon.add_css_class("composited");
@@ -430,7 +445,7 @@ impl QueueRow {
                     }
                 }
 
-                gtk::DragIcon::for_drag(drag).set_child(Some(&icon));
+                gtk::DragIcon::for_drag(drag).set_child(Some(&clamp));
                 drag.set_hotspot(point.x() as i32, point.y() as i32);
 
                 this.add_css_class("dragging");
@@ -749,16 +764,17 @@ impl QueueRow {
         item.update_state(&[gtk::accessible::State::Selected(Some(selected))]);
     }
 
-    // Long titles get truncated in the queue, so we show the full
-    // text of the row on hover; for movements, that includes the work from
-    // the header of their section, which may be scrolled away, and the
-    // levels of the work go above the movement, from the largest down
+    // The lines of a row are cut short after two lines, so the tooltip
+    // shows the whole text of the row; for movements, that includes the
+    // work from the header of their section, which may be scrolled away, and
+    // the levels of the work go above the movement, from the largest down,
+    // and for a missing track, where its file was looked for
     fn tooltip(&self) -> String {
         let imp = self.imp();
         let track = self.track();
-        let title = imp.track_title_label.text().unwrap_or_default();
-        let artist = imp.track_artist_label.text().unwrap_or_default();
-        let credits = imp.track_credits_label.text().unwrap_or_default();
+        let title = imp.track_title_label.label();
+        let artist = imp.track_artist_label.label();
+        let credits = imp.track_credits_label.label();
         // Where the file was looked for
         let path = track
             .as_ref()

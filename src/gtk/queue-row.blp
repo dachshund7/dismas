@@ -82,18 +82,27 @@ template $DismasQueueRow: Widget {
       hexpand: true;
       spacing: 3;
 
-      Inscription track_title_label {
+      // Each line goes on to a second one rather than being cut short, as
+      // the pane can be narrow; a label, unlike an inscription, is as tall
+      // as its text, so only the rows with long text are taller
+      Label track_title_label {
         xalign: 0;
-        text-overflow: ellipsize_end;
+        wrap: true;
+        wrap-mode: word_char;
+        lines: 2;
+        ellipsize: end;
 
         styles [
           "track-title",
         ]
       }
 
-      Inscription track_artist_label {
+      Label track_artist_label {
         xalign: 0;
-        text-overflow: ellipsize_end;
+        wrap: true;
+        wrap-mode: word_char;
+        lines: 2;
+        ellipsize: end;
 
         styles [
           "track-artist",
@@ -102,9 +111,12 @@ template $DismasQueueRow: Widget {
 
       // The performers, for movements whose second line is the parts of
       // the work above them
-      Inscription track_credits_label {
+      Label track_credits_label {
         xalign: 0;
-        text-overflow: ellipsize_end;
+        wrap: true;
+        wrap-mode: word_char;
+        lines: 2;
+        ellipsize: end;
         visible: false;
 
         styles [
