@@ -179,10 +179,22 @@ template $DismasLibraryView: Widget {
       StackPage {
         name: "empty";
 
+        // It says where the albums were looked for, or that the music
+        // folders aren't there, see LibraryView::update_empty_page()
         child: Adw.StatusPage empty_page {
           icon-name: "folder-music-symbolic";
           title: _("No Albums");
-          description: _("Albums in your music folders will be shown here");
+
+          child: Button empty_button {
+            label: _("Choose Music Folders…");
+            halign: center;
+            action-name: "win.choose-music-folders";
+
+            styles [
+              "pill",
+              "suggested-action",
+            ]
+          };
         };
       }
 

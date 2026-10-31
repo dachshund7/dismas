@@ -193,6 +193,10 @@ mod imp {
         #[template_child]
         pub no_favorites_page: TemplateChild<adw::StatusPage>,
         #[template_child]
+        pub empty_page: TemplateChild<adw::StatusPage>,
+        #[template_child]
+        pub empty_button: TemplateChild<gtk::Button>,
+        #[template_child]
         pub scan_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
         pub update_progress: TemplateChild<gtk::ProgressBar>,
@@ -294,6 +298,9 @@ mod imp {
         // The music folders that aren't there, as of the last reload, whose
         // albums are hidden
         pub hidden_folders: RefCell<Vec<PathBuf>>,
+        // No album is shown, and the music folders that are missing or
+        // empty have albums, as when their drive isn't plugged in
+        pub albums_unavailable: Cell<bool>,
         // The albums the grid shows, as they were read
         pub shown_albums: RefCell<Vec<library::AlbumInfo>>,
         // A scan made covers again since the albums were last shown, which
@@ -1837,8 +1844,17 @@ impl LibraryView {
         utils::focus_when_laid_out(&*self.imp().grid_view);
     }
 
+    // Puts the cursor in the search, so that typing searches right away.
+    // With no album to search, the button of the empty page takes the
+    // focus instead, so that Enter goes on to choose the music folders;
+    // typing still goes to the search, through the window
     pub fn focus_search(&self) {
-        self.imp().search_entry.grab_focus();
+        let imp = self.imp();
+        if imp.albums_stack.visible_child_name().as_deref() == Some("empty") {
+            imp.empty_button.grab_focus();
+        } else {
+            imp.search_entry.grab_focus();
+        }
     }
 
     pub fn search_entry(&self) -> gtk::SearchEntry {
@@ -2042,32 +2058,46 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let (hidden, albums, has_composers, has_performers, has_works, favorites) =
-                    gio::spawn_blocking(move || {
-                        let roots = library::roots(&folders);
-                        let hidden = [roots.unavailable, roots.excluded].concat();
-                        let albums = library::albums(&hidden);
-                        let has_composers = library::has_composers(&hidden);
-                        let has_performers = library::has_performers(&hidden);
-                        let has_works = library::has_works(&hidden);
-                        let shown = albums.iter().map(|album| album.id.as_str()).collect();
-                        let favorites = favorite_album_updates(
-                            &play_stats::favorite_albums(),
-                            &shown,
-                            album_of_uri,
-                            first_track_uri,
-                        );
-                        (
-                            hidden,
-                            albums,
-                            has_composers,
-                            has_performers,
-                            has_works,
-                            favorites,
-                        )
-                    })
-                    .await
-                    .unwrap_or_default();
+                let (
+                    hidden,
+                    albums,
+                    albums_unavailable,
+                    has_composers,
+                    has_performers,
+                    has_works,
+                    favorites,
+                ) = gio::spawn_blocking(move || {
+                    let roots = library::roots(&folders);
+                    let hidden = [roots.unavailable.as_slice(), &roots.excluded].concat();
+                    let albums = library::albums(&hidden);
+                    // Only asked while there's no album to show: with
+                    // only the folders left out hidden, the albums found
+                    // are in the folders that are missing or empty
+                    let albums_unavailable = albums.is_empty()
+                        && !roots.unavailable.is_empty()
+                        && library::has_albums(&roots.excluded);
+                    let has_composers = library::has_composers(&hidden);
+                    let has_performers = library::has_performers(&hidden);
+                    let has_works = library::has_works(&hidden);
+                    let shown = albums.iter().map(|album| album.id.as_str()).collect();
+                    let favorites = favorite_album_updates(
+                        &play_stats::favorite_albums(),
+                        &shown,
+                        album_of_uri,
+                        first_track_uri,
+                    );
+                    (
+                        hidden,
+                        albums,
+                        albums_unavailable,
+                        has_composers,
+                        has_performers,
+                        has_works,
+                        favorites,
+                    )
+                })
+                .await
+                .unwrap_or_default();
                 if this.imp().reload_generation.get() == generation {
                     play_stats::update_favorite_albums(&favorites);
                     // Read again here, rather than kept from the other
@@ -2077,6 +2107,12 @@ impl LibraryView {
                         .favorite_albums
                         .replace(play_stats::favorite_album_ids());
                     this.imp().hidden_folders.replace(hidden);
+                    // Before the albums, which can switch to the page and
+                    // give its button the focus, and also when there were
+                    // no albums before either, as the grid then stays as it
+                    // is, but the folders can have changed
+                    this.imp().albums_unavailable.set(albums_unavailable);
+                    this.update_empty_page();
                     this.show_albums(albums);
                     // Also when the albums are the same, and the grid keeps
                     // them
@@ -2167,9 +2203,19 @@ impl LibraryView {
             let lost = focus
                 .as_ref()
                 .is_none_or(|focus| focus.is_ancestor(stack) || !focus.is_drawable());
+            // With no album at all, there's nothing to search either, so
+            // the button that chooses the music folders also takes the
+            // focus from an empty search, which had it at first run while
+            // the folders were read
+            let in_empty_search = focus
+                .as_ref()
+                .is_some_and(|focus| focus.is_ancestor(&*imp.search_entry))
+                && imp.search_entry.text().is_empty();
             stack.set_visible_child_name(page);
             if lost && page == "no-favorites" {
                 imp.search_entry.grab_focus();
+            } else if page == "empty" && (lost || in_empty_search) && self.is_drawable() {
+                imp.empty_button.grab_focus();
             }
         }
 
@@ -2203,6 +2249,24 @@ impl LibraryView {
                     .as_ref()
                     .is_some_and(HashMap::is_empty)
         }
+    }
+
+    // The page without albums says where they were looked for, or that the
+    // music folders that have them are missing or empty. The button, which
+    // takes the focus, has the same description, for screen readers
+    fn update_empty_page(&self) {
+        let imp = self.imp();
+        let folders: Vec<PathBuf> = library::music_folders(self.app_settings())
+            .iter()
+            .map(|folder| folder.shown_path().to_path_buf())
+            .collect();
+        let (title, description) = empty_page_text(&folders, imp.albums_unavailable.get());
+        imp.empty_page.set_title(&title);
+        // It's markup, and the name of a folder can have a "&" in it
+        imp.empty_page
+            .set_description(Some(&glib::markup_escape_text(&description)));
+        imp.empty_button
+            .update_property(&[gtk::accessible::Property::Description(&description)]);
     }
 
     // The page says so, and how to mark favorites if there are none
@@ -2701,9 +2765,76 @@ fn album_drag_icon(cover: Option<&gdk::Paintable>, n_albums: usize) -> gtk::Widg
     icon.upcast()
 }
 
+// The title and the description of the page without albums: where they
+// were looked for, naming the music folder if there's one, or that the
+// music folders that have them are missing or empty, as when their drive
+// isn't plugged in
+fn empty_page_text(folders: &[PathBuf], albums_unavailable: bool) -> (String, String) {
+    let folder = match folders {
+        [folder] => Some(utils::home_path(folder)),
+        _ => None,
+    };
+    match (albums_unavailable, folder) {
+        (false, Some(folder)) => (
+            i18n("No Albums"),
+            i18n_k(
+                // Translators: the `{folder}` must be left unmodified; it's
+                // the music folder, e.g. ~/Music
+                "Dismas looked for albums in {folder} and found none. Choose the folders your music is in.",
+                &[("folder", &folder)],
+            ),
+        ),
+        (false, None) => (
+            i18n("No Albums"),
+            i18n(
+                "Dismas found no albums in your music folders. Choose the folders your music is in.",
+            ),
+        ),
+        (true, Some(folder)) => (
+            i18n("Music Folder Not Available"),
+            i18n_k(
+                // Translators: the `{folder}` must be left unmodified; it's
+                // the music folder, e.g. ~/Music
+                "{folder} is missing or empty, so its albums are hidden. Connect the drive it's on and they come back by themselves, or choose another folder.",
+                &[("folder", &folder)],
+            ),
+        ),
+        (true, None) => (
+            i18n("Music Folders Not Available"),
+            i18n(
+                "The music folders with your albums are missing or empty, so the albums are hidden. Connect the drives they're on and the albums come back by themselves, or choose other folders.",
+            ),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_page_names_the_folder() {
+        let music = glib::home_dir().join("Music");
+        let (title, description) = empty_page_text(std::slice::from_ref(&music), false);
+        assert_eq!(title, "No Albums");
+        assert!(description.contains("in ~/Music and"), "{description}");
+
+        // Several folders aren't named
+        let several = [music, PathBuf::from("/srv/music")];
+        let (_, description) = empty_page_text(&several, false);
+        assert!(!description.contains('/'), "{description}");
+
+        // A folder outside the home folder keeps its whole path
+        let drive = PathBuf::from("/mnt/drive/Music");
+        let (title, description) = empty_page_text(std::slice::from_ref(&drive), true);
+        assert_eq!(title, "Music Folder Not Available");
+        assert!(
+            description.starts_with("/mnt/drive/Music is"),
+            "{description}"
+        );
+        let (title, _) = empty_page_text(&several, true);
+        assert_eq!(title, "Music Folders Not Available");
+    }
 
     #[test]
     fn favorite_tracks_are_found_by_their_paths() {

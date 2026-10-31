@@ -1430,6 +1430,15 @@ impl WorkRow {
     }
 }
 
+// Whether a track is in an album, without the tracks in the `hidden`
+// folders; with only the folders left out hidden, it says whether the
+// music folders that are missing or empty have albums
+pub fn has_albums(hidden: &[PathBuf]) -> bool {
+    query_or_default("look for albums", |conn| {
+        query_tracks_have(conn, "album_id", hidden)
+    })
+}
+
 // Whether a track of the albums of the grid is part of a work, without the
 // tracks in the `hidden` folders
 pub fn has_works(hidden: &[PathBuf]) -> bool {
@@ -4631,6 +4640,24 @@ mod tests {
                 ("Floyd, Pink".to_string(), "Pink Floyd".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn albums_in_the_folders_that_are_gone_are_found() {
+        let conn = test_db();
+        for (path, album) in [("/m/Gone/01.opus", Some("a")), ("/m/Loose/01.opus", None)] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2)",
+                rusqlite::params![path.as_bytes(), album],
+            )
+            .unwrap();
+        }
+        assert!(super::query_tracks_have(&conn, "album_id", &[]).unwrap());
+        // A track in no album, which the scan stores for a file it couldn't
+        // read, makes no album
+        let gone = [PathBuf::from("/m/Gone")];
+        assert!(!super::query_tracks_have(&conn, "album_id", &gone).unwrap());
     }
 
     #[test]

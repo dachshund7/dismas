@@ -205,6 +205,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- When there are no albums to show, the album page says which folder
+  Dismas looked in, or that the music folders are missing or empty, as
+  when their drive isn't plugged in, rather than only "No Albums". Its
+  Choose Music Folders… button opens Preferences with Add Folder… ready
 - Go to Album, in the menu of a track of the playlist and in the player's
   More menu, goes to the Albums page, where the albums scroll to the
   album, as Go to Work goes to the Works page, and opens the album in the

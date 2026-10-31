@@ -744,6 +744,15 @@ pub fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
     file_name_key(filename_a).cmp(&file_name_key(filename_b))
 }
 
+// A path to show, with the home folder as "~"
+pub fn home_path(path: &std::path::Path) -> String {
+    match path.strip_prefix(glib::home_dir()) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
+    }
+}
+
 // Whether Dismas runs in the Flatpak sandbox, which Flatpak marks with
 // this file
 pub fn in_flatpak() -> bool {

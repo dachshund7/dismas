@@ -293,7 +293,7 @@ impl PreferencesDialog {
     // it leaves out
     fn update_folder_subtitle(&self, item: &glib::BoxedAnyObject, row: &adw::ExpanderRow) {
         let folder = item.borrow::<MusicFolder>();
-        let mut lines = vec![home_path(folder.shown_path())];
+        let mut lines = vec![utils::home_path(folder.shown_path())];
         if self.imp().unavailable.borrow().contains(&folder.path) {
             lines.push(i18n("Not found or empty; its albums are hidden"));
         }
@@ -359,6 +359,12 @@ impl PreferencesDialog {
         ));
         exclusion.add_suffix(&remove);
         exclusion
+    }
+
+    // Puts the focus on Add Folder…, for the button of the album page
+    // without albums, so that Enter goes on to pick a folder
+    pub fn focus_add_folder(&self) {
+        adw::prelude::AdwDialogExt::set_focus(self, Some(&*self.imp().add_folder_row));
     }
 
     pub fn toast(&self, title: &str) {
@@ -626,13 +632,4 @@ fn folder_name(path: &Path) -> String {
     path.file_name()
         .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy())
         .into_owned()
-}
-
-// A path to show, with the home folder as "~"
-fn home_path(path: &Path) -> String {
-    match path.strip_prefix(glib::home_dir()) {
-        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-        Ok(rest) => format!("~/{}", rest.display()),
-        Err(_) => path.display().to_string(),
-    }
 }

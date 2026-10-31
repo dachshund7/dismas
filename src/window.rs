@@ -381,6 +381,11 @@ mod imp {
                 debug!("Window::win.preferences()");
                 win.show_preferences();
             });
+            // The button of the album page without albums
+            klass.install_action("win.choose-music-folders", None, move |win, _, _| {
+                debug!("Window::win.choose-music-folders()");
+                win.show_preferences().focus_add_folder();
+            });
             klass.install_action_async("win.open-directory", None, async move |win, _, _| {
                 debug!("Window::win.open-directory()");
                 win.open_playing_track_directory().await;
@@ -1393,7 +1398,7 @@ impl Window {
     // The music folders are read again once the dialog is closed, if they
     // or the folders they leave out changed: a scan can't be stopped, so a
     // folder added by mistake and removed again isn't read in the meantime
-    fn show_preferences(&self) {
+    fn show_preferences(&self) -> PreferencesDialog {
         let folders = |win: &Self| library::music_folders(&win.imp().settings);
         let before = folders(self);
         let dialog = PreferencesDialog::default();
@@ -1410,6 +1415,7 @@ impl Window {
             ),
         );
         adw::prelude::AdwDialogExt::present(&dialog, Some(self));
+        dialog
     }
 
     pub fn add_toast(&self, msg: String) {
