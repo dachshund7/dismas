@@ -6,7 +6,7 @@
 
 use std::{cell::OnceCell, path::Path};
 
-use super::{Field, IsFlag, Kind, Node, Term, Test, values};
+use super::{Field, IsFlag, Node, Term, Test, values};
 use crate::audio::{FieldCode, normalize_search_text};
 
 // What a query looks at in a track, borrowed from wherever the track keeps
@@ -22,6 +22,15 @@ pub struct Candidate<'a> {
     pub favorite: bool,
     // Whether its file is gone, in the queue
     pub missing: bool,
+    // In seconds since the epoch: when the track was added to the library,
+    // when it was last heard, and when it was marked a favorite
+    pub added: Option<i64>,
+    pub played: Option<i64>,
+    pub favorited: Option<i64>,
+    // How many times it was played, 0 for a track never heard
+    pub plays: Option<i64>,
+    pub favorite_album: bool,
+    pub favorite_work: bool,
 }
 
 // When the query is matched, for the relative dates
@@ -88,12 +97,19 @@ fn eval(node: &Node, track: &Track) -> bool {
         Node::All => true,
         Node::Word(word) => track.candidate.search_key.contains(word.as_str()),
         Node::Term(term) => eval_term(term, track),
-        Node::Has(field) => match field.kind() {
-            Kind::Path => track.candidate.path.is_some(),
-            _ => track.values(field.codes()).next().is_some(),
+        Node::Has(field) => match field {
+            Field::Path => track.candidate.path.is_some(),
+            // Played at least once
+            Field::Plays => track.candidate.plays.is_some_and(|plays| plays > 0),
+            _ => match source(*field, track.candidate) {
+                Some(value) => value.is_some(),
+                None => track.values(field.codes()).next().is_some(),
+            },
         },
         Node::Is(flag) => match flag {
             IsFlag::Favorite => track.candidate.favorite,
+            IsFlag::FavoriteAlbum => track.candidate.favorite_album,
+            IsFlag::FavoriteWork => track.candidate.favorite_work,
             IsFlag::Missing => track.candidate.missing,
             _ => track
                 .values(&[FieldCode::Is])
@@ -105,7 +121,27 @@ fn eval(node: &Node, track: &Track) -> bool {
     }
 }
 
+// The value of a field that isn't in the tags, `Some(None)` for a track
+// without one, and `None` for a field from the tags
+fn source(field: Field, candidate: &Candidate) -> Option<Option<i64>> {
+    match field {
+        Field::Added => Some(candidate.added),
+        Field::Plays => Some(candidate.plays),
+        Field::Played => Some(candidate.played),
+        Field::Favorited => Some(candidate.favorited),
+        _ => None,
+    }
+}
+
 fn eval_term(term: &Term, track: &Track) -> bool {
+    if let Some(value) = source(term.field, track.candidate) {
+        return match (&term.test, value) {
+            (Test::Numbers(range), Some(n)) => range.contains(n),
+            // A moment, rather than a period
+            (Test::Dates(range), Some(time)) => range.overlaps(time, time + 1, track.now),
+            _ => false,
+        };
+    }
     let mut values = track.values(term.field.codes());
     match &term.test {
         Test::Contains(text) => values.any(|value| value.contains(text.as_str())),

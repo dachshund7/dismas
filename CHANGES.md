@@ -12,7 +12,10 @@ All notable changes to this project will be documented in this file.
   out, parentheses, and quotes for phrases. composer:(bach OR handel)
   looks for either in one field, has:composer finds the tracks with a
   composer, and is:live, is:favorite and other flags find the tracks they
-  name. Search Syntax, in the main menu, lists them all. A search with a
+  name. The play history and the hearts can be searched too:
+  plays:10.. played:<-2m finds tracks played often but not lately, and
+  added:-30d, favorited:2026 and is:favorite-album find what they say.
+  Search Syntax, in the main menu, lists them all. A search with a
   mistake, like year:abc, finds nothing, and a line under it says why,
   which screen readers announce
 - Searches find curly quotes and long dashes when they're typed as plain

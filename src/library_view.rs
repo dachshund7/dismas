@@ -1798,23 +1798,14 @@ impl LibraryView {
             .as_ref()
             .map(|query| query.needs())
             .unwrap_or_default();
-        let sources = (needs.favorites || needs.path).then(|| {
+        // A folder that came through the document portal is read at a path
+        // inside the sandbox, which `path:` doesn't look into
+        let sources = needs.path.then(|| {
             Arc::new(library::SearchSources {
-                favorite_tracks: if needs.favorites {
-                    self.favorite_tracks()
-                } else {
-                    Arc::default()
-                },
-                // A folder that came through the document portal is read at
-                // a path inside the sandbox, which `path:` doesn't look into
-                shown_folders: if needs.path {
-                    library::music_folders(self.app_settings())
-                        .into_iter()
-                        .filter_map(|folder| Some((folder.path, folder.host?)))
-                        .collect()
-                } else {
-                    Vec::new()
-                },
+                shown_folders: library::music_folders(self.app_settings())
+                    .into_iter()
+                    .filter_map(|folder| Some((folder.path, folder.host?)))
+                    .collect(),
             })
         });
         TrackFilter {
@@ -1851,7 +1842,7 @@ impl LibraryView {
     // as they do for a new search
     pub fn favorite_tracks_changed(&self) {
         self.imp().favorite_tracks.replace(None);
-        // A search for is:favorite finds them, or leaves them out
+        // A search for the favorites finds them, or leaves them out
         let searched = TrackFilter::query(&self.imp().search_entry.text())
             .is_some_and(|query| query.needs().favorites);
         if searched {

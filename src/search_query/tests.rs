@@ -596,3 +596,33 @@ fn names_are_told_apart_and_described() {
         assert!(!flag.description().is_empty());
     }
 }
+
+#[test]
+fn fields_from_the_library_and_the_play_stats() {
+    const DAY: i64 = 24 * 60 * 60;
+    let candidate = Candidate {
+        added: Some(NOW.now - 10 * DAY),
+        played: Some(NOW.now - 70 * DAY),
+        favorited: Some(NOW.now - DAY),
+        plays: Some(5),
+        favorite_album: true,
+        ..Default::default()
+    };
+    assert!(finds("added:-30d", &candidate));
+    assert!(!finds("added:-7d", &candidate));
+    assert!(finds("added:<-7d", &candidate));
+    assert!(finds("played:<-61d plays:3..", &candidate));
+    assert!(finds("favorited:-2d", &candidate));
+    assert!(finds("is:favorite-album -is:favorite-work", &candidate));
+    // A track never heard has no plays and wasn't played
+    let never = Candidate {
+        plays: Some(0),
+        ..Default::default()
+    };
+    assert!(finds("plays:0 -has:played -has:plays", &never));
+    assert!(!finds("played:..2030", &never));
+    assert!(finds("-played:2026", &never));
+    let needs = search("plays:3 added:-1y is:favorite-work favorited:2026").needs();
+    assert!(needs.stats && needs.added && needs.favorite_works && needs.favorites);
+    assert!(!needs.fields && !needs.search_key);
+}

@@ -13,7 +13,8 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::HashSet,
+    collections::HashMap,
+    path::PathBuf,
     rc::Rc,
     time::Duration,
 };
@@ -22,9 +23,34 @@ use gtk::{glib, glib::clone, prelude::*, subclass::prelude::*};
 
 use crate::{
     i18n::i18n,
-    play_stats,
-    search_query::{Context, Mode, Problem, Query},
+    library::{self, TrackEntry},
+    play_stats::{self, SearchStats},
+    search_query::{Context, Mode, Needs, Problem, Query},
 };
+
+// What a search of the queue needs that its tracks don't have, read when a
+// search needs it, see `Needs`
+#[derive(Debug, Default)]
+pub struct QueueSources {
+    // From plays.db, by URI
+    pub stats: SearchStats,
+    // From the library, by path
+    pub tracks: HashMap<PathBuf, TrackEntry>,
+}
+
+impl QueueSources {
+    fn read(needs: &Needs) -> Self {
+        let from_library = needs.added || needs.favorite_albums || needs.favorite_works;
+        Self {
+            stats: play_stats::search_stats(needs),
+            tracks: if from_library {
+                library::track_entries()
+            } else {
+                HashMap::new()
+            },
+        }
+    }
+}
 
 mod imp {
     use super::*;
@@ -41,9 +67,10 @@ mod imp {
         pub query: RefCell<Option<Query>>,
         // When the search was typed, for its relative dates
         pub context: Cell<Option<Context>>,
-        // The URIs of the favorite tracks, read when a search needs them,
-        // and again when one is marked (`favorites_changed()`)
-        pub favorites: RefCell<Option<HashSet<String>>>,
+        // What the search needs from the library and plays.db, read when
+        // it's typed, and again when a favorite is marked
+        // (`favorites_changed()`)
+        pub sources: RefCell<Option<QueueSources>>,
     }
 
     #[glib::object_subclass]
@@ -66,9 +93,10 @@ mod imp {
                 .as_deref()
                 .map(|text| Query::parse(text, Mode::Search))
                 .filter(|query| !query.matches_all());
-            if query.as_ref().is_some_and(|query| query.needs().favorites) {
-                self.read_favorites();
-            }
+            let sources = query
+                .as_ref()
+                .map(|query| QueueSources::read(&query.needs()));
+            self.sources.replace(sources);
 
             let was_filtering = self.filtering();
             self.search.replace(search);
@@ -85,13 +113,6 @@ mod imp {
 
         fn filtering(&self) -> bool {
             self.query.borrow().is_some()
-        }
-
-        pub(super) fn read_favorites(&self) {
-            if self.favorites.borrow().is_none() {
-                let favorites = play_stats::favorites().into_iter().collect();
-                self.favorites.replace(Some(favorites));
-            }
         }
     }
 
@@ -111,7 +132,8 @@ mod imp {
             };
             let context = self.context.get().unwrap_or_else(Context::now);
             let track = track.downcast_ref::<Track>().unwrap();
-            track.matches_query(query, &context, self.favorites.borrow().as_ref())
+            let sources = self.sources.borrow();
+            track.matches_query(query, &context, sources.as_ref())
         }
     }
 }
@@ -132,20 +154,18 @@ impl SearchFilter {
         glib::Object::new()
     }
 
-    // A track was marked a favorite, or unmarked; a search for the
-    // favorites finds it, or leaves it out, at once
+    // A track, an album or a work was marked a favorite, or unmarked; a
+    // search for the favorites finds it, or leaves it out, at once
     pub fn favorites_changed(&self) {
         let imp = self.imp();
-        imp.favorites.replace(None);
-        let needs = imp
-            .query
-            .borrow()
-            .as_ref()
-            .is_some_and(|query| query.needs().favorites);
-        if needs {
-            imp.read_favorites();
-            self.changed(gtk::FilterChange::Different);
-        }
+        let needs = imp.query.borrow().as_ref().map(Query::needs);
+        let Some(needs) =
+            needs.filter(|needs| needs.favorites || needs.favorite_albums || needs.favorite_works)
+        else {
+            return;
+        };
+        imp.sources.replace(Some(QueueSources::read(&needs)));
+        self.changed(gtk::FilterChange::Different);
     }
 }
 

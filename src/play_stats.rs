@@ -608,6 +608,73 @@ fn set_recording(
     }
 }
 
+// What the search syntax looks into in plays.db, by URI, read only as far
+// as a search needs it, see `search_query::Needs`
+#[derive(Clone, Debug, Default)]
+pub struct SearchStats {
+    // The totals of the tracks heard, for `plays:` and `played:`
+    pub heard: HashMap<String, TrackStats>,
+    // When each favorite track was marked, for `is:favorite` and
+    // `favorited:`
+    pub favorites: HashMap<String, i64>,
+    // The ids of the favorite albums, for `is:favorite-album`
+    pub favorite_albums: BTreeSet<String>,
+    // The keys of the favorite works, and of the works with a favorite
+    // recording, for `is:favorite-work`
+    pub favorite_works: std::collections::HashSet<String>,
+}
+
+pub fn search_stats(needs: &crate::search_query::Needs) -> SearchStats {
+    match with_connection(|conn| query_search_stats(conn, needs)) {
+        Ok(stats) => stats,
+        Err(e) => {
+            warn!("Unable to load the play stats for a search: {e}");
+            SearchStats::default()
+        }
+    }
+}
+
+fn query_search_stats(
+    conn: &Connection,
+    needs: &crate::search_query::Needs,
+) -> rusqlite::Result<SearchStats> {
+    let mut stats = SearchStats::default();
+    if needs.stats {
+        let mut stmt = conn.prepare("SELECT uri, plays, last_played FROM totals")?;
+        for row in stmt.query_map([], |row| {
+            let track = TrackStats {
+                plays: row.get(1)?,
+                last_heard: row.get(2)?,
+            };
+            Ok((row.get(0)?, track))
+        })? {
+            let (uri, track) = row?;
+            stats.heard.insert(uri, track);
+        }
+    }
+    if needs.favorites {
+        let mut stmt = conn.prepare("SELECT uri, added FROM favorites")?;
+        stats.favorites = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+    }
+    if needs.favorite_albums {
+        let mut stmt = conn.prepare("SELECT album_id FROM favorite_albums")?;
+        stats.favorite_albums = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+    }
+    if needs.favorite_works {
+        let mut stmt = conn.prepare(
+            "SELECT key FROM favorite_works UNION SELECT work_key FROM favorite_recordings",
+        )?;
+        stats.favorite_works = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+    }
+    Ok(stats)
+}
+
 // The keys of the works that are favorites, or have a favorite recording,
 // which the Works page marks
 pub fn favorite_work_keys() -> std::collections::HashSet<String> {
@@ -1016,6 +1083,46 @@ mod tests {
             query_not_heard_lately(&conn, now).unwrap(),
             ["five plays", "year ago", "three plays"]
         );
+    }
+
+    #[test]
+    fn not_heard_lately_is_expressible_in_the_search_syntax() {
+        use crate::search_query::{Candidate, Context, Mode, Query};
+
+        let mut conn = test_db();
+        let now = 1_800_000_000;
+        let long_ago = now - 300 * DAY;
+        for (uri, plays, last) in [
+            ("five plays", 5, long_ago),
+            ("three plays", 3, now - 62 * DAY),
+            // Just inside the 61 days, which a day's precision would miss
+            ("heard 60 days ago", 9, now - 61 * DAY + 3600),
+            ("two plays", 2, long_ago),
+        ] {
+            for i in 0..plays {
+                insert_listen(&mut conn, &played(uri, last - i)).unwrap();
+            }
+        }
+        let query = Query::parse("plays:3.. played:<-61d", Mode::Search);
+        let stats = query_search_stats(&conn, &query.needs()).unwrap();
+        let mut found: Vec<&str> = stats
+            .heard
+            .iter()
+            .filter(|(_, track)| {
+                let candidate = Candidate {
+                    plays: Some(i64::from(track.plays)),
+                    played: Some(track.last_heard),
+                    ..Default::default()
+                };
+                query.matches(&candidate, &Context { now })
+            })
+            .map(|(uri, _)| uri.as_str())
+            .collect();
+        found.sort_unstable();
+        let mut expected = query_not_heard_lately(&conn, now).unwrap();
+        expected.sort();
+        assert_eq!(found, expected);
+        assert_eq!(found, ["five plays", "three plays"]);
     }
 
     #[test]

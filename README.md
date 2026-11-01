@@ -86,7 +86,12 @@ What Dismas adds
   Work Hierarchy plugin), `catalogue:` (BWV, K., op. and others, however
   they're spaced), `conductor:`, `ensemble:`, `soloist:`, `role:piano` and
   `people:` (anyone credited). Flags such as `is:live`, `is:movement`,
-  `is:lossless` and `is:favorite` find the tracks they name. Dates are a
+  `is:lossless` and `is:favorite` find the tracks they name, and the play
+  history and the hearts are searched too: `plays:10.. played:<-2m` finds
+  the tracks played often but not in the last two months, and `added:-30d`,
+  `favorited:2026`, `is:favorite-album` and `is:favorite-work` what they
+  say; `played:` is the last time a track was listened to for 30 seconds
+  or more. Dates are a
   year, a month or a day (`2026-10`), or a time ago, `-30d`, `-2w`, `-6m` or
   `-1y`; `path:bach/cantatas` looks for folders from the start of their
   names, and `disc:` is the disc number in the tags. A search with a

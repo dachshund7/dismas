@@ -128,6 +128,12 @@ pub struct Needs {
     pub fields: bool,
     pub path: bool,
     pub favorites: bool,
+    // The play stats, for `plays:` and `played:`
+    pub stats: bool,
+    // When the track was added to the library
+    pub added: bool,
+    pub favorite_albums: bool,
+    pub favorite_works: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,6 +159,8 @@ impl Node {
             Self::Term(term) => term.field.add_needs(needs),
             Self::Has(field) => field.add_needs(needs),
             Self::Is(IsFlag::Favorite) => needs.favorites = true,
+            Self::Is(IsFlag::FavoriteAlbum) => needs.favorite_albums = true,
+            Self::Is(IsFlag::FavoriteWork) => needs.favorite_works = true,
             Self::Is(IsFlag::Missing) => (),
             Self::Is(_) => needs.fields = true,
             Self::Not(node) => node.add_needs(needs),
@@ -268,10 +276,15 @@ pub enum Field {
     BitDepth,
     Bitrate,
     Channels,
+    // Not from the tags, but from the library and the play stats
+    Added,
+    Plays,
+    Played,
+    Favorited,
 }
 
 impl Field {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 42] = [
         Self::Title,
         Self::Artist,
         Self::AlbumArtist,
@@ -310,6 +323,10 @@ impl Field {
         Self::BitDepth,
         Self::Bitrate,
         Self::Channels,
+        Self::Added,
+        Self::Plays,
+        Self::Played,
+        Self::Favorited,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -352,6 +369,10 @@ impl Field {
             Self::BitDepth => "bitdepth",
             Self::Bitrate => "bitrate",
             Self::Channels => "channels",
+            Self::Added => "added",
+            Self::Plays => "plays",
+            Self::Played => "played",
+            Self::Favorited => "favorited",
         }
     }
 
@@ -372,15 +393,21 @@ impl Field {
             | Self::SampleRate
             | Self::BitDepth
             | Self::Bitrate
-            | Self::Channels => Kind::Number,
+            | Self::Channels
+            | Self::Plays => Kind::Number,
             Self::Length => Kind::Duration,
-            Self::Recorded | Self::Original | Self::Released => Kind::Date,
+            Self::Recorded
+            | Self::Original
+            | Self::Released
+            | Self::Added
+            | Self::Played
+            | Self::Favorited => Kind::Date,
             _ => Kind::Text,
         }
     }
 
-    // The lines of the fields it looks into; none for the path, which is
-    // the track's own
+    // The lines of the fields it looks into; none for the path, and for
+    // what isn't in the tags, which the `Candidate` has
     pub(crate) fn codes(self) -> &'static [FieldCode] {
         use FieldCode as C;
         match self {
@@ -429,12 +456,16 @@ impl Field {
             Self::BitDepth => &[C::BitDepth],
             Self::Bitrate => &[C::Bitrate],
             Self::Channels => &[C::Channels],
+            Self::Added | Self::Plays | Self::Played | Self::Favorited => &[],
         }
     }
 
     fn add_needs(self, needs: &mut Needs) {
         match self {
             Self::Path => needs.path = true,
+            Self::Added => needs.added = true,
+            Self::Plays | Self::Played => needs.stats = true,
+            Self::Favorited => needs.favorites = true,
             _ => needs.fields = true,
         }
     }
@@ -484,6 +515,10 @@ impl Field {
             Self::BitDepth => i18n("The bit depth"),
             Self::Bitrate => i18n("The bitrate, in kbps"),
             Self::Channels => i18n("The number of channels"),
+            Self::Added => i18n("When it was added to the library"),
+            Self::Plays => i18n("How many times it was played, all time"),
+            Self::Played => i18n("When it was last listened to, for 30 seconds or more"),
+            Self::Favorited => i18n("When it was marked with the heart"),
         }
     }
 }
@@ -492,6 +527,10 @@ impl Field {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum IsFlag {
     Favorite,
+    // In a favorite album
+    FavoriteAlbum,
+    // A part of a favorite work, or of a work with a favorite recording
+    FavoriteWork,
     Movement,
     Arrangement,
     Live,
@@ -502,8 +541,10 @@ pub enum IsFlag {
 }
 
 impl IsFlag {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Favorite,
+        Self::FavoriteAlbum,
+        Self::FavoriteWork,
         Self::Movement,
         Self::Arrangement,
         Self::Live,
@@ -515,6 +556,8 @@ impl IsFlag {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Favorite => "favorite",
+            Self::FavoriteAlbum => "favorite-album",
+            Self::FavoriteWork => "favorite-work",
             Self::Movement => "movement",
             Self::Arrangement => "arrangement",
             Self::Live => "live",
@@ -533,6 +576,10 @@ impl IsFlag {
     pub fn description(self) -> String {
         match self {
             Self::Favorite => i18n("Tracks marked with the heart"),
+            Self::FavoriteAlbum => i18n("Tracks of albums marked with the heart"),
+            Self::FavoriteWork => {
+                i18n("Tracks of works marked with the heart, or of their marked recordings")
+            }
             Self::Movement => i18n("Movements of a larger work"),
             Self::Arrangement => i18n("Arrangements of another work"),
             Self::Live => i18n("Live recordings"),
@@ -773,7 +820,7 @@ impl Problem {
             // to what was typed after "is:". The names after "is:" stay as
             // they are
             K::UnknownFlag(value) => i18n_k(
-                "is:{value} isn't known; is: takes favorite, movement, arrangement, live, partial, lossless or missing",
+                "is:{value} isn't known; is: takes favorite, favorite-album, favorite-work, movement, arrangement, live, partial, lossless or missing",
                 &[("value", value)],
             ),
             // Translators: `{value}` must be left unmodified; it's expanded

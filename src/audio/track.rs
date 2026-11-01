@@ -4,7 +4,7 @@
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     fs::File,
     hash::Hash,
     io::BufReader,
@@ -1035,20 +1035,48 @@ impl Track {
         &self,
         query: &Query,
         context: &Context,
-        favorites: Option<&HashSet<String>>,
+        sources: Option<&crate::search::QueueSources>,
     ) -> bool {
         let needs = query.needs();
-        let favorite = needs.favorites && favorites.is_some_and(|f| f.contains(&self.uri()));
+        let uri = (needs.favorites || needs.stats).then(|| self.uri());
+        let stats = sources.map(|sources| &sources.stats);
+        let favorited = stats
+            .zip(uri.as_ref())
+            .and_then(|(stats, uri)| stats.favorites.get(uri).copied());
+        let heard = stats
+            .zip(uri.as_ref())
+            .and_then(|(stats, uri)| stats.heard.get(uri));
         self.with_search_key(|search_key| {
             let data = self.imp().data.borrow();
-            let path = needs.path.then(|| data.search_path()).flatten();
-            let candidate = Candidate {
-                search_key,
-                fields: &data.fields,
-                path: path.as_deref(),
-                favorite,
-                missing: data.missing.is_some(),
-            };
+            let path = (needs.path || needs.added || needs.favorite_albums || needs.favorite_works)
+                .then(|| data.file.path())
+                .flatten();
+            // As the library keeps it, under its sheet for a track of a CUE
+            // sheet
+            let entry = sources
+                .zip(path.as_ref())
+                .and_then(|(sources, path)| sources.tracks.get(path));
+            let shown = needs.path.then(|| data.search_path()).flatten();
+            let candidate =
+                Candidate {
+                    search_key,
+                    fields: &data.fields,
+                    path: shown.as_deref(),
+                    favorite: favorited.is_some(),
+                    missing: data.missing.is_some(),
+                    added: entry.map(|entry| entry.added),
+                    played: heard.map(|heard| heard.last_heard),
+                    favorited,
+                    plays: needs
+                        .stats
+                        .then(|| heard.map_or(0, |heard| i64::from(heard.plays))),
+                    favorite_album: entry.and_then(|entry| entry.album_id.as_ref()).is_some_and(
+                        |id| stats.is_some_and(|stats| stats.favorite_albums.contains(id)),
+                    ),
+                    favorite_work: entry.and_then(|entry| entry.work_key.as_ref()).is_some_and(
+                        |key| stats.is_some_and(|stats| stats.favorite_works.contains(key)),
+                    ),
+                };
             query.matches(&candidate, context)
         })
     }
