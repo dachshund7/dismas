@@ -34,6 +34,7 @@ mod queue_row;
 mod resume_point;
 mod reveal_bin;
 mod search;
+mod search_query;
 mod slide_bin;
 mod square_bin;
 mod track_cover;

@@ -61,7 +61,7 @@ mod work_hierarchy;
 use credits::is_composer;
 pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
 use fields::sane_duration;
-pub use fields::{AudioProperties, FieldParts};
+pub use fields::{AudioProperties, FieldCode, FieldParts};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;

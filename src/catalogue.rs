@@ -51,6 +51,17 @@ impl CatalogueNumber {
     }
 }
 
+// A catalogue by the name written before its numbers, e.g. "BWV" or "op.",
+// with "kv" as "k", as in `CatalogueNumber`
+pub fn catalogue_name(word: &str) -> Option<&'static str> {
+    let word = word.strip_suffix('.').unwrap_or(word).to_lowercase();
+    CATALOGUES
+        .iter()
+        .copied()
+        .find(|catalogue| *catalogue == word)
+        .map(|catalogue| if catalogue == "kv" { "k" } else { catalogue })
+}
+
 // The catalogue numbers in the name of a work, in the order they're in;
 // none in "Book I" or "Act II"
 pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
