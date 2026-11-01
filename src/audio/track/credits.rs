@@ -120,8 +120,14 @@ pub struct TrackCredits {
     // whole work or isn't part of one
     pub movement_order: Option<Vec<u32>>,
     // The names of the works in the tag of the "Work Hierarchy" plugin,
-    // which lofty doesn't search, see `WorkHierarchy::search_text()`
-    pub work_search: String,
+    // which lofty doesn't search, see `WorkHierarchy::search_names()`
+    pub work_names: Vec<String>,
+    // The MusicBrainz types of the works, from the "Work Hierarchy" plugin,
+    // see `WorkHierarchy::forms()`
+    pub work_forms: Vec<String>,
+    // How MusicBrainz links the recording to its works, e.g. "live", from
+    // the "Work Hierarchy" plugin
+    pub performance_attributes: Vec<String>,
     pub movement: Option<String>,
     pub movement_number: Option<String>,
     // The levels of the work above the movement, and the movement, when
@@ -192,8 +198,12 @@ pub struct MusicBrainzIds {
     pub recording: Option<String>,
     pub release: Option<String>,
     pub work: Option<String>,
+    pub track: Option<String>,
+    pub release_group: Option<String>,
     // The ids of the track artists
     pub artists: Vec<String>,
+    // The ids of the album artists
+    pub release_artists: Vec<String>,
 }
 
 impl MusicBrainzIds {
@@ -207,7 +217,13 @@ impl MusicBrainzIds {
             recording: id(ItemKey::MusicBrainzRecordingId),
             release: id(ItemKey::MusicBrainzReleaseId),
             work: id(ItemKey::MusicBrainzWorkId),
+            track: id(ItemKey::MusicBrainzTrackId),
+            release_group: id(ItemKey::MusicBrainzReleaseGroupId),
             artists: tag_strings(tag, ItemKey::MusicBrainzArtistId)
+                .into_iter()
+                .filter(|id| is_mbid(id))
+                .collect(),
+            release_artists: tag_strings(tag, ItemKey::MusicBrainzReleaseArtistId)
                 .into_iter()
                 .filter(|id| is_mbid(id))
                 .collect(),
@@ -231,10 +247,11 @@ impl TrackCredits {
             .as_deref()
             .and_then(WorkHierarchy::parse);
         credits.composer_ids = hierarchy.as_ref().and_then(WorkHierarchy::composer_ids);
-        credits.work_search = hierarchy
-            .as_ref()
-            .map(WorkHierarchy::search_text)
-            .unwrap_or_default();
+        if let Some(hierarchy) = &hierarchy {
+            credits.work_names = hierarchy.search_names();
+            credits.work_forms = hierarchy.forms();
+            credits.performance_attributes = hierarchy.performance_attributes();
+        }
         // The hierarchy has the numbers of every level, so the movement
         // includes them where they belong, whatever the work and movement
         // tags say. A track of a whole part with a catalogue number of its
@@ -296,7 +313,9 @@ impl TrackCredits {
             work_arrangement: None,
             work_part_ids: Vec::new(),
             movement_order,
-            work_search: String::new(),
+            work_names: Vec::new(),
+            work_forms: Vec::new(),
+            performance_attributes: Vec::new(),
             movement,
             movement_number,
             movement_levels: None,

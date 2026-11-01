@@ -50,6 +50,7 @@ use crate::{
 
 mod credits;
 pub mod discovered;
+mod fields;
 mod file_name;
 mod loader;
 mod lofty_gaps;
@@ -59,11 +60,13 @@ mod work_hierarchy;
 
 use credits::is_composer;
 pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
+use fields::sane_duration;
+pub use fields::{AudioProperties, FieldParts};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
 use lofty_gaps::Fills;
-pub use search::{normalize_search_text, search_key, track_search_text};
+pub use search::{normalize_key_text, normalize_search_text, search_key, track_search_text};
 pub use tags::{ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_title};
 use tags::{track_album, track_artist};
 pub use work_hierarchy::Arrangement;
@@ -80,6 +83,9 @@ pub struct TrackData {
     fallback_album: String,
     credits: TrackCredits,
     tag_text: String,
+    // The values the fields of the search look into, see `FieldParts`
+    #[allow(dead_code, reason = "the queue's search reads them from the next step")]
+    fields: String,
     cover: Option<AlbumCover>,
     uuid: Option<String>,
     duration: u64,
@@ -297,6 +303,11 @@ impl TrackData {
         &self.credits
     }
 
+    #[cfg(test)]
+    pub fn fields(&self) -> &str {
+        &self.fields
+    }
+
     // The title and the artist, as Copy puts them on the clipboard, e.g.
     // "Summer of '69 — Bryan Adams"; for classical music, the composers
     // and then the performers, as MusicBrainz credits classical releases,
@@ -417,6 +428,7 @@ impl TrackData {
             fallback_album,
             credits: TrackCredits::default(),
             tag_text: String::new(),
+            fields: String::new(),
             cover: None,
             uuid: None,
             duration: 0,
@@ -483,6 +495,7 @@ impl Default for TrackData {
             fallback_album: String::new(),
             credits: TrackCredits::default(),
             tag_text: String::new(),
+            fields: String::new(),
             cover: None,
             uuid: None,
             duration: 0,

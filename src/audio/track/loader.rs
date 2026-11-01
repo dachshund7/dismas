@@ -6,22 +6,6 @@
 
 use super::*;
 
-// The longest a track can be. A file can report a far longer one in its
-// header, e.g. an Ogg file cut off in the middle of a page, and the clock
-// times of GStreamer and MPRIS can't hold the longest; such a length counts
-// as unknown. Audiobooks in a single file run to some tens of hours
-const MAX_DURATION: Duration = Duration::from_secs(1000 * 60 * 60);
-
-// The length of a track in seconds, 0 if it's unknown
-fn sane_duration(duration: Duration) -> u64 {
-    if duration > MAX_DURATION {
-        warn!("Ignoring a length of {} s", duration.as_secs());
-        0
-    } else {
-        duration.as_secs()
-    }
-}
-
 // The id of a track, which names the cache of its waveform
 fn track_uuid(display_name: &str, number: Option<u32>, tags: [&Option<String>; 3]) -> String {
     let mut hasher = Sha256::new();
@@ -96,6 +80,9 @@ struct CueFile {
     tag: Tag,
     cover: AlbumCover,
     duration: Duration,
+    // The properties of the whole file, which the length of each track
+    // replaces
+    properties: AudioProperties,
     display_name: Option<String>,
     details: FileDetails,
 }
@@ -109,12 +96,14 @@ impl CueFile {
             tag.remove_picture(0);
         }
         let duration = read.tags.properties.duration();
+        let properties = AudioProperties::of(&read.tags.properties);
         let details = read.details(ReplayGain::default());
         Self {
             path: read.path,
             tag,
             cover,
             duration,
+            properties,
             display_name: read.display_name,
             details,
         }
@@ -408,15 +397,31 @@ impl TrackData {
         };
         // The folder outside the sandbox, as a file that came through the
         // document portal is in a folder named after its document
+        let folder = read.host_path.as_deref().unwrap_or(path);
         let fallback_album = if album.is_none() {
-            fallback_album(read.host_path.as_deref().unwrap_or(path))
+            fallback_album(folder)
         } else {
             String::new()
         };
+        // As the library names it, without the "Unknown album" shown
+        let folder_album = album
+            .is_none()
+            .then(|| folder_album_title(folder))
+            .flatten();
 
         let credits = TrackCredits::from_tag(tag, extra);
+        let fields = FieldParts {
+            tag,
+            credits: &credits,
+            title: title.as_deref().or(Some(&fallback_title)),
+            album: album.as_deref().or(folder_album.as_deref()),
+            format: read.tags.format.as_deref(),
+            properties: Some(AudioProperties::of(&read.tags.properties)),
+        }
+        .encode();
         TrackData {
             tag_text: track_search_text(tag, &credits),
+            fields,
             credits,
             cover: Some(CoverCache::cover_art(path, tag)),
             uuid,
@@ -443,10 +448,7 @@ impl TrackData {
         let title = track_title(&tag);
         let album = track_album(&tag);
 
-        let end = match track.end {
-            Some(end) if cue_file.duration.is_zero() || end < cue_file.duration => end,
-            _ => cue_file.duration,
-        };
+        let length = track.length(cue_file.duration);
         let uuid = cue_file
             .display_name
             .as_deref()
@@ -455,12 +457,27 @@ impl TrackData {
         details.replay_gain = ReplayGain::from_tag(&tag);
 
         let credits = TrackCredits::from_tag(&tag, &extra);
+        // The album is in the folder of the sheet
+        let folder_album = album
+            .is_none()
+            .then(|| folder_album_title(&sheet.path))
+            .flatten();
+        let fields = FieldParts {
+            tag: &tag,
+            credits: &credits,
+            title: title.as_deref(),
+            album: album.as_deref().or(folder_album.as_deref()),
+            format: cue_file.details.format.as_deref(),
+            properties: Some(cue_file.properties.with_length(length)),
+        }
+        .encode();
         TrackData {
             tag_text: track_search_text(&tag, &credits),
+            fields,
             credits,
             cover: Some(cue_file.cover.clone()),
             uuid,
-            duration: sane_duration(end.saturating_sub(track.start)),
+            duration: sane_duration(length),
             details,
             file: gio::File::for_path(sheet.location(track)),
             audio: Some(CueAudio {

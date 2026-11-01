@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Searches find curly quotes and long dashes when they're typed as plain
+  ones, so "bach's" finds "Bach’s" and "kyrie - christe" finds "Kyrie –
+  Christe", and they ignore how many spaces are between words
+- Searches find a catalogue number typed without its space, so "bwv1047"
+  finds "BWV 1047", in the work or in the title
 - The album covers can be made larger or smaller, on the Albums, Tracks
   and Works pages, with the buttons at the top of the main menu, with
   Ctrl+plus and Ctrl+minus, with Ctrl and the mouse wheel over them, or

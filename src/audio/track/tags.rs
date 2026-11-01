@@ -215,10 +215,19 @@ impl ReadOptions {
         properties: true,
         lyrics: false,
     };
-    // Without the covers and the properties, which the library doesn't keep
+    // Without the covers and the properties, to time reading them
+    #[cfg(test)]
     pub const TAGS: Self = Self {
         covers: false,
         properties: false,
+        lyrics: false,
+    };
+    // What the library keeps: the tags and the properties, which the search
+    // looks into, e.g. the length; not the covers, which it reads only for
+    // the albums whose cover it makes
+    pub const SCAN: Self = Self {
+        covers: false,
+        properties: true,
         lyrics: false,
     };
     // The tags with the synchronized lyrics

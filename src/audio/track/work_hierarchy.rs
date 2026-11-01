@@ -173,6 +173,10 @@ struct HierarchySegment {
     // The name the recording's title gives the part of the work the track
     // has, when it has only part of it
     excerpt: Option<String>,
+    // How MusicBrainz links the recording to the work, e.g. "live" or
+    // "partial"
+    #[serde(default)]
+    attributes: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +187,9 @@ struct HierarchyWork {
     #[serde(default, deserialize_with = "lenient_number")]
     number: Option<u64>,
     numeral: Option<String>,
+    // Its MusicBrainz type, e.g. "Cantata" or "Aria"
+    #[serde(rename = "type")]
+    work_type: Option<String>,
     #[serde(default, deserialize_with = "lenient_number")]
     position: Option<u64>,
     // `None` if the plugin didn't record them
@@ -420,8 +427,9 @@ impl WorkHierarchy {
     // by them, e.g. by "Well-
     // Tempered" for a Prelude and Fugue, or by its English name when its
     // work tag has the original one. Their types are left out, as "Song"
-    // would match every song
-    pub(super) fn search_text(&self) -> String {
+    // would match every song; the field of their types is `form:`, see
+    // `forms()`
+    pub(super) fn search_names(&self) -> Vec<String> {
         self.segments
             .iter()
             .flat_map(|segment| {
@@ -452,7 +460,33 @@ impl WorkHierarchy {
             })
             .flatten()
             .unique()
-            .join(" ")
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    // The MusicBrainz types of the works a track performs and of the works
+    // they're part of, e.g. "Cantata" and "Aria", so that a search finds the
+    // movements of a cantata, and an aria of any work
+    pub(super) fn forms(&self) -> Vec<String> {
+        self.segments
+            .iter()
+            .flat_map(|segment| &segment.path)
+            .filter_map(|work| work.work_type.as_deref())
+            .filter(|form| !form.trim().is_empty())
+            .unique()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    // How MusicBrainz links the recording to the works, e.g. "live" for a
+    // live performance, or "partial" for a recording of part of one
+    pub(super) fn performance_attributes(&self) -> Vec<String> {
+        self.segments
+            .iter()
+            .flat_map(|segment| &segment.attributes)
+            .unique()
+            .cloned()
+            .collect()
     }
 
     // The ids of the composers of the works a track performs, the last in
@@ -989,7 +1023,7 @@ mod tests {
         let busoni = arrangement("for piano, Busoni").unwrap();
         assert_eq!(busoni.label.as_deref(), Some("for piano, Busoni"));
         let hierarchy = WorkHierarchy::parse(&tag("for piano, Busoni")).unwrap();
-        assert!(hierarchy.search_text().contains("Busoni"));
+        assert!(hierarchy.search_names().join(" ").contains("Busoni"));
 
         // Not from older versions of the plugin, nor for an original
         let older = serde_json::json!({ "version": 1, "segments": [{ "work_index": 0, "path": [
@@ -1518,7 +1552,8 @@ mod tests {
             ] }] });
         let text = WorkHierarchy::parse(&json.to_string())
             .unwrap()
-            .search_text();
+            .search_names()
+            .join(" ");
         assert_eq!(
             text,
             "The Well-Tempered Clavier Keyboard Works Das Wohltemperierte Klavier \

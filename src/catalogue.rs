@@ -30,6 +30,27 @@ pub struct CatalogueNumber {
     pub order: Vec<(u32, String)>,
 }
 
+impl CatalogueNumber {
+    // How the search keeps it, e.g. "bwv 1047", "op 2.4" or "hob 16.52":
+    // the catalogue, then the parts of the number, which a search for a
+    // number compares one by one, so that "op. 2" finds "op. 2 no. 4"
+    pub fn search_text(&self) -> String {
+        let parts: Vec<String> = self
+            .order
+            .iter()
+            .map(|(value, rest)| format!("{value}{rest}"))
+            .collect();
+        format!("{} {}", self.catalogue, parts.join("."))
+    }
+
+    // As one word, e.g. "bwv1047", which plain words find, as they're
+    // often typed without the space
+    pub fn word(&self) -> Option<String> {
+        let (value, rest) = self.order.first()?;
+        Some(format!("{}{value}{rest}", self.catalogue))
+    }
+}
+
 // The catalogue numbers in the name of a work, in the order they're in;
 // none in "Book I" or "Act II"
 pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {

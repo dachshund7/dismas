@@ -7,9 +7,38 @@
 use super::*;
 use crate::lyrics;
 
-// Makes searching insensitive to case and accents, e.g. "Gemüte" becomes
-// "gemute", so it can be found by typing it without the accent
+// Makes searching insensitive to case, accents, the kinds of quotes and
+// dashes, and spacing: "Gemüte" becomes "gemute", "Bach’s" "bach's" and
+// "Kyrie – Christe" "kyrie - christe", so that they can be typed without
+// the accent, on any keyboard. Runs of whitespace become one space, which
+// the search syntax tells phrases and the values of fields apart by. Most
+// tags are ASCII, which only needs lowercasing
 pub fn normalize_search_text(s: &str) -> String {
+    let folded = if s.is_ascii() {
+        s.to_ascii_lowercase()
+    } else {
+        fold_letters(s)
+            .chars()
+            .map(|c| match c {
+                '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{02bc}' => '\'',
+                '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{201f}' => '"',
+                '\u{2010}'..='\u{2015}' | '\u{2212}' => '-',
+                _ => c,
+            })
+            .collect()
+    };
+    folded.split_whitespace().join(" ")
+}
+
+// The fold of the keys that tell composers, performers and works apart,
+// which plays.db keeps the favorite works by: case and accents only, as
+// before the search folded quotes and dashes, so that the keys don't change
+pub fn normalize_key_text(s: &str) -> String {
+    fold_letters(s)
+}
+
+// The text without case and accents
+fn fold_letters(s: &str) -> String {
     // The compatibility decomposition splits accented letters into the
     // letter and a combining mark, which we drop
     let decomposed = glib::normalize(s, glib::NormalizeMode::All);
@@ -63,9 +92,20 @@ pub fn search_key(
 // which lofty leaves out of `tag`
 pub fn track_search_text(tag: &Tag, credits: &TrackCredits) -> String {
     let mut text = tag_search_text(tag);
-    if !credits.work_search.is_empty() {
+    let works = credits.work_names.join(" ");
+    if !works.is_empty() {
         text.push(' ');
-        text.push_str(text_start(&credits.work_search, MAX_SEARCHED_TEXT));
+        text.push_str(text_start(&works, MAX_SEARCHED_TEXT));
+    }
+    // The catalogue numbers as one word too, e.g. "bwv1047", as they're
+    // often typed without the space
+    let title = track_title(tag);
+    for word in fields::catalogue_numbers(credits, title.as_deref())
+        .iter()
+        .filter_map(crate::catalogue::CatalogueNumber::word)
+    {
+        text.push(' ');
+        text.push_str(&word);
     }
     text
 }
@@ -312,11 +352,49 @@ mod tests {
             "troste mir, jesu, mein gemute"
         );
         assert_eq!(normalize_search_text("Antonín Dvořák"), "antonin dvorak");
-        assert_eq!(normalize_search_text("L’Étang du Parc"), "l’etang du parc");
+    }
+
+    #[test]
+    fn search_text_folds_quotes_dashes_and_spaces() {
+        assert_eq!(normalize_search_text("L’Étang du Parc"), "l'etang du parc");
         assert_eq!(
             normalize_search_text("Kantate „Ach Gott“"),
-            "kantate „ach gott“"
+            "kantate \"ach gott\""
         );
+        assert_eq!(
+            normalize_search_text("Kyrie – Christe — Kyrie"),
+            "kyrie - christe - kyrie"
+        );
+        assert_eq!(normalize_search_text("−5 dB"), "-5 db");
+        assert_eq!(
+            normalize_search_text("  Ach\tGott,\n  vom   Himmel "),
+            "ach gott, vom himmel"
+        );
+    }
+
+    #[test]
+    fn ascii_text_folds_like_any_text() {
+        // The fast path for ASCII gives what the general one would
+        for text in [
+            "Bach: BWV 1047",
+            "  AC/DC\tLive ",
+            "Op. 27, No. 2",
+            "~!@#$%^&*()_+",
+        ] {
+            assert_eq!(
+                normalize_search_text(text),
+                fold_letters(text).split_whitespace().join(" "),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn composer_keys_keep_typographic_punctuation() {
+        // plays.db keeps favorite works by keys made from composer keys, so
+        // they mustn't change with the search's folds
+        assert_eq!(normalize_key_text("Conlon O’Brien"), "conlon o’brien");
+        assert_eq!(normalize_key_text("Saint‐Saëns"), "saint‐saens");
     }
 
     #[test]

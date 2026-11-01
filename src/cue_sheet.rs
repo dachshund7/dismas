@@ -82,6 +82,18 @@ pub struct CueTrack {
     pub end: Option<Duration>,
 }
 
+impl CueTrack {
+    // How long the track plays of an audio file `duration` long, which is
+    // zero if it isn't known: up to the next track, or to the end of the file
+    pub fn length(&self, duration: Duration) -> Duration {
+        let end = match self.end {
+            Some(end) if duration.is_zero() || end < duration => end,
+            _ => duration,
+        };
+        end.saturating_sub(self.start)
+    }
+}
+
 // A track as the sheet has it, including the tracks that are not audio,
 // whose start still ends the track before them
 #[derive(Default)]

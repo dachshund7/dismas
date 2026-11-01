@@ -21,7 +21,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Instant, UNIX_EPOCH},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 pub use album::{Album, AlbumSort};
@@ -39,9 +39,10 @@ pub use watch::FolderWatch;
 
 use crate::{
     audio::{
-        Arrangement, CoverCache, ExtraComments, FileTags, ListedPerformer, PerformerKind,
-        ReadOptions, TrackCredits, normalize_search_text, plain_commas, read_file_tags, search_key,
-        title_from_file_name, track_search_text, track_title,
+        Arrangement, AudioProperties, CoverCache, ExtraComments, FieldParts, FileTags,
+        ListedPerformer, PerformerKind, ReadOptions, TrackCredits, normalize_key_text,
+        normalize_search_text, plain_commas, read_file_tags, search_key, title_from_file_name,
+        track_search_text, track_title,
     },
     catalogue::{self, CatalogueNumber},
     cover_image::CoverImage,
@@ -52,7 +53,7 @@ use crate::{
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-const SCHEMA_VERSION: i32 = 30;
+const SCHEMA_VERSION: i32 = 31;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -91,7 +92,8 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         work_arrangement_of TEXT,
         work_arrangement TEXT,
         work_arrangement_of_id TEXT,
-        work_part_ids TEXT
+        work_part_ids TEXT,
+        fields TEXT
     );
     CREATE INDEX tracks_album ON tracks (album_id);
     CREATE INDEX tracks_file ON tracks (file);
@@ -187,6 +189,9 @@ struct TrackTags {
     // The first record label, and the first catalogue number
     label: Option<String>,
     catalog_number: Option<String>,
+    // The values the fields of the search look into, as in the queue, see
+    // `FieldParts`
+    fields: Option<String>,
 }
 
 // The work of a track, as the library keeps it
@@ -2562,9 +2567,10 @@ fn scan_with(
                   artist_sort, year, disc, track, title, search, added, composers, work_key,
                   work, work_title, work_collection, work_composers, movement_order, performers,
                   label, catalog_number, work_arrangement_of, work_arrangement,
-                  work_arrangement_of_id, work_part_ids)
+                  work_arrangement_of_id, work_part_ids, fields)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+                         ?31)",
             )?;
             for source in chunk {
                 let key = path_bytes(&source.path);
@@ -2638,6 +2644,7 @@ fn scan_with(
                         work.and_then(|w| w.arrangement.as_ref()),
                         work.and_then(|w| w.arrangement_of_id.as_ref()),
                         work.and_then(|w| w.part_ids.as_ref()),
+                        tags.fields,
                     ])?;
                     n_changed += 1;
                     // A changed track might have new cover art; new tracks
@@ -3033,17 +3040,28 @@ fn save_thumbnail(image: &CoverImage, dir: &Path, album_id: &str, size: u32) -> 
 }
 
 // An audio file's tags, and the items lofty leaves out of them, which have
-// the CUE sheet in the tags, without the covers and properties, which the
-// library doesn't keep
+// the CUE sheet in the tags, with the properties and without the covers
 fn read_tags_only(path: &Path) -> Option<FileTags> {
-    read_file_tags(path, ReadOptions::TAGS)
+    read_file_tags(path, ReadOptions::SCAN)
 }
 
 // The tracks of an audio file: the file, or the tracks that the CUE sheet
 // in its tags splits it into
 fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
-    let Some(FileTags { tag, extra, .. }) = read_tags_only(path) else {
+    let Some(FileTags {
+        tag,
+        extra,
+        properties,
+        format,
+        ..
+    }) = read_tags_only(path)
+    else {
         return vec![(path.to_path_buf(), TrackTags::default())];
+    };
+    let file = Audio {
+        format: format.as_deref(),
+        properties: AudioProperties::of(&properties),
+        duration: properties.duration(),
     };
 
     let sheet = extra
@@ -3054,13 +3072,33 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
         let album_tag = cue_sheet::album_tag(Some(&tag), &sheet.sheet);
         return sheet
             .tracks()
-            .map(|(track, _)| cue_track_tags(&sheet, &album_tag, track))
+            .map(|(track, _)| cue_track_tags(&sheet, &album_tag, track, &file))
             .collect();
     }
 
     // A file without tags is in the album of its folder too
-    let tags = TrackTags::from_tag(&tag, path, Some(path), &extra);
+    let tags = TrackTags::from_tag(&tag, path, Some(path), &extra, file.whole());
     vec![(path.to_path_buf(), tags)]
+}
+
+// What the fields take from an audio file
+struct Audio<'a> {
+    format: Option<&'a str>,
+    properties: AudioProperties,
+    duration: Duration,
+}
+
+impl<'a> Audio<'a> {
+    // The format and the properties of the whole file
+    fn whole(&self) -> (Option<&'a str>, Option<AudioProperties>) {
+        (self.format, Some(self.properties))
+    }
+
+    // Those of a track of a CUE sheet, as long as its part of the file
+    fn part(&self, track: &CueTrack) -> (Option<&'a str>, Option<AudioProperties>) {
+        let length = track.length(self.duration);
+        (self.format, Some(self.properties.with_length(length)))
+    }
 }
 
 // The tracks that a ".cue" file splits audio files into
@@ -3068,24 +3106,39 @@ fn read_sheet_tags(
     sheet: &SplitSheet,
     tracks: Vec<(&CueTrack, &Path)>,
 ) -> Vec<(PathBuf, TrackTags)> {
-    let mut album_tags = HashMap::new();
+    let mut files = HashMap::new();
     tracks
         .into_iter()
         .map(|(track, audio)| {
-            let album_tag = album_tags.entry(audio).or_insert_with(|| {
+            let (album_tag, format, properties) = files.entry(audio).or_insert_with(|| {
                 let file = read_tags_only(audio);
-                cue_sheet::album_tag(file.as_ref().map(|file| &file.tag), &sheet.sheet)
+                let album_tag =
+                    cue_sheet::album_tag(file.as_ref().map(|file| &file.tag), &sheet.sheet);
+                let format = file.as_ref().and_then(|file| file.format.clone());
+                (album_tag, format, file.map(|file| file.properties))
             });
-            cue_track_tags(sheet, album_tag, track)
+            let properties = properties.clone().unwrap_or_default();
+            let file = Audio {
+                format: format.as_deref(),
+                properties: AudioProperties::of(&properties),
+                duration: properties.duration(),
+            };
+            cue_track_tags(sheet, album_tag, track, &file)
         })
         .collect()
 }
 
-fn cue_track_tags(sheet: &SplitSheet, album_tag: &Tag, track: &CueTrack) -> (PathBuf, TrackTags) {
+fn cue_track_tags(
+    sheet: &SplitSheet,
+    album_tag: &Tag,
+    track: &CueTrack,
+    file: &Audio,
+) -> (PathBuf, TrackTags) {
     let tag = cue_sheet::track_tag(album_tag, &sheet.sheet, track);
     // The album is in the folder of the sheet, and the items that lofty
     // doesn't read are about the whole audio file
-    let tags = TrackTags::from_tag(&tag, &sheet.path, None, &ExtraComments::default());
+    let extra = ExtraComments::default();
+    let tags = TrackTags::from_tag(&tag, &sheet.path, None, &extra, file.part(track));
     (sheet.location(track), tags)
 }
 
@@ -3162,7 +3215,13 @@ impl TrackTags {
     // is searched like the queue searches it; the tracks of CUE sheets
     // have none. The items that lofty doesn't read, like the sort names of
     // the composers and the "Work Hierarchy" tag, are in `extra`
-    fn from_tag(tag: &Tag, path: &Path, file: Option<&Path>, extra: &ExtraComments) -> Self {
+    fn from_tag(
+        tag: &Tag,
+        path: &Path,
+        file: Option<&Path>,
+        extra: &ExtraComments,
+        (format, properties): (Option<&str>, Option<AudioProperties>),
+    ) -> Self {
         let get = |key| tag.get_string(key).map(|s| s.trim().to_string());
 
         let album = get(ItemKey::AlbumTitle).filter(|s| !s.is_empty());
@@ -3205,16 +3264,25 @@ impl TrackTags {
         // matches the same tracks as searching the queue
         let title = track_title(tag);
         let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");
+        let searched_title = title
+            .as_deref()
+            .map(Cow::Borrowed)
+            .or_else(|| file.map(|file| title_from_file_name(file).into()));
         let search = search_key(
             Some(&artists),
-            title
-                .as_deref()
-                .map(Cow::Borrowed)
-                .or_else(|| file.map(|file| title_from_file_name(file).into()))
-                .as_deref(),
+            searched_title.as_deref(),
             &track_search_text(tag, &credits),
             folder_album.as_deref(),
         );
+        let fields = FieldParts {
+            tag,
+            credits: &credits,
+            title: searched_title.as_deref(),
+            album: album.as_deref().or(folder_album.as_deref()),
+            format,
+            properties,
+        }
+        .encode();
 
         TrackTags {
             album_id: Some(album_id),
@@ -3233,6 +3301,7 @@ impl TrackTags {
             performers: performer_entries(&credits.listed_performers()),
             label: credits.labels.into_iter().next(),
             catalog_number: credits.catalog_numbers.into_iter().next(),
+            fields: Some(fields),
         }
     }
 }
@@ -3420,7 +3489,7 @@ fn composer_entries(names: &[String], sorts: &[String]) -> Option<String> {
 // What tells a composer apart: the name, ignoring case and accents, and
 // how it's spaced
 pub fn composer_key(name: &str) -> String {
-    normalize_search_text(name)
+    normalize_key_text(name)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -3545,24 +3614,39 @@ mod tests {
 
         let path = Path::new("/music/Some Folder/01 - Intro.flac");
         let mut tag = Tag::new(TagType::VorbisComments);
-        let tags =
-            super::TrackTags::from_tag(&tag, path, Some(path), &super::ExtraComments::default());
+        let tags = super::TrackTags::from_tag(
+            &tag,
+            path,
+            Some(path),
+            &super::ExtraComments::default(),
+            (None, None),
+        );
         assert_eq!(tags.album.as_deref(), Some("Some Folder"));
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(search.contains("some folder"));
 
         tag.insert_text(ItemKey::AlbumTitle, "Album".to_string());
-        let tags =
-            super::TrackTags::from_tag(&tag, path, Some(path), &super::ExtraComments::default());
+        let tags = super::TrackTags::from_tag(
+            &tag,
+            path,
+            Some(path),
+            &super::ExtraComments::default(),
+            (None, None),
+        );
         assert_eq!(tags.title, None);
         let search = tags.search.unwrap();
         assert!(search.contains("intro"));
         assert!(!search.contains("some folder"));
 
         tag.insert_text(ItemKey::TrackTitle, "Overture".to_string());
-        let tags =
-            super::TrackTags::from_tag(&tag, path, Some(path), &super::ExtraComments::default());
+        let tags = super::TrackTags::from_tag(
+            &tag,
+            path,
+            Some(path),
+            &super::ExtraComments::default(),
+            (None, None),
+        );
         let search = tags.search.unwrap();
         assert!(search.contains("overture"));
         assert!(!search.contains("intro"));
@@ -3584,7 +3668,7 @@ mod tests {
                     lofty::tag::ItemValue::Text((*composer).to_string()),
                 ));
             }
-            super::TrackTags::from_tag(&tag, path, Some(path), extra)
+            super::TrackTags::from_tag(&tag, path, Some(path), extra, (None, None))
                 .work
                 .unwrap()
         };
@@ -3648,7 +3732,7 @@ mod tests {
             let mut tag = Tag::new(TagType::VorbisComments);
             tag.insert_text(ItemKey::Work, prelude.to_string());
             tag.insert_text(ItemKey::MusicBrainzWorkId, work_id.to_string());
-            super::TrackTags::from_tag(&tag, path, Some(path), &extra)
+            super::TrackTags::from_tag(&tag, path, Some(path), &extra, (None, None))
                 .work
                 .unwrap()
         };
@@ -3688,7 +3772,7 @@ mod tests {
             tag.insert_text(ItemKey::MovementNumber, "4".to_string());
             tag.insert_text(ItemKey::Composer, "Franz Schubert".to_string());
             tag.insert_text(ItemKey::MusicBrainzWorkId, CATCH_ALL.to_string());
-            super::TrackTags::from_tag(&tag, path, Some(path), &extra)
+            super::TrackTags::from_tag(&tag, path, Some(path), &extra, (None, None))
                 .work
                 .unwrap()
         };
@@ -3764,7 +3848,7 @@ mod tests {
                 { "id": "f", "title": "…: Fugue", "name": "Fugue", "number": 2 },
             ] }] });
         let extra = super::ExtraComments::with_work_hierarchy(&hierarchy.to_string());
-        let search = super::TrackTags::from_tag(&tag, path, Some(path), &extra)
+        let search = super::TrackTags::from_tag(&tag, path, Some(path), &extra, (None, None))
             .search
             .unwrap();
         assert!(search.contains("praludium und fuge"));
@@ -4227,6 +4311,140 @@ mod tests {
         for dir in [&music, &away, &dir] {
             std::fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    #[test]
+    fn the_queue_and_the_library_encode_the_same_fields() {
+        use std::borrow::Cow;
+
+        use gtk::gio::prelude::FileExt;
+        use lofty::{
+            TextEncoding,
+            id3::v2::{Frame, FrameId, Id3v2Tag, KeyValueFrame, TextInformationFrame},
+        };
+
+        use crate::utils::{write_test_id3v2, write_test_wav};
+
+        fn text(id: &'static str, value: &str) -> Frame<'static> {
+            Frame::Text(TextInformationFrame::new(
+                FrameId::Valid(Cow::Borrowed(id)),
+                TextEncoding::UTF8,
+                value.to_string(),
+            ))
+        }
+
+        let music = test_dir("fields");
+        let album = music.join("Brandenburg Concertos");
+        let disc = music.join("Untagged/CD 2");
+        let sheet = music.join("Sheet");
+        for dir in [&album, &disc, &sheet] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+
+        // Tagged as MusicBrainz Picard tags it, with a "Work Hierarchy" tag
+        let tagged = album.join("01 Allegro.wav");
+        write_test_wav(&tagged, 2);
+        let mut id3v2 = Id3v2Tag::new();
+        for (id, value) in [
+            (
+                "TIT2",
+                "Brandenburg Concerto No. 2 in F major, BWV 1047: I. Allegro",
+            ),
+            ("TPE1", "Musica Antiqua Köln, Reinhard Goebel"),
+            ("TPE2", "Johann Sebastian Bach; Musica Antiqua Köln"),
+            ("TALB", "Brandenburgische Konzerte"),
+            ("TCOM", "Johann Sebastian Bach"),
+            ("TPE3", "Reinhard Goebel"),
+            ("TCON", "Baroque"),
+            ("TIT1", "Concertos"),
+            ("TPOS", "1/2"),
+            ("TRCK", "1/6"),
+            ("TDRC", "1986"),
+            ("TPUB", "Erato"),
+        ] {
+            id3v2.insert(text(id, value));
+        }
+        id3v2.insert(Frame::KeyValue(KeyValueFrame::new(
+            FrameId::Valid(Cow::Borrowed("TMCL")),
+            TextEncoding::UTF8,
+            vec![("violin".into(), "Reinhard Goebel".into())],
+        )));
+        let hierarchy = serde_json::json!({ "version": 1, "segments": [{
+            "work_index": 0, "attributes": ["live"], "path": [
+                { "id": "1a0d0fe3-55e6-4d0e-b4b3-6d1a8e6c3f9b",
+                  "title": "Brandenburg Concerto no. 2 in F major, BWV 1047",
+                  "name": "Brandenburg Concerto no. 2 in F major, BWV 1047",
+                  "type": "Concerto" },
+                { "id": "2b1e1fe4-66f7-4e1f-c5c4-7e2b9f7d4a0c",
+                  "title": "Brandenburg Concerto no. 2 in F major, BWV 1047: I. Allegro",
+                  "name": "Allegro", "number": 1, "position": 1 },
+            ] }] });
+        let _ = id3v2.insert_user_text("WORK_HIERARCHY".to_string(), hierarchy.to_string());
+        write_test_id3v2(&tagged, &id3v2, false);
+
+        // Without tags, named by its file and its folder
+        write_test_wav(&disc.join("03 - Gigue.wav"), 1);
+
+        // A CUE sheet, whose last track runs to the end of the file
+        write_test_wav(&sheet.join("Recital.wav"), 10);
+        let cue = sheet.join("Recital.cue");
+        std::fs::write(
+            &cue,
+            "PERFORMER \"Rosalyn Tureck\"\nTITLE \"Recital\"\nFILE \"Recital.wav\" WAVE\n\
+             TRACK 01 AUDIO\nTITLE \"Partita no. 1, BWV 825: Praeludium\"\nINDEX 01 00:00:00\n\
+             TRACK 02 AUDIO\nINDEX 01 00:04:00\n",
+        )
+        .unwrap();
+
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        let library: std::collections::BTreeMap<PathBuf, String> = conn
+            .prepare("SELECT path, fields FROM tracks")
+            .unwrap()
+            .query_map([], |row| Ok((path_from_bytes(row.get(0)?), row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+
+        let files = [
+            &tagged,
+            &disc.join("03 - Gigue.wav"),
+            &cue,
+            &sheet.join("Recital.wav"),
+        ]
+        .into_iter()
+        .map(gtk::gio::File::for_path)
+        .collect();
+        let receiver = crate::audio::load_tracks(files, false);
+        let queue: std::collections::BTreeMap<PathBuf, String> =
+            std::iter::from_fn(|| receiver.recv_blocking().ok())
+                .flatten()
+                .map(|data| (data.file().path().unwrap(), data.fields().to_string()))
+                .collect();
+
+        assert_eq!(library.len(), 4);
+        assert_eq!(queue, library);
+        // What they have in common is the point; a few lines show that
+        // they're the fields a search needs
+        let fields = &library[&tagged];
+        for line in [
+            "fm\tconcerto",
+            "ca\tbwv 1047",
+            "is\tlive",
+            "is\tmovement",
+            "ro\tviolin",
+            "gr\tconcertos",
+        ] {
+            assert!(fields.contains(&format!("{line}\n")), "{line} in {fields}");
+        }
+        let gigue = &library[&disc.join("03 - Gigue.wav")];
+        assert!(gigue.contains("ti\tgigue\n"), "{gigue}");
+        assert!(gigue.contains("al\tuntagged\n"), "{gigue}");
+        let second = &library[&sheet.join("Recital.cue/track02")];
+        assert!(second.contains("ln\t6\n"), "{second}");
+
+        std::fs::remove_dir_all(&music).unwrap();
     }
 
     #[test]
@@ -6521,12 +6739,18 @@ mod tests {
         tag.insert_text(ItemKey::OriginalReleaseDate, "1961".to_string());
         tag.insert_text(ItemKey::Label, "Hyperion".to_string());
         tag.insert_text(ItemKey::CatalogNumber, "CDA67100".to_string());
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &ExtraComments::default());
+        let tags = super::TrackTags::from_tag(
+            &tag,
+            path,
+            Some(path),
+            &ExtraComments::default(),
+            (None, None),
+        );
         assert_eq!(tags.year.as_deref(), Some("1961"));
         assert_eq!(tags.label.as_deref(), Some("Hyperion"));
         assert_eq!(tags.catalog_number.as_deref(), Some("CDA67100"));
         let extra = ExtraComments::with_recording_date("1960-05/1960-06");
-        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &extra);
+        let tags = super::TrackTags::from_tag(&tag, path, Some(path), &extra, (None, None));
         assert_eq!(tags.year.as_deref(), Some("1960"));
 
         // The album has the earliest year of its tracks, and its label

@@ -15,3 +15,6 @@ Handel = "Handel"
 Ein = "Ein"
 # "No. 2 « Sur la place »", in examples of the numbers of Carmen
 Sur = "Sur"
+# ID3v2 frames, e.g. TPE1 and TPOS, in tests that write tags
+TPE = "TPE"
+TPOS = "TPOS"
