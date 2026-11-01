@@ -616,4 +616,159 @@ mod tests {
             assert_eq!(read.extra.recording_date.as_deref(), Some("1962-05-25"));
         }
     }
+
+    // Times reading every audio file under DISMAS_SCAN_DIR without the
+    // properties, as the library scan does, and with them, as a search for
+    // the length of tracks would need. For each format, it gives the time
+    // per file in one round with each file dropped from the page cache
+    // first, and in two with it cached, and counts the files that fail
+    // only with the properties:
+    //   DISMAS_SCAN_DIR=~/Music cargo test time_tag_reads -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn time_tag_reads() {
+        use std::{
+            collections::BTreeMap,
+            os::fd::AsRawFd,
+            path::PathBuf,
+            time::{Duration, Instant},
+        };
+
+        // So that the next read of the file comes from the disk
+        fn drop_from_cache(path: &Path) {
+            if let Ok(file) = File::open(path) {
+                // SAFETY: the descriptor is open for the whole call
+                unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+            }
+        }
+
+        fn timed(path: &Path, options: ReadOptions) -> (Duration, bool) {
+            let start = Instant::now();
+            let read = read_file_tags(path, options).is_some();
+            (start.elapsed(), read)
+        }
+
+        #[derive(Default)]
+        struct Times {
+            files: u32,
+            // Without the properties, then with them
+            cold: [Duration; 2],
+            warm: [Duration; 2],
+            unread: [u32; 2],
+            unread_only_with_properties: u32,
+        }
+
+        const OPTIONS: [ReadOptions; 2] = [
+            ReadOptions::TAGS,
+            ReadOptions {
+                properties: true,
+                ..ReadOptions::TAGS
+            },
+        ];
+        const WARM_ROUNDS: u32 = 2;
+
+        let root = std::env::var_os("DISMAS_SCAN_DIR").expect("DISMAS_SCAN_DIR is not set");
+        let mut files = Vec::new();
+        let mut dirs = vec![PathBuf::from(root)];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if !crate::library::is_library_entry(&path) {
+                    continue;
+                }
+                match entry.file_type() {
+                    Ok(kind) if kind.is_dir() => dirs.push(path),
+                    Ok(kind) if kind.is_file() && crate::utils::is_audio_path(&path) => {
+                        files.push(path);
+                    }
+                    _ => (),
+                }
+            }
+        }
+        files.sort();
+
+        let format = |path: &Path| {
+            path.extension().map_or_else(
+                || "(none)".to_string(),
+                |extension| extension.to_string_lossy().to_lowercase(),
+            )
+        };
+        let mut times: BTreeMap<String, Times> = BTreeMap::new();
+        for path in &files {
+            let times = times.entry(format(path)).or_default();
+            times.files += 1;
+            let mut read = [false; 2];
+            for (i, options) in OPTIONS.into_iter().enumerate() {
+                drop_from_cache(path);
+                let (elapsed, ok) = timed(path, options);
+                times.cold[i] += elapsed;
+                read[i] = ok;
+                times.unread[i] += u32::from(!ok);
+            }
+            times.unread_only_with_properties += u32::from(read[0] && !read[1]);
+        }
+        // Each round starts with the other read, so that neither always
+        // has the other's pages
+        for round in 0..WARM_ROUNDS as usize {
+            for path in &files {
+                let times = times.get_mut(&format(path)).unwrap();
+                for i in [round % 2, (round + 1) % 2] {
+                    times.warm[i] += timed(path, OPTIONS[i]).0;
+                }
+            }
+        }
+
+        let per_file = |total: Duration, files: u32| total.as_secs_f64() * 1e6 / f64::from(files);
+        println!(
+            "{:<8} {:>7} {:>11} {:>11} {:>11} {:>11} {:>11} {:>11} {:>7} {:>7} {:>9}",
+            "format",
+            "files",
+            "cold µs",
+            "+props µs",
+            "extra µs",
+            "warm µs",
+            "+props µs",
+            "extra µs",
+            "unread",
+            "+props",
+            "only+prop"
+        );
+        let mut all = Times::default();
+        let rows = times.iter().map(|(format, times)| (format.as_str(), times));
+        for (format, times) in rows {
+            let warm = times.warm.map(|total| total / WARM_ROUNDS);
+            println!(
+                "{format:<8} {:>7} {:>11.0} {:>11.0} {:>11.0} {:>11.0} {:>11.0} {:>11.0} {:>7} {:>7} {:>9}",
+                times.files,
+                per_file(times.cold[0], times.files),
+                per_file(times.cold[1], times.files),
+                per_file(times.cold[1].saturating_sub(times.cold[0]), times.files),
+                per_file(warm[0], times.files),
+                per_file(warm[1], times.files),
+                per_file(warm[1].saturating_sub(warm[0]), times.files),
+                times.unread[0],
+                times.unread[1],
+                times.unread_only_with_properties,
+            );
+            all.files += times.files;
+            for (i, warm) in warm.into_iter().enumerate() {
+                all.cold[i] += times.cold[i];
+                all.warm[i] += warm;
+                all.unread[i] += times.unread[i];
+            }
+            all.unread_only_with_properties += times.unread_only_with_properties;
+        }
+        println!(
+            "all: {} files; cold {:.1} s, {:.1} s with the properties; warm {:.1} s, {:.1} s; \
+             {} unread, {} with the properties, {} only with them",
+            all.files,
+            all.cold[0].as_secs_f64(),
+            all.cold[1].as_secs_f64(),
+            all.warm[0].as_secs_f64(),
+            all.warm[1].as_secs_f64(),
+            all.unread[0],
+            all.unread[1],
+            all.unread_only_with_properties,
+        );
+    }
 }
