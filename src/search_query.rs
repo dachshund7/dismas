@@ -261,6 +261,22 @@ pub(crate) enum Test {
     Path(PathTest),
 }
 
+// Where a field's values come from
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Source {
+    // The lines of the track's fields with these codes, see `FieldParts`
+    Tags(&'static [FieldCode]),
+    // The path that's shown
+    Path,
+    // When the track was added to the library, how many times it was
+    // played, when it was last heard, and when it was marked a favorite,
+    // which the `Candidate` has
+    Added,
+    Plays,
+    Played,
+    Favorited,
+}
+
 // What a field's values are
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -445,11 +461,11 @@ impl Field {
         }
     }
 
-    // The lines of the fields it looks into; none for the path, and for
-    // what isn't in the tags, which the `Candidate` has
-    pub(crate) fn codes(self) -> &'static [FieldCode] {
+    // Where its values come from: the lines of the fields, or what the
+    // `Candidate` has that isn't in the tags
+    pub(crate) fn source(self) -> Source {
         use FieldCode as C;
-        match self {
+        let codes: &'static [FieldCode] = match self {
             Self::Title => &[C::Title],
             Self::Artist => &[C::Artist],
             Self::AlbumArtist => &[C::AlbumArtist],
@@ -483,7 +499,7 @@ impl Field {
             Self::Media => &[C::Media],
             Self::Format => &[C::Format],
             Self::MusicBrainzId => &[C::MusicBrainzId],
-            Self::Path => &[],
+            Self::Path => return Source::Path,
             Self::Year => &[C::Year],
             Self::Disc => &[C::Disc],
             Self::Track => &[C::Track],
@@ -495,8 +511,12 @@ impl Field {
             Self::BitDepth => &[C::BitDepth],
             Self::Bitrate => &[C::Bitrate],
             Self::Channels => &[C::Channels],
-            Self::Added | Self::Plays | Self::Played | Self::Favorited => &[],
-        }
+            Self::Added => return Source::Added,
+            Self::Plays => return Source::Plays,
+            Self::Played => return Source::Played,
+            Self::Favorited => return Source::Favorited,
+        };
+        Source::Tags(codes)
     }
 
     // A search with a field of numbers, for the problem of one that isn't
@@ -517,12 +537,12 @@ impl Field {
     }
 
     fn add_needs(self, needs: &mut Needs) {
-        match self {
-            Self::Path => needs.path = true,
-            Self::Added => needs.added = true,
-            Self::Plays | Self::Played => needs.stats = true,
-            Self::Favorited => needs.favorites = true,
-            _ => needs.fields = true,
+        match self.source() {
+            Source::Tags(_) => needs.fields = true,
+            Source::Path => needs.path = true,
+            Source::Added => needs.added = true,
+            Source::Plays | Source::Played => needs.stats = true,
+            Source::Favorited => needs.favorites = true,
         }
     }
 

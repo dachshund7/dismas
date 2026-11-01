@@ -6,7 +6,7 @@
 
 use std::{cell::OnceCell, path::Path};
 
-use super::{Field, IsFlag, Node, Term, Test, values};
+use super::{Field, IsFlag, Node, Source, Term, Test, values};
 use crate::audio::{FieldCode, field_values, normalize_search_text};
 
 // What a query looks at in a track, borrowed from wherever the track keeps
@@ -85,14 +85,12 @@ fn eval(node: &Node, track: &Track) -> bool {
         Node::All => true,
         Node::Word(word) => track.candidate.search_key.contains(word.as_str()),
         Node::Term(term) => eval_term(term, track),
-        Node::Has(field) => match field {
-            Field::Path => track.candidate.path.is_some(),
+        Node::Has(field) => match field.source() {
+            Source::Tags(codes) => track.values(codes).next().is_some(),
+            Source::Path => track.candidate.path.is_some(),
             // Played at least once
-            Field::Plays => track.candidate.plays.is_some_and(|plays| plays > 0),
-            _ => match source(*field, track.candidate) {
-                Some(value) => value.is_some(),
-                None => track.values(field.codes()).next().is_some(),
-            },
+            Source::Plays => track.candidate.plays.is_some_and(|plays| plays > 0),
+            source => number(source, track.candidate).is_some(),
         },
         Node::Is(flag) => match flag {
             IsFlag::Favorite => track.candidate.favorite,
@@ -109,28 +107,37 @@ fn eval(node: &Node, track: &Track) -> bool {
     }
 }
 
-// The value of a field that isn't in the tags, `Some(None)` for a track
-// without one, and `None` for a field from the tags
-fn source(field: Field, candidate: &Candidate) -> Option<Option<i64>> {
-    match field {
-        Field::Added => Some(candidate.added),
-        Field::Plays => Some(candidate.plays),
-        Field::Played => Some(candidate.played),
-        Field::Favorited => Some(candidate.favorited),
-        _ => None,
+// The number of a field that the `Candidate` has, which isn't in the tags,
+// if the track has one
+fn number(source: Source, candidate: &Candidate) -> Option<i64> {
+    match source {
+        Source::Added => candidate.added,
+        Source::Plays => candidate.plays,
+        Source::Played => candidate.played,
+        Source::Favorited => candidate.favorited,
+        Source::Tags(_) | Source::Path => None,
     }
 }
 
 fn eval_term(term: &Term, track: &Track) -> bool {
-    if let Some(value) = source(term.field, track.candidate) {
-        return match (&term.test, value) {
-            (Test::Numbers(range), Some(n)) => range.contains(n),
-            // A moment, rather than a period
-            (Test::Dates(range), Some(time)) => range.overlaps(time, time + 1, track.now),
-            _ => false,
-        };
-    }
-    let mut values = track.values(term.field.codes());
+    let codes = match term.field.source() {
+        Source::Tags(codes) => codes,
+        Source::Path => {
+            return match &term.test {
+                Test::Path(test) => track.path().is_some_and(|path| test.matches(path)),
+                _ => false,
+            };
+        }
+        source => {
+            return match (&term.test, number(source, track.candidate)) {
+                (Test::Numbers(range), Some(n)) => range.contains(n),
+                // A moment, rather than a period
+                (Test::Dates(range), Some(time)) => range.overlaps(time, time + 1, track.now),
+                _ => false,
+            };
+        }
+    };
+    let mut values = track.values(codes);
     match &term.test {
         Test::Contains(text) => values.any(|value| value.contains(text.as_str())),
         Test::Equals(text) => values.any(|value| {
@@ -147,6 +154,7 @@ fn eval_term(term: &Term, track: &Track) -> bool {
                 .is_some_and(|(start, end)| range.overlaps(start, end, track.now))
         }),
         Test::Catalogue(test) => values.any(|value| test.matches(value)),
-        Test::Path(test) => track.path().is_some_and(|path| test.matches(path)),
+        // Only the path has these
+        Test::Path(_) => false,
     }
 }
