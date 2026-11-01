@@ -156,6 +156,16 @@ template $DismasLibraryView: Widget {
       };
     }
 
+    // What's wrong with the search, or worth knowing about it, see
+    // `search::setup_query_entry()`; its title isn't markup, as the syntax
+    // has "<"
+    [top]
+    Adw.Banner search_problem {
+      use-markup: false;
+      button-label: _("Search Syntax");
+      action-name: "win.search-syntax";
+    }
+
     content: Stack albums_stack {
       transition-type: crossfade;
 

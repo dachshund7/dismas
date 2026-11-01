@@ -214,6 +214,8 @@ mod imp {
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
+        pub search_problem: TemplateChild<adw::Banner>,
+        #[template_child]
         pub composer_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub composer_popover: TemplateChild<gtk::Popover>,
@@ -1298,6 +1300,21 @@ impl LibraryView {
                 this.update_search();
             }
         ));
+        crate::search::setup_query_entry(
+            &imp.search_entry,
+            crate::i18n::pi18n("a11y", "Type to search the library"),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |problem| {
+                    let banner = &this.imp().search_problem;
+                    if let Some(problem) = problem {
+                        banner.set_title(problem);
+                    }
+                    banner.set_revealed(problem.is_some());
+                }
+            ),
+        );
 
         // Esc is the window's, in window/albums.rs
         crate::utils::focus_on_clear(&imp.search_entry);

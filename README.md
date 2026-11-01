@@ -72,6 +72,28 @@ What Dismas adds
   recorded on, with their performers and years, and play, add or select
   its recordings. Go to Work, in the menu of a movement, opens its work
   there, with the movement's album pointed out.
+- **Search syntax:** both searches also take fields, comparisons and
+  ranges, as in `composer:bach year:<1730`, `catalogue:bwv1046..1051`,
+  `released:-30d` (in the last 30 days) or `length:>10min`. Words next to
+  each other must all match; `OR` takes either, and goes after them, so
+  `(bach OR handel) cantata` needs its parentheses; `-live` or `NOT live`
+  leaves tracks out; quotes keep a phrase together. `composer:bach` finds
+  "bach" in the composers, and `composer:="johann sebastian bach"` only that
+  whole name; `composer:(bach OR handel)` looks for either in that field;
+  `has:composer` finds the tracks with a composer, and `-has:composer`
+  those without one. Classical fields find what MusicBrainz knows of a
+  track: `work:`, `movement:`, `form:cantata` (the kind of work, with the
+  Work Hierarchy plugin), `catalogue:` (BWV, K., op. and others, however
+  they're spaced), `conductor:`, `ensemble:`, `soloist:`, `role:piano` and
+  `people:` (anyone credited). Flags such as `is:live`, `is:movement`,
+  `is:lossless` and `is:favorite` find the tracks they name. Dates are a
+  year, a month or a day (`2026-10`), or a time ago, `-30d`, `-2w`, `-6m` or
+  `-1y`; `path:bach/cantatas` looks for folders from the start of their
+  names, and `disc:` is the disc number in the tags. A search with a
+  mistake, like `year:abc`, finds nothing, and a line under it says why.
+  Search Syntax, in the main menu, lists every field. In the album search,
+  an album shows when any of its tracks matches, so `-live` keeps an album
+  with a track that isn't live; `-releasetype:live` leaves out live albums.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
   the Playlists page. Add to Playlist, in the menu of a track, adds it to
