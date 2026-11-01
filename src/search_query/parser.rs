@@ -27,6 +27,39 @@ use crate::audio::normalize_search_text;
 // The characters a rule must quote, for wildcards later
 pub(super) const RESERVED: [char; 5] = ['*', '?', '@', '[', ']'];
 
+// What a name before a colon is: a field, `is:` or `has:`, or a directive
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Name {
+    Field(Field),
+    Is,
+    Has,
+    Directive(Directive),
+}
+
+impl Name {
+    // The name, ignoring ASCII case
+    pub(super) fn parse(name: &str) -> Option<Self> {
+        if let Some(field) = Field::from_name(name) {
+            Some(Self::Field(field))
+        } else if name.eq_ignore_ascii_case("is") {
+            Some(Self::Is)
+        } else if name.eq_ignore_ascii_case("has") {
+            Some(Self::Has)
+        } else {
+            Directive::from_name(name).map(Self::Directive)
+        }
+    }
+
+    // All the names the syntax knows
+    pub(super) fn all() -> impl Iterator<Item = &'static str> {
+        Field::ALL
+            .iter()
+            .map(|field| field.name())
+            .chain(["is", "has"])
+            .chain(Directive::ALL.iter().map(|directive| directive.name()))
+    }
+}
+
 pub(super) fn parse(text: &str, mode: Mode) -> Query {
     let mut parser = Parser {
         tokens: tokens(text),
@@ -211,28 +244,20 @@ impl Parser {
         };
         let value = word.after(name.len() + 1);
 
-        if let Some(field) = Field::from_name(name) {
+        if let Some(known) = Name::parse(name) {
             if group_field.is_some() {
                 self.problem(span, ProblemKind::FieldInGroup);
                 return Node::All;
             }
-            return self.field_term(field, value, span);
-        }
-        let flag = name.eq_ignore_ascii_case("is");
-        if flag || name.eq_ignore_ascii_case("has") {
-            if group_field.is_some() {
-                self.problem(span, ProblemKind::FieldInGroup);
-                return Node::All;
-            }
-            return self.flag_term(flag, &word, &value, span);
-        }
-        if let Some(directive) = Directive::from_name(name) {
-            if group_field.is_some() {
-                self.problem(span, ProblemKind::FieldInGroup);
-                return Node::All;
-            }
-            self.directive(directive, &value, span);
-            return Node::All;
+            return match known {
+                Name::Field(field) => self.field_term(field, value, span),
+                Name::Is => self.flag_term(true, &word, &value, span),
+                Name::Has => self.flag_term(false, &word, &value, span),
+                Name::Directive(directive) => {
+                    self.directive(directive, &value, span);
+                    Node::All
+                }
+            };
         }
 
         // Not a name the syntax knows, so it's text, as in "Re: Bach"
@@ -494,12 +519,9 @@ impl Parser {
 // its colon, so that a field before it doesn't take it as its value
 fn has_known_name(word: &Word) -> bool {
     let start = word.unquoted_start();
-    start.split_once(':').is_some_and(|(name, _)| {
-        Field::from_name(name).is_some()
-            || name.eq_ignore_ascii_case("is")
-            || name.eq_ignore_ascii_case("has")
-            || Directive::from_name(name).is_some()
-    })
+    start
+        .split_once(':')
+        .is_some_and(|(name, _)| Name::parse(name).is_some())
 }
 
 // The terms together, without the ones that match every track
@@ -554,11 +576,7 @@ fn near_name(typed: &str) -> Option<&'static str> {
         return None;
     }
     let most = if len >= 7 { 2 } else { 1 };
-    Field::ALL
-        .iter()
-        .map(|field| field.name())
-        .chain(["is", "has"])
-        .chain(Directive::ALL.iter().map(|directive| directive.name()))
+    Name::all()
         .map(|name| (distance(&typed, name), name))
         .filter(|(distance, _)| *distance <= most)
         .min_by_key(|(distance, _)| *distance)

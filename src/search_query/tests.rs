@@ -589,14 +589,15 @@ fn every_problem_has_a_message() {
 
 #[test]
 fn names_are_told_apart_and_described() {
-    let names: Vec<&str> = Field::ALL
-        .iter()
-        .map(|field| field.name())
-        .chain(["is", "has"])
-        .chain(Directive::ALL.iter().map(|directive| directive.name()))
-        .collect();
+    let names: Vec<&str> = parser::Name::all().collect();
     let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
     assert_eq!(unique.len(), names.len());
+    for name in names {
+        assert!(
+            parser::Name::parse(&name.to_uppercase()).is_some(),
+            "{name}"
+        );
+    }
     for field in Field::ALL {
         assert_eq!(Field::from_name(&field.name().to_uppercase()), Some(field));
         assert!(!field.description().is_empty());
