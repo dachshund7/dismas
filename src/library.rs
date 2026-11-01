@@ -17,7 +17,10 @@ use std::{
     cell::RefCell,
     collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Instant, UNIX_EPOCH},
 };
 
@@ -2744,27 +2747,56 @@ fn update_covers(
         let mut upsert =
             tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
         let total = missing.len();
-        for (i, (id, first_track, larger)) in missing.into_iter().enumerate() {
-            // Each cover is decoded in a sandboxed process, so making all
-            // of them again, as when the grid shows them larger, takes a
-            // while; making them smaller takes a fraction of that
-            let _ = sender.try_send(ScanEvent::Covers(i, total));
-            let made = utils::guarded(
-                first_track.display(),
-                || match &larger {
-                    Some((thumbnail, size)) => shrink_thumbnail(thumbnail, &dir, &id, *size)
-                        .or_else(|| create_thumbnail(&first_track, &dir, &id, sizes.wanted)),
-                    None => create_thumbnail(&first_track, &dir, &id, sizes.wanted),
-                },
-                || None,
-            );
-            n_made += usize::from(made.is_some());
-            // A thumbnail that couldn't be made smaller is kept as it is
-            let cover = made
-                .or_else(|| larger.map(|(thumbnail, _)| thumbnail))
-                .map(|path| path.to_string_lossy().to_string());
-            upsert.execute(params![id, cover])?;
+        if total > 0 {
+            let _ = sender.try_send(ScanEvent::Covers(0, total));
         }
+        // Each cover is decoded in a sandboxed process, so making all of
+        // them again, as when the grid shows them larger, takes a while: a
+        // few are made at a time, which goes faster, as for the loader.
+        // Making them smaller takes a fraction of that. They're written in
+        // this thread, which has the transaction
+        let (missing, next, dir) = (&missing, &AtomicUsize::new(0), &dir);
+        let (made_sender, made_receiver) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            for _ in 0..THUMBNAIL_THREADS.min(total) {
+                let made_sender = made_sender.clone();
+                scope.spawn(move || {
+                    while let Some((id, first_track, larger)) =
+                        missing.get(next.fetch_add(1, Ordering::Relaxed))
+                    {
+                        let made = utils::guarded(
+                            first_track.display(),
+                            || match larger {
+                                Some((thumbnail, size)) => {
+                                    shrink_thumbnail(thumbnail, dir, id, *size).or_else(|| {
+                                        create_thumbnail(first_track, dir, id, sizes.wanted)
+                                    })
+                                }
+                                None => create_thumbnail(first_track, dir, id, sizes.wanted),
+                            },
+                            || None,
+                        );
+                        // The receiver is gone once writing failed
+                        if made_sender.send((id, larger, made)).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(made_sender);
+
+            for (i, (id, larger, made)) in made_receiver.into_iter().enumerate() {
+                let _ = sender.try_send(ScanEvent::Covers(i + 1, total));
+                n_made += usize::from(made.is_some());
+                // A thumbnail that couldn't be made smaller is kept as it is
+                let cover = made
+                    .as_deref()
+                    .or_else(|| larger.as_ref().map(|(thumbnail, _)| thumbnail.as_path()))
+                    .map(|path| path.to_string_lossy().to_string());
+                upsert.execute(params![id, cover])?;
+            }
+            Ok::<_, rusqlite::Error>(())
+        })?;
         tx.execute(
             "DELETE FROM covers WHERE album_id NOT IN
              (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)",
@@ -2776,6 +2808,11 @@ fn update_covers(
     remove_unused_covers(conn, &dir)?;
     Ok(n_made)
 }
+
+// How many of the album grid's thumbnails are made at a time. Decoding a
+// cover mostly waits for its sandboxed loader, so a few at a time go
+// faster, even on fewer cores, as for the loader's covers
+const THUMBNAIL_THREADS: usize = 4;
 
 // The sizes the album grid's thumbnails are made at, in pixels
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
