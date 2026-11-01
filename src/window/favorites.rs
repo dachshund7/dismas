@@ -32,6 +32,7 @@ impl Window {
             self.notify_track_favorite();
         }
         self.imp().library_view.favorite_tracks_changed();
+        self.imp().queue_filter.favorites_changed();
     }
 
     // Marks a work as a favorite, or unmarks it; the Works page shows it

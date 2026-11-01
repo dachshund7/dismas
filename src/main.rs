@@ -35,6 +35,7 @@ mod resume_point;
 mod reveal_bin;
 mod search;
 mod search_query;
+mod search_syntax;
 mod slide_bin;
 mod square_bin;
 mod track_cover;

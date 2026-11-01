@@ -4,7 +4,7 @@
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::File,
     hash::Hash,
     io::BufReader,
@@ -45,6 +45,7 @@ use crate::{
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::{i18n, i18n_f},
     library::{self, Disc, folder_album_title, is_mbid},
+    search_query::{Candidate, Context, Query},
     utils::{self, ATTRIBUTE_HOST_PATH},
 };
 
@@ -84,7 +85,6 @@ pub struct TrackData {
     credits: TrackCredits,
     tag_text: String,
     // The values the fields of the search look into, see `FieldParts`
-    #[allow(dead_code, reason = "the queue's search reads them from the next step")]
     fields: String,
     cover: Option<AlbumCover>,
     uuid: Option<String>,
@@ -306,6 +306,16 @@ impl TrackData {
     #[cfg(test)]
     pub fn fields(&self) -> &str {
         &self.fields
+    }
+
+    // The path a search for one looks into: the one shown, outside the
+    // sandbox, and for a track of a CUE sheet, its path under the sheet, as
+    // the library keeps it
+    fn search_path(&self) -> Option<PathBuf> {
+        match &self.audio {
+            None => self.details.path.clone().or_else(|| self.file.path()),
+            Some(_) => self.file.path(),
+        }
     }
 
     // The title and the artist, as Copy puts them on the clipboard, e.g.
@@ -1017,11 +1027,30 @@ impl Track {
         }
     }
 
-    // Whether the text that searching the queue looks into has all the
-    // words, which are normalized like it. Searching tests every track of
-    // the queue at each keystroke, so the text isn't copied
-    pub fn matches_search(&self, words: &[String]) -> bool {
-        self.with_search_key(|key| words.iter().all(|word| key.contains(word.as_str())))
+    // Whether the track matches a search of the queue, at the time of
+    // `context`, with the URIs of the favorite tracks if the search needs
+    // them. Searching tests every track of the queue at each keystroke, so
+    // the text isn't copied
+    pub fn matches_query(
+        &self,
+        query: &Query,
+        context: &Context,
+        favorites: Option<&HashSet<String>>,
+    ) -> bool {
+        let needs = query.needs();
+        let favorite = needs.favorites && favorites.is_some_and(|f| f.contains(&self.uri()));
+        self.with_search_key(|search_key| {
+            let data = self.imp().data.borrow();
+            let path = needs.path.then(|| data.search_path()).flatten();
+            let candidate = Candidate {
+                search_key,
+                fields: &data.fields,
+                path: path.as_deref(),
+                favorite,
+                missing: data.missing.is_some(),
+            };
+            query.matches(&candidate, context)
+        })
     }
 
     #[cfg(test)]

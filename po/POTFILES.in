@@ -34,10 +34,13 @@ src/library_view/work_row.rs
 src/library_view/works.rs
 src/lyrics_view.rs
 src/playback_control.rs
+src/playlist_view.rs
 src/playlists_page.rs
 src/preferences_dialog.rs
 src/queue_row.rs
+src/search.rs
 src/search_query.rs
+src/search_syntax.rs
 src/track_info_dialog.rs
 src/window.rs
 src/window/adding.rs

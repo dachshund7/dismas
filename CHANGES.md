@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The playlist's search takes fields, as in composer:bach, year:<1730,
+  catalogue:bwv1046..1051, released:-30d or length:>10min, with OR, "-"
+  or NOT to leave tracks out, parentheses, and quotes for phrases.
+  composer:(bach OR handel) looks for either in one field, has:composer
+  finds the tracks with a composer, and is:live, is:favorite and other
+  flags find the tracks they name. Search Syntax, in the main menu, lists
+  them all. A search with a mistake, like year:abc, finds nothing, and a
+  line under it says why, which screen readers announce
 - Searches find curly quotes and long dashes when they're typed as plain
   ones, so "bach's" finds "Bach’s" and "kyrie - christe" finds "Kyrie –
   Christe", and they ignore how many spaces are between words

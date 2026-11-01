@@ -21,9 +21,6 @@
 //! - While the text has an error, such as `year:abc`, the query matches
 //!   nothing, and the problem says why.
 
-// Nothing uses the syntax until the searches do, in the next commits
-#![allow(dead_code)]
-
 mod eval;
 mod lexer;
 mod parser;
@@ -42,6 +39,10 @@ use crate::{
 
 // The version of the syntax that saved rules are written in, so that a
 // later one can read them as they were meant
+#[allow(
+    dead_code,
+    reason = "the smart playlists made by the user will save it"
+)]
 pub const SYNTAX_VERSION: u32 = 1;
 
 // How deep parentheses can go

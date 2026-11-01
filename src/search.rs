@@ -2,20 +2,31 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Filters the queue, keeping the tracks that contain every word of the
-// search, in any of their tags; matching ignores case and accents.
+// Filters the queue with a search in the search syntax (`search_query`):
+// plain words are found in any of the tags, ignoring case and accents, and
+// fields, OR, "-" and the rest narrow it down. Also shows what's wrong with
+// a search under its entry, for the album search too.
 //
 // Fuzzy matching used to be used here, but the tags of classical music are
 // long enough that the letters of almost any word can be found in them, in
 // order, so most of the tracks matched any search.
 
-use gtk::{glib, prelude::*, subclass::prelude::*};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashSet,
+    rc::Rc,
+    time::Duration,
+};
 
-use crate::audio::normalize_search_text;
+use gtk::{glib, glib::clone, prelude::*, subclass::prelude::*};
+
+use crate::{
+    i18n::i18n,
+    play_stats,
+    search_query::{Context, Mode, Problem, Query},
+};
 
 mod imp {
-    use std::cell::RefCell;
-
     use super::*;
     use crate::audio::Track;
 
@@ -24,10 +35,15 @@ mod imp {
     pub struct SearchFilter {
         #[property(get, set = Self::set_search, explicit_notify, nullable)]
         pub search: RefCell<Option<String>>,
-        // The normalized words of the search; without any, every track
-        // matches, and the search doesn't filter the queue
+        // The search, unless it matches every track, as an empty one does;
+        // without one, the search doesn't filter the queue
         #[property(name = "filtering", get = Self::filtering, type = bool)]
-        pub words: RefCell<Vec<String>>,
+        pub query: RefCell<Option<Query>>,
+        // When the search was typed, for its relative dates
+        pub context: Cell<Option<Context>>,
+        // The URIs of the favorite tracks, read when a search needs them,
+        // and again when one is marked (`favorites_changed()`)
+        pub favorites: RefCell<Option<HashSet<String>>>,
     }
 
     #[glib::object_subclass]
@@ -46,19 +62,18 @@ mod imp {
                 return;
             }
 
-            let words = search
+            let query = search
                 .as_deref()
-                .map(|s| {
-                    normalize_search_text(s)
-                        .split_whitespace()
-                        .map(ToString::to_string)
-                        .collect()
-                })
-                .unwrap_or_default();
+                .map(|text| Query::parse(text, Mode::Search))
+                .filter(|query| !query.matches_all());
+            if query.as_ref().is_some_and(|query| query.needs().favorites) {
+                self.read_favorites();
+            }
 
             let was_filtering = self.filtering();
             self.search.replace(search);
-            self.words.replace(words);
+            self.query.replace(query);
+            self.context.set(Some(Context::now()));
 
             let obj = self.obj();
             obj.changed(gtk::FilterChange::Different);
@@ -69,27 +84,34 @@ mod imp {
         }
 
         fn filtering(&self) -> bool {
-            !self.words.borrow().is_empty()
+            self.query.borrow().is_some()
+        }
+
+        pub(super) fn read_favorites(&self) {
+            if self.favorites.borrow().is_none() {
+                let favorites = play_stats::favorites().into_iter().collect();
+                self.favorites.replace(Some(favorites));
+            }
         }
     }
 
     impl FilterImpl for SearchFilter {
         fn strictness(&self) -> gtk::FilterMatch {
-            if self.words.borrow().is_empty() {
-                gtk::FilterMatch::All
-            } else {
-                gtk::FilterMatch::Some
+            match &*self.query.borrow() {
+                None => gtk::FilterMatch::All,
+                Some(query) if query.matches_none() => gtk::FilterMatch::None,
+                Some(_) => gtk::FilterMatch::Some,
             }
         }
 
         fn match_(&self, track: &glib::Object) -> bool {
-            let words = self.words.borrow();
-            if words.is_empty() {
+            let query = self.query.borrow();
+            let Some(query) = &*query else {
                 return true;
-            }
-
+            };
+            let context = self.context.get().unwrap_or_else(Context::now);
             let track = track.downcast_ref::<Track>().unwrap();
-            track.matches_search(&words)
+            track.matches_query(query, &context, self.favorites.borrow().as_ref())
         }
     }
 }
@@ -109,4 +131,110 @@ impl SearchFilter {
     pub fn new() -> Self {
         glib::Object::new()
     }
+
+    // A track was marked a favorite, or unmarked; a search for the
+    // favorites finds it, or leaves it out, at once
+    pub fn favorites_changed(&self) {
+        let imp = self.imp();
+        imp.favorites.replace(None);
+        let needs = imp
+            .query
+            .borrow()
+            .as_ref()
+            .is_some_and(|query| query.needs().favorites);
+        if needs {
+            imp.read_favorites();
+            self.changed(gtk::FilterChange::Different);
+        }
+    }
+}
+
+// How long a problem waits after the search changes before it shows, so
+// that its line doesn't come and go with each key typed
+const PROBLEM_DELAY: Duration = Duration::from_millis(500);
+
+// Shows what's wrong with the search of an entry, or what to know about
+// it. While it has an error, the entry is red, and invalid for screen
+// readers; the error, or else a hint, shows a moment after typing stops,
+// through `show` (`None` hides it, at once), and is announced once. The
+// entry's description, `description`, is what screen readers say it's for,
+// and its tooltip says what can be typed
+pub fn setup_query_entry(
+    entry: &gtk::SearchEntry,
+    description: String,
+    show: impl Fn(Option<&str>) + 'static,
+) {
+    let show = Rc::new(show);
+    let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
+    let announced: Rc<RefCell<Option<String>>> = Rc::default();
+
+    entry.set_has_tooltip(true);
+    entry.connect_query_tooltip(|_, _, _, _, tooltip| {
+        tooltip.set_text(Some(&i18n(
+            "Search in the tags, or in a field, e.g. composer:bach year:<1730; Search Syntax in the main menu has them all",
+        )));
+        true
+    });
+    entry.update_property(&[gtk::accessible::Property::Description(&description)]);
+
+    entry.connect_search_changed(clone!(
+        #[strong]
+        show,
+        move |entry| {
+            let query = Query::parse(&entry.text(), Mode::Search);
+            let problems = query.problems();
+            let problem = problems
+                .iter()
+                .find(|problem| problem.is_error(Mode::Search))
+                .or_else(|| problems.first())
+                .map(Problem::message);
+
+            if query.has_errors() {
+                entry.add_css_class("error");
+                entry.update_state(&[gtk::accessible::State::Invalid(
+                    gtk::AccessibleInvalidState::True,
+                )]);
+            } else {
+                entry.remove_css_class("error");
+                entry.reset_state(gtk::AccessibleState::Invalid);
+            }
+            let full = match &problem {
+                Some(problem) => format!("{description} {problem}"),
+                None => description.clone(),
+            };
+            entry.update_property(&[gtk::accessible::Property::Description(&full)]);
+
+            if let Some(id) = pending.take() {
+                id.remove();
+            }
+            let Some(problem) = problem else {
+                show(None);
+                announced.replace(None);
+                return;
+            };
+            let id = glib::timeout_add_local_once(
+                PROBLEM_DELAY,
+                clone!(
+                    #[weak]
+                    entry,
+                    #[strong]
+                    show,
+                    #[strong]
+                    pending,
+                    #[strong]
+                    announced,
+                    move || {
+                        pending.replace(None);
+                        show(Some(&problem));
+                        // Changes to a description aren't said
+                        if announced.borrow().as_deref() != Some(problem.as_str()) {
+                            entry.announce(&problem, gtk::AccessibleAnnouncementPriority::Medium);
+                            announced.replace(Some(problem));
+                        }
+                    }
+                ),
+            );
+            pending.replace(Some(id));
+        }
+    ));
 }

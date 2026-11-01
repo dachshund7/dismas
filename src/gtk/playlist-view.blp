@@ -104,24 +104,60 @@ template $DismasPlaylistView: Widget {
         hexpand: true;
 
         child: Box {
+          orientation: vertical;
           spacing: 6;
 
-          SearchEntry queue_searchentry {
-            hexpand: true;
-            placeholder-text: _("Search tracks");
+          Box {
+            spacing: 6;
 
-            accessibility {
-              label: C_("a11y", "Search");
-              description: C_("a11y", "Type to search tracks");
+            // Its description is set with the problems of the search, see
+            // `search::setup_query_entry()`
+            SearchEntry queue_searchentry {
+              hexpand: true;
+              placeholder-text: _("Search tracks");
+
+              accessibility {
+                label: C_("a11y", "Search");
+              }
+            }
+
+            // Plays the tracks the search found in place of the queue, as
+            // playback goes through all the tracks of the queue otherwise
+            Button {
+              icon-name: "media-playback-start-symbolic";
+              action-name: "queue.play-results";
+              tooltip-text: _("Play Matching Tracks");
             }
           }
 
-          // Plays the tracks the search found in place of the queue, as
-          // playback goes through all the tracks of the queue otherwise
-          Button {
-            icon-name: "media-playback-start-symbolic";
-            action-name: "queue.play-results";
-            tooltip-text: _("Play Matching Tracks");
+          // What's wrong with the search, or worth knowing about it
+          Revealer queue_search_problem {
+            transition-type: slide_down;
+
+            child: Box {
+              spacing: 6;
+
+              Label queue_search_problem_label {
+                hexpand: true;
+                xalign: 0;
+                wrap: true;
+                wrap-mode: word_char;
+
+                styles [
+                  "caption",
+                ]
+              }
+
+              Button {
+                label: _("Search Syntax");
+                action-name: "win.search-syntax";
+                valign: center;
+
+                styles [
+                  "flat",
+                ]
+              }
+            };
           }
         };
       };

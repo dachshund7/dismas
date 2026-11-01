@@ -49,6 +49,10 @@ mod imp {
         #[template_child]
         pub queue_searchentry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
+        pub queue_search_problem: TemplateChild<gtk::Revealer>,
+        #[template_child]
+        pub queue_search_problem_label: TemplateChild<gtk::Label>,
+        #[template_child]
         pub queue_no_results: TemplateChild<adw::StatusPage>,
 
         // While a track is dragged near an edge of the queue, the pixels to
@@ -253,6 +257,21 @@ impl PlaylistView {
         let entry = self.imp().queue_searchentry.get();
         self.imp().queue_searchbar.connect_entry(&entry);
         crate::utils::focus_on_clear(&entry);
+        crate::search::setup_query_entry(
+            &entry,
+            crate::i18n::pi18n("a11y", "Type to search tracks"),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |problem| {
+                    let imp = this.imp();
+                    if let Some(problem) = problem {
+                        imp.queue_search_problem_label.set_label(problem);
+                    }
+                    imp.queue_search_problem.set_reveal_child(problem.is_some());
+                }
+            ),
+        );
     }
 
     // The name of the selected playlist

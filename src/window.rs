@@ -378,6 +378,11 @@ mod imp {
                 debug!("Window::win.track-info()");
                 win.show_track_info();
             });
+            // The help on the search syntax, from the main menu and from the
+            // line under a search with a problem
+            klass.install_action("win.search-syntax", None, move |win, _, _| {
+                crate::search_syntax::show(win);
+            });
             klass.install_action("win.preferences", None, move |win, _, _| {
                 debug!("Window::win.preferences()");
                 win.show_preferences();
