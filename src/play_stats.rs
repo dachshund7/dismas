@@ -511,7 +511,7 @@ fn query_favorites(conn: &Connection) -> rusqlite::Result<Vec<String>> {
 // A recording of a work marked as a favorite: the work, the album, and
 // the URI of the recording's first track, which tells two recordings of
 // the work on one album apart
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FavoriteRecording {
     pub work_key: String,
     pub album_id: String,
@@ -566,6 +566,29 @@ pub fn is_favorite_recording(recording: &FavoriteRecording) -> bool {
         warn!("Unable to find whether a recording is a favorite: {e}");
         false
     })
+}
+
+// The favorite recordings, which Play a Random Work prefers among the
+// recordings of a favorite work
+pub fn favorite_recordings() -> std::collections::HashSet<FavoriteRecording> {
+    with_connection(|conn| query_favorite_recordings(conn)).unwrap_or_else(|e| {
+        warn!("Unable to load the favorite recordings: {e}");
+        Default::default()
+    })
+}
+
+fn query_favorite_recordings(
+    conn: &Connection,
+) -> rusqlite::Result<std::collections::HashSet<FavoriteRecording>> {
+    let mut stmt = conn.prepare("SELECT work_key, album_id, uri FROM favorite_recordings")?;
+    stmt.query_map([], |row| {
+        Ok(FavoriteRecording {
+            work_key: row.get(0)?,
+            album_id: row.get(1)?,
+            uri: row.get(2)?,
+        })
+    })?
+    .collect()
 }
 
 pub fn set_favorite_recording(recording: &FavoriteRecording, favorite: bool) {
@@ -1342,10 +1365,15 @@ mod tests {
         set_work(&conn, "a", true, 10).unwrap();
         set_recording(&conn, &recording, true, 20).unwrap();
         assert_eq!(query_favorite_work_keys(&conn).unwrap(), keys(&["a", "b"]));
+        assert_eq!(
+            query_favorite_recordings(&conn).unwrap(),
+            std::collections::HashSet::from([recording.clone()])
+        );
 
         set_recording(&conn, &recording, false, 0).unwrap();
         set_work(&conn, "a", false, 0).unwrap();
         assert!(query_favorite_work_keys(&conn).unwrap().is_empty());
+        assert!(query_favorite_recordings(&conn).unwrap().is_empty());
     }
 
     #[test]

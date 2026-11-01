@@ -66,10 +66,14 @@ All notable changes to this project will be documented in this file.
   read again when the album grid is shown instead, at most every 5 minutes
 - Keep a Play History, in Preferences, to stop adding the tracks played
   to the history, and Clear History, to delete it; the favorites are kept
-- Play a Random Album, in the menu of the Albums, Tracks and Works pages,
-  plays an album picked at random in place of the queue, with an Undo; an
-  album not heard lately is more likely, and choosing it again plays
-  another
+- Play a Random Album, Play a Random Track or Play a Random Work, in the
+  menu of the Albums, Tracks and Works pages, plays an album, a track or a
+  work picked at random from those the page shows, in place of the queue,
+  with an Undo. The search, the composer and performer picked, and the
+  heart beside the search narrow what it picks from. An album, a track or
+  a work not heard lately is more likely to be picked, and choosing it
+  again plays another. A work plays in one of its recordings that the
+  search matches; with the heart on, in a favorite recording if it has one
 - Works and recordings can be favorites, not only tracks: Add Work to
   Favorites is in the menu of a work's header and of the rows of the
   Works page, with a right click, a long press or the Menu key, and Add
@@ -89,11 +93,6 @@ All notable changes to this project will be documented in this file.
   and takes only those tracks from them: an album opened there lists only
   its favorite tracks, under a bar that says how many of its tracks they
   are. The page says how to mark favorites when there are none
-- Play a Random Work, below it, plays a recording of a work picked at
-  random in the same way. A work that hasn't been heard lately in any of
-  its recordings is more likely to be picked, and so is a recording of it
-  that hasn't been heard lately. It's in the menu while a track is part of
-  a work
 - Composers, the button next to the album search, lists the composers of
   the albums, sorted by their last names, with the number of their albums;
   the names are shown last name first only where the tags give them so,

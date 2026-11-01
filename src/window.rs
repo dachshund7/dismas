@@ -253,10 +253,11 @@ mod imp {
         pub queue_time_idle: Cell<bool>,
         // The number of times tracks are being read for the queue
         pub loads: Cell<u32>,
-        // The album Random Album played last, which it doesn't play again
-        // right away
+        // What Play a Random … played last on each page, which it doesn't
+        // play again right away: the album, by its id, the track, by its
+        // URI, and the work, by its key
         pub last_random_album: RefCell<Option<String>>,
-        // The work Random Work played last, by its key, likewise
+        pub last_random_track: RefCell<Option<String>>,
         pub last_random_work: RefCell<Option<String>>,
         // The pages of the pane to go back to, see `PaneHistory`
         pub pane_history: RefCell<PaneHistory>,
@@ -450,15 +451,11 @@ mod imp {
                     }
                 },
             );
-            // In the album pages' menu; a recording of a work only while a
-            // track is part of a work, see `works-available`
-            klass.install_action("win.play-random-album", None, move |win, _, _| {
-                debug!("Window::win.play-random-album()");
-                win.play_random_album();
-            });
-            klass.install_action("win.play-random-work", None, move |win, _, _| {
-                debug!("Window::win.play-random-work()");
-                win.play_random_work();
+            // In the album pages' menu, whose item names what the page
+            // shows, see `LibraryView::random_pool()`
+            klass.install_action("win.play-random", None, move |win, _, _| {
+                debug!("Window::win.play-random()");
+                win.play_random();
             });
             klass.install_action(
                 "win.play-smart-playlist",
@@ -652,6 +649,7 @@ mod imp {
                 queue_time_idle: Cell::new(false),
                 loads: Cell::new(0),
                 last_random_album: RefCell::default(),
+                last_random_track: RefCell::default(),
                 last_random_work: RefCell::default(),
                 hide_focus_after_transition: Cell::new(false),
                 pane_history: RefCell::default(),
@@ -693,11 +691,6 @@ mod imp {
                 .bind_property("has-works", &*self.obj(), "works-available")
                 .sync_create()
                 .build();
-            let obj = self.obj();
-            obj.action_set_enabled("win.play-random-work", obj.works_available());
-            obj.connect_works_available_notify(|win| {
-                win.action_set_enabled("win.play-random-work", win.works_available());
-            });
             // The works going away shows the albums
             self.library_view.connect_page_notify(clone!(
                 #[weak(rename_to = obj)]

@@ -122,10 +122,9 @@ What Dismas adds
   tracks you played the most but haven't heard in the last 2 months. Works
   and particular recordings can be favorites too, from their menus: the
   Works page marks them with a heart and can show only them. Play a Random
-  Album, in the menu of the album pages, plays an album picked at random,
-  more likely one you haven't heard lately, and Play a Random Work plays a
-  recording of a work picked the same way. They play in place of the queue,
-  with an Undo.
+  Album, Track or Work, in the menu of the album pages, plays one of the
+  albums, tracks or works the page shows, picked at random, more likely one
+  you haven't heard lately, in place of the queue, with an Undo.
 - **Queue editing and drag and drop:** drag tracks by their handle to
   reorder them, and select ranges with Shift+click. Play Next, in the menu
   of a track, puts it after the playing track, or after the last movement

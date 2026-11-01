@@ -121,6 +121,21 @@ impl LibraryPage {
     }
 }
 
+// What Play a Random … picks from on the page shown, see
+// `LibraryView::random_pool()`
+pub enum RandomPool {
+    // The albums with a track the filter matches, which play whole
+    Albums(TrackFilter),
+    // The tracks the filter matches
+    Tracks(TrackFilter),
+    // The works listed for the filter, only the favorite ones with the
+    // heart on, and the recordings of them that it matches
+    Works {
+        filter: TrackFilter,
+        favorites_only: bool,
+    },
+}
+
 // The albums dragged from the grid, with the words of the search each was
 // selected in, like the ones the Add button adds, and whether they are
 // the selected ones; only Dismas takes them
@@ -269,6 +284,9 @@ mod imp {
         pub page: Cell<LibraryPage>,
         #[property(get)]
         pub has_works: Cell<bool>,
+        // The section of the main menu with Play a Random …, whose one item
+        // names what the page shows
+        pub random_menu: gio::Menu,
         // The step the covers of the grid and of the works are zoomed to,
         // which the cells follow
         #[property(get)]
@@ -424,6 +442,7 @@ mod imp {
             if self.favorites_button.is_active() {
                 self.obj().update_album_matches();
             }
+            self.obj().update_random_item();
             self.obj().notify_page();
         }
     }
@@ -440,27 +459,14 @@ mod imp {
             self.parent_constructed();
 
             self.zoom_row.set_action_prefix("library");
-            // What used to be on the Playlists page, as it plays what the
-            // album pages show; Random Work hides while there's no work,
-            // as its action is off then
-            let items = gio::Menu::new();
-            items.append(
-                Some(&crate::i18n::i18n("Play a _Random Album")),
-                Some("win.play-random-album"),
-            );
-            let work = gio::MenuItem::new(
-                Some(&crate::i18n::i18n("Play a Random _Work")),
-                Some("win.play-random-work"),
-            );
-            work.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
-            items.append_item(&work);
+            let obj = self.obj();
+            obj.update_random_item();
             crate::utils::setup_primary_menu_button(
                 &self.menu_button,
                 Some(&self.zoom_row),
-                Some(items.upcast_ref()),
+                Some(self.random_menu.upcast_ref()),
             );
 
-            let obj = self.obj();
             obj.setup_grid();
             obj.setup_actions();
             obj.setup_zoom();
@@ -1960,6 +1966,34 @@ impl LibraryView {
             LibraryPage::Tracks => (self.search_filter(), self.search_pick_names()),
             LibraryPage::Works => self.taken_from_open_work(),
         }
+    }
+
+    // What Play a Random … picks from: what the search, the composer and
+    // the performer picked, and the heart ask for on the page shown, as
+    // the grid and the works are searched with it, rather than what the
+    // page shows, which is still the other page's just after a page switch
+    pub fn random_pool(&self) -> RandomPool {
+        let filter = self.wanted_filter();
+        match self.page() {
+            LibraryPage::Albums => RandomPool::Albums(filter),
+            LibraryPage::Tracks => RandomPool::Tracks(filter),
+            LibraryPage::Works => RandomPool::Works {
+                filter,
+                favorites_only: self.imp().favorites_button.is_active(),
+            },
+        }
+    }
+
+    // Names what Play a Random … plays on the page shown
+    fn update_random_item(&self) {
+        let label = match self.page() {
+            LibraryPage::Albums => i18n("Play a _Random Album"),
+            LibraryPage::Tracks => i18n("Play a _Random Track"),
+            LibraryPage::Works => i18n("Play a _Random Work"),
+        };
+        let menu = &self.imp().random_menu;
+        menu.remove_all();
+        menu.append(Some(&label), Some("win.play-random"));
     }
 
     // What's taken from the album of a cell: among the covers of the albums

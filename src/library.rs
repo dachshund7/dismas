@@ -1645,6 +1645,16 @@ impl WorkInfo {
             .collect()
     }
 
+    // Whether it's among the `favorites`, the keys of the works marked and
+    // of those of the favorite recordings, see
+    // `play_stats::favorite_work_keys()`: by its own key, or by that of an
+    // arrangement listed under it
+    pub fn is_among(&self, favorites: &HashSet<String>) -> bool {
+        std::iter::once(&self.key)
+            .chain(self.arrangements.iter().map(|arranged| &arranged.key))
+            .any(|key| favorites.contains(key))
+    }
+
     // The names of its composers, as a list
     pub fn composer_names(&self) -> String {
         self.composers
@@ -1754,44 +1764,104 @@ fn query_works(
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkInfo>> {
     let rows = query_work_rows(conn, filter, &[], hidden)?;
-    Ok(works_of_rows(&rows, true))
+    Ok(works_of_rows(&rows))
 }
 
-// The works of the albums of the grid, sorted as in `works()`, each with
-// the paths of the tracks of each of its recordings, in the order of their
-// albums, see `recordings_of_works()`; the tracks in the `hidden` folders
-// are left out
-pub fn work_recording_paths(hidden: &[PathBuf]) -> Vec<(WorkInfo, Vec<Vec<PathBuf>>)> {
+// A work the Works page lists, as Play a Random Work picks from them
+#[derive(Debug)]
+pub struct WorkCandidate {
+    pub info: WorkInfo,
+    // The recordings of it that the filter matches, its own and those of
+    // the arrangements listed under it
+    pub recordings: Vec<RecordingCandidate>,
+    // The tracks of all its recordings, those the filter doesn't match
+    // too, which tell when it was heard last
+    pub paths: Vec<PathBuf>,
+}
+
+// A recording of a work that Play a Random Work can play
+#[derive(Debug)]
+pub struct RecordingCandidate {
+    pub album_id: String,
+    // The work of its first track, by which a favorite recording is kept,
+    // see `play_stats::FavoriteRecording`
+    pub work_key: String,
+    // Its tracks, in the order of their album
+    pub paths: Vec<PathBuf>,
+}
+
+// The works that `works()` lists for the filter, in its order, each with
+// the recordings of it that the filter matches, as `work_recordings()`
+// gives them with its keys; the tracks in the `hidden` folders are left
+// out
+pub fn work_recording_candidates(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkCandidate> {
     query_or_default("load the recordings of the works", |conn| {
-        query_work_recording_paths(conn, hidden)
+        query_work_recording_candidates(conn, filter, hidden)
     })
 }
 
-fn query_work_recording_paths(
+fn query_work_recording_candidates(
     conn: &Connection,
+    filter: &TrackFilter,
     hidden: &[PathBuf],
-) -> rusqlite::Result<Vec<(WorkInfo, Vec<Vec<PathBuf>>)>> {
-    let rows = query_work_rows(conn, &TrackFilter::default(), &[], hidden)?;
-    let mut recordings: HashMap<&str, Vec<Vec<PathBuf>>> = HashMap::new();
-    for recording in recordings_of_works(&rows, |row| &row.work) {
-        let work = rows[recording[0]].work.as_str();
-        let paths = recording.iter().map(|&i| rows[i].path.clone()).collect();
-        recordings.entry(work).or_default().push(paths);
-    }
-    Ok(works_of_rows(&rows, false)
+) -> rusqlite::Result<Vec<WorkCandidate>> {
+    let rows = query_work_rows(conn, filter, &[], hidden)?;
+    let paths = |recording: &RecordingRows| -> Vec<PathBuf> {
+        recording
+            .rows
+            .iter()
+            .map(|&i| rows[i].path.clone())
+            .collect()
+    };
+    Ok(listed_works(&rows)
         .into_iter()
-        .filter_map(|work| {
-            let paths = recordings.remove(work.key.as_str())?;
-            Some((work, paths))
+        .map(|listed| WorkCandidate {
+            recordings: listed
+                .recordings
+                .iter()
+                .filter(|recording| recording.matching)
+                .map(|recording| {
+                    let first = &rows[recording.rows[0]];
+                    RecordingCandidate {
+                        album_id: first.album_id.clone(),
+                        work_key: first.work.clone(),
+                        paths: paths(recording),
+                    }
+                })
+                .collect(),
+            paths: listed.recordings.iter().flat_map(paths).collect(),
+            info: listed.info,
         })
         .collect())
 }
 
 // The works of the rows with a recording that the filter matches, sorted
-// as in `works()`. With `fold`, the arrangements of a work among them are
-// listed under it, see `listed_under()`, and their recordings count as
-// its own
-fn works_of_rows(rows: &[WorkRow], fold: bool) -> Vec<WorkInfo> {
+// as in `works()`, see `listed_works()`
+fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
+    listed_works(rows)
+        .into_iter()
+        .map(|listed| listed.info)
+        .collect()
+}
+
+// The rows of a recording of a work, see `recordings_of_works()`, and
+// whether the filter matches any of them
+struct RecordingRows {
+    rows: Vec<usize>,
+    matching: bool,
+}
+
+// A work as the Works page lists it, with the recordings of it and of the
+// arrangements listed under it, those the filter matches or not
+struct ListedWork {
+    info: WorkInfo,
+    recordings: Vec<RecordingRows>,
+}
+
+// The works of the rows with a recording that the filter matches, sorted
+// as in `works()`. The arrangements of a work among them are listed under
+// it, see `listed_under()`, and their recordings count as its own
+fn listed_works(rows: &[WorkRow]) -> Vec<ListedWork> {
     // How often each of the names of a work is given, by all its tracks
     #[derive(Default)]
     struct Seen<'a> {
@@ -1850,18 +1920,20 @@ fn works_of_rows(rows: &[WorkRow], fold: bool) -> Vec<WorkInfo> {
         })
         .collect();
 
-    let listed = if fold {
-        listed_under(rows, &works)
-    } else {
-        HashMap::new()
-    };
-    let work_of = |key: &str| listed.get(key).copied().unwrap_or(key).to_owned();
+    let listed = listed_under(rows, &works);
+    // The recordings of each work, by the work they're listed under
+    let mut recordings: HashMap<&str, Vec<RecordingRows>> = HashMap::new();
     for recording in recordings_of_works(rows, |row| split_recording_work(row, &listed)) {
-        if recording.iter().any(|&i| rows[i].matching)
-            && let Some(work) = works.get_mut(work_of(&rows[recording[0]].work).as_str())
-        {
+        let first = rows[recording[0]].work.as_str();
+        let key = listed.get(first).copied().unwrap_or(first);
+        let matching = recording.iter().any(|&i| rows[i].matching);
+        if matching && let Some(work) = works.get_mut(key) {
             work.recordings += 1;
         }
+        recordings.entry(key).or_default().push(RecordingRows {
+            rows: recording,
+            matching,
+        });
     }
     let mut arranged: Vec<(&str, &str)> = listed.into_iter().collect();
     arranged.sort_unstable();
@@ -1881,6 +1953,12 @@ fn works_of_rows(rows: &[WorkRow], fold: bool) -> Vec<WorkInfo> {
             .filter(|work| work.recordings > 0)
             .collect(),
     )
+    .into_iter()
+    .map(|info| ListedWork {
+        recordings: recordings.remove(info.key.as_str()).unwrap_or_default(),
+        info,
+    })
+    .collect()
 }
 
 // The arrangements among the works, by key, each with the work it's listed
@@ -2370,6 +2448,32 @@ fn performers_line<'a>(entries: impl Iterator<Item = &'a str>) -> String {
         .into_iter()
         .filter(|s| !s.is_empty())
         .join(" · ")
+}
+
+// The tracks the filter matches, as the Tracks page takes them from the
+// albums, each with its title, if its tags give one; the tracks in the
+// `hidden` folders are left out
+pub fn matching_tracks(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<(PathBuf, Option<String>)> {
+    query_or_default("load the tracks the search finds", |conn| {
+        query_matching_tracks(conn, filter, hidden)
+    })
+}
+
+fn query_matching_tracks(
+    conn: &Connection,
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<Vec<(PathBuf, Option<String>)>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT path, title FROM tracks WHERE album_id IS NOT NULL{}{}",
+        filter.conditions_sql(),
+        hidden_condition("file", hidden).0
+    ))?;
+    stmt.query_map(
+        rusqlite::params_from_iter(filter_values(filter, hidden)),
+        |row| Ok((path_from_bytes(row.get(0)?), row.get(1)?)),
+    )?
+    .collect()
 }
 
 // The files of the tracks of an album, in order; with a filter, only the
@@ -5850,6 +5954,69 @@ mod tests {
     }
 
     #[test]
+    fn a_random_track_is_one_the_filter_matches() {
+        let conn = test_db();
+        for (path, album, title, search) in [
+            ("/m/A/01.opus", Some("a"), Some("Sonata"), "bwv 1001"),
+            ("/m/A/02.opus", Some("a"), None, "bwv 1002"),
+            ("/m/B/01.opus", Some("b"), Some("Partita"), "bwv 1004"),
+            ("/m/Gone/01.opus", Some("g"), Some("Gone"), "bwv 1003"),
+            // A file whose tags couldn't be read is in no album
+            ("/m/X/01.opus", None, None, "bwv 1005"),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, title, search)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4)",
+                rusqlite::params![path.as_bytes(), album, title, search],
+            )
+            .unwrap();
+        }
+        let hidden = [PathBuf::from("/m/Gone")];
+        let tracks = |filter: &super::TrackFilter| {
+            let mut tracks = super::query_matching_tracks(&conn, filter, &hidden)
+                .unwrap()
+                .into_iter()
+                .map(|(path, title)| (path.to_string_lossy().into_owned(), title))
+                .collect::<Vec<_>>();
+            tracks.sort();
+            tracks
+        };
+        let track =
+            |path: &str, title: Option<&str>| (path.to_string(), title.map(ToString::to_string));
+
+        assert_eq!(
+            tracks(&super::TrackFilter::default()),
+            [
+                track("/m/A/01.opus", Some("Sonata")),
+                track("/m/A/02.opus", None),
+                track("/m/B/01.opus", Some("Partita")),
+            ]
+        );
+        // The favorites, alone and with the words of a search
+        let favorites = super::TrackFilter {
+            favorites: Some(super::Favorites::Tracks(
+                ["/m/A/02.opus", "/m/B/01.opus"]
+                    .iter()
+                    .map(PathBuf::from)
+                    .collect(),
+            )),
+            ..Default::default()
+        };
+        assert_eq!(
+            tracks(&favorites),
+            [
+                track("/m/A/02.opus", None),
+                track("/m/B/01.opus", Some("Partita")),
+            ]
+        );
+        let words = super::TrackFilter {
+            query: super::TrackFilter::query("1004"),
+            ..favorites
+        };
+        assert_eq!(tracks(&words), [track("/m/B/01.opus", Some("Partita"))]);
+    }
+
+    #[test]
     fn the_works_page_lists_only_the_people_of_works() {
         use super::Counted::{Albums, Works};
 
@@ -6179,8 +6346,6 @@ mod tests {
 
     #[test]
     fn arrangements_are_listed_under_the_works_they_arrange() {
-        use std::collections::HashMap;
-
         use super::TrackFilter;
 
         let conn = test_db();
@@ -6584,23 +6749,78 @@ mod tests {
             ]
         );
 
-        // Random Work and Favorite Works still find each arrangement as a
-        // work of its own
-        let all_recordings = super::query_work_recording_paths(&conn, &[])
-            .unwrap()
-            .into_iter()
-            .map(|(work, recordings)| (work.key, recordings.len()))
-            .filter(|(key, _)| ["bwv80", "chorale", "partita", "lute"].contains(&key.as_str()))
-            .collect::<HashMap<_, _>>();
-        assert_eq!(
-            all_recordings,
-            HashMap::from([
-                ("bwv80".to_string(), 1),
-                ("chorale".to_string(), 1),
-                ("partita".to_string(), 1),
-                ("lute".to_string(), 2),
-            ])
-        );
+        // Play a Random Work picks from the works as they're listed, each
+        // with the recordings that `work_recordings()` gives for its keys
+        let sorted_paths = |recordings: Vec<(Vec<String>, String)>| {
+            let mut recordings = recordings;
+            recordings.sort();
+            recordings
+        };
+        let strings_of = |paths: &[std::path::PathBuf]| {
+            paths
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        for filter in [TrackFilter::default(), trio.clone()] {
+            let candidates = super::query_work_recording_candidates(&conn, &filter, &[]).unwrap();
+            let listed = super::query_works(&conn, &filter, &[]).unwrap();
+            assert_eq!(
+                candidates
+                    .iter()
+                    .map(|candidate| &candidate.info)
+                    .collect::<Vec<_>>(),
+                listed.iter().collect::<Vec<_>>()
+            );
+            for candidate in &candidates {
+                assert_eq!(
+                    candidate.recordings.len(),
+                    candidate.info.recordings as usize
+                );
+                let expected =
+                    super::query_work_recordings(&conn, &candidate.info.keys(), &filter, &[])
+                        .unwrap()
+                        .into_iter()
+                        .map(|recording| (strings_of(&recording.paths), recording.work_key))
+                        .collect();
+                let found = candidate
+                    .recordings
+                    .iter()
+                    .map(|recording| (strings_of(&recording.paths), recording.work_key.clone()))
+                    .collect();
+                assert_eq!(
+                    sorted_paths(found),
+                    sorted_paths(expected),
+                    "{}",
+                    candidate.info.key
+                );
+            }
+        }
+        let candidates =
+            super::query_work_recording_candidates(&conn, &TrackFilter::default(), &[]).unwrap();
+        let partita = candidates
+            .iter()
+            .find(|candidate| candidate.info.key == "partita")
+            .unwrap();
+        assert_eq!(partita.recordings.len(), 5);
+        // The arrangement on the lute goes with the work, as it's listed
+        // under it
+        assert!(partita.recordings.iter().any(|recording| {
+            recording.work_key == "lute" && strings_of(&recording.paths) == ["/m/violin/03"]
+        }));
+        // The work of a search that only finds an arrangement plays the
+        // arrangement, and the tracks of all its recordings tell when it was
+        // heard
+        let candidates = super::query_work_recording_candidates(&conn, &trio, &[]).unwrap();
+        let [d957] = candidates.as_slice() else {
+            panic!("{candidates:?}");
+        };
+        assert_eq!(d957.info.key, "d957");
+        let [recording] = d957.recordings.as_slice() else {
+            panic!("{d957:?}");
+        };
+        assert_eq!(recording.work_key, "standchen");
+        assert!(d957.paths.len() > recording.paths.len());
     }
 
     #[test]
@@ -7026,50 +7246,78 @@ mod tests {
             )]
         );
 
-        // All the works with all their recordings, as Random Work picks
-        // from them
-        let all_recordings = super::query_work_recording_paths(&conn, &hidden)
-            .unwrap()
-            .into_iter()
-            .map(|(work, recordings)| {
-                let recordings = recordings
-                    .iter()
-                    .map(|paths| {
+        // The works as Play a Random Work picks from them, each with the
+        // recordings of it that the filter matches
+        let candidates = |filter: &super::TrackFilter| {
+            super::query_work_recording_candidates(&conn, filter, &hidden)
+                .unwrap()
+                .into_iter()
+                .map(|work| {
+                    let paths = |paths: &[PathBuf]| {
                         paths
                             .iter()
                             .map(|path| path.to_string_lossy().into_owned())
                             .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>();
-                (work.name, recordings)
-            })
-            .collect::<Vec<_>>();
+                    };
+                    let recordings = work
+                        .recordings
+                        .iter()
+                        .map(|recording| paths(&recording.paths))
+                        .collect::<Vec<_>>();
+                    (work.info.name, recordings, paths(&work.paths))
+                })
+                .collect::<Vec<_>>()
+        };
+        let kdf = strings(&["/m/E/01", "/m/E/02", "/m/E/04", "/m/E/05"]);
+        let goldberg = strings(&["/m/B/01", "/m/B/02", "/m/B/03", "/m/B/04", "/m/E/03"]);
+        let requiem = strings(&["/m/A/01", "/m/A/02", "/m/C/01", "/m/C/02"]);
         assert_eq!(
-            all_recordings,
+            candidates(&all),
             [
-                (
-                    "Die Kunst der Fuge".to_string(),
-                    vec![strings(&["/m/E/01", "/m/E/02", "/m/E/04", "/m/E/05"])]
-                ),
+                ("Die Kunst der Fuge".to_string(), vec![kdf.clone()], kdf),
                 (
                     "Goldberg Variations".to_string(),
                     vec![
                         strings(&["/m/B/01", "/m/B/02", "/m/B/03"]),
                         strings(&["/m/B/04"]),
                         strings(&["/m/E/03"]),
-                    ]
+                    ],
+                    goldberg
                 ),
                 (
                     "Requiem v B-moll".to_string(),
                     vec![
                         strings(&["/m/A/01", "/m/A/02"]),
                         strings(&["/m/C/01", "/m/C/02"])
-                    ]
+                    ],
+                    requiem.clone()
                 ),
-                ("Stabat Mater".to_string(), vec![strings(&["/m/A/04"])]),
-                ("Symphony no. 2".to_string(), vec![strings(&["/m/D/02"])]),
-                ("Symphony no. 10".to_string(), vec![strings(&["/m/D/01"])]),
+                (
+                    "Stabat Mater".to_string(),
+                    vec![strings(&["/m/A/04"])],
+                    strings(&["/m/A/04"])
+                ),
+                (
+                    "Symphony no. 2".to_string(),
+                    vec![strings(&["/m/D/02"])],
+                    strings(&["/m/D/02"])
+                ),
+                (
+                    "Symphony no. 10".to_string(),
+                    vec![strings(&["/m/D/01"])],
+                    strings(&["/m/D/01"])
+                ),
             ]
+        );
+        // Only the recordings the search matches, but the tracks of all of
+        // them, which tell when the work was heard last
+        assert_eq!(
+            candidates(&graduale),
+            [(
+                "Requiem v B-moll".to_string(),
+                vec![strings(&["/m/A/01", "/m/A/02"])],
+                requiem
+            )]
         );
     }
 

@@ -343,8 +343,8 @@ impl LibraryView {
             let Some(first) = recording.paths.first() else {
                 continue;
             };
-            // By the work of its own tracks, which Favorite Works finds it
-            // among the recordings of
+            // By the work of its own tracks, so that the recording of an
+            // arrangement is among the arrangement's favorites
             let favorite = FavoriteRecording {
                 work_key: recording.work_key.clone(),
                 album_id: recording.album_id.clone(),
@@ -681,7 +681,7 @@ impl LibraryView {
                     // A favorite arrangement makes the work it's listed
                     // under one
                     for work in &mut works {
-                        work.favorite = work.keys().iter().any(|key| favorites.contains(key));
+                        work.favorite = work.is_among(&favorites);
                     }
                     if favorites_only {
                         works.retain(|work| work.favorite);
