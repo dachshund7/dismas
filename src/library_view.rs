@@ -28,6 +28,7 @@ use crate::{
     play_stats, utils,
     work_sections::{WorkSectionModel, same_section_of},
     zoom::{self, Zoom},
+    zoom_row::ZoomRow,
 };
 
 // The covers in the grid grow with the width of the columns, between
@@ -327,6 +328,8 @@ mod imp {
         pub cover_generation: Cell<u32>,
         // The size the last scan made the covers at, 0 before the first
         pub thumbnail_size: Cell<u32>,
+        // The buttons that zoom the covers, in the main menu
+        pub zoom_row: ZoomRow,
         // The `library` actions, of which zooming is only on short of the
         // ends it goes to
         pub actions: gio::SimpleActionGroup,
@@ -431,7 +434,8 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
 
-            crate::utils::setup_primary_menu_button(&self.menu_button);
+            self.zoom_row.set_action_prefix("library");
+            crate::utils::setup_primary_menu_button(&self.menu_button, Some(&self.zoom_row));
 
             let obj = self.obj();
             obj.setup_grid();
@@ -1215,6 +1219,7 @@ impl LibraryView {
             .int("cover-zoom")
             .clamp(MIN_COVER_ZOOM, MAX_COVER_ZOOM);
         imp.cover_zoom.set(step);
+        imp.zoom_row.set_percent(cover_zoom_percent(step));
 
         // Past the width of the most columns with the largest covers, the
         // grid stays centered, rather than spreading the covers apart
@@ -1248,9 +1253,9 @@ impl LibraryView {
                 action.set_enabled(on);
             }
         };
+        // The size between them stays on, so that it reads as the size
         enable("zoom-in", step < MAX_COVER_ZOOM);
         enable("zoom-out", step > MIN_COVER_ZOOM);
-        enable("zoom-reset", step != 0);
 
         // The columns change, and the album with the focus could go out
         // of view
@@ -2930,6 +2935,13 @@ fn at_zoom_step<T: Copy>(sizes: &[T], step: i32) -> T {
 // The sizes the covers of the grid grow between at a step of the zoom
 fn grid_cover_sizes(step: i32) -> (i32, i32) {
     at_zoom_step(&COVER_SIZES, step)
+}
+
+// The size of the covers at a step of the zoom, in percent of the normal
+// size, by their largest size
+fn cover_zoom_percent(step: i32) -> u32 {
+    let ((_, max), (_, normal)) = (grid_cover_sizes(step), grid_cover_sizes(0));
+    (f64::from(max) * 100.0 / f64::from(normal)).round() as u32
 }
 
 // The most columns the grid has with covers of this largest size, so that

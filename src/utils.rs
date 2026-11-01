@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use gtk::{gdk, gio, glib, prelude::*};
 use log::{debug, warn};
 
-use crate::{audio::Track, config::APPLICATION_ID};
+use crate::{audio::Track, config::APPLICATION_ID, zoom_row::ZoomRow};
 
 // The path of a file outside the sandbox, for the files that came through
 // the document portal
@@ -44,13 +44,37 @@ pub fn primary_menu() -> gio::MenuModel {
         .expect("The main menu is in the resources")
 }
 
-// Gives a page's menu button the main menu. GTK opens the primary menu
-// of the visible page with F10, but doesn't close it with F10 again, as
-// the menu has the keyboard; its popover takes care of that
-pub fn setup_primary_menu_button(button: &gtk::MenuButton) {
-    button.set_menu_model(Some(&primary_menu()));
+// Gives a page's menu button the main menu, with the buttons that zoom the
+// page's view at its top, if it has one, as Text Editor's menu has them.
+// GTK opens the primary menu of the visible page with F10, but doesn't
+// close it with F10 again, as the menu has the keyboard; its popover takes
+// care of that
+pub fn setup_primary_menu_button(button: &gtk::MenuButton, zoom: Option<&ZoomRow>) {
+    let menu = primary_menu();
+    match zoom {
+        Some(_) => {
+            let with_zoom = gio::Menu::new();
+            let item = gio::MenuItem::new(None, None);
+            item.set_attribute_value("custom", Some(&"zoom".to_variant()));
+            let section = gio::Menu::new();
+            section.append_item(&item);
+            with_zoom.append_section(None, &section);
+            // The main menu is all sections
+            for i in 0..menu.n_items() {
+                if let Some(section) = menu.item_link(i, gio::MENU_LINK_SECTION) {
+                    with_zoom.append_section(None, &section);
+                }
+            }
+            button.set_menu_model(Some(&with_zoom));
+        }
+        None => button.set_menu_model(Some(&menu)),
+    }
     button.set_primary(true);
 
+    if let (Some(zoom), Some(popover)) = (zoom, button.popover().and_downcast::<gtk::PopoverMenu>())
+    {
+        popover.add_child(zoom, "zoom");
+    }
     if let Some(popover) = button.popover() {
         let controller = gtk::ShortcutController::new();
         controller.add_shortcut(gtk::Shortcut::new(

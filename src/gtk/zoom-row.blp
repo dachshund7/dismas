@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 John Hamilton
+
+using Gtk 4.0;
+
+// The buttons that zoom a view, in a menu, as in Text Editor's: smaller,
+// the size, which puts back the normal size, and larger. Their actions are
+// the view's, see ZoomRow::set_action_prefix()
+template $DismasZoomRow: Box {
+  spacing: 12;
+  margin-start: 12;
+  margin-end: 12;
+
+  Button zoom_out_button {
+    icon-name: "zoom-out-symbolic";
+    tooltip-text: _("Zoom Out");
+    valign: center;
+
+    styles [
+      "flat",
+      "circular",
+    ]
+  }
+
+  // Named by its label, the size, with the tooltip as its description
+  Button reset_button {
+    hexpand: true;
+    tooltip-text: _("Normal Size");
+
+    styles [
+      "flat",
+      "numeric",
+    ]
+  }
+
+  Button zoom_in_button {
+    icon-name: "zoom-in-symbolic";
+    tooltip-text: _("Zoom In");
+    valign: center;
+
+    styles [
+      "flat",
+      "circular",
+    ]
+  }
+}

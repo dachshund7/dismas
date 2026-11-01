@@ -18,6 +18,20 @@ template $DismasLyricsView: Widget {
       title-widget: Adw.WindowTitle window_title {
         title: _("Lyrics");
       };
+
+      // The size of the text, as Ctrl+plus and Ctrl+minus change it
+      [end]
+      MenuButton zoom_button {
+        icon-name: "zoom-in-symbolic";
+        tooltip-text: _("Text Size");
+        valign: center;
+
+        popover: Popover {
+          child: $DismasZoomRow zoom_row {
+            action-prefix: "lyrics";
+          };
+        };
+      }
     }
 
     content: Stack stack {

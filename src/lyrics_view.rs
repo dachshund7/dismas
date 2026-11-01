@@ -25,6 +25,7 @@ use crate::{
     queue_row::{glide_adjustment, within_scroll},
     utils,
     zoom::{self, Zoom},
+    zoom_row::ZoomRow,
 };
 
 // How far a position can be before the line that shows and still keep it:
@@ -54,6 +55,8 @@ mod imp {
         pub back_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub window_title: TemplateChild<adw::WindowTitle>,
+        #[template_child]
+        pub zoom_row: TemplateChild<ZoomRow>,
         #[template_child]
         pub stack: TemplateChild<gtk::Stack>,
         #[template_child]
@@ -94,6 +97,7 @@ mod imp {
         type ParentType = gtk::Widget;
 
         fn class_init(klass: &mut Self::Class) {
+            ZoomRow::static_type();
             Self::bind_template(klass);
 
             klass.set_layout_manager_type::<gtk::BinLayout>();
@@ -636,9 +640,10 @@ impl LyricsView {
             self.add_css_class(&format!("zoom-{percent}"));
         }
 
+        imp.zoom_row.set_percent(percent);
+        // The size between them stays on, so that it reads as the size
         self.action_set_enabled("lyrics.zoom-in", step < MAX_ZOOM);
         self.action_set_enabled("lyrics.zoom-out", step > MIN_ZOOM);
-        self.action_set_enabled("lyrics.zoom-reset", step != 0);
 
         // The line sung goes back to the middle, as the user asked for the
         // lyrics to change

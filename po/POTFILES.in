@@ -15,6 +15,7 @@ src/gtk/shortcuts-dialog.blp
 src/gtk/track-info-dialog.blp
 src/gtk/volume-control.blp
 src/gtk/window.blp
+src/gtk/zoom-row.blp
 src/application.rs
 src/audio/inhibit_controller.rs
 src/audio/state.rs
@@ -50,3 +51,4 @@ src/window/selection.rs
 src/window/sleep_timer.rs
 src/window/smart_playlists.rs
 src/window/track_menu.rs
+src/zoom_row.rs

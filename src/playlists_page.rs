@@ -54,7 +54,7 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
 
-            crate::utils::setup_primary_menu_button(&self.menu_button);
+            crate::utils::setup_primary_menu_button(&self.menu_button, None);
         }
 
         fn dispose(&self) {

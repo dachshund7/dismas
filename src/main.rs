@@ -47,6 +47,7 @@ mod work_sections;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 mod x11_stacking;
 mod zoom;
+mod zoom_row;
 
 use std::{
     env,

@@ -19,6 +19,7 @@ blueprints = custom_target('blueprints',
     'track-info-dialog.blp',
     'volume-control.blp',
     'window.blp',
+    'zoom-row.blp',
   ),
   output: '.',
   command: [

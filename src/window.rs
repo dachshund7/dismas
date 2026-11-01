@@ -756,7 +756,7 @@ mod imp {
 
             // Each page has the main menu; F10 opens the one of the
             // visible page
-            utils::setup_primary_menu_button(&self.menu_button);
+            utils::setup_primary_menu_button(&self.menu_button, None);
         }
     }
 
