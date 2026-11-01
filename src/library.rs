@@ -40,7 +40,7 @@ pub use watch::FolderWatch;
 
 use crate::{
     audio::{
-        Arrangement, AudioProperties, CoverCache, ExtraComments, FieldParts, FileTags,
+        Arrangement, AudioProperties, CoverCache, ExtraComments, FieldCode, FieldParts, FileTags,
         ListedPerformer, PerformerKind, ReadOptions, TrackCredits, normalize_key_text,
         normalize_search_text, plain_commas, read_file_tags, search_key, title_from_file_name,
         track_search_text, track_title,
@@ -936,10 +936,31 @@ impl From<rusqlite::types::Value> for Param {
 // search of the `Matcher` bound as its first argument, see
 // `TrackFilter::conditions()`: the one evaluator of the search syntax, as
 // the queue's search uses. A NULL for an argument the search doesn't need
-// saves reading it
+// saves reading it. And `dismas_length(fields)`, a track's length in whole
+// seconds from its `fields`, or NULL when it's unknown, which Play a
+// Random Work weighs the works by, without a column of its own
 fn add_functions(conn: &Connection) -> rusqlite::Result<()> {
     use rusqlite::{functions::FunctionFlags, types::ValueRef};
 
+    conn.create_scalar_function(
+        "dismas_length",
+        1,
+        FunctionFlags::SQLITE_UTF8
+            | FunctionFlags::SQLITE_DETERMINISTIC
+            | FunctionFlags::SQLITE_DIRECTONLY,
+        |ctx| {
+            let ValueRef::Text(fields) = ctx.get_raw(0) else {
+                return Ok(None);
+            };
+            let code = FieldCode::Length.code();
+            Ok(std::str::from_utf8(fields).ok().and_then(|fields| {
+                fields.lines().find_map(|line| {
+                    let (field, value) = line.split_once('\t')?;
+                    (field == code).then(|| value.parse::<i64>().ok())?
+                })
+            }))
+        },
+    )?;
     conn.create_scalar_function(
         "dismas_match",
         7,
@@ -1718,6 +1739,9 @@ struct WorkRow {
     arrangement_of_id: Option<String>,
     // See `WorkEntry::part_ids`
     part_ids: Vec<String>,
+    // In whole seconds, if it's known and was asked for, see
+    // `query_work_rows()`
+    length: Option<u64>,
 }
 
 impl WorkRow {
@@ -1763,7 +1787,7 @@ fn query_works(
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkInfo>> {
-    let rows = query_work_rows(conn, filter, &[], hidden)?;
+    let rows = query_work_rows(conn, filter, &[], hidden, Lengths::Skip)?;
     Ok(works_of_rows(&rows))
 }
 
@@ -1788,6 +1812,9 @@ pub struct RecordingCandidate {
     pub work_key: String,
     // Its tracks, in the order of their album
     pub paths: Vec<PathBuf>,
+    // Its length in whole seconds, from those of its tracks that are known,
+    // as if the others were as long, or `None` when none is
+    pub length: Option<u64>,
 }
 
 // The works that `works()` lists for the filter, in its order, each with
@@ -1805,7 +1832,7 @@ fn query_work_recording_candidates(
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkCandidate>> {
-    let rows = query_work_rows(conn, filter, &[], hidden)?;
+    let rows = query_work_rows(conn, filter, &[], hidden, Lengths::Read)?;
     let paths = |recording: &RecordingRows| -> Vec<PathBuf> {
         recording
             .rows
@@ -1822,10 +1849,18 @@ fn query_work_recording_candidates(
                 .filter(|recording| recording.matching)
                 .map(|recording| {
                     let first = &rows[recording.rows[0]];
+                    let known: Vec<u64> = recording
+                        .rows
+                        .iter()
+                        .filter_map(|&i| rows[i].length)
+                        .collect();
+                    let tracks = recording.rows.len() as u64;
                     RecordingCandidate {
                         album_id: first.album_id.clone(),
                         work_key: first.work.clone(),
                         paths: paths(recording),
+                        length: (!known.is_empty())
+                            .then(|| known.iter().sum::<u64>() * tracks / known.len() as u64),
                     }
                 })
                 .collect(),
@@ -2193,6 +2228,7 @@ fn query_track_work(
         &TrackFilter::default(),
         std::slice::from_ref(&key),
         hidden,
+        Lengths::Skip,
     )?;
     Ok((!rows.is_empty()).then_some(key))
 }
@@ -2218,7 +2254,7 @@ fn query_work_recordings(
     filter: &TrackFilter,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkRecording>> {
-    let rows = query_work_rows(conn, filter, keys, hidden)?;
+    let rows = query_work_rows(conn, filter, keys, hidden, Lengths::Skip)?;
     let (work, arrangements) = keys.split_first().unzip();
     let listed: HashMap<&str, &str> = arrangements
         .into_iter()
@@ -2272,6 +2308,15 @@ fn query_work_recordings(
         .collect())
 }
 
+// Whether `query_work_rows()` reads the lengths of the tracks, which only
+// Play a Random Work weighs the works by: reading them takes the `fields`
+// of every track, which the Works page doesn't need
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lengths {
+    Read,
+    Skip,
+}
+
 // The tracks of the works, or of the works of `keys`, in the order of
 // their albums; the other tracks of the albums don't split the recordings
 // of a work, see `recordings_of_works()`
@@ -2280,6 +2325,7 @@ fn query_work_rows(
     filter: &TrackFilter,
     keys: &[String],
     hidden: &[PathBuf],
+    lengths: Lengths,
 ) -> rusqlite::Result<Vec<WorkRow>> {
     let key_sql = if keys.is_empty() {
         String::new()
@@ -2290,10 +2336,14 @@ fn query_work_rows(
         "SELECT album_id, path, work_key, movement_order, {},
                 work, work_title, work_collection, work_composers, album, year, performers,
                 disc, track, work_arrangement_of, work_arrangement, work_arrangement_of_id,
-                work_part_ids
+                work_part_ids, {}
          FROM tracks
          WHERE album_id IS NOT NULL AND work_key IS NOT NULL{}{key_sql}",
         filter.matches_sql(),
+        match lengths {
+            Lengths::Read => "dismas_length(fields)",
+            Lengths::Skip => "NULL",
+        },
         hidden_condition("file", hidden).0
     ))?;
     let mut params = filter_values(filter, hidden);
@@ -2331,6 +2381,9 @@ fn query_work_rows(
                 .get::<_, Option<String>>(17)?
                 .map(|ids| ids.lines().map(ToString::to_string).collect())
                 .unwrap_or_default(),
+            length: row
+                .get::<_, Option<i64>>(18)?
+                .and_then(|length| u64::try_from(length).ok()),
         };
         Ok((track_order, row))
     })?;
@@ -7319,6 +7372,49 @@ mod tests {
                 requiem
             )]
         );
+    }
+
+    #[test]
+    fn a_recording_is_as_long_as_its_tracks() {
+        let conn = test_db();
+        let length = |fields: Option<&str>| -> Option<i64> {
+            conn.query_row("SELECT dismas_length(?1)", [fields], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(length(Some("ln\t300\nsr\t44100\n")), Some(300));
+        assert_eq!(length(Some("ti\tadagio\nln\t42\nsr\t44100\n")), Some(42));
+        assert_eq!(length(Some("ti\tadagio\nln\t7")), Some(7));
+        assert_eq!(length(Some("ti\tadagio\n")), None);
+        assert_eq!(length(None), None);
+
+        // A movement whose length isn't known counts as long as the others
+        // of its recording; a recording with no length known has none
+        for (path, album, order, fields) in [
+            ("/m/A/01", "a", "1", Some("ti\tlargo\nln\t100\n")),
+            ("/m/A/02", "a", "2", Some("ln\t200\n")),
+            ("/m/A/03", "a", "3", None),
+            ("/m/B/01", "b", "1", None),
+        ] {
+            conn.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                     work_key, work, movement_order, fields)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2, 'w', 'Work', ?3, ?4)",
+                rusqlite::params![path.as_bytes(), album, order, fields],
+            )
+            .unwrap();
+        }
+        let candidates =
+            super::query_work_recording_candidates(&conn, &super::TrackFilter::default(), &[])
+                .unwrap();
+        let [work] = candidates.as_slice() else {
+            panic!("{candidates:?}");
+        };
+        let lengths = work
+            .recordings
+            .iter()
+            .map(|recording| recording.length)
+            .collect::<Vec<_>>();
+        assert_eq!(lengths, [Some(450), None]);
     }
 
     #[test]

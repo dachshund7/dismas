@@ -73,7 +73,9 @@ All notable changes to this project will be documented in this file.
   heart beside the search narrow what it picks from. An album, a track or
   a work not heard lately is more likely to be picked, and choosing it
   again plays another. A work plays in one of its recordings that the
-  search matches; with the heart on, in a favorite recording if it has one
+  search matches; with the heart on, in a favorite recording if it has one.
+  A long work is more likely to be picked than a short one, and a whole
+  recording than an excerpt of the same work
 - Works and recordings can be favorites, not only tracks: Add Work to
   Favorites is in the menu of a work's header and of the rows of the
   Works page, with a right click, a long press or the Menu key, and Add

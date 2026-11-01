@@ -11,7 +11,7 @@ use adw::prelude::*;
 use super::*;
 use crate::{
     audio::shuffle,
-    library::WorkCandidate,
+    library::{RecordingCandidate, WorkCandidate},
     library_view::RandomPool,
     play_stats::{FavoriteRecording, TrackStats},
 };
@@ -337,10 +337,13 @@ struct Favorites {
 // The positions of a work and of one of its recordings, picked at random:
 // the work by what was heard of all its recordings, so that a work heard
 // lately in any of them is less likely, and then the recording by what was
-// heard of it, so that the recordings of a work take turns. With the
-// `favorites`, the recording is one of the work's favorite recordings, if
-// it has any, or else one of a work marked, itself or an arrangement
-// listed under it
+// heard of it, so that the recordings of a work take turns. Both are
+// weighed by their length too, the work by that of its longest recording,
+// so that short pieces don't crowd out the rest, and the music doesn't
+// stop after a few minutes most of the time; a whole recording comes up
+// more often than an excerpt of the same work. With the `favorites`, the
+// recording is one of the work's favorite recordings, if it has any, or
+// else one of a work marked, itself or an arrangement listed under it
 fn choose_work(
     works: &[WorkCandidate],
     heard: &HashMap<&Path, TrackStats>,
@@ -357,8 +360,16 @@ fn choose_work(
             now,
         )
     };
+    let median = median_length(works);
+    let length = |recording: &RecordingCandidate| counted_length(recording, median);
     let keys: Vec<&str> = works.iter().map(|work| work.info.key.as_str()).collect();
-    let weights: Vec<f64> = works.iter().map(|work| weight(&work.paths)).collect();
+    let weights: Vec<f64> = works
+        .iter()
+        .map(|work| {
+            let longest = work.recordings.iter().map(length).fold(1.0, f64::max);
+            weight(&work.paths) * longest
+        })
+        .collect();
     let pos = pick_index(&keys, &weights, last, rng)?;
 
     let recordings = &works[pos].recordings;
@@ -385,10 +396,31 @@ fn choose_work(
     }
     let weights: Vec<f64> = chosen
         .iter()
-        .map(|&i| weight(&recordings[i].paths))
+        .map(|&i| weight(&recordings[i].paths) * length(&recordings[i]))
         .collect();
     let recording = shuffle::weighted_pick(&weights, rng)?;
     Some((pos, chosen[recording]))
+}
+
+// The median of the lengths of the recordings that are known, which those
+// whose length isn't known count as
+fn median_length(works: &[WorkCandidate]) -> Option<u64> {
+    let mut known: Vec<u64> = works
+        .iter()
+        .flat_map(|work| &work.recordings)
+        .filter_map(|recording| recording.length)
+        .collect();
+    known.sort_unstable();
+    known.get(known.len() / 2).copied()
+}
+
+// The length a recording is weighed by, in seconds: its own, or else the
+// `median` of those known, as a weight of 0 would never be picked; when no
+// length is known, they all count the same
+fn counted_length(recording: &RecordingCandidate, median: Option<u64>) -> f64 {
+    median.map_or(1.0, |median| {
+        recording.length.unwrap_or(median).max(1) as f64
+    })
 }
 
 // The weight of some tracks, by what was heard of them, see
@@ -428,7 +460,7 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     use super::*;
-    use crate::library::{RecordingCandidate, WorkInfo};
+    use crate::library::WorkInfo;
 
     const NOW: i64 = 1_800_000_000;
 
@@ -437,7 +469,26 @@ mod tests {
             album_id: album.to_string(),
             work_key: work_key.to_string(),
             paths: vec![PathBuf::from(format!("/m/{album}/01.flac"))],
+            length: Some(600),
         }
+    }
+
+    fn lasting(length: Option<u64>, recording: RecordingCandidate) -> RecordingCandidate {
+        RecordingCandidate {
+            length,
+            ..recording
+        }
+    }
+
+    // How often each recording of each work is picked out of 2,000
+    fn picks(works: &[WorkCandidate], seed: u64) -> HashMap<(usize, usize), u32> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut picks = HashMap::new();
+        for _ in 0..2000 {
+            let pick = choose_work(works, &HashMap::new(), None, None, NOW, &mut rng).unwrap();
+            *picks.entry(pick).or_default() += 1;
+        }
+        picks
     }
 
     fn work(key: &str, recordings: Vec<RecordingCandidate>) -> WorkCandidate {
@@ -537,5 +588,57 @@ mod tests {
         assert_eq!(picks(Some(&favorites(&[], &["arr"]))), HashSet::from([1]));
         // or the work itself
         assert_eq!(picks(Some(&favorites(&[], &["w"]))), HashSet::from([0, 2]));
+    }
+
+    #[test]
+    fn a_long_work_is_more_likely_than_a_short_one() {
+        // 40 minutes and 4 minutes
+        let works = [
+            work(
+                "symphony",
+                vec![lasting(Some(2400), recording("a", "symphony"))],
+            ),
+            work("song", vec![lasting(Some(240), recording("b", "song"))]),
+        ];
+        let symphony = f64::from(picks(&works, 4)[&(0, 0)]) / 2000.0;
+        assert!((0.88..0.94).contains(&symphony), "{symphony}");
+
+        // An hour, and a five-minute excerpt of the same work
+        let works = [work(
+            "opera",
+            vec![
+                lasting(Some(3600), recording("a", "opera")),
+                lasting(Some(300), recording("b", "opera")),
+            ],
+        )];
+        let whole = f64::from(picks(&works, 5)[&(0, 0)]) / 2000.0;
+        assert!((0.89..0.95).contains(&whole), "{whole}");
+    }
+
+    #[test]
+    fn a_length_that_is_not_known_counts_as_the_median() {
+        let works = [
+            work("a", vec![lasting(Some(100), recording("a", "a"))]),
+            work("b", vec![lasting(Some(300), recording("b", "b"))]),
+            work("c", vec![lasting(Some(500), recording("c", "c"))]),
+            work("d", vec![lasting(None, recording("d", "d"))]),
+        ];
+        let median = median_length(&works);
+        assert_eq!(median, Some(300));
+        let unknown = &works[3].recordings[0];
+        assert!((counted_length(unknown, median) - 300.0).abs() < f64::EPSILON);
+
+        // With no length known at all, they count the same
+        let works = [
+            work("a", vec![lasting(None, recording("a", "a"))]),
+            work("b", vec![lasting(None, recording("b", "b"))]),
+        ];
+        let median = median_length(&works);
+        assert_eq!(median, None);
+        let counted = counted_length(&works[0].recordings[0], median);
+        assert!((counted - 1.0).abs() < f64::EPSILON);
+        let picks = picks(&works, 6);
+        let a = f64::from(picks[&(0, 0)]) / 2000.0;
+        assert!((0.45..0.55).contains(&a), "{a}");
     }
 }
