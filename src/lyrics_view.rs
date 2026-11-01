@@ -588,6 +588,17 @@ impl LyricsView {
         ));
         self.add_controller(scroll);
 
+        zoom::add_pinch(
+            self,
+            clone!(
+                #[weak(rename_to = view)]
+                self,
+                move |zoom| {
+                    view.zoom(zoom);
+                }
+            ),
+        );
+
         // Kept, as its signals stop once it's dropped
         self.imp().settings.replace(Some(settings));
     }

@@ -1184,6 +1184,17 @@ impl LibraryView {
             }
         ));
         self.imp().albums_stack.add_controller(scroll);
+
+        zoom::add_pinch(
+            &*self.imp().albums_stack,
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |zoom| {
+                    this.zoom_covers(zoom);
+                }
+            ),
+        );
     }
 
     // Zooms the covers of the grid and of the works a step, or back to

@@ -4,10 +4,13 @@
 //! Zooming the views that can be made larger or smaller: the covers of the
 //! album grid and of the works, and the lyrics' text. Each keeps the step
 //! it's zoomed to in a setting, 0 for the normal size, and goes a step at a
-//! time, with Ctrl+plus, Ctrl+minus and Ctrl+0, as the HIG has it, and with
-//! Ctrl and the mouse wheel.
+//! time, with Ctrl+plus, Ctrl+minus and Ctrl+0, as the HIG has it, with
+//! Ctrl and the mouse wheel, and with a pinch on a touchscreen or a
+//! touchpad.
 
-use gtk::gdk;
+use std::cell::RefCell;
+
+use gtk::{gdk, prelude::*};
 
 // How a view is zoomed
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,11 +69,82 @@ impl ScrollSteps {
     }
 }
 
+// How much farther apart, or closer, the fingers of a pinch move for a
+// step: a quarter of the distance between them
+const PINCH_STEP: f64 = 1.25;
+
+// Turns a pinch into zoom steps, as its fingers move apart or together
+#[derive(Debug)]
+pub struct PinchSteps {
+    // The scale of the pinch at the last step, from 1 where it started
+    base: f64,
+}
+
+impl Default for PinchSteps {
+    fn default() -> Self {
+        Self { base: 1.0 }
+    }
+}
+
+impl PinchSteps {
+    // The step the pinch makes as its scale changes, if it makes one
+    pub fn update(&mut self, scale: f64) -> Option<Zoom> {
+        let ratio = scale / self.base;
+        let zoom = if ratio >= PINCH_STEP {
+            Zoom::In
+        } else if ratio <= 1.0 / PINCH_STEP {
+            Zoom::Out
+        } else {
+            return None;
+        };
+        self.base = scale;
+        Some(zoom)
+    }
+}
+
+// Zooms the widget's view with a pinch, which GTK takes from two fingers on
+// a touchscreen or on a touchpad, never from the mouse. It's in the capture
+// phase, and claims the fingers as it begins, which cancels the scrolling
+// and the long press that the first finger started
+pub fn add_pinch(widget: &impl IsA<gtk::Widget>, zoom: impl Fn(Zoom) + 'static) {
+    let pinch = gtk::GestureZoom::new();
+    pinch.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let steps = std::rc::Rc::new(RefCell::new(PinchSteps::default()));
+    pinch.connect_begin({
+        let steps = steps.clone();
+        move |gesture, _| {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            *steps.borrow_mut() = PinchSteps::default();
+        }
+    });
+    pinch.connect_scale_changed(move |_, scale| {
+        let step = steps.borrow_mut().update(scale);
+        if let Some(step) = step {
+            zoom(step);
+        }
+    });
+    widget.add_controller(pinch);
+}
+
 #[cfg(test)]
 mod tests {
     use gtk::gdk::ScrollUnit;
 
-    use super::{ScrollSteps, Zoom};
+    use super::{PinchSteps, ScrollSteps, Zoom};
+
+    #[test]
+    fn a_pinch_steps_as_the_fingers_move_a_quarter_apart() {
+        let mut pinch = PinchSteps::default();
+        assert_eq!(pinch.update(1.1), None);
+        assert_eq!(pinch.update(1.25), Some(Zoom::In));
+        // From there, a quarter farther again
+        assert_eq!(pinch.update(1.5), None);
+        assert_eq!(pinch.update(1.6), Some(Zoom::In));
+        // And back together
+        assert_eq!(pinch.update(1.3), None);
+        assert_eq!(pinch.update(1.25), Some(Zoom::Out));
+        assert_eq!(pinch.update(0.9), Some(Zoom::Out));
+    }
 
     #[test]
     fn zooming_goes_a_step_at_a_time_within_the_steps() {
