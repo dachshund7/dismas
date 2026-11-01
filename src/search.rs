@@ -191,7 +191,7 @@ pub fn setup_query_entry(
     entry.set_has_tooltip(true);
     entry.connect_query_tooltip(|_, _, _, _, tooltip| {
         tooltip.set_text(Some(&i18n(
-            "Search in the tags, or in a field, e.g. composer:bach year:<1730; Search Syntax in the main menu has them all",
+            "Search in the tags, or in a field, e.g. composer:bach year:<1970; Search Syntax in the main menu has them all",
         )));
         true
     });

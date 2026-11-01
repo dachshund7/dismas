@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The values of a track that the fields of the search syntax look into,
-//! e.g. `composer:bach` or `year:<1730`. They're packed into one string of
+//! e.g. `composer:bach` or `year:<1970`. They're packed into one string of
 //! lines, `code\tvalue\n`, each value folded as searches are
 //! (`normalize_search_text()`). The library keeps the string in its
 //! `fields` column, and each track of the queue keeps its own copy. Both

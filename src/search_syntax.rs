@@ -35,7 +35,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>) {
     page.add(&group(
         &i18n("Fields"),
         Some(&i18n(
-            "A field looks into one tag, e.g. composer:bach. composer:=… is the whole name; year:<1730, year:>=1700 and year:1720..1730 compare; composer:(bach OR handel) looks for either; -composer:bach or composer:!=bach leaves out",
+            "A field looks into one tag, e.g. composer:bach. composer:=… is the whole name; year:<1970, year:>=1960 and year:1960..1969 compare; composer:(bach OR handel) looks for either; -composer:bach or composer:!=bach leaves out",
         )),
         &Field::ALL
             .iter()

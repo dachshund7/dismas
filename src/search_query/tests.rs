@@ -34,7 +34,7 @@ fn finds(query: &str, candidate: &Candidate) -> bool {
     search(query).matches(candidate, &NOW)
 }
 
-const BACH: &str = "co\tjohann sebastian bach\nco\tbach, johann sebastian\nyr\t1725\n\
+const BACH: &str = "co\tjohann sebastian bach\nco\tbach, johann sebastian\nyr\t1985\n\
                     pf\treinhard goebel (violin)\nfm\tcantata\nca\tbwv 1047\nln\t301\n\
                     re\t1986-11\nis\tlive\nge\tbaroque\n";
 
@@ -139,7 +139,7 @@ fn spaces_after_a_fields_colon_are_skipped() {
     assert!(finds("Composer: Bach", &candidate));
     assert!(finds("composer:  bach", &candidate));
     // But not into another field's term
-    assert_eq!(search("composer: year:1725").root, search("year:1725").root);
+    assert_eq!(search("composer: year:1985").root, search("year:1985").root);
     // While it's typed, a field without a value matches everything
     assert!(search("bach composer:").problems().is_empty());
     assert_eq!(search("bach composer:").root, word("bach"));
@@ -165,7 +165,7 @@ fn text_fields_contain_or_equal() {
 
 #[test]
 fn not_equal_is_minus_equal() {
-    let without = track("", "yr\t1725\n");
+    let without = track("", "yr\t1985\n");
     let candidate = track("", BACH);
     // On a track without the field, both are true
     assert!(finds("composer:!=bach", &without));
@@ -182,8 +182,8 @@ fn not_equal_is_minus_equal() {
 #[test]
 fn missing_values_are_false_and_true_under_minus() {
     let without = track("", "ti\tsong\n");
-    assert!(!finds("year:1725", &without));
-    assert!(finds("-year:1725", &without));
+    assert!(!finds("year:1985", &without));
+    assert!(finds("-year:1985", &without));
     assert!(!finds("year:<2000", &without));
     assert!(finds("-composer:bach", &without));
     assert!(finds("has:title", &without));
@@ -199,26 +199,26 @@ fn missing_values_are_false_and_true_under_minus() {
 fn numbers_compare_and_take_ranges() {
     let candidate = track("", BACH);
     for (query, found) in [
-        ("year:1725", true),
-        ("year:=1725", true),
-        ("year:<1730", true),
-        ("year:<1725", false),
-        ("year:<=1725", true),
-        ("year:>1724", true),
-        ("year:>=1726", false),
-        ("year:1720..1730", true),
-        ("year:1726..", false),
-        ("year:..1725", true),
+        ("year:1985", true),
+        ("year:=1985", true),
+        ("year:<1990", true),
+        ("year:<1985", false),
+        ("year:<=1985", true),
+        ("year:>1984", true),
+        ("year:>=1986", false),
+        ("year:1980..1990", true),
+        ("year:1986..", false),
+        ("year:..1985", true),
     ] {
         assert_eq!(finds(query, &candidate), found, "{query}");
     }
     assert!(search("year:abc").has_errors());
     assert!(search("year:..").has_errors());
-    assert!(search("year:>1720..1730").has_errors());
+    assert!(search("year:>1980..1990").has_errors());
     // A reversed range reads as open while it's typed at the end
-    assert!(finds("year:1720..1", &candidate));
+    assert!(finds("year:1980..1", &candidate));
     assert_eq!(
-        kinds(&search("year:1730..1720 bach")),
+        kinds(&search("year:1990..1980 bach")),
         [ProblemKind::ReversedRange]
     );
 }
@@ -358,10 +358,10 @@ fn field_groups_apply_the_field_to_each_value() {
         search("composer:bach -composer:handel").root
     );
     assert!(finds(
-        "composer:(handel OR bach) year:(<1700 OR >1720)",
+        "composer:(handel OR bach) year:(<1960 OR >1980)",
         &candidate
     ));
-    assert!(!finds("year:(<1700 OR >1730)", &candidate));
+    assert!(!finds("year:(<1960 OR >1990)", &candidate));
     assert_eq!(
         kinds(&search("composer:(title:x)")),
         [ProblemKind::FieldInGroup]
@@ -485,11 +485,11 @@ const CORPUS: [&str; 18] = [
     "a OR b c",
     "(a OR b) c",
     "-(a b) -c",
-    "composer:Bach year:<1730",
+    "composer:Bach year:<1990",
     "composer:!=bach",
     "title:\"Re: x\" \"re:x\"",
     "performer:==\"reinhard goebel\"",
-    "year:1720..1730 length:>=5min",
+    "year:1980..1990 length:>=5min",
     "released:-30d recorded:..1950",
     "catalogue:bwv1046..1051 catalogue:op2",
     "path:bach/cantatas path:/music",
@@ -522,7 +522,7 @@ fn print_then_parse_is_identity() {
         assert_eq!(again.to_text(), printed, "{text}");
     }
     assert_eq!(rule("Composer:==Bach").to_text(), "composer:=Bach");
-    assert_eq!(rule("year:<>1720").to_text(), "-year:=1720");
+    assert_eq!(rule("year:<>1980").to_text(), "-year:=1980");
 }
 
 #[test]

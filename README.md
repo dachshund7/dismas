@@ -73,7 +73,7 @@ What Dismas adds
   its recordings. Go to Work, in the menu of a movement, opens its work
   there, with the movement's album pointed out.
 - **Search syntax:** both searches also take fields, comparisons and
-  ranges, as in `composer:bach year:<1730`, `catalogue:bwv1046..1051`,
+  ranges, as in `composer:bach year:<1970`, `catalogue:bwv1046..1051`,
   `released:-30d` (in the last 30 days) or `length:>10min`. Words next to
   each other must all match; `OR` takes either, and goes after them, so
   `(bach OR handel) cantata` needs its parentheses; `-live` or `NOT live`

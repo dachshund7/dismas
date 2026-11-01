@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - The searches, of the playlist and of the albums, tracks and works, take
-  fields, as in composer:bach, year:<1730, catalogue:bwv1046..1051,
+  fields, as in composer:bach, year:<1970, catalogue:bwv1046..1051,
   released:-30d or length:>10min, with OR, "-" or NOT to leave tracks
   out, parentheses, and quotes for phrases. composer:(bach OR handel)
   looks for either in one field, has:composer finds the tracks with a

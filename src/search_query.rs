@@ -3,7 +3,7 @@
 
 //! The search syntax of the queue's search and of the album search, which
 //! smart playlists made by the user will be written in too: words, fields
-//! (`composer:bach`, `year:<1730`), `OR`, `-` or `NOT`, parentheses, and
+//! (`composer:bach`, `year:<1970`), `OR`, `-` or `NOT`, parentheses, and
 //! quotes. There's one grammar, read leniently for a search box
 //! (`Mode::Search`) and strictly for a rule that's saved (`Mode::Rule`),
 //! so that a typo can't be saved as a search for plain words. The meaning
@@ -173,7 +173,7 @@ impl Node {
     }
 }
 
-// A field with a value to compare its values with, e.g. `year:<1730`
+// A field with a value to compare its values with, e.g. `year:<1970`
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Term {
     field: Field,
@@ -457,6 +457,23 @@ impl Field {
             Self::Bitrate => &[C::Bitrate],
             Self::Channels => &[C::Channels],
             Self::Added | Self::Plays | Self::Played | Self::Favorited => &[],
+        }
+    }
+
+    // A search with a field of numbers, for the problem of one that isn't
+    // a number; the year is when a track was recorded or released, so it's
+    // never one of the 18th century
+    fn example(self) -> &'static str {
+        match self {
+            Self::Year => "year:1965 or year:1960..1969",
+            Self::Disc => "disc:2",
+            Self::Track => "track:1..3",
+            Self::SampleRate => "samplerate:>=96000",
+            Self::BitDepth => "bitdepth:24",
+            Self::Bitrate => "bitrate:>=256",
+            Self::Channels => "channels:>2",
+            Self::Plays => "plays:>=10",
+            _ => "",
         }
     }
 
@@ -787,11 +804,12 @@ impl Problem {
         use ProblemKind as K;
         let field_name = |field: &Field| format!("{}:", field.name());
         match &self.kind {
-            // Translators: `{field}` must be left unmodified; it's expanded
-            // to the name of a field of the search, e.g. "year:"
+            // Translators: `{field}` and `{example}` must be left unmodified;
+            // they're expanded to the name of a field of the search, e.g.
+            // "year:", and to a search with it, e.g. "year:1960..1969"
             K::NotANumber(field) => i18n_k(
-                "{field} takes a number, e.g. {field}1720 or {field}>1720",
-                &[("field", &field_name(field))],
+                "{field} takes a number, e.g. {example}",
+                &[("field", &field_name(field)), ("example", field.example())],
             ),
             // Translators: `{field}` must be left unmodified; it's expanded
             // to the name of a field of the search, e.g. "released:". The

@@ -4790,7 +4790,7 @@ mod tests {
             );
             let fields = format!(
                 "ti\tcantata no. {i}\nco\t{composer}\nyr\t{}\nge\tbaroque\nft\tflac\nln\t{}\n",
-                1700 + i % 60,
+                1960 + i % 60,
                 200 + i % 300
             );
             tx.execute(
@@ -4836,7 +4836,7 @@ mod tests {
             })
         };
         let words = search("bach");
-        let fields = search("composer:bach year:<1730");
+        let fields = search("composer:bach year:<1990");
         println!(
             "instr: {:.1} ms; dismas_match, words: {:.1} ms, fields: {:.1} ms",
             before.as_secs_f64() * 1000.0,
