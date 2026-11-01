@@ -57,7 +57,9 @@ const SCHEMA_VERSION: i32 = 30;
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
 // the file the track comes from, with the audio files the sheet splits;
-// the times and the size are those of the files
+// the times and the size are those of the files. The tracks are made again
+// for each version, but not the covers, nor the times their files were
+// added, see `keep_added_times()`
 const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
     CREATE TABLE tracks (
         path BLOB PRIMARY KEY,
@@ -97,6 +99,10 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
     CREATE TABLE IF NOT EXISTS covers (
         album_id TEXT PRIMARY KEY,
         path TEXT
+    );
+    CREATE TABLE IF NOT EXISTS added_times (
+        file BLOB PRIMARY KEY,
+        added INTEGER NOT NULL
     );";
 
 pub enum ScanEvent {
@@ -572,12 +578,48 @@ fn open_at(path: &Path) -> rusqlite::Result<Connection> {
         // they take a while to create, and the scan replaces the ones of the
         // albums that are gone or changed
         debug!("Library schema version {version}, recreating it");
+        keep_added_times(&tx);
         tx.execute_batch(SCHEMA)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()?;
 
     Ok(conn)
+}
+
+// Keeps the time each file's tracks were added, before a new version of
+// the schema drops them, until the scan has read the file again. Otherwise
+// every track would be added at that scan: a new file counts as added
+// when it was created, which without a birth time is when it was last
+// written, as is a file that a sync tool replaced. A database too old to
+// have these columns loses them, as before
+fn keep_added_times(conn: &Connection) {
+    if !matches!(has_table(conn, "tracks"), Ok(true)) {
+        return;
+    }
+    // The WHERE keeps SQLite from taking ON CONFLICT for a join
+    let kept = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS added_times (
+             file BLOB PRIMARY KEY,
+             added INTEGER NOT NULL
+         );
+         INSERT INTO added_times (file, added)
+             SELECT file, MIN(added) FROM tracks WHERE true GROUP BY file
+             ON CONFLICT (file) DO UPDATE SET added = MIN(added, excluded.added);",
+    );
+    if let Err(e) = kept {
+        warn!("Unable to keep the times the tracks were added: {e}");
+    }
+}
+
+// Whether the database has a table, which one made by an older version
+// can lack, as the tables other than the tracks are only made at a bump
+fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [name],
+        |row| row.get(0),
+    )
 }
 
 // The paths of the tracks, as they're kept in the database
@@ -2448,6 +2490,20 @@ fn scan_with(
             known.insert(file, (stamp, added));
         }
     }
+    // When the files were added whose tracks an older version of the
+    // schema dropped, see `keep_added_times()`; a database of the version
+    // before them has no table for them until the next bump, which makes it
+    let mut kept = HashMap::new();
+    if has_table(conn, "added_times")? {
+        let mut stmt = conn.prepare("SELECT file, added FROM added_times")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (file, added) = row?;
+            kept.insert(file, added);
+        }
+    }
 
     // Find the files that are new or changed since the last scan
     let mut present = HashSet::new();
@@ -2518,12 +2574,16 @@ fn scan_with(
                 delete.execute([key])?;
 
                 // A changed track keeps the time it was added, as do the
-                // tracks of an audio file that a CUE sheet splits now
+                // tracks of an audio file that a CUE sheet splits now, and
+                // those of a file read again for a new version of the schema
                 let was_known = known.contains_key(key);
                 let added = std::iter::once(&source.path)
                     .chain(&source.audio)
-                    .filter_map(|path| known.get(path_bytes(path)))
-                    .map(|(_, added)| *added)
+                    .flat_map(|path| {
+                        let file = path_bytes(path);
+                        let known = known.get(file).map(|(_, added)| *added);
+                        known.into_iter().chain(kept.get(file).copied())
+                    })
                     .min()
                     .unwrap_or(source.created);
 
@@ -2599,21 +2659,19 @@ fn scan_with(
     // Forget the files that are gone, or left out, but not those of the
     // folders that aren't there, e.g. on a drive that isn't plugged in, which
     // aren't read again once they're back
-    let gone: Vec<&[u8]> = known
-        .keys()
-        .filter(|file| !present.contains(*file))
-        .map(Vec::as_slice)
-        .filter(|file| {
-            roots.unavailable.is_empty() || {
+    let is_gone = |file: &&[u8]| {
+        !present.contains(*file)
+            && (roots.unavailable.is_empty() || {
                 let path = path_of_bytes(file);
                 !roots.unavailable.iter().any(|root| path.starts_with(root))
-            }
-        })
-        .collect();
-    if !gone.is_empty() {
-        debug!("Library: {} files of tracks removed", gone.len());
+            })
+    };
+    let gone: Vec<&[u8]> = known.keys().map(Vec::as_slice).filter(is_gone).collect();
+    let kept_gone: Vec<&[u8]> = kept.keys().map(Vec::as_slice).filter(is_gone).collect();
+    if !gone.is_empty() || !kept.is_empty() {
         let tx = conn.transaction()?;
-        {
+        if !gone.is_empty() {
+            debug!("Library: {} files of tracks removed", gone.len());
             let mut old_albums = tx.prepare(
                 "SELECT DISTINCT album_id FROM tracks WHERE file = ?1 AND album_id IS NOT NULL",
             )?;
@@ -2624,6 +2682,17 @@ fn scan_with(
                 }
                 n_changed += delete.execute([file])?;
             }
+        }
+        if !kept.is_empty() {
+            let mut forget = tx.prepare("DELETE FROM added_times WHERE file = ?1")?;
+            for file in kept_gone {
+                forget.execute([file])?;
+            }
+            // The tracks of the files read again have their times now
+            tx.execute(
+                "DELETE FROM added_times WHERE file IN (SELECT file FROM tracks)",
+                [],
+            )?;
         }
         tx.commit()?;
     }
@@ -4091,6 +4160,90 @@ mod tests {
         assert_eq!(found[0].path, "Album/Album.wav");
         assert_eq!(found[0].file, "Album/Album.wav");
         assert_eq!(found[0].added, added);
+
+        std::fs::remove_dir_all(&music).unwrap();
+    }
+
+    #[test]
+    fn a_new_version_of_the_schema_keeps_when_the_tracks_were_added() {
+        use crate::utils::write_test_wav;
+
+        let music = test_dir("added-music");
+        let away = test_dir("added-away");
+        write_test_wav(&music.join("Kept.wav"), 1);
+        write_test_wav(&music.join("Gone.wav"), 1);
+        write_test_wav(&away.join("Away.wav"), 1);
+        let dir = test_dir("added-db");
+        let path = dir.join("library.db");
+        let (sender, _receiver) = async_channel::unbounded();
+        let kept = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM added_times", [], |row| row.get(0))
+                .unwrap()
+        };
+
+        let mut conn = super::open_at(&path).unwrap();
+        scan_roots(&mut conn, &roots_of(&[&music, &away]), &sender).unwrap();
+        // As if they had been added long ago, and an older version had made
+        // the database
+        conn.execute("UPDATE tracks SET added = 100", []).unwrap();
+        conn.pragma_update(None, "user_version", super::SCHEMA_VERSION - 1)
+            .unwrap();
+        drop(conn);
+
+        let mut conn = super::open_at(&path).unwrap();
+        assert!(tracks(&conn, &music).is_empty());
+        assert_eq!(kept(&conn), 3);
+        // A file that's gone is forgotten, and a folder that isn't there
+        // keeps its times until it's back
+        std::fs::remove_file(music.join("Gone.wav")).unwrap();
+        write_test_wav(&music.join("New.wav"), 1);
+        std::fs::remove_dir_all(&away).unwrap();
+        scan_roots(&mut conn, &roots_of(&[&music, &away]), &sender).unwrap();
+        let found = tracks(&conn, &music);
+        let added: Vec<_> = found
+            .iter()
+            .map(|row| (row.path.as_str(), row.added))
+            .collect();
+        assert_eq!(added.len(), 2);
+        assert_eq!(added[0], ("Kept.wav", 100));
+        assert_eq!(added[1].0, "New.wav");
+        assert!(added[1].1 > 100);
+        assert_eq!(kept(&conn), 1);
+
+        std::fs::create_dir_all(&away).unwrap();
+        write_test_wav(&away.join("Away.wav"), 1);
+        scan_roots(&mut conn, &roots_of(&[&music, &away]), &sender).unwrap();
+        let back: i64 = conn
+            .query_row(
+                "SELECT added FROM tracks WHERE path = ?1",
+                [path_bytes(&away.join("Away.wav"))],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(back, 100);
+        assert_eq!(kept(&conn), 0);
+
+        drop(conn);
+        for dir in [&music, &away, &dir] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_database_made_before_the_kept_times_is_scanned() {
+        let music = test_dir("no-added-times");
+        crate::utils::write_test_wav(&music.join("Track.wav"), 1);
+        crate::utils::write_test_wav(&music.join("Other.wav"), 1);
+        let mut conn = test_db();
+        conn.execute_batch("DROP TABLE added_times").unwrap();
+        let (sender, _receiver) = async_channel::unbounded();
+
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        assert_eq!(result.n_changed, 2);
+        // A track whose file is gone is still forgotten
+        std::fs::remove_file(music.join("Track.wav")).unwrap();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        assert_eq!(result.n_changed, 1);
 
         std::fs::remove_dir_all(&music).unwrap();
     }

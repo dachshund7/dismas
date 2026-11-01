@@ -368,6 +368,11 @@ All notable changes to this project will be documented in this file.
   written, as the singer's name among the composers kept the album artist
   from standing in for a list of more than five players; for a song by
   another writer, it already did, and the line was left out
+- After an update that read the whole library again, tracks could count
+  as added when their files were last written, rather than when they were
+  first added, which changed the order of the albums sorted by when they
+  were added: on drives that don't keep the time a file was made, and for
+  files that a sync tool had replaced
 
 ### Removed
 
