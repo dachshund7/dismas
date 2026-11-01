@@ -24,6 +24,7 @@ use crate::{
     lyrics::{self, Line, Lyrics},
     queue_row::{glide_adjustment, within_scroll},
     utils,
+    zoom::{self, Zoom},
 };
 
 // How far a position can be before the line that shows and still keep it:
@@ -34,6 +35,14 @@ const BACK_TOLERANCE: Duration = Duration::from_millis(300);
 // How long the lines stay where the user scrolled them, before they follow
 // the music again
 const FOLLOW_PAUSE: Duration = Duration::from_secs(4);
+
+// The sizes of the text, in percent of the normal size, at each step of the
+// zoom from the smallest (the `lyrics-zoom` setting, from MIN_ZOOM, with 0
+// for the normal size); each but the normal size has a style class
+// `zoom-{percent}` in style.css
+const ZOOM_PERCENTS: [u32; 5] = [85, 100, 125, 150, 200];
+const MIN_ZOOM: i32 = -1;
+const MAX_ZOOM: i32 = 3;
 
 mod imp {
     use super::*;
@@ -74,6 +83,8 @@ mod imp {
         // While the lines stay where the user scrolled them
         pub follow_pause: RefCell<Option<glib::SourceId>>,
         pub glide: RefCell<Option<adw::TimedAnimation>>,
+        // Where the text's zoom is kept
+        pub settings: RefCell<Option<gio::Settings>>,
     }
 
     #[glib::object_subclass]
@@ -88,6 +99,18 @@ mod imp {
             klass.set_layout_manager_type::<gtk::BinLayout>();
             klass.set_css_name("lyricsview");
             klass.set_accessible_role(gtk::AccessibleRole::Group);
+
+            // The text of the lyrics, larger or smaller; the window's
+            // zoom actions come here when the focus is on them
+            for (name, zoom) in [
+                ("lyrics.zoom-in", Zoom::In),
+                ("lyrics.zoom-out", Zoom::Out),
+                ("lyrics.zoom-reset", Zoom::Reset),
+            ] {
+                klass.install_action(name, None, move |view, _, _| {
+                    view.zoom(zoom);
+                });
+            }
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -120,6 +143,7 @@ mod imp {
                 ),
             );
             obj.setup_lines();
+            obj.setup_zoom();
         }
 
         fn signals() -> &'static [Signal] {
@@ -519,6 +543,101 @@ impl LyricsView {
     fn stop_glide(&self) {
         if let Some(animation) = self.imp().glide.take() {
             animation.pause();
+        }
+    }
+
+    // The text is as large as the `lyrics-zoom` setting says, with Ctrl
+    // and the mouse wheel over it as well as with the keys
+    fn setup_zoom(&self) {
+        let settings = utils::settings_manager();
+        settings.connect_changed(
+            Some("lyrics-zoom"),
+            clone!(
+                #[weak(rename_to = view)]
+                self,
+                move |settings, _| view.apply_zoom(settings.int("lyrics-zoom"))
+            ),
+        );
+        self.apply_zoom(settings.int("lyrics-zoom"));
+
+        // On the view, so that it comes before the scrolling of the lines
+        // that leaves them where the user scrolls them for a while, see
+        // `pause_following()`, and the lines don't scroll either
+        let steps = RefCell::new(zoom::ScrollSteps::default());
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        scroll.connect_scroll(clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |controller, _, dy| {
+                if !controller
+                    .current_event_state()
+                    .contains(gdk::ModifierType::CONTROL_MASK)
+                {
+                    return glib::Propagation::Proceed;
+                }
+                let n = steps.borrow_mut().add(dy, controller.unit());
+                let zoom = if n > 0 { Zoom::In } else { Zoom::Out };
+                for _ in 0..n.unsigned_abs() {
+                    view.zoom(zoom);
+                }
+                glib::Propagation::Stop
+            }
+        ));
+        self.add_controller(scroll);
+
+        // Kept, as its signals stop once it's dropped
+        self.imp().settings.replace(Some(settings));
+    }
+
+    // Makes the text of the lyrics a step larger or smaller, or its normal
+    // size; false when it's at that end already
+    pub fn zoom(&self, zoom: Zoom) -> bool {
+        let Some(settings) = self.imp().settings.borrow().clone() else {
+            return false;
+        };
+        let step = settings.int("lyrics-zoom");
+        match zoom.step_from(step, MIN_ZOOM, MAX_ZOOM) {
+            Some(step) => settings.set_int("lyrics-zoom", step).is_ok(),
+            None => false,
+        }
+    }
+
+    fn apply_zoom(&self, step: i32) {
+        let imp = self.imp();
+        let step = step.clamp(MIN_ZOOM, MAX_ZOOM);
+        let percent = ZOOM_PERCENTS[usize::try_from(step - MIN_ZOOM).unwrap_or(0)];
+
+        // The plain lyrics keep the line at the top where it is
+        let text_view = &*imp.text_view;
+        let top = text_view.visible_rect();
+        let top_mark = text_view
+            .iter_at_location(top.x(), top.y())
+            .filter(|_| imp.stack.visible_child_name().as_deref() == Some("plain"))
+            .map(|iter| text_view.buffer().create_mark(None, &iter, true));
+
+        for percent in ZOOM_PERCENTS {
+            self.remove_css_class(&format!("zoom-{percent}"));
+        }
+        if percent != 100 {
+            self.add_css_class(&format!("zoom-{percent}"));
+        }
+
+        self.action_set_enabled("lyrics.zoom-in", step < MAX_ZOOM);
+        self.action_set_enabled("lyrics.zoom-out", step > MIN_ZOOM);
+        self.action_set_enabled("lyrics.zoom-reset", step != 0);
+
+        // The line sung goes back to the middle, as the user asked for the
+        // lyrics to change
+        self.resume_following();
+        self.center_when_laid_out();
+        if let Some(mark) = top_mark {
+            utils::when_laid_out(text_view, move |text_view| {
+                text_view.scroll_to_mark(&mark, 0.0, true, 0.0, 0.0);
+                text_view.buffer().delete_mark(&mark);
+            });
         }
     }
 

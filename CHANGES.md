@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
   mouse wheel over them; Ctrl+0 puts them back to their normal size.
   Smaller, more of them fit on a row. The first time they're made larger,
   the covers are made again at that size, which the progress bar counts
+- The text of the lyrics can be made larger or smaller the same way: with
+  Ctrl+plus, Ctrl+minus and Ctrl+0 while the focus is on them, or while
+  they show beside the player, and with Ctrl and the mouse wheel over them
 - Opening an M3U playlist with Dismas, from a file manager or on the
   command line, opens its tracks, as it does a folder; it said it found
   none. They're found as when the playlist is imported

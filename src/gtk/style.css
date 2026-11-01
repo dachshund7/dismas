@@ -329,6 +329,27 @@ list.synced-lyrics {
   background: none;
 }
 
+/* The text of the lyrics, zoomed, see LyricsView::apply_zoom() */
+lyricsview.zoom-85 textview.lyrics,
+lyricsview.zoom-85 list.synced-lyrics {
+  font-size: 85%;
+}
+
+lyricsview.zoom-125 textview.lyrics,
+lyricsview.zoom-125 list.synced-lyrics {
+  font-size: 125%;
+}
+
+lyricsview.zoom-150 textview.lyrics,
+lyricsview.zoom-150 list.synced-lyrics {
+  font-size: 150%;
+}
+
+lyricsview.zoom-200 textview.lyrics,
+lyricsview.zoom-200 list.synced-lyrics {
+  font-size: 200%;
+}
+
 /* The lines of synchronized lyrics: the one sung is in the accent color,
  * and the others are dimmed, which leaves the height of the rows alone */
 list.synced-lyrics > row {
