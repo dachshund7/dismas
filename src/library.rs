@@ -3084,7 +3084,30 @@ fn scan_with(
                          ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
                          ?31)",
             )?;
-            for source in chunk {
+            // The files are read a few at a time, and written here, in the
+            // transaction, as they come
+            let read = |source: &Source| {
+                // A file that makes the tag reader panic is kept as a track
+                // without tags, which is in no album, so that the scan goes
+                // on, and the file isn't read again until it changes
+                let read_file = || {
+                    if source.audio.is_empty() {
+                        read_tags(&source.path)
+                    } else {
+                        claims
+                            .sheets
+                            .get(&source.path)
+                            .map_or_else(Vec::new, |sheet| {
+                                read_sheet_tags(sheet, claims.tracks_of(&source.path))
+                            })
+                    }
+                };
+                utils::guarded(source.path.display(), read_file, || {
+                    vec![(source.path.clone(), TrackTags::default())]
+                })
+            };
+            utils::in_threads(chunk, utils::READING_THREADS, read, |i, tracks| {
+                let source = &chunk[i];
                 let key = path_bytes(&source.path);
                 for id in old_albums.query_map([key], |row| row.get::<_, String>(0))? {
                     stale_albums.insert(id?);
@@ -3105,24 +3128,6 @@ fn scan_with(
                     .min()
                     .unwrap_or(source.created);
 
-                // A file that makes the tag reader panic is kept as a track
-                // without tags, which is in no album, so that the scan goes
-                // on, and the file isn't read again until it changes
-                let read = || {
-                    if source.audio.is_empty() {
-                        read_tags(&source.path)
-                    } else {
-                        claims
-                            .sheets
-                            .get(&source.path)
-                            .map_or_else(Vec::new, |sheet| {
-                                read_sheet_tags(sheet, claims.tracks_of(&source.path))
-                            })
-                    }
-                };
-                let tracks = utils::guarded(source.path.display(), read, || {
-                    vec![(source.path.clone(), TrackTags::default())]
-                });
                 for (path, tags) in tracks {
                     let work = tags.work.as_ref();
                     insert.execute(params![
@@ -3167,7 +3172,8 @@ fn scan_with(
                         updated.push(path);
                     }
                 }
-            }
+                Ok::<_, rusqlite::Error>(())
+            })?;
         }
         tx.commit()?;
 
@@ -4800,6 +4806,33 @@ mod tests {
         for dir in [&music, &away, &dir] {
             std::fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    // Times a first scan of a few thousand tagged tracks, which are in the
+    // temporary folder, so it's the reading of the tags that's timed more
+    // than the disk:
+    //   cargo test --release time_scan -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn time_scan() {
+        let (music, files) = tagged_test_files("time-scan");
+        for album in 0..150 {
+            let dir = music.join(format!("Album {album}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            for track in 0..14 {
+                std::fs::copy(&files[0], dir.join(format!("{track:02}.wav"))).unwrap();
+            }
+        }
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        let start = std::time::Instant::now();
+        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        println!(
+            "scan of {} tracks: {:.0} ms",
+            result.n_changed,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+        std::fs::remove_dir_all(&music).unwrap();
     }
 
     // Tracks to search, in a folder made for `name`: one tagged as Picard

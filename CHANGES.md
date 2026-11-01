@@ -312,6 +312,9 @@ All notable changes to this project will be documented in this file.
   mode, as the album grid's selection bar does once its buttons have taken
   the albums, rather than staying in it with no track selected. The
   keyboard focus goes to the track after the ones removed
+- Scanning the music folders reads the tags of several files at a time,
+  as the playlist already did, so a first scan, or the one after updating
+  Dismas, takes less time
 
 ### Fixed
 
