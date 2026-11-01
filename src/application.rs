@@ -116,13 +116,26 @@ mod imp {
             obj.set_accels_for_action("win.preferences", &["<primary>comma"]);
             obj.set_accels_for_action("win.fullscreen", &["F11"]);
             // The HIG's, and Ctrl+= for Ctrl++ without Shift, as in other
-            // GNOME apps; they zoom what the focus is on
+            // GNOME apps; they zoom what the focus is on. Ctrl++ takes
+            // Shift on a US keyboard, which is often still held for the
+            // next key, and then minus and 0 type "_" and ")": GTK matches
+            // the character typed, so `<primary><shift>0` would never match
             obj.set_accels_for_action(
                 "win.zoom-in",
                 &["<primary>plus", "<primary>equal", "<primary>KP_Add"],
             );
-            obj.set_accels_for_action("win.zoom-out", &["<primary>minus", "<primary>KP_Subtract"]);
-            obj.set_accels_for_action("win.zoom-reset", &["<primary>0", "<primary>KP_0"]);
+            obj.set_accels_for_action(
+                "win.zoom-out",
+                &[
+                    "<primary>minus",
+                    "<primary>underscore",
+                    "<primary>KP_Subtract",
+                ],
+            );
+            obj.set_accels_for_action(
+                "win.zoom-reset",
+                &["<primary>0", "<primary>parenright", "<primary>KP_0"],
+            );
             // In the order of the buttons of the pages
             obj.set_accels_for_action("win.page::player", &["<primary>1"]);
             obj.set_accels_for_action("win.page::albums", &["<primary>2"]);
