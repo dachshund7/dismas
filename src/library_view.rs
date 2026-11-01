@@ -1776,11 +1776,33 @@ impl LibraryView {
         } else {
             None
         };
+        let query = TrackFilter::query(&imp.search_entry.text());
+        let needs = query
+            .as_ref()
+            .map(|query| query.needs())
+            .unwrap_or_default();
+        let sources = (needs.favorites || needs.path).then(|| {
+            Arc::new(library::SearchSources {
+                favorite_tracks: if needs.favorites {
+                    self.favorite_tracks()
+                } else {
+                    Arc::default()
+                },
+                // A folder that came through the document portal is read at
+                // a path inside the sandbox, which `path:` doesn't look into
+                shown_folders: if needs.path {
+                    library::music_folders(self.app_settings())
+                        .into_iter()
+                        .filter_map(|folder| Some((folder.path, folder.host?)))
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            })
+        });
         TrackFilter {
-            words: normalize_search_text(&imp.search_entry.text())
-                .split_whitespace()
-                .map(ToString::to_string)
-                .collect(),
+            query,
+            sources,
             composer: imp.composer.borrow().as_ref().map(|c| c.key.clone()),
             performer: imp.performer.borrow().as_ref().map(|p| p.key.clone()),
             works: Vec::new(),
@@ -1812,15 +1834,20 @@ impl LibraryView {
     // as they do for a new search
     pub fn favorite_tracks_changed(&self) {
         self.imp().favorite_tracks.replace(None);
-        if self.heart_filters(LibraryPage::Tracks) {
+        // A search for is:favorite finds them, or leaves them out
+        let searched = TrackFilter::query(&self.imp().search_entry.text())
+            .is_some_and(|query| query.needs().favorites);
+        if searched {
+            self.update_search();
+        } else if self.heart_filters(LibraryPage::Tracks) {
             self.update_album_matches();
         }
     }
 
-    // Looks for the albums with a track that contains every word of the
-    // search, in any of its tags, like searching the queue, and that's by
-    // the composer picked, with the performer picked, if any, and among the
-    // favorites while the heart is on; and for the works
+    // Looks for the albums with a track that the search matches, like
+    // searching the queue, and that's by the composer picked, with the
+    // performer picked, if any, and among the favorites while the heart is
+    // on; and for the works
     fn update_search(&self) {
         self.update_works();
         self.update_album_matches();

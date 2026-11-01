@@ -17,6 +17,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -48,6 +49,7 @@ use crate::{
     cover_image::CoverImage,
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
+    search_query::{Candidate, Context, Mode, Query},
     utils,
 };
 
@@ -569,6 +571,8 @@ fn open_at(path: &Path) -> rusqlite::Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
+    add_functions(&conn)?;
+
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version == SCHEMA_VERSION {
         return Ok(conn);
@@ -765,15 +769,19 @@ fn main_artists(
     .collect()
 }
 
-// What the tracks taken from albums match: every word of a search, normalized
-// with `normalize_search_text()`, in any of their tags, a composer and a
-// performer, by their keys (`composer_key()`), a work, by its key (see
-// `work_entry()`) and those of the arrangements listed under it, as the
-// covers of a work's albums take its tracks, and the favorites. An empty one
-// matches every track
+// What the tracks taken from albums match: a search in the search syntax,
+// matched as in the queue (`dismas_match()`), a composer and a performer, by
+// their keys (`composer_key()`), a work, by its key (see `work_entry()`) and
+// those of the arrangements listed under it, as the covers of a work's
+// albums take its tracks, and the favorites. An empty one matches every
+// track. Two filters made from the same search and picks are equal, as the
+// time its relative dates go by is only taken when it's matched
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
-    pub words: Vec<String>,
+    // The search, unless it matches every track, see `TrackFilter::query()`
+    pub query: Option<Arc<Query>>,
+    // What the search needs from the window, if anything
+    pub sources: Option<Arc<SearchSources>>,
     pub composer: Option<String>,
     pub performer: Option<String>,
     pub works: Vec<String>,
@@ -801,9 +809,111 @@ impl Favorites {
     }
 }
 
+// What a search needs that the library doesn't keep
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchSources {
+    // The paths of the favorite tracks, for `is:favorite`
+    pub favorite_tracks: Arc<[PathBuf]>,
+    // The music folders that came through the document portal, with their
+    // paths outside the sandbox, which `path:` looks into
+    pub shown_folders: Vec<(PathBuf, PathBuf)>,
+}
+
+// What `dismas_match()` matches a track with, bound to each statement, so
+// that each has its own search, and a statement without one fails rather
+// than matching with another's
+struct Matcher {
+    query: Arc<Query>,
+    context: Context,
+    favorites: HashSet<PathBuf>,
+    shown_folders: Vec<(PathBuf, PathBuf)>,
+}
+
+// The type of the pointer to a `Matcher` that statements are given
+const MATCHER: &std::ffi::CStr = c"dismas-matcher";
+
+// A value bound to a statement: a plain one, or the search it matches with
+enum Param {
+    Value(rusqlite::types::Value),
+    Matcher(Rc<Matcher>),
+}
+
+impl rusqlite::ToSql for Param {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        match self {
+            Self::Value(value) => value.to_sql(),
+            Self::Matcher(matcher) => Ok(rusqlite::types::ToSqlOutput::from_rc(
+                Rc::clone(matcher),
+                MATCHER,
+            )),
+        }
+    }
+}
+
+impl From<rusqlite::types::Value> for Param {
+    fn from(value: rusqlite::types::Value) -> Self {
+        Self::Value(value)
+    }
+}
+
+// Adds `dismas_match(matcher, search, fields, path)` to a connection,
+// which tells whether a track matches the search of the `Matcher` bound as
+// its first argument, see `TrackFilter::conditions()`: the one evaluator
+// of the search syntax, as the queue's search uses. A NULL for an argument
+// the search doesn't need saves reading it
+fn add_functions(conn: &Connection) -> rusqlite::Result<()> {
+    use rusqlite::{functions::FunctionFlags, types::ValueRef};
+
+    conn.create_scalar_function(
+        "dismas_match",
+        4,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
+        |ctx| {
+            let error = |e: &str| rusqlite::Error::UserFunctionError(e.into());
+            // SAFETY: only `TrackFilter::conditions()` binds a pointer of this
+            // type, which is an `Rc<Matcher>`
+            let matcher = unsafe { ctx.get_pointer::<Matcher>(0, MATCHER) }
+                .ok_or_else(|| error("dismas_match() without its search"))?;
+            let text = |i| match ctx.get_raw(i) {
+                ValueRef::Text(text) => std::str::from_utf8(text).ok(),
+                _ => None,
+            };
+            let path = match ctx.get_raw(3) {
+                ValueRef::Blob(path) => Some(path_of_bytes(path)),
+                _ => None,
+            };
+            let favorite = path
+                .as_ref()
+                .is_some_and(|path| matcher.favorites.contains(path.as_ref()));
+            let shown = path.as_ref().map(|path| {
+                matcher
+                    .shown_folders
+                    .iter()
+                    .find_map(|(folder, shown)| Some(shown.join(path.strip_prefix(folder).ok()?)))
+                    .map_or_else(|| Cow::Borrowed(path.as_ref()), Cow::Owned)
+            });
+            let candidate = Candidate {
+                search_key: text(1).unwrap_or_default(),
+                fields: text(2).unwrap_or_default(),
+                path: shown.as_deref(),
+                favorite,
+                missing: false,
+            };
+            Ok(matcher.query.matches(&candidate, &matcher.context))
+        },
+    )
+}
+
 impl TrackFilter {
+    // The search of a text, unless it matches every track
+    pub fn query(text: &str) -> Option<Arc<Query>> {
+        Some(Query::parse(text, Mode::Search))
+            .filter(|query| !query.matches_all())
+            .map(Arc::new)
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty()
+        self.query.is_none()
             && self.composer.is_none()
             && self.performer.is_none()
             && self.works.is_empty()
@@ -813,45 +923,69 @@ impl TrackFilter {
     // The SQL conditions on a track, each after " AND ", and their values;
     // a track without search text, composers, performers or a work matches
     // nothing
-    fn conditions(&self) -> (String, Vec<rusqlite::types::Value>) {
+    fn conditions(&self) -> (String, Vec<Param>) {
         use rusqlite::types::Value;
 
         let mut sql = String::new();
-        let mut values = Vec::new();
-        for word in &self.words {
-            sql.push_str(" AND instr(search, ?) > 0");
-            values.push(Value::Text(word.clone()));
-        }
+        let mut values: Vec<Param> = Vec::new();
         if let Some(key) = &self.composer {
             sql.push_str(" AND instr(composers, ?) > 0");
-            values.push(Value::Text(format!("\n{key}\t")));
+            values.push(Value::Text(format!("\n{key}\t")).into());
         }
         if let Some(key) = &self.performer {
             sql.push_str(" AND instr(performers, ?) > 0");
-            values.push(Value::Text(format!("\t{key}\t")));
+            values.push(Value::Text(format!("\t{key}\t")).into());
         }
         if !self.works.is_empty() {
             sql.push_str(&format!(
                 " AND work_key IN ({})",
                 placeholders(self.works.len())
             ));
-            values.extend(self.works.iter().cloned().map(Value::Text));
+            values.extend(
+                self.works
+                    .iter()
+                    .cloned()
+                    .map(|key| Value::Text(key).into()),
+            );
         }
         match &self.favorites {
             Some(favorites) if favorites.is_empty() => sql.push_str(" AND 0"),
             Some(Favorites::Albums(ids)) => {
                 sql.push_str(&format!(" AND album_id IN ({})", placeholders(ids.len())));
-                values.extend(ids.iter().cloned().map(Value::Text));
+                values.extend(ids.iter().cloned().map(|id| Value::Text(id).into()));
             }
             Some(Favorites::Tracks(paths)) => {
                 sql.push_str(&format!(" AND path IN ({})", placeholders(paths.len())));
                 values.extend(
                     paths
                         .iter()
-                        .map(|path| Value::Blob(path_bytes(path).to_vec())),
+                        .map(|path| Value::Blob(path_bytes(path).to_vec()).into()),
                 );
             }
             None => {}
+        }
+        // Last, so that the conditions before it, which SQLite checks first,
+        // leave out what they can
+        if let Some(query) = &self.query {
+            let needs = query.needs();
+            let column = |needed: bool, column: &'static str| if needed { column } else { "NULL" };
+            sql.push_str(&format!(
+                " AND dismas_match(?, {}, {}, {})",
+                column(needs.search_key, "search"),
+                column(needs.fields, "fields"),
+                column(needs.path || needs.favorites, "path"),
+            ));
+            let sources = self.sources.as_deref();
+            values.push(Param::Matcher(Rc::new(Matcher {
+                query: Arc::clone(query),
+                context: Context::now(),
+                favorites: sources
+                    .map(|sources| sources.favorite_tracks.iter().cloned().collect())
+                    .unwrap_or_default(),
+                shown_folders: sources
+                    .map(|sources| sources.shown_folders.clone())
+                    .unwrap_or_default(),
+            })));
         }
         (sql, values)
     }
@@ -871,14 +1005,18 @@ fn placeholders(n: usize) -> String {
 
 // The values of a statement that has the filter's `matches_sql()` before
 // the condition on the `hidden` folders, see `hidden_condition()`
-fn filter_values(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<rusqlite::types::Value> {
+fn filter_values(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<Param> {
     use rusqlite::types::Value;
 
     let (_, values) = filter.conditions();
     let (_, hidden_params) = hidden_condition("file", hidden);
     values
         .into_iter()
-        .chain(hidden_params.into_iter().map(Value::Blob))
+        .chain(
+            hidden_params
+                .into_iter()
+                .map(|path| Value::Blob(path).into()),
+        )
         .collect()
 }
 
@@ -910,7 +1048,7 @@ fn query_search_albums(
     let works = filter
         .works
         .iter()
-        .map(|key| rusqlite::types::Value::Text(key.clone()));
+        .map(|key| Param::from(rusqlite::types::Value::Text(key.clone())));
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, SUM({}) AS matching, COUNT(*)
          FROM tracks
@@ -2027,7 +2165,7 @@ fn query_work_rows(
     let mut params = filter_values(filter, hidden);
     params.extend(
         keys.iter()
-            .map(|key| rusqlite::types::Value::Text(key.clone())),
+            .map(|key| Param::from(rusqlite::types::Value::Text(key.clone()))),
     );
     let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
         let order = row.get::<_, Option<String>>(3)?.map(|order| {
@@ -2215,8 +2353,10 @@ fn query_album_tracks(
          WHERE album_id = ?{conditions}{}",
         hidden_condition("file", hidden).0
     ))?;
-    let params = std::iter::once(rusqlite::types::Value::Text(album_id.to_string()))
-        .chain(filter_values(filter, hidden));
+    let params = std::iter::once(Param::from(rusqlite::types::Value::Text(
+        album_id.to_string(),
+    )))
+    .chain(filter_values(filter, hidden));
     let mut tracks = stmt
         .query_map(rusqlite::params_from_iter(params), |row| {
             let path = path_from_bytes(row.get(0)?);
@@ -3576,6 +3716,7 @@ mod tests {
     fn test_db() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(super::SCHEMA).unwrap();
+        super::add_functions(&conn).unwrap();
         conn
     }
 
@@ -4011,12 +4152,12 @@ mod tests {
             .unwrap();
         }
         let search = |words: &[&str]| {
-            let words: Vec<String> = words.iter().map(ToString::to_string).collect();
+            let query = super::TrackFilter::query(&words.join(" "));
             let hidden = [PathBuf::from("/music/unmounted")];
             let mut albums: Vec<(String, (u32, u32))> = super::query_search_albums(
                 &conn,
                 &super::TrackFilter {
-                    words,
+                    query,
                     ..Default::default()
                 },
                 &hidden,
@@ -4313,11 +4454,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_queue_and_the_library_encode_the_same_fields() {
+    // Tracks to search, in a folder made for `name`: one tagged as Picard
+    // tags it, with a "Work Hierarchy" tag, one without tags in a disc
+    // folder, and a CUE sheet of two tracks, the last of which runs to the end
+    // of its file; with the files, as they'd be opened
+    fn tagged_test_files(name: &str) -> (PathBuf, Vec<PathBuf>) {
         use std::borrow::Cow;
 
-        use gtk::gio::prelude::FileExt;
         use lofty::{
             TextEncoding,
             id3::v2::{Frame, FrameId, Id3v2Tag, KeyValueFrame, TextInformationFrame},
@@ -4333,7 +4476,7 @@ mod tests {
             ))
         }
 
-        let music = test_dir("fields");
+        let music = test_dir(name);
         let album = music.join("Brandenburg Concertos");
         let disc = music.join("Untagged/CD 2");
         let sheet = music.join("Sheet");
@@ -4396,6 +4539,22 @@ mod tests {
         )
         .unwrap();
 
+        let files = vec![
+            tagged,
+            disc.join("03 - Gigue.wav"),
+            cue,
+            sheet.join("Recital.wav"),
+        ];
+        (music, files)
+    }
+
+    #[test]
+    fn the_queue_and_the_library_encode_the_same_fields() {
+        use gtk::gio::prelude::FileExt;
+
+        let (music, files) = tagged_test_files("fields");
+        let [tagged, gigue, cue, _] = <[PathBuf; 4]>::try_from(files.clone()).unwrap();
+
         let mut conn = test_db();
         let (sender, _receiver) = async_channel::unbounded();
         scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
@@ -4407,15 +4566,7 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
 
-        let files = [
-            &tagged,
-            &disc.join("03 - Gigue.wav"),
-            &cue,
-            &sheet.join("Recital.wav"),
-        ]
-        .into_iter()
-        .map(gtk::gio::File::for_path)
-        .collect();
+        let files = files.iter().map(gtk::gio::File::for_path).collect();
         let receiver = crate::audio::load_tracks(files, false);
         let queue: std::collections::BTreeMap<PathBuf, String> =
             std::iter::from_fn(|| receiver.recv_blocking().ok())
@@ -4438,13 +4589,188 @@ mod tests {
         ] {
             assert!(fields.contains(&format!("{line}\n")), "{line} in {fields}");
         }
-        let gigue = &library[&disc.join("03 - Gigue.wav")];
-        assert!(gigue.contains("ti\tgigue\n"), "{gigue}");
-        assert!(gigue.contains("al\tuntagged\n"), "{gigue}");
-        let second = &library[&sheet.join("Recital.cue/track02")];
+        let untagged = &library[&gigue];
+        assert!(untagged.contains("ti\tgigue\n"), "{untagged}");
+        assert!(untagged.contains("al\tuntagged\n"), "{untagged}");
+        let second = &library[&cue.join("track02")];
         assert!(second.contains("ln\t6\n"), "{second}");
 
         std::fs::remove_dir_all(&music).unwrap();
+    }
+
+    // The tracks the library finds with a filter, by their paths
+    fn library_finds(conn: &rusqlite::Connection, filter: &super::TrackFilter) -> Vec<PathBuf> {
+        let (conditions, values) = filter.conditions();
+        let mut paths: Vec<PathBuf> = conn
+            .prepare(&format!("SELECT path FROM tracks WHERE 1{conditions}"))
+            .unwrap()
+            .query_map(rusqlite::params_from_iter(values), |row| {
+                Ok(path_from_bytes(row.get(0)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        paths.sort();
+        paths
+    }
+
+    #[test]
+    fn the_queue_and_the_library_find_the_same_tracks() {
+        use std::{collections::HashSet, sync::Arc};
+
+        use gtk::gio::prelude::FileExt;
+
+        use crate::search_query::Context;
+
+        let (music, files) = tagged_test_files("finds");
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
+        let receiver =
+            crate::audio::load_tracks(files.iter().map(gtk::gio::File::for_path).collect(), false);
+        let tracks: Vec<crate::audio::Track> = std::iter::from_fn(|| receiver.recv_blocking().ok())
+            .flatten()
+            .map(crate::audio::Track::new)
+            .collect();
+        assert_eq!(tracks.len(), 4);
+
+        // A favorite, by its URI in the queue and by its path in the library
+        let favorite = &files[0];
+        let uris: HashSet<String> = [gtk::gio::File::for_path(favorite).uri().to_string()].into();
+        let sources = Arc::new(super::SearchSources {
+            favorite_tracks: Arc::from([favorite.clone()]),
+            shown_folders: Vec::new(),
+        });
+        let context = Context::now();
+
+        for (text, found) in [
+            ("allegro", 1),
+            ("composer:bach", 1),
+            ("-composer:bach", 3),
+            ("composer:(bach OR handel)", 1),
+            ("people:goebel", 1),
+            ("year:<1990", 1),
+            ("released:1986", 1),
+            ("is:live", 1),
+            ("-is:live", 3),
+            ("has:work", 1),
+            ("form:concerto", 1),
+            ("catalogue:bwv825", 1),
+            ("catalogue:bwv", 2),
+            ("length:>5", 1),
+            ("path:sheet", 2),
+            ("path:untagged/cd", 1),
+            ("\"rosalyn tureck\"", 2),
+            ("bach OR tureck", 3),
+            ("is:favorite", 1),
+            ("-is:favorite", 3),
+            ("format:wav", 4),
+        ] {
+            let query = super::TrackFilter::query(text).unwrap();
+            let filter = super::TrackFilter {
+                query: Some(query.clone()),
+                sources: Some(sources.clone()),
+                ..Default::default()
+            };
+            let library = library_finds(&conn, &filter);
+            let mut queue: Vec<PathBuf> = tracks
+                .iter()
+                .filter(|track| track.matches_query(&query, &context, Some(&uris)))
+                .map(|track| track.file().path().unwrap())
+                .collect();
+            queue.sort();
+            assert_eq!(queue, library, "{text}");
+            assert_eq!(library.len(), found, "{text}: {library:?}");
+        }
+
+        std::fs::remove_dir_all(&music).unwrap();
+    }
+
+    #[test]
+    fn a_statement_without_its_search_fails() {
+        // Rather than matching with another statement's search
+        let conn = test_db();
+        let result: rusqlite::Result<bool> =
+            conn.query_row("SELECT dismas_match(NULL, 'bach', '', NULL)", [], |row| {
+                row.get(0)
+            });
+        assert!(result.is_err());
+    }
+
+    // Times searching a library of 50,000 tracks with plain words, as
+    // before the search syntax, with `instr()`, and through `dismas_match()`:
+    //   cargo test --release time_library_searches -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn time_library_searches() {
+        let conn = test_db();
+        let tx = conn.unchecked_transaction().unwrap();
+        for i in 0..50_000 {
+            let composer = [
+                "johann sebastian bach",
+                "georg friedrich handel",
+                "antonio vivaldi",
+            ][i % 3];
+            let search = format!(
+                "{composer} cantata no. {i} for soloists, choir and orchestra recorded live {}",
+                "with a long comment about the recording and the performers ".repeat(3)
+            );
+            let fields = format!(
+                "ti\tcantata no. {i}\nco\t{composer}\nyr\t{}\nge\tbaroque\nft\tflac\nln\t{}\n",
+                1700 + i % 60,
+                200 + i % 300
+            );
+            tx.execute(
+                "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, search, fields)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4)",
+                rusqlite::params![format!("/music/{i}.flac").as_bytes(), (i / 10).to_string(), search, fields],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+
+        let median = |run: &dyn Fn() -> usize| {
+            let mut times: Vec<std::time::Duration> = (0..7)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    assert!(run() > 0);
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[3]
+        };
+        let before = median(&|| {
+            conn.prepare(
+                "SELECT album_id, SUM(CASE WHEN instr(search, ?) > 0 THEN 1 ELSE 0 END) AS matching,
+                        COUNT(*)
+                 FROM tracks WHERE album_id IS NOT NULL GROUP BY album_id HAVING matching > 0",
+            )
+            .unwrap()
+            .query_map(["bach"], |_| Ok(()))
+            .unwrap()
+            .count()
+        });
+        let search = |text: &str| {
+            let filter = super::TrackFilter {
+                query: super::TrackFilter::query(text),
+                ..Default::default()
+            };
+            median(&|| {
+                super::query_search_albums(&conn, &filter, &[])
+                    .unwrap()
+                    .len()
+            })
+        };
+        let words = search("bach");
+        let fields = search("composer:bach year:<1730");
+        println!(
+            "instr: {:.1} ms; dismas_match, words: {:.1} ms, fields: {:.1} ms",
+            before.as_secs_f64() * 1000.0,
+            words.as_secs_f64() * 1000.0,
+            fields.as_secs_f64() * 1000.0
+        );
+        assert!(words.as_secs_f64() <= before.as_secs_f64() * 1.5);
     }
 
     #[test]
@@ -5281,7 +5607,7 @@ mod tests {
         // the albums of those tracks
         let listed = |words: &[&str]| -> Vec<(String, u32)> {
             let filter = super::TrackFilter {
-                words: words.iter().map(ToString::to_string).collect(),
+                query: super::TrackFilter::query(&words.join(" ")),
                 ..Default::default()
             };
             super::query_composers(&conn, &hidden, &filter, super::Counted::Albums)
@@ -5322,7 +5648,7 @@ mod tests {
 
         // and with the words of a search too
         let filter = super::TrackFilter {
-            words: vec!["1002".to_string()],
+            query: super::TrackFilter::query("1002"),
             ..filter
         };
         let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
@@ -5373,7 +5699,7 @@ mod tests {
         );
         // With the words of a search, and the composer's list follows
         let filter = super::TrackFilter {
-            words: vec!["1002".to_string()],
+            query: super::TrackFilter::query("1002"),
             ..filter
         };
         assert_eq!(albums(&filter), [("a".to_string(), (1, 2))]);
@@ -5436,7 +5762,7 @@ mod tests {
 
         // With the words of a search, only the favorites they match
         let words = |words: &[&str]| super::TrackFilter {
-            words: words.iter().map(ToString::to_string).collect(),
+            query: super::TrackFilter::query(&words.join(" ")),
             ..filter.clone()
         };
         assert_eq!(albums(&words(&["1004"])), [("c".to_string(), (1, 1))]);
@@ -6152,7 +6478,7 @@ mod tests {
         // A search that only finds the arrangement finds the work it's
         // listed under
         let trio = TrackFilter {
-            words: vec!["trio".to_string()],
+            query: super::TrackFilter::query("trio"),
             ..Default::default()
         };
         assert_eq!(works(&trio), [work("d957", 1, &["standchen"])]);
@@ -6568,7 +6894,7 @@ mod tests {
         );
         // The recordings with a track the search matches
         let graduale = super::TrackFilter {
-            words: vec!["graduale".to_string()],
+            query: super::TrackFilter::query("graduale"),
             ..Default::default()
         };
         assert_eq!(works(&graduale), [("Requiem v B-moll".to_string(), 1)]);
@@ -6653,7 +6979,7 @@ mod tests {
             [("b".to_string(), (4, 4)), ("e".to_string(), (1, 5))]
         );
         let variations = super::TrackFilter {
-            words: vec!["variatio".to_string()],
+            query: super::TrackFilter::query("variatio"),
             ..gold.clone()
         };
         assert_eq!(albums(&variations), [("b".to_string(), (2, 4))]);

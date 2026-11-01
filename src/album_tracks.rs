@@ -642,7 +642,7 @@ impl AlbumTracks {
         let filter = imp.filter.borrow();
         // The tracks of a composer or a performer counted with words or the
         // favorites would only be some of theirs
-        let searched = !filter.words.is_empty() || filter.favorites.is_some();
+        let searched = filter.query.is_some() || filter.favorites.is_some();
         let label = if let Some(work) = picks.work.as_deref() {
             ni18n_k(
                 // Translators: `{n}`, `{total}` and `{work}` must be left
@@ -707,7 +707,7 @@ impl AlbumTracks {
                         ("composer", composer),
                     ],
                 ),
-                (None, None) if filter.words.is_empty() && filter.favorites.is_some() => ni18n_k(
+                (None, None) if filter.query.is_none() && filter.favorites.is_some() => ni18n_k(
                     // Translators: `{n}` and `{total}` must be left unmodified;
                     // they are expanded to the number of tracks of the album
                     // marked as favorites, and the number of all of them. The
