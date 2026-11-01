@@ -322,8 +322,11 @@ impl CoverImage {
 // One of the album grid's thumbnails, scaled down to `size` when it's
 // larger, as when the grid shows its covers smaller than it can, or on a
 // monitor with a smaller scale than another one connected: a texture of
-// the whole thumbnail would take more memory than the grid has for it.
-// Those up to a tenth larger are read as they are, which is quicker
+// the whole thumbnail would take more memory than the grid has for it (at
+// the smallest zoom, 730 MB rather than 435 MB in a test of 825 albums).
+// Those up to a tenth larger are read as they are, which is quicker. They
+// were made from a larger cover already, so the triangle filter does, and
+// takes less time than the covers' own (`resize`) while the grid scrolls
 pub fn read_thumbnail(path: &Path, size: u32) -> Option<gdk::Texture> {
     let (width, height) = image::ImageReader::open(path)
         .ok()?
@@ -333,7 +336,8 @@ pub fn read_thumbnail(path: &Path, size: u32) -> Option<gdk::Texture> {
         return gdk::Texture::from_filename(path).ok();
     }
     let image = image::ImageReader::open(path).ok()?.decode().ok()?;
-    Some(CoverImage::from_image(image).scaled(size)?.into_texture())
+    let image = image.resize(size, size, FilterType::Triangle);
+    Some(CoverImage::from_image(image).into_texture())
 }
 
 // Colors less chromatic than this, in OKLCH, look grey; a cover with only
