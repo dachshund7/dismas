@@ -19,6 +19,7 @@ mod sleep_timer;
 mod smart_playlists;
 mod track_menu;
 mod zen;
+mod zoom;
 
 use std::{
     cell::{Cell, RefCell},
@@ -512,6 +513,17 @@ mod imp {
                 debug!("Window::win.find()");
                 win.find();
             });
+            // They zoom what the focus is on, see window/zoom.rs
+            for (name, zoom) in [
+                ("win.zoom-in", crate::zoom::Zoom::In),
+                ("win.zoom-out", crate::zoom::Zoom::Out),
+                ("win.zoom-reset", crate::zoom::Zoom::Reset),
+            ] {
+                klass.install_action(name, None, move |win, _, _| {
+                    debug!("Window::{name}()");
+                    win.zoom(zoom);
+                });
+            }
             klass.install_action("queue.play-results", None, move |win, _, _| {
                 debug!("Window::queue.play-results()");
                 win.play_search_results();

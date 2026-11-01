@@ -127,6 +127,12 @@
 	    <summary>The direction the albums are sorted in</summary>
 	    <description>Whether the albums in the grid are sorted in ascending or descending order</description>
 	  </key>
+	  <key name="cover-zoom" type="i">
+	    <range min="-2" max="1"/>
+	    <default>0</default>
+	    <summary>The size of the album covers</summary>
+	    <description>How far the covers of the album grid and of the works are zoomed from their normal size, 0: below it they're smaller, with more of them on a row, and above it larger</description>
+	  </key>
 	  <key name="keep-play-history" type="b">
 	    <default>true</default>
 	    <summary>Keep a history of the tracks played</summary>

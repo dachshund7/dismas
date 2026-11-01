@@ -8,7 +8,7 @@
 // them, and with a heart, whether the album is a favorite; among the covers
 // of the albums of a work, whether one of its recordings there is one
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -33,6 +33,10 @@ pub struct CellWork {
     pub recordings: Vec<FavoriteRecording>,
 }
 
+// The smallest and largest sizes of a cover at a step of the zoom, 0 for
+// the normal size
+pub type CoverSizes = fn(i32) -> (i32, i32);
+
 mod imp {
     use super::*;
 
@@ -53,6 +57,12 @@ mod imp {
         // among the covers of a work, for a favorite recording
         #[property(get, set = Self::set_favorite)]
         pub favorite: Cell<bool>,
+        // The step the covers are zoomed to, 0 for the normal size
+        #[property(get, set = Self::set_zoom)]
+        pub zoom: Cell<i32>,
+        // The sizes the cover grows between at each step
+        pub cover_sizes: Cell<Option<super::CoverSizes>>,
+        pub square: OnceCell<SquareBin>,
         pub picture: gtk::Picture,
         pub badge: gtk::Label,
         pub heart: gtk::Image,
@@ -109,6 +119,14 @@ mod imp {
             self.favorite.set(favorite);
             self.heart.set_visible(favorite);
         }
+
+        fn set_zoom(&self, zoom: i32) {
+            self.zoom.set(zoom);
+            if let (Some(sizes), Some(square)) = (self.cover_sizes.get(), self.square.get()) {
+                let (min, max) = sizes(zoom);
+                square.set_size_range(min, max);
+            }
+        }
     }
 }
 
@@ -119,8 +137,9 @@ glib::wrapper! {
 }
 
 impl AlbumCell {
-    // The cover grows with the width it's given, between these sizes
-    pub fn new(min_cover_size: i32, max_cover_size: i32) -> Self {
+    // The cover grows with the width it's given, between the sizes that
+    // `cover_sizes` gives for the step the covers are zoomed to
+    pub fn new(cover_sizes: CoverSizes) -> Self {
         let cell: Self = glib::Object::builder()
             .property("orientation", gtk::Orientation::Vertical)
             .property("spacing", 3)
@@ -196,7 +215,11 @@ impl AlbumCell {
             !text.is_empty()
         });
 
-        cell.append(&SquareBin::new(&overlay, min_cover_size, max_cover_size));
+        let (min, max) = cover_sizes(0);
+        let square = SquareBin::new(&overlay, min, max);
+        cell.append(&square);
+        imp.cover_sizes.set(Some(cover_sizes));
+        let _ = imp.square.set(square);
         cell.append(title);
         cell.append(artist);
         cell.connect_map(Self::update_selected_state);

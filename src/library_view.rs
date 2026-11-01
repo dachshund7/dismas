@@ -27,12 +27,25 @@ use crate::{
     library::{self, Album, AlbumSort, Counted, Favorites, ScanEvent, ScanResult, TrackFilter},
     play_stats, utils,
     work_sections::{WorkSectionModel, same_section_of},
+    zoom::{self, Zoom},
 };
 
 // The covers in the grid grow with the width of the columns, between
-// these sizes
-const MIN_COVER_SIZE: i32 = 160;
-const MAX_COVER_SIZE: i32 = 240;
+// these sizes, at each step of the zoom from the smallest (the
+// `cover-zoom` setting, from MIN_COVER_ZOOM, with 0 for the normal size,
+// 160 to 240). GridView picks how many columns it has by the covers'
+// smallest size, and stretches them to fill the row, so each step starts
+// where the one before ends: when they overlapped, a step could leave the
+// same columns, as wide as before
+const COVER_SIZES: [(i32, i32); 4] = [(90, 120), (120, 160), (160, 240), (240, 320)];
+const MIN_COVER_ZOOM: i32 = -2;
+const MAX_COVER_ZOOM: i32 = 1;
+
+// The widest the grid gets, at any step: six columns of the largest covers
+// at the normal size. Past it, it stays centered, rather than spreading
+// the covers apart. The grid keeps 30 rows of cells bound, so each column
+// makes scrolling slower, even when fewer of them fit
+const MAX_GRID_WIDTH: i32 = 6 * (240 + COVER_SPACING);
 
 // The space around each cover in the grid, from the margin of the cells
 // and the padding of their content in style.css, and the padding of the
@@ -163,6 +176,11 @@ impl TextureCache {
         self.capacity
     }
 
+    fn set_capacity(&mut self, capacity: usize) {
+        self.capacity = capacity;
+        self.trim();
+    }
+
     // Whether the cover is in the cache, without counting it as used
     fn contains(&self, path: &str) -> bool {
         self.textures.contains_key(path)
@@ -245,6 +263,10 @@ mod imp {
         pub page: Cell<LibraryPage>,
         #[property(get)]
         pub has_works: Cell<bool>,
+        // The step the covers of the grid and of the works are zoomed to,
+        // which the cells follow
+        #[property(get)]
+        pub cover_zoom: Cell<i32>,
         // The works the search finds, and the filter and the generation of
         // the library they were read for, `None` until they're read. The
         // generation goes up each time the library is read again, as the
@@ -303,6 +325,9 @@ mod imp {
         // Bumped when the size the covers are read at changes, so that the
         // covers still being read at the size before aren't kept
         pub cover_generation: Cell<u32>,
+        // The `library` actions, of which zooming is only on short of the
+        // ends it goes to
+        pub actions: gio::SimpleActionGroup,
         // The cells of the grid that are mapped, which are about the ones
         // on screen
         pub mapped_cells: Cell<u32>,
@@ -409,6 +434,7 @@ mod imp {
             let obj = self.obj();
             obj.setup_grid();
             obj.setup_actions();
+            obj.setup_zoom();
             obj.setup_watch();
             obj.setup_pickers();
             obj.setup_favorites_filter();
@@ -629,13 +655,6 @@ impl LibraryView {
             ),
         );
 
-        // Past the width of the most columns with the largest covers, the
-        // grid stays centered, rather than spreading the covers apart
-        let grid_width = imp.grid_view.max_columns() as i32 * (MAX_COVER_SIZE + COVER_SPACING)
-            + 2 * GRID_PADDING;
-        imp.grid_clamp.set_maximum_size(grid_width);
-        imp.grid_clamp.set_tightening_threshold(grid_width);
-
         imp.model.replace(Some(model));
         imp.filter.replace(Some(filter));
         imp.sorter.replace(Some(sorter));
@@ -668,10 +687,25 @@ impl LibraryView {
     fn setup_actions(&self) {
         let settings = self.app_settings();
 
-        let actions = gio::SimpleActionGroup::new();
+        let actions = &self.imp().actions;
         actions.add_action(&settings.create_action("album-sort"));
         actions.add_action(&settings.create_action("album-sort-order"));
-        self.insert_action_group("library", Some(&actions));
+        for (name, zoom) in [
+            ("zoom-in", Zoom::In),
+            ("zoom-out", Zoom::Out),
+            ("zoom-reset", Zoom::Reset),
+        ] {
+            let action = gio::SimpleAction::new(name, None);
+            action.connect_activate(clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |_, _| {
+                    this.zoom_covers(zoom);
+                }
+            ));
+            actions.add_action(&action);
+        }
+        self.insert_action_group("library", Some(actions));
 
         // Picking what to sort by also picks the direction that suits it;
         // it can be reversed afterwards
@@ -739,7 +773,7 @@ impl LibraryView {
             self,
             move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-                let content = AlbumCell::new(MIN_COVER_SIZE, MAX_COVER_SIZE);
+                let content = AlbumCell::new(grid_cover_sizes);
                 this.setup_cell(&content, true);
                 content.set_list_item(item);
 
@@ -794,6 +828,10 @@ impl LibraryView {
     // What a cell of an album does, in the grid or elsewhere: it shows its
     // cover while it's on screen, is selected, has a menu, and is dragged
     fn setup_cell(&self, cell: &AlbumCell, grid: bool) {
+        self.bind_property("cover-zoom", cell, "zoom")
+            .sync_create()
+            .build();
+
         // GridView keeps hundreds of cells bound around the visible ones,
         // and binds many of them again at about every frame while the grid
         // scrolls, as its anchor moves back and forth, but it hides the ones
@@ -1088,7 +1126,8 @@ impl LibraryView {
     // The width the covers are read at, in the pixels of the screen the
     // grid is on: as large as the grid shows them
     fn cover_pixels(&self) -> u32 {
-        (MAX_COVER_SIZE * self.scale_factor()).max(1) as u32
+        let (_, size) = grid_cover_sizes(self.imp().cover_zoom.get());
+        (size * self.scale_factor()).max(1) as u32
     }
 
     // The covers in the cache are at a size they're no longer shown at:
@@ -1102,6 +1141,104 @@ impl LibraryView {
         imp.pending_covers.borrow_mut().clear();
         for cell in mapped_album_cells(self.upcast_ref()) {
             self.show_cover(&cell);
+        }
+    }
+
+    // The covers are as large as the `cover-zoom` setting says, with Ctrl
+    // and the mouse wheel over them as well as with the keys
+    fn setup_zoom(&self) {
+        self.app_settings().connect_changed(
+            Some("cover-zoom"),
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move |_, _| this.apply_cover_zoom()
+            ),
+        );
+        self.apply_cover_zoom();
+
+        // In the capture phase, so that the grid doesn't scroll as well
+        let steps = RefCell::new(zoom::ScrollSteps::default());
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        scroll.connect_scroll(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |controller, _, dy| {
+                if !controller
+                    .current_event_state()
+                    .contains(gdk::ModifierType::CONTROL_MASK)
+                {
+                    return glib::Propagation::Proceed;
+                }
+                let n = steps.borrow_mut().add(dy, controller.unit());
+                let zoom = if n > 0 { Zoom::In } else { Zoom::Out };
+                for _ in 0..n.unsigned_abs() {
+                    this.zoom_covers(zoom);
+                }
+                glib::Propagation::Stop
+            }
+        ));
+        self.imp().albums_stack.add_controller(scroll);
+    }
+
+    // Zooms the covers of the grid and of the works a step, or back to
+    // their normal size; false when they're at that end already
+    pub fn zoom_covers(&self, zoom: Zoom) -> bool {
+        let settings = self.app_settings();
+        let step = settings.int("cover-zoom");
+        match zoom.step_from(step, MIN_COVER_ZOOM, MAX_COVER_ZOOM) {
+            Some(step) => settings.set_int("cover-zoom", step).is_ok(),
+            None => false,
+        }
+    }
+
+    fn apply_cover_zoom(&self) {
+        let imp = self.imp();
+        let step = self
+            .app_settings()
+            .int("cover-zoom")
+            .clamp(MIN_COVER_ZOOM, MAX_COVER_ZOOM);
+        imp.cover_zoom.set(step);
+
+        // Past the width of the most columns with the largest covers, the
+        // grid stays centered, rather than spreading the covers apart
+        let (_, max_size) = grid_cover_sizes(step);
+        let columns = max_columns(max_size);
+        imp.grid_view.set_max_columns(columns);
+        let grid_width = columns as i32 * (max_size + COVER_SPACING) + 2 * GRID_PADDING;
+        imp.grid_clamp.set_maximum_size(grid_width);
+        imp.grid_clamp.set_tightening_threshold(grid_width);
+
+        imp.textures
+            .borrow_mut()
+            .set_capacity(cache_capacity(max_size));
+        self.notify_cover_zoom();
+        self.reset_covers();
+
+        let enable = |name: &str, on: bool| {
+            if let Some(action) = imp
+                .actions
+                .lookup_action(name)
+                .and_downcast::<gio::SimpleAction>()
+            {
+                action.set_enabled(on);
+            }
+        };
+        enable("zoom-in", step < MAX_COVER_ZOOM);
+        enable("zoom-out", step > MIN_COVER_ZOOM);
+        enable("zoom-reset", step != 0);
+
+        // The columns change, and the album with the focus could go out
+        // of view
+        if let Some(position) =
+            utils::focused_child::<AlbumCell>(&*imp.grid_view).and_then(|cell| cell.position())
+        {
+            utils::when_laid_out(&*imp.grid_view, move |grid| {
+                grid.scroll_to(position, gtk::ListScrollFlags::FOCUS, None);
+            });
         }
     }
 
@@ -2750,6 +2887,31 @@ fn first_track_uri(album_id: &str) -> Option<String> {
     Some(gio::File::for_path(path).uri().to_string())
 }
 
+// What a table of the covers' sizes has at a step of the zoom
+fn at_zoom_step<T: Copy>(sizes: &[T], step: i32) -> T {
+    let index = usize::try_from(step - MIN_COVER_ZOOM).unwrap_or(0);
+    sizes[index.min(sizes.len() - 1)]
+}
+
+// The sizes the covers of the grid grow between at a step of the zoom
+fn grid_cover_sizes(step: i32) -> (i32, i32) {
+    at_zoom_step(&COVER_SIZES, step)
+}
+
+// The most columns the grid has with covers of this largest size, so that
+// it's never wider than MAX_GRID_WIDTH
+fn max_columns(max_size: i32) -> u32 {
+    (f64::from(MAX_GRID_WIDTH) / f64::from(max_size + COVER_SPACING)).round() as u32
+}
+
+// How many covers the cache keeps with covers of this largest size: about
+// as many pixels as at the normal size
+fn cache_capacity(max_size: i32) -> usize {
+    let (_, normal) = grid_cover_sizes(0);
+    let ratio = f64::from(normal) / f64::from(max_size);
+    (MAX_CACHED_COVERS as f64 * ratio * ratio).round() as usize
+}
+
 // The cells under the widget that show an album's cover, the grid's and
 // those of an open work, which are mapped; GridView keeps the cells off
 // screen bound, but unmapped
@@ -2783,7 +2945,8 @@ fn thumbnail_size() -> u32 {
         })
         .unwrap_or(1)
         .clamp(1, 2);
-    (MAX_COVER_SIZE * scale) as u32
+    let (_, max_size) = grid_cover_sizes(0);
+    (max_size * scale) as u32
 }
 
 // The copy of an album that follows the pointer while it's dragged: its
@@ -2882,6 +3045,38 @@ fn empty_page_text(folders: &[PathBuf], albums_unavailable: bool) -> (String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_zoom_step_changes_the_size_of_the_covers() {
+        // A step starts where the one before ends, so the covers change
+        // size even where the grid keeps its columns
+        for sizes in [&COVER_SIZES, &works::WORK_COVER_SIZES] {
+            assert_eq!(sizes.len(), (MAX_COVER_ZOOM - MIN_COVER_ZOOM + 1) as usize);
+            for pair in sizes.windows(2) {
+                let ((min, max), (next_min, _)) = (pair[0], pair[1]);
+                assert!(min < max && max <= next_min, "{sizes:?}");
+            }
+        }
+        assert_eq!(grid_cover_sizes(0), (160, 240));
+        assert_eq!(grid_cover_sizes(MIN_COVER_ZOOM), (90, 120));
+        assert_eq!(grid_cover_sizes(MAX_COVER_ZOOM), (240, 320));
+        // A step out of range, from a hand edit of the setting
+        assert_eq!(grid_cover_sizes(9), (240, 320));
+    }
+
+    #[test]
+    fn smaller_covers_have_more_columns_and_more_in_the_cache() {
+        let columns: Vec<_> = COVER_SIZES
+            .iter()
+            .map(|&(_, max)| max_columns(max))
+            .collect();
+        assert_eq!(columns, [11, 9, 6, 5]);
+        let cached: Vec<_> = COVER_SIZES
+            .iter()
+            .map(|&(_, max)| cache_capacity(max))
+            .collect();
+        assert_eq!(cached, [600, 338, 150, 84]);
+    }
 
     #[test]
     fn empty_page_names_the_folder() {

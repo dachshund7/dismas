@@ -81,4 +81,16 @@ impl SquareBin {
         child.set_parent(&bin);
         bin
     }
+
+    // As when the album grid is zoomed
+    pub fn set_size_range(&self, min_size: i32, max_size: i32) {
+        let imp = self.imp();
+        let old = (
+            imp.min_size.replace(min_size),
+            imp.max_size.replace(max_size),
+        );
+        if old != (min_size, max_size) {
+            self.queue_resize();
+        }
+    }
 }

@@ -90,6 +90,32 @@ Adw.ShortcutsDialog shortcuts_dialog {
         }
     }
 
+    // The keys of the actions have alternatives, Ctrl+= and the keypad's,
+    // which aren't listed
+    Adw.ShortcutsSection {
+        title: C_("shortcut window", "View");
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Make the album covers larger");
+            accelerator: "<primary>plus";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Make the album covers smaller");
+            accelerator: "<primary>minus";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Show the album covers at their normal size");
+            accelerator: "<primary>0";
+        }
+
+        Adw.ShortcutsItem {
+            title: C_("shortcut window", "Hold to zoom with the mouse wheel");
+            accelerator: "Control_L";
+        }
+    }
+
     Adw.ShortcutsSection {
         title: C_("shortcut window", "Playlist");
 

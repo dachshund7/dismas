@@ -12,10 +12,10 @@ use crate::{
     album_cell::CellWork, play_stats::FavoriteRecording, queue_row, reveal_bin::RevealBin,
 };
 
-// The covers of the albums of an open work, smaller than the grid's, as
-// they're in a list
-const WORK_COVER_MIN: i32 = 120;
-const WORK_COVER_MAX: i32 = 160;
+// The sizes the covers of the albums of an open work grow between, at each
+// step of the zoom, as for the grid's (`COVER_SIZES`): smaller, as they're
+// in a list, and none overlapping the next
+pub(super) const WORK_COVER_SIZES: [(i32, i32); 4] = [(60, 80), (80, 107), (120, 160), (160, 213)];
 
 // The work of the list that's open, with its key and those of the
 // arrangements listed under it, and the covers of its albums
@@ -1034,7 +1034,7 @@ fn fill_work_covers(view: &LibraryView, bin: &RevealBin, work: &ExpandedWork) {
     if !same {
         flowbox.remove_all();
         for cover in &work.covers {
-            let cell = AlbumCell::new(WORK_COVER_MIN, WORK_COVER_MAX);
+            let cell = AlbumCell::new(|step| super::at_zoom_step(&WORK_COVER_SIZES, step));
             view.setup_cell(&cell, false);
             cell.show_album(&cover.album);
             cover

@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The album covers can be made larger or smaller, on the Albums, Tracks
+  and Works pages, with Ctrl+plus and Ctrl+minus, or with Ctrl and the
+  mouse wheel over them; Ctrl+0 puts them back to their normal size.
+  Smaller, more of them fit on a row
 - Opening an M3U playlist with Dismas, from a file manager or on the
   command line, opens its tracks, as it does a folder; it said it found
   none. They're found as when the playlist is imported

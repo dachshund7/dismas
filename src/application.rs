@@ -115,6 +115,14 @@ mod imp {
             obj.set_accels_for_action("win.favorite", &["<primary>d"]);
             obj.set_accels_for_action("win.preferences", &["<primary>comma"]);
             obj.set_accels_for_action("win.fullscreen", &["F11"]);
+            // The HIG's, and Ctrl+= for Ctrl++ without Shift, as in other
+            // GNOME apps; they zoom what the focus is on
+            obj.set_accels_for_action(
+                "win.zoom-in",
+                &["<primary>plus", "<primary>equal", "<primary>KP_Add"],
+            );
+            obj.set_accels_for_action("win.zoom-out", &["<primary>minus", "<primary>KP_Subtract"]);
+            obj.set_accels_for_action("win.zoom-reset", &["<primary>0", "<primary>KP_0"]);
             // In the order of the buttons of the pages
             obj.set_accels_for_action("win.page::player", &["<primary>1"]);
             obj.set_accels_for_action("win.page::albums", &["<primary>2"]);
