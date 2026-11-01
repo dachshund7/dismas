@@ -14,54 +14,78 @@ use crate::lyrics;
 // the search syntax tells phrases and the values of fields apart by. Most
 // tags are ASCII, which only needs lowercasing
 pub fn normalize_search_text(s: &str) -> String {
-    let folded = if s.is_ascii() {
-        s.to_ascii_lowercase()
+    let mut folded = String::with_capacity(s.len());
+    if s.is_ascii() {
+        // Whitespace as `char::is_whitespace()` has it, which counts the
+        // vertical tab, unlike `u8::is_ascii_whitespace()`
+        let mut space = false;
+        for byte in s.bytes() {
+            if matches!(byte, b' ' | b'\t'..=b'\r') {
+                space = !folded.is_empty();
+            } else {
+                if space {
+                    folded.push(' ');
+                    space = false;
+                }
+                folded.push(char::from(byte.to_ascii_lowercase()));
+            }
+        }
     } else {
-        fold_letters(s)
-            .chars()
-            .map(|c| match c {
-                '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{02bc}' => '\'',
-                '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{201f}' => '"',
-                '\u{2010}'..='\u{2015}' | '\u{2212}' => '-',
-                _ => c,
-            })
-            .collect()
-    };
-    folded.split_whitespace().join(" ")
+        fold_into(s, &mut folded, true);
+    }
+    folded
 }
 
 // The fold of the keys that tell composers, performers and works apart,
 // which plays.db keeps the favorite works by: case and accents only, as
 // before the search folded quotes and dashes, so that the keys don't change
 pub fn normalize_key_text(s: &str) -> String {
-    fold_letters(s)
+    let mut folded = String::with_capacity(s.len());
+    fold_into(s, &mut folded, false);
+    folded
 }
 
-// The text without case and accents
-fn fold_letters(s: &str) -> String {
+// The text without case and accents, and for a `search`, with the kinds of
+// quotes and dashes made one, and runs of whitespace one space, without
+// any at the ends
+fn fold_into(s: &str, folded: &mut String, search: bool) {
     // The compatibility decomposition splits accented letters into the
     // letter and a combining mark, which we drop
     let decomposed = glib::normalize(s, glib::NormalizeMode::All);
 
-    let mut res = String::with_capacity(decomposed.len());
+    let mut space = false;
     for c in decomposed.chars().flat_map(char::to_lowercase) {
         match c {
             '\u{0300}'..='\u{036f}'
             | '\u{1ab0}'..='\u{1aff}'
             | '\u{1dc0}'..='\u{1dff}'
             | '\u{20d0}'..='\u{20ff}'
-            | '\u{fe20}'..='\u{fe2f}' => (),
+            | '\u{fe20}'..='\u{fe2f}' => continue,
+            _ if search && c.is_whitespace() => {
+                space = !folded.is_empty();
+                continue;
+            }
+            _ => (),
+        }
+        if space {
+            folded.push(' ');
+            space = false;
+        }
+        match c {
             // Letters that don't decompose into a base letter
-            'ß' => res.push_str("ss"),
-            'æ' => res.push_str("ae"),
-            'œ' => res.push_str("oe"),
-            'ø' => res.push('o'),
-            'ł' => res.push('l'),
-            _ => res.push(c),
+            'ß' => folded.push_str("ss"),
+            'æ' => folded.push_str("ae"),
+            'œ' => folded.push_str("oe"),
+            'ø' => folded.push('o'),
+            'ł' => folded.push('l'),
+            '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{02bc}' if search => {
+                folded.push('\'');
+            }
+            '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{201f}' if search => folded.push('"'),
+            '\u{2010}'..='\u{2015}' | '\u{2212}' if search => folded.push('-'),
+            _ => folded.push(c),
         }
     }
-
-    res
 }
 
 // The text that searching the queue and the album grid looks into for a
@@ -274,8 +298,140 @@ fn album_artist_search_text(tag: &Tag, album_artist: &str) -> String {
 #[cfg(test)]
 mod tests {
     use lofty::tag::TagType;
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
 
     use super::*;
+
+    // The folds as they were before they were made in one pass, which the
+    // library and plays.db keep values made with, so the new ones must
+    // give exactly the same
+    fn old_normalize_search_text(s: &str) -> String {
+        let folded = if s.is_ascii() {
+            s.to_ascii_lowercase()
+        } else {
+            old_fold_letters(s)
+                .chars()
+                .map(|c| match c {
+                    '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{02bc}' => '\'',
+                    '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{201f}' => '"',
+                    '\u{2010}'..='\u{2015}' | '\u{2212}' => '-',
+                    _ => c,
+                })
+                .collect()
+        };
+        folded.split_whitespace().join(" ")
+    }
+
+    fn old_fold_letters(s: &str) -> String {
+        let decomposed = glib::normalize(s, glib::NormalizeMode::All);
+        let mut res = String::with_capacity(decomposed.len());
+        for c in decomposed.chars().flat_map(char::to_lowercase) {
+            match c {
+                '\u{0300}'..='\u{036f}'
+                | '\u{1ab0}'..='\u{1aff}'
+                | '\u{1dc0}'..='\u{1dff}'
+                | '\u{20d0}'..='\u{20ff}'
+                | '\u{fe20}'..='\u{fe2f}' => (),
+                'ß' => res.push_str("ss"),
+                'æ' => res.push_str("ae"),
+                'œ' => res.push_str("oe"),
+                'ø' => res.push('o'),
+                'ł' => res.push('l'),
+                _ => res.push(c),
+            }
+        }
+        res
+    }
+
+    // Characters that the folds treat in their own ways
+    const TRICKY: &[char] = &[
+        ' ', '\t', '\n', '\u{0b}', '\u{0c}', '\r', '\u{1f}', '\u{85}', '\u{a0}', '\u{1680}',
+        '\u{2002}', '\u{2009}', '\u{200b}', '\u{2028}', '\u{2029}', '\u{202f}', '\u{3000}',
+        '\u{0301}', '\u{0308}', '\u{1ab0}', '\u{20dd}', '\u{fe20}', 'ß', 'ẞ', 'Æ', 'æ', 'Œ', 'ø',
+        'Ø', 'Ł', 'ł', 'İ', 'ı', 'Σ', 'ς', 'ﬁ', 'é', 'Ü', '½', '²', '\u{2018}', '\u{2019}',
+        '\u{201a}', '\u{201b}', '\u{02bc}', '\u{201c}', '\u{201d}', '\u{201e}', '\u{201f}',
+        '\u{2010}', '\u{2011}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}', '\'', '"', '-',
+        'A', 'z', '7', 'Ж', '日',
+    ];
+
+    #[test]
+    fn the_folds_in_one_pass_are_the_same_as_before() {
+        let check = |s: &str| {
+            assert_eq!(
+                normalize_search_text(s),
+                old_normalize_search_text(s),
+                "{s:?}"
+            );
+            assert_eq!(normalize_key_text(s), old_fold_letters(s), "{s:?}");
+        };
+        for s in [
+            "",
+            " ",
+            " \t\u{0b}\n ",
+            "\u{a0}\u{3000}",
+            "Bach\u{0b}Partita",
+            "  Kyrie \u{2013}  Christe ",
+            "e\u{0301} \u{0301} x",
+            "\u{0301}",
+            " \u{0301} ",
+            "Straße",
+            "İstanbul",
+            "ΣΟΦΟΣ",
+            "ﬁne",
+            "Bach’s „Wohltemperiertes“ Klavier",
+            "Johann Sebastian Bach (1685\u{2212}1750)",
+        ] {
+            check(s);
+        }
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..100_000 {
+            let len = rng.random_range(0..12);
+            let s: String = (0..len)
+                .map(|_| {
+                    if rng.random_range(0..3) == 0 {
+                        char::from(rng.random_range(0x20u8..0x7f))
+                    } else {
+                        TRICKY[rng.random_range(0..TRICKY.len())]
+                    }
+                })
+                .collect();
+            check(&s);
+        }
+    }
+
+    // Times the folds before and after they were made in one pass:
+    //   cargo test --release time_normalize_search_text -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn time_normalize_search_text() {
+        let texts: Vec<String> = [
+            "Johann Sebastian Bach",
+            "Partita No. 2 in D minor, BWV 1004: V. Chaconne",
+            "Berliner Philharmoniker",
+            "Wohltemperiertes Klavier I – Präludium und Fuge Nr. 1 C-Dur",
+            "Antonín Dvořák",
+            "Ensemble Café Zimmermann",
+            "Bach’s „Kunst der Fuge“",
+            "Sergei Rachmaninoff · Piano Concerto No. 2 in C minor, Op. 18",
+        ]
+        .iter()
+        .flat_map(|text| (0..2_000).map(move |i| format!("{text} {i}")))
+        .collect();
+        let time = |fold: &dyn Fn(&str) -> String| {
+            let start = std::time::Instant::now();
+            let total: usize = texts.iter().map(|text| fold(text).len()).sum();
+            assert!(total > 0);
+            start.elapsed()
+        };
+        // The faster of two runs each, so that warming up doesn't count
+        let before = time(&old_normalize_search_text).min(time(&old_normalize_search_text));
+        let after = time(&normalize_search_text).min(time(&normalize_search_text));
+        println!(
+            "normalize_search_text: {:.1} ms before, {:.1} ms after",
+            before.as_secs_f64() * 1000.0,
+            after.as_secs_f64() * 1000.0
+        );
+    }
 
     #[test]
     fn search_text_has_no_links() {
@@ -383,7 +539,7 @@ mod tests {
         ] {
             assert_eq!(
                 normalize_search_text(text),
-                fold_letters(text).split_whitespace().join(" "),
+                normalize_key_text(text).split_whitespace().join(" "),
                 "{text}"
             );
         }
