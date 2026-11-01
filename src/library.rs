@@ -50,7 +50,7 @@ use crate::{
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
     play_stats,
-    search_query::{Candidate, Context, Mode, Needs, Query},
+    search_query::{Candidate, Context, Mode, Needs, Query, tagged_span},
     utils,
 };
 
@@ -1798,7 +1798,7 @@ fn query_works(
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkInfo>> {
     let rows = query_work_rows(conn, filter, &[], hidden, Lengths::Skip)?;
-    Ok(works_of_rows(&rows))
+    Ok(works_of_rows(&rows, &mut RecordingDates::new(conn)))
 }
 
 // A work the Works page lists, as Play a Random Work picks from them
@@ -1849,7 +1849,7 @@ fn query_work_recording_candidates(
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkCandidate>> {
     let rows = query_work_rows(conn, filter, &[], hidden, Lengths::Read)?;
-    Ok(listed_works(&rows)
+    Ok(listed_works(&rows, &mut RecordingDates::new(conn))
         .into_iter()
         .map(|listed| {
             let arranged = &listed.info.arrangements;
@@ -1911,8 +1911,8 @@ fn recording_arrangement(
 
 // The works of the rows with a recording that the filter matches, sorted
 // as in `works()`, see `listed_works()`
-fn works_of_rows(rows: &[WorkRow]) -> Vec<WorkInfo> {
-    listed_works(rows)
+fn works_of_rows(rows: &[WorkRow], dates: &mut RecordingDates) -> Vec<WorkInfo> {
+    listed_works(rows, dates)
         .into_iter()
         .map(|listed| listed.info)
         .collect()
@@ -1934,8 +1934,9 @@ struct ListedWork {
 
 // The works of the rows with a recording that the filter matches, sorted
 // as in `works()`. The arrangements of a work among them are listed under
-// it, see `listed_under()`, and their recordings count as its own
-fn listed_works(rows: &[WorkRow]) -> Vec<ListedWork> {
+// it, see `listed_under()`, and their recordings count as its own. The
+// `dates` are read as `recordings_of_works()` needs them
+fn listed_works(rows: &[WorkRow], dates: &mut RecordingDates) -> Vec<ListedWork> {
     // How often each of the names of a work is given, by all its tracks
     #[derive(Default)]
     struct Seen<'a> {
@@ -1997,7 +1998,7 @@ fn listed_works(rows: &[WorkRow]) -> Vec<ListedWork> {
     let listed = listed_under(rows, &works);
     // The recordings of each work, by the work they're listed under
     let mut recordings: HashMap<&str, Vec<RecordingRows>> = HashMap::new();
-    for recording in recordings_of_works(rows, |row| split_recording_work(row, &listed)) {
+    for recording in recordings_of_works(rows, |row| split_recording_work(row, &listed), dates) {
         let first = rows[recording[0]].work.as_str();
         let key = listed.get(first).copied().unwrap_or(first);
         let matching = recording.iter().any(|&i| rows[i].matching);
@@ -2297,8 +2298,9 @@ fn query_work_recordings(
         ))
         .map(|(key, work)| (key.as_str(), work))
         .collect();
+    let mut dates = RecordingDates::new(conn);
     let mut recordings: Vec<(_, WorkRecording)> =
-        recordings_of_works(&rows, |row| split_recording_work(row, &listed))
+        recordings_of_works(&rows, |row| split_recording_work(row, &listed), &mut dates)
             .into_iter()
             .map(|recording| recording.into_iter().map(|i| &rows[i]).collect::<Vec<_>>())
             .filter(|rows| rows.iter().any(|row| row.matching))
@@ -2427,13 +2429,22 @@ fn query_work_rows(
 // They're not always in the order of the work, as in The Art of Fugue, nor
 // next to each other, as in recitals that mix the pieces of a collection
 // with others, and MusicBrainz links some of the tracks of an opera to the
-// whole opera rather than to its scenes, so they make one recording,
-// unless a movement comes again, as on an album with two recordings of the
-// work. The parts of a movement in several tracks have its place, one
-// after the other
+// whole opera, or to an act, rather than to its scenes, so they make one
+// recording. A movement that comes again starts another recording only
+// when its tags show another performance, see `another_performance()`: a
+// movement comes again far more often in a single performance, as a da
+// capo, a variant of it or another version of the work after it, or a
+// track that MusicBrainz links to the wrong movement, and splitting there
+// broke operas into fragments. The parts of a movement in several tracks
+// have its place, one after the other, and never split.
+// Each work has one recording open on an album, the last one, so a track
+// that goes back to an earlier performance without coming again in the
+// last one joins the last one: performances that take turns, movement by
+// movement, or more of the first after part of a second
 fn recordings_of_works<'a>(
     rows: &'a [WorkRow],
     work_of: impl Fn(&'a WorkRow) -> &'a str,
+    dates: &mut RecordingDates,
 ) -> Vec<Vec<usize>> {
     // For each work of the album being read, its last recording, and the
     // places of the movements in it
@@ -2451,8 +2462,11 @@ fn recordings_of_works<'a>(
         let work = work_of(row);
         let continues = open.get(work).is_some_and(|open| match &row.order {
             Some(place) if !place.is_empty() => {
-                let last = &rows[*recordings[open.recording].last().unwrap()];
-                last.order.as_ref() == Some(place) || !open.places.contains(place.as_slice())
+                let recording = &recordings[open.recording];
+                let last = &rows[*recording.last().unwrap()];
+                last.order.as_ref() == Some(place)
+                    || !open.places.contains(place.as_slice())
+                    || !another_performance(rows, recording, row, dates)
             }
             _ => true,
         });
@@ -2482,6 +2496,117 @@ fn recordings_of_works<'a>(
     recordings
 }
 
+// Whether the tags show that a track is another performance than the
+// tracks of a `recording` on its album: it has no conductor or performer
+// in common with them, or it was recorded more than a year away from all
+// of them, see `RecordingDates`. What isn't known on either side shows
+// nothing, so the track stays in the recording
+fn another_performance(
+    rows: &[WorkRow],
+    recording: &[usize],
+    row: &WorkRow,
+    dates: &mut RecordingDates,
+) -> bool {
+    let theirs = || recording.iter().map(|&i| &rows[i]);
+    let performers: HashSet<&str> = performer_keys(row.performers.as_deref()).collect();
+    if !performers.is_empty() {
+        let others: HashSet<&str> = theirs()
+            .flat_map(|row| performer_keys(row.performers.as_deref()))
+            .collect();
+        if !others.is_empty() && performers.is_disjoint(&others) {
+            return true;
+        }
+    }
+    dates.read(&row.album_id);
+    let recorded = dates.of(&row.path);
+    if recorded.is_empty() {
+        return false;
+    }
+    let others: Vec<(i64, i64)> = theirs()
+        .flat_map(|row| dates.of(&row.path))
+        .copied()
+        .collect();
+    !others.is_empty()
+        && recorded
+            .iter()
+            .all(|a| others.iter().all(|b| years_apart(*a, *b)))
+}
+
+// Whether two times a date in the tags covers, see `tagged_span()`, are
+// more than a year apart. Their ends are left out, so a gap of 365 days
+// between the end of one and the start of the other is more than a year:
+// 1990 and 1992 are, and so are a day and the same day two years later,
+// but 1990 and 1991 aren't, nor a day and the same day a year later
+fn years_apart(a: (i64, i64), b: (i64, i64)) -> bool {
+    const YEAR: i64 = 365 * 24 * 60 * 60;
+    a.0.max(b.0) - a.1.min(b.1) >= YEAR
+}
+
+// When the tracks of an album were recorded, from the RECORDINGDATE tags
+// in their `fields`, see `another_performance()`. They're only read for an
+// album where a movement comes again in a work, the one being read, as
+// reading the fields of every track takes time the Works page doesn't
+// need to spend, see `Lengths`. They're optional, so they're none when
+// they can't be read, which keeps the tracks in one recording
+struct RecordingDates<'c> {
+    conn: &'c Connection,
+    album: Option<String>,
+    // The times each track's dates cover, by path, for the tracks with any
+    recorded: HashMap<PathBuf, Vec<(i64, i64)>>,
+}
+
+impl<'c> RecordingDates<'c> {
+    fn new(conn: &'c Connection) -> Self {
+        Self {
+            conn,
+            album: None,
+            recorded: HashMap::new(),
+        }
+    }
+
+    // Reads the dates of the tracks of an album, unless they're read
+    fn read(&mut self, album_id: &str) {
+        if self.album.as_deref() == Some(album_id) {
+            return;
+        }
+        self.album = Some(album_id.to_owned());
+        self.recorded = query_recording_dates(self.conn, album_id).unwrap_or_else(|e| {
+            warn!("Unable to read when the tracks of album {album_id} were recorded: {e}");
+            HashMap::new()
+        });
+    }
+
+    // The times the dates of a track of the album read cover
+    fn of(&self, path: &Path) -> &[(i64, i64)] {
+        self.recorded.get(path).map_or(&[], Vec::as_slice)
+    }
+}
+
+fn query_recording_dates(
+    conn: &Connection,
+    album_id: &str,
+) -> rusqlite::Result<HashMap<PathBuf, Vec<(i64, i64)>>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT path, fields FROM tracks
+         WHERE album_id = ?1 AND work_key IS NOT NULL AND fields IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([album_id], |row| {
+        let fields: String = row.get(1)?;
+        let recorded: Vec<(i64, i64)> = field_values(&fields, &[FieldCode::Recorded])
+            .filter_map(tagged_span)
+            .collect();
+        Ok((path_from_bytes(row.get(0)?), recorded))
+    })?;
+    let mut recorded = HashMap::new();
+    for row in rows {
+        let (path, spans) = row?;
+        if !spans.is_empty() {
+            recorded.insert(path, spans);
+        }
+    }
+    Ok(recorded)
+}
+
 // The composers of a work, from the lines of `composer_entries()`
 fn work_composers(entries: &str) -> Vec<WorkComposer> {
     entries
@@ -2507,15 +2632,7 @@ fn performers_line<'a>(entries: impl Iterator<Item = &'a str>) -> String {
     let mut conductors = Vec::new();
     let mut soloists = Vec::new();
     let mut groups = Vec::new();
-    for line in entries.flat_map(str::lines) {
-        let mut fields = line.split('\t');
-        let (Some(kind), Some(key), Some(name)) = (
-            fields.next().and_then(performer_kind_from_code),
-            fields.next(),
-            fields.next(),
-        ) else {
-            continue;
-        };
+    for (kind, key, name) in entries.flat_map(performer_lines) {
         if !seen.insert(key) {
             continue;
         }
@@ -2530,6 +2647,25 @@ fn performers_line<'a>(entries: impl Iterator<Item = &'a str>) -> String {
         .into_iter()
         .filter(|s| !s.is_empty())
         .join(" · ")
+}
+
+// The kind, the key and the name of each conductor and performer in the
+// lines of `performer_entries()`
+fn performer_lines(entries: &str) -> impl Iterator<Item = (PerformerKind, &str, &str)> {
+    entries.lines().filter_map(|line| {
+        let mut fields = line.split('\t');
+        let kind = performer_kind_from_code(fields.next()?)?;
+        Some((kind, fields.next()?, fields.next()?))
+    })
+}
+
+// The keys of the conductors and performers of a track, see
+// `performer_entries()`, which tell them apart
+fn performer_keys(entries: Option<&str>) -> impl Iterator<Item = &str> {
+    entries
+        .into_iter()
+        .flat_map(performer_lines)
+        .map(|(_, key, _)| key)
 }
 
 // The tracks the filter matches, as the Tracks page takes them from the
@@ -6960,8 +7096,9 @@ mod tests {
                 None,
                 "stabat",
             ),
-            // Two recordings of a work one after the other, and a movement
-            // in two tracks
+            // A movement in two tracks, and a movement that comes again,
+            // without dates or performers that show another performance,
+            // which is still the same recording
             (
                 "/m/B/01",
                 "b",
@@ -7188,7 +7325,7 @@ mod tests {
             works(&all),
             [
                 ("Die Kunst der Fuge".to_string(), 1),
-                ("Goldberg Variations".to_string(), 3),
+                ("Goldberg Variations".to_string(), 2),
                 ("Requiem v B-moll".to_string(), 2),
                 ("Stabat Mater".to_string(), 1),
                 ("Symphony no. 2".to_string(), 1),
@@ -7255,10 +7392,9 @@ mod tests {
             [
                 (
                     None,
-                    strings(&["/m/B/01", "/m/B/02", "/m/B/03"]),
+                    strings(&["/m/B/01", "/m/B/02", "/m/B/03", "/m/B/04"]),
                     String::new()
                 ),
-                (None, strings(&["/m/B/04"]), String::new()),
                 (None, strings(&["/m/E/03"]), String::new()),
             ]
         );
@@ -7340,8 +7476,7 @@ mod tests {
                 (
                     "Goldberg Variations".to_string(),
                     vec![
-                        strings(&["/m/B/01", "/m/B/02", "/m/B/03"]),
-                        strings(&["/m/B/04"]),
+                        strings(&["/m/B/01", "/m/B/02", "/m/B/03", "/m/B/04"]),
                         strings(&["/m/E/03"]),
                     ],
                     goldberg
@@ -7397,10 +7532,7 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        assert_eq!(
-            single_movements,
-            [strings(&["/m/B/04"]), strings(&["/m/E/03"])]
-        );
+        assert_eq!(single_movements, [strings(&["/m/E/03"])]);
     }
 
     #[test]
@@ -7444,6 +7576,298 @@ mod tests {
             .map(|recording| recording.length)
             .collect::<Vec<_>>();
         assert_eq!(lengths, [Some(450), None]);
+    }
+
+    #[test]
+    fn a_work_played_again_on_an_album_is_split_only_by_another_date_or_other_performers() {
+        let conn = test_db();
+        let bach = "\njohann sebastian bach\tJohann Sebastian Bach\tBach, Johann Sebastian\n";
+        // A track: its work, the place of its movement, the keys of its
+        // performers, and when it was recorded. "arr" arranges "orig"
+        type Track<'a> = (&'a str, &'a str, &'a [&'a str], Option<&'a str>);
+        let albums: &[(&str, &[Track])] = &[
+            // Played again eleven years later, by the same pianist
+            (
+                "remake",
+                &[
+                    ("remake", "1", &["p"], Some("1990")),
+                    ("remake", "2", &["p"], Some("1990")),
+                    ("remake", "3", &["p"], Some("1990")),
+                    ("remake", "1", &["p"], Some("2001")),
+                    ("remake", "2", &["p"], Some("2001")),
+                    ("remake", "3", &["p"], Some("2001")),
+                ],
+            ),
+            // Two pianists, without dates
+            (
+                "pianists",
+                &[
+                    ("pianists", "1", &["a"], None),
+                    ("pianists", "2", &["a"], None),
+                    ("pianists", "1", &["b"], None),
+                    ("pianists", "2", &["b"], None),
+                ],
+            ),
+            // A da capo, by the same players at the same time
+            (
+                "da-capo",
+                &[
+                    ("da-capo", "1", &["a"], Some("2024-02")),
+                    ("da-capo", "2", &["a"], Some("2024-02")),
+                    ("da-capo", "1", &["a"], Some("2024-02")),
+                ],
+            ),
+            // Sessions less than a year apart
+            (
+                "sessions",
+                &[
+                    ("sessions", "1", &[], Some("1997-04/1997-09")),
+                    ("sessions", "2", &[], Some("1997-04/1997-09")),
+                    ("sessions", "1", &[], Some("1998-03")),
+                ],
+            ),
+            // A date on one side only
+            (
+                "one-date",
+                &[
+                    ("one-date", "1", &[], None),
+                    ("one-date", "2", &[], None),
+                    ("one-date", "1", &[], Some("2001")),
+                ],
+            ),
+            // A performer in common, without dates
+            (
+                "in-common",
+                &[
+                    ("in-common", "1", &["a", "b"], None),
+                    ("in-common", "2", &["a", "b"], None),
+                    ("in-common", "1", &["b", "c"], None),
+                ],
+            ),
+            // The place of the track before, as the parts of a movement in
+            // two tracks have, whatever their tags say
+            (
+                "parts",
+                &[
+                    ("parts", "1", &["a"], Some("1990")),
+                    ("parts", "2", &["a"], Some("1990")),
+                    ("parts", "2", &["b"], Some("2001")),
+                ],
+            ),
+            // The years next to each other aren't a year apart, and those
+            // two years apart are
+            (
+                "next-year",
+                &[
+                    ("next-year", "1", &[], Some("1990")),
+                    ("next-year", "2", &[], Some("1990")),
+                    ("next-year", "1", &[], Some("1991")),
+                ],
+            ),
+            (
+                "two-years",
+                &[
+                    ("two-years", "1", &[], Some("1990")),
+                    ("two-years", "2", &[], Some("1990")),
+                    ("two-years", "1", &[], Some("1992")),
+                ],
+            ),
+            // The movements of an arrangement go with those of the work it's
+            // listed under, so they come again there: by the same players,
+            // it's the same recording, and by others, another
+            (
+                "arranged",
+                &[
+                    ("orig", "1", &["a"], None),
+                    ("orig", "2", &["a"], None),
+                    ("arr", "1", &["a"], None),
+                    ("arr", "2", &["a"], None),
+                ],
+            ),
+            (
+                "arranged-apart",
+                &[
+                    ("orig", "1", &["a"], None),
+                    ("orig", "2", &["a"], None),
+                    ("arr", "1", &["b"], None),
+                    ("arr", "2", &["b"], None),
+                ],
+            ),
+        ];
+        for (album, tracks) in albums {
+            for (n, (work, place, performers, recorded)) in (1u32..).zip(tracks.iter()) {
+                let path = format!("/m/{album}/{n:02}");
+                // The lines of `performer_entries()`, as soloists
+                let performers = (!performers.is_empty()).then(|| {
+                    performers
+                        .iter()
+                        .map(|key| format!("\ns\t{key}\t{key}\t{key}\t"))
+                        .collect::<String>()
+                        + "\n"
+                });
+                let arranges = (*work == "arr").then_some("orig");
+                conn.execute(
+                    "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                         disc, track, work_key, work, work_composers,
+                                         movement_order, performers, fields,
+                                         work_arrangement_of, work_arrangement_of_id)
+                     VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2, 1, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                    rusqlite::params![
+                        path.as_bytes(),
+                        album,
+                        n,
+                        work,
+                        bach,
+                        place,
+                        performers,
+                        recorded.map(|date| format!("rd\t{date}\n")),
+                        arranges,
+                    ],
+                )
+                .unwrap();
+            }
+        }
+
+        // The recordings of each work, by the numbers of their tracks on
+        // their albums
+        type Recordings<'a> = &'a [(&'a str, &'a [u32])];
+        let expected: &[(&[&str], Recordings)] = &[
+            (
+                &["remake"],
+                &[("remake", &[1, 2, 3]), ("remake", &[4, 5, 6])],
+            ),
+            (
+                &["pianists"],
+                &[("pianists", &[1, 2]), ("pianists", &[3, 4])],
+            ),
+            (&["da-capo"], &[("da-capo", &[1, 2, 3])]),
+            (&["sessions"], &[("sessions", &[1, 2, 3])]),
+            (&["one-date"], &[("one-date", &[1, 2, 3])]),
+            (&["in-common"], &[("in-common", &[1, 2, 3])]),
+            (&["parts"], &[("parts", &[1, 2, 3])]),
+            (&["next-year"], &[("next-year", &[1, 2, 3])]),
+            (
+                &["two-years"],
+                &[("two-years", &[1, 2]), ("two-years", &[3])],
+            ),
+            (
+                &["orig", "arr"],
+                &[
+                    ("arranged", &[1, 2, 3, 4]),
+                    ("arranged-apart", &[1, 2]),
+                    ("arranged-apart", &[3, 4]),
+                ],
+            ),
+        ];
+        let all = super::TrackFilter::default();
+        let strings = |paths: &[PathBuf]| {
+            paths
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        for (keys, recordings) in expected {
+            let keys: Vec<String> = keys.iter().map(ToString::to_string).collect();
+            let found = super::query_work_recordings(&conn, &keys, &all, &[])
+                .unwrap()
+                .into_iter()
+                .map(|recording| strings(&recording.paths))
+                .collect::<Vec<_>>();
+            let wanted = recordings
+                .iter()
+                .map(|(album, tracks)| {
+                    tracks
+                        .iter()
+                        .map(|n| format!("/m/{album}/{n:02}"))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(found, wanted, "{keys:?}");
+        }
+
+        // The rows count them, as Play a Random Work picks from them; the
+        // arrangement is listed under the work
+        let mut works = super::query_works(&conn, &all, &[])
+            .unwrap()
+            .into_iter()
+            .map(|work| (work.key, work.recordings))
+            .collect::<Vec<_>>();
+        works.sort();
+        let mut wanted = expected
+            .iter()
+            .map(|(keys, recordings)| (keys[0].to_string(), recordings.len() as u32))
+            .collect::<Vec<_>>();
+        wanted.sort();
+        assert_eq!(works, wanted);
+        let candidates = super::query_work_recording_candidates(&conn, &all, &[]).unwrap();
+        assert_eq!(candidates.len(), wanted.len());
+        for candidate in &candidates {
+            assert_eq!(
+                candidate.recordings.len(),
+                candidate.info.recordings as usize,
+                "{}",
+                candidate.info.key
+            );
+        }
+    }
+
+    // Prints, for a library database, the albums where a work has more than
+    // one recording, with the tracks of each, to check the rule of
+    // `recordings_of_works()` on a real library rather than on a copy of it:
+    //   DISMAS_LIBRARY_DB=~/.local/share/dismas/library.db \
+    //     cargo test print_work_splits -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn print_work_splits() {
+        let path = std::env::var_os("DISMAS_LIBRARY_DB").expect("DISMAS_LIBRARY_DB is not set");
+        let conn = rusqlite::Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        super::add_functions(&conn).unwrap();
+        let rows = super::query_work_rows(
+            &conn,
+            &super::TrackFilter::default(),
+            &[],
+            &[],
+            super::Lengths::Skip,
+        )
+        .unwrap();
+        let works = super::listed_works(&rows, &mut super::RecordingDates::new(&conn));
+        let mut splits = 0;
+        for work in &works {
+            let mut by_album: std::collections::BTreeMap<&str, Vec<&[usize]>> =
+                std::collections::BTreeMap::new();
+            for recording in &work.recordings {
+                let album = rows[recording.rows[0]].album_id.as_str();
+                by_album.entry(album).or_default().push(&recording.rows);
+            }
+            for recordings in by_album.values().filter(|recordings| recordings.len() > 1) {
+                splits += 1;
+                let first = &rows[recordings[0][0]];
+                println!(
+                    "{} on {}",
+                    work.info.name,
+                    first.album.as_deref().unwrap_or(&first.album_id)
+                );
+                for recording in recordings {
+                    let paths: Vec<String> = recording
+                        .iter()
+                        .map(|&i| rows[i].path.display().to_string())
+                        .collect();
+                    println!("    {}", paths.join(", "));
+                }
+            }
+        }
+        println!(
+            "{} works, {} recordings, {splits} albums with more than one recording of a work",
+            works.len(),
+            works
+                .iter()
+                .map(|work| work.recordings.len())
+                .sum::<usize>()
+        );
     }
 
     #[test]

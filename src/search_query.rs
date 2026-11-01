@@ -30,6 +30,9 @@ mod values;
 use std::ops::Range;
 
 pub use eval::{Candidate, Context};
+// The times a date in the tags covers, which the library compares the
+// recording dates of a work's tracks by
+pub(crate) use values::tagged_span;
 use values::{CatalogueTest, DateRange, NumberRange, PathTest};
 
 use crate::{
