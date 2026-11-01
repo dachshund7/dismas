@@ -94,7 +94,8 @@ impl Queue {
         self.imp().store.upcast_ref()
     }
 
-    fn tracks(&self) -> Vec<Track> {
+    // The tracks, in the order of the queue
+    pub fn tracks(&self) -> Vec<Track> {
         self.imp().store.iter::<Track>().flatten().collect()
     }
 

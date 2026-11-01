@@ -485,25 +485,27 @@ impl TrackCredits {
     // artist performs too, as songwriters do, whose band would only
     // clutter the row
     pub fn performers_of_composer(&self, artist: Option<&str>) -> Option<String> {
-        let artist = artist.filter(|a| self.only_names_composer(a))?;
-        Some(self.summary(Some(artist)))
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                self.album_performers_of_composer(artist)
-                    .map(ToString::to_string)
-            })
+        let (conductors, performers) = self.performer_groups_of_composer(artist)?;
+        Some(summary_line(&conductors, &performers))
     }
 
     // The performers `performers_of_composer()` names, one by one; the
     // performers in the album artist are one name, as they are written
     pub fn performer_names_of_composer(&self, artist: Option<&str>) -> Option<Vec<&str>> {
+        let (conductors, performers) = self.performer_groups_of_composer(artist)?;
+        Some(conductors.into_iter().chain(performers).collect())
+    }
+
+    // The conductors and the other performers that
+    // `performers_of_composer()` names, apart
+    fn performer_groups_of_composer(&self, artist: Option<&str>) -> Option<(Vec<&str>, Vec<&str>)> {
         let artist = artist.filter(|a| self.only_names_composer(a))?;
         let (conductors, performers) = self.summary_names(Some(artist));
-        let names = conductors.into_iter().chain(performers).collect::<Vec<_>>();
-        if names.is_empty() {
-            self.album_performers_of_composer(artist).map(|p| vec![p])
+        if conductors.is_empty() && performers.is_empty() {
+            let performers = self.album_performers_of_composer(artist)?;
+            Some((Vec::new(), vec![performers]))
         } else {
-            Some(names)
+            Some((conductors, performers))
         }
     }
 
@@ -648,10 +650,7 @@ impl TrackCredits {
     // long list of players
     pub fn summary(&self, artist: Option<&str>) -> String {
         let (conductors, performers) = self.summary_names(artist);
-        [conductors.join(", "), performers.join(", ")]
-            .iter()
-            .filter(|s| !s.is_empty())
-            .join(" · ")
+        summary_line(&conductors, &performers)
     }
 
     // The conductors and the performers that `summary()` names, apart
@@ -740,6 +739,14 @@ impl TrackCredits {
         );
         listed
     }
+}
+
+// The conductors, then the other performers, on one line, apart
+fn summary_line(conductors: &[&str], performers: &[&str]) -> String {
+    [conductors.join(", "), performers.join(", ")]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .join(" · ")
 }
 
 // Whether an artist names a composer: in full, or by the first and last

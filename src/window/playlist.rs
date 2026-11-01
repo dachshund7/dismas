@@ -661,21 +661,14 @@ impl Window {
         };
 
         let shown = self.shown_queue_rows();
-        let old_order: Vec<Track> = queue.model().iter::<Track>().flatten().collect();
+        let old_order = queue.tracks();
         player.move_tracks(&tracks, before.as_ref());
         self.store_queue();
 
         // Dragging works in the queue, so the focus goes to the dropped
         // track; not when the drag starts, as focusing a row that's cut off
         // scrolls it from under the pointer
-        let queue_view = self.imp().playlist_view.queue_view();
-        if let Some(model) = queue_view.model()
-            && let Some(pos) = (0..model.n_items())
-                .find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
-        {
-            queue_view.scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
-            queue_view.grab_focus();
-        }
+        self.focus_queue_track(Some(track));
 
         // The rows get their new places when the list is laid out, before
         // it's drawn, so they can still be drawn in their old places first
@@ -825,9 +818,9 @@ impl Window {
     fn focus_queue_track(&self, track: Option<&Track>) {
         let playlist_view = &self.imp().playlist_view;
         let queue_view = playlist_view.queue_view();
-        let pos = track.zip(queue_view.model()).and_then(|(track, model)| {
-            (0..model.n_items()).find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
-        });
+        let pos = track
+            .zip(queue_view.model())
+            .and_then(|(track, model)| utils::track_position(model.upcast_ref(), track));
         if let Some(pos) = pos {
             queue_view.scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
             queue_view.grab_focus();
@@ -846,7 +839,7 @@ impl Window {
             return;
         }
         let mut undo = self.take_queue_undo();
-        let tracks: Vec<Track> = queue.model().iter::<Track>().flatten().collect();
+        let tracks = queue.tracks();
         let unshuffled = playlists::load_unshuffled(&self.selected_playlist());
         self.clear_queue();
         // Emptying it is what goes up, and this is still the playlist that

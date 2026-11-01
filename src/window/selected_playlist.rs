@@ -159,6 +159,14 @@ impl Window {
         playlists::save(&name, &player.queue().files());
     }
 
+    // Whether the tracks of the selected playlist, `name`, can be put in
+    // another order: not while tracks are read, as the queue doesn't have
+    // them all yet, nor once a saved playlist is deleted, which can still
+    // be playing
+    fn can_reorder(&self, name: &str) -> bool {
+        self.imp().loads.get() == 0 && (name.is_empty() || playlists::exists(name))
+    }
+
     // The shuffle button shows whether the selected playlist was shuffled,
     // and keeps the order it had before; it's on, to put it back, even
     // when there's a single track left
@@ -179,12 +187,8 @@ impl Window {
     pub(super) fn shuffle_queue(&self) {
         let player = self.player();
         let queue = player.queue();
-        // While tracks are read, the queue doesn't have them all yet
         let name = self.selected_playlist();
-        if queue.is_empty()
-            || self.imp().loads.get() > 0
-            || (!name.is_empty() && !playlists::exists(&name))
-        {
+        if queue.is_empty() || !self.can_reorder(&name) {
             return;
         }
 
@@ -237,16 +241,12 @@ impl Window {
     pub(super) fn sort_queue(&self, key: SortKey) {
         let player = self.player();
         let queue = player.queue();
-        // While tracks are read, the queue doesn't have them all yet
         let name = self.selected_playlist();
-        if queue.n_tracks() < 2
-            || self.imp().loads.get() > 0
-            || (!name.is_empty() && !playlists::exists(&name))
-        {
+        if queue.n_tracks() < 2 || !self.can_reorder(&name) {
             return;
         }
 
-        let order: Vec<Track> = queue.model().iter::<Track>().flatten().collect();
+        let order = queue.tracks();
         let shuffled = playlists::is_shuffled(&name);
         let unshuffled = shuffled
             .then(|| playlists::load_unshuffled(&name))
@@ -304,10 +304,7 @@ impl Window {
         let queue = player.queue();
         let name = self.selected_playlist();
         // Emptied since for other tracks, such as those of another playlist
-        if self.imp().loads.get() > 0
-            || undo.generation != queue.generation()
-            || (!name.is_empty() && !playlists::exists(&name))
-        {
+        if undo.generation != queue.generation() || !self.can_reorder(&name) {
             return;
         }
 

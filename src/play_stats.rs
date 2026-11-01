@@ -422,6 +422,30 @@ pub fn track_stats(uris: &[String]) -> HashMap<String, TrackStats> {
     }
 }
 
+// The totals of every track heard, by URI: for many tracks, as a library's,
+// one read of them all is quicker than reading them one at a time
+pub fn all_track_stats() -> HashMap<String, TrackStats> {
+    match with_connection(|conn| query_all_track_stats(conn)) {
+        Ok(stats) => stats,
+        Err(e) => {
+            warn!("Unable to load the play stats of the tracks: {e}");
+            HashMap::new()
+        }
+    }
+}
+
+fn query_all_track_stats(conn: &Connection) -> rusqlite::Result<HashMap<String, TrackStats>> {
+    let mut stmt = conn.prepare("SELECT uri, plays, last_played FROM totals")?;
+    stmt.query_map([], |row| {
+        let track = TrackStats {
+            plays: row.get(1)?,
+            last_heard: row.get(2)?,
+        };
+        Ok((row.get(0)?, track))
+    })?
+    .collect()
+}
+
 fn query_track_stats(
     conn: &mut Connection,
     uris: &[String],
@@ -655,17 +679,7 @@ fn query_search_stats(
 ) -> rusqlite::Result<SearchStats> {
     let mut stats = SearchStats::default();
     if needs.stats {
-        let mut stmt = conn.prepare("SELECT uri, plays, last_played FROM totals")?;
-        for row in stmt.query_map([], |row| {
-            let track = TrackStats {
-                plays: row.get(1)?,
-                last_heard: row.get(2)?,
-            };
-            Ok((row.get(0)?, track))
-        })? {
-            let (uri, track) = row?;
-            stats.heard.insert(uri, track);
-        }
+        stats.heard = query_all_track_stats(conn)?;
     }
     if needs.favorites {
         let mut stmt = conn.prepare("SELECT uri, added FROM favorites")?;

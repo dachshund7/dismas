@@ -1194,6 +1194,23 @@ pub fn album_track_paths(hidden: &[PathBuf]) -> Vec<(String, Vec<PathBuf>)> {
     })
 }
 
+// The title of an album, as `albums()` gives it, without the tracks in the
+// `hidden` folders
+pub fn album_title(album_id: &str, hidden: &[PathBuf]) -> Option<String> {
+    query_or_default("look up the title of an album", |conn| {
+        use rusqlite::types::Value;
+        let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+        conn.query_row(
+            &format!("SELECT MAX(album) FROM tracks WHERE album_id = ?{hidden_sql}"),
+            rusqlite::params_from_iter(
+                std::iter::once(Value::Text(album_id.to_owned()))
+                    .chain(hidden_params.into_iter().map(Value::Blob)),
+            ),
+            |row| row.get(0),
+        )
+    })
+}
+
 fn query_album_track_paths(
     conn: &Connection,
     hidden: &[PathBuf],

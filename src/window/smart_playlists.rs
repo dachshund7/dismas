@@ -69,9 +69,9 @@ impl Window {
         self.player().save_listen();
         let view = &self.imp().library_view;
         let pool = view.random_pool();
-        let random = Random::of(&pool);
+        let page = pool.page;
         let hidden = view.hidden_folders();
-        let last = random.last(self).borrow().clone();
+        let last = last_random(self, page).borrow().clone();
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
@@ -82,11 +82,11 @@ impl Window {
                     .ok()
                     .flatten();
                 let Some(picked) = picked else {
-                    win.add_toast(random.none_found());
+                    win.add_toast(none_found(page));
                     return;
                 };
-                let message = random.announce(&picked.name, picked.part.as_ref());
-                random.last(&win).replace(Some(picked.id));
+                let message = announce(page, &picked.name, picked.part.as_ref());
+                last_random(&win, page).replace(Some(picked.id));
                 let files = picked.paths.into_iter().map(gio::File::for_path).collect();
                 win.play_announced_in_place_of_queue(files, Some(message));
             }
@@ -143,15 +143,7 @@ impl Window {
     }
 }
 
-// What Play a Random … picks on the page it's chosen on
-#[derive(Clone, Copy)]
-enum Random {
-    Album,
-    Track,
-    Work,
-}
-
-// An album, a track or a work that `Random` picked: its id, which it isn't
+// An album, a track or a work that Play a Random … picked: its id, which it isn't
 // picked by the next time, its name, and the paths of the tracks to play
 struct Picked {
     id: String,
@@ -183,60 +175,50 @@ impl Part {
     }
 }
 
-impl Random {
-    fn of(pool: &RandomPool) -> Self {
-        match pool {
-            RandomPool::Albums(_) => Self::Album,
-            RandomPool::Tracks(_) => Self::Track,
-            RandomPool::Works { .. } => Self::Work,
-        }
+// The id of the one Play a Random … played last on the page
+fn last_random(win: &Window, page: LibraryPage) -> &RefCell<Option<String>> {
+    let imp = win.imp();
+    match page {
+        LibraryPage::Albums => &imp.last_random_album,
+        LibraryPage::Tracks => &imp.last_random_track,
+        LibraryPage::Works => &imp.last_random_work,
     }
+}
 
-    // The id of the one played last
-    fn last(self, win: &Window) -> &RefCell<Option<String>> {
-        let imp = win.imp();
-        match self {
-            Self::Album => &imp.last_random_album,
-            Self::Track => &imp.last_random_track,
-            Self::Work => &imp.last_random_work,
-        }
+fn none_found(page: LibraryPage) -> String {
+    match page {
+        LibraryPage::Albums => i18n("No albums found"),
+        LibraryPage::Tracks => i18n("No tracks found"),
+        LibraryPage::Works => i18n("No works found"),
     }
+}
 
-    fn none_found(self) -> String {
-        match self {
-            Self::Album => i18n("No albums found"),
-            Self::Track => i18n("No tracks found"),
-            Self::Work => i18n("No works found"),
+// The toast that names the one picked, as it plays
+fn announce(page: LibraryPage, name: &str, part: Option<&Part>) -> String {
+    match (page, part) {
+        // Translators: `{album}` must be left unmodified; it is
+        // expanded to the title of an album
+        (LibraryPage::Albums, _) => i18n_k("Playing “{album}”", &[("album", name)]),
+        // Translators: `{track}` must be left unmodified; it is
+        // expanded to the title of a track
+        (LibraryPage::Tracks, _) => i18n_k("Playing “{track}”", &[("track", name)]),
+        // Translators: `{work}` must be left unmodified; it is expanded
+        // to the name of a musical work, such as “Goldberg Variations”
+        (LibraryPage::Works, None) => i18n_k("Playing “{work}”", &[("work", name)]),
+        // Translators: `{work}` must be left unmodified; it is expanded
+        // to the name of a musical work, such as “Don Giovanni”, of
+        // which a single movement plays, such as an aria
+        (LibraryPage::Works, Some(Part::Movement)) => {
+            i18n_k("Playing part of “{work}”", &[("work", name)])
         }
-    }
-
-    // The toast that names the one picked, as it plays
-    fn announce(self, name: &str, part: Option<&Part>) -> String {
-        match (self, part) {
-            // Translators: `{album}` must be left unmodified; it is
-            // expanded to the title of an album
-            (Self::Album, _) => i18n_k("Playing “{album}”", &[("album", name)]),
-            // Translators: `{track}` must be left unmodified; it is
-            // expanded to the title of a track
-            (Self::Track, _) => i18n_k("Playing “{track}”", &[("track", name)]),
-            // Translators: `{work}` must be left unmodified; it is expanded
-            // to the name of a musical work, such as “Goldberg Variations”
-            (Self::Work, None) => i18n_k("Playing “{work}”", &[("work", name)]),
-            // Translators: `{work}` must be left unmodified; it is expanded
-            // to the name of a musical work, such as “Don Giovanni”, of
-            // which a single movement plays, such as an aria
-            (Self::Work, Some(Part::Movement)) => {
-                i18n_k("Playing part of “{work}”", &[("work", name)])
-            }
-            // Translators: `{work}` and `{arrangement}` must be left
-            // unmodified; they are expanded to the name of a musical work and
-            // to what the arrangement of it that plays is, such as “for
-            // piano, Busoni”, or “arrangement”
-            (Self::Work, Some(Part::Arrangement(arrangement))) => i18n_k(
-                "Playing “{work}”, {arrangement}",
-                &[("work", name), ("arrangement", arrangement)],
-            ),
-        }
+        // Translators: `{work}` and `{arrangement}` must be left
+        // unmodified; they are expanded to the name of a musical work and
+        // to what the arrangement of it that plays is, such as “for
+        // piano, Busoni”, or “arrangement”
+        (LibraryPage::Works, Some(Part::Arrangement(arrangement))) => i18n_k(
+            "Playing “{work}”, {arrangement}",
+            &[("work", name), ("arrangement", arrangement)],
+        ),
     }
 }
 
@@ -246,13 +228,15 @@ impl Random {
 fn pick(pool: RandomPool, hidden: &[PathBuf], last: Option<&str>) -> Option<Picked> {
     let now = play_stats::now();
     let mut rng = rand::rng();
-    match pool {
-        RandomPool::Albums(filter) => pick_album(&filter, hidden, last, now, &mut rng),
-        RandomPool::Tracks(filter) => pick_track(&filter, hidden, last, now, &mut rng),
-        RandomPool::Works {
-            filter,
-            favorites_only,
-        } => pick_work(&filter, favorites_only, hidden, last, now, &mut rng),
+    let RandomPool {
+        page,
+        filter,
+        favorites_only,
+    } = pool;
+    match page {
+        LibraryPage::Albums => pick_album(&filter, hidden, last, now, &mut rng),
+        LibraryPage::Tracks => pick_track(&filter, hidden, last, now, &mut rng),
+        LibraryPage::Works => pick_work(&filter, favorites_only, hidden, last, now, &mut rng),
     }
 }
 
@@ -266,33 +250,22 @@ fn pick_album(
     rng: &mut impl rand::Rng,
 ) -> Option<Picked> {
     let shown = (!filter.is_empty()).then(|| library::search_albums(filter, hidden));
-    let mut tracks: HashMap<String, Vec<PathBuf>> =
-        library::album_track_paths(hidden).into_iter().collect();
-    let mut albums: Vec<(library::AlbumInfo, Vec<PathBuf>)> = library::albums(hidden)
+    let mut albums: Vec<(String, Vec<PathBuf>)> = library::album_track_paths(hidden)
         .into_iter()
-        .filter(|album| {
-            shown
-                .as_ref()
-                .is_none_or(|shown| shown.contains_key(&album.id))
-        })
-        .filter_map(|album| {
-            let paths = tracks.remove(&album.id)?;
-            Some((album, paths))
-        })
+        .filter(|(id, _)| shown.as_ref().is_none_or(|shown| shown.contains_key(id)))
         .collect();
 
-    let uris: Vec<Vec<String>> = albums.iter().map(|(_, paths)| uris_of(paths)).collect();
-    let stats = play_stats::track_stats(&uris.concat());
-    let weights: Vec<f64> = uris
+    let stats = play_stats::all_track_stats();
+    let weights: Vec<f64> = albums
         .iter()
-        .map(|uris| heard_weight(uris, &stats, now))
+        .map(|(_, paths)| heard_weight(&uris_of(paths), &stats, now))
         .collect();
-    let ids: Vec<&str> = albums.iter().map(|(album, _)| album.id.as_str()).collect();
+    let ids: Vec<&str> = albums.iter().map(|(id, _)| id.as_str()).collect();
     let pos = pick_index(&ids, &weights, last, rng)?;
-    let (album, paths) = albums.swap_remove(pos);
+    let (id, paths) = albums.swap_remove(pos);
     Some(Picked {
-        id: album.id,
-        name: album.title,
+        name: library::album_title(&id, hidden).unwrap_or_default(),
+        id,
         part: None,
         paths,
     })
@@ -308,7 +281,7 @@ fn pick_track(
 ) -> Option<Picked> {
     let mut tracks = library::matching_tracks(filter, hidden);
     let mut uris: Vec<String> = tracks.iter().map(|(path, _)| uri_of(path)).collect();
-    let stats = play_stats::track_stats(&uris);
+    let stats = play_stats::all_track_stats();
     let weights: Vec<f64> = uris
         .iter()
         .map(|uri| heard_weight(std::slice::from_ref(uri), &stats, now))
@@ -349,7 +322,7 @@ fn pick_work(
         .map(PathBuf::as_path)
         .collect();
     let uris: Vec<String> = paths.iter().map(|path| uri_of(path)).collect();
-    let stats = play_stats::track_stats(&uris);
+    let stats = play_stats::all_track_stats();
     let heard: HashMap<&Path, TrackStats> = paths
         .into_iter()
         .zip(&uris)

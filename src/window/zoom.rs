@@ -17,9 +17,8 @@ impl Window {
     // zoom, the bell rings
     pub(super) fn zoom(&self, zoom: Zoom) {
         let imp = self.imp();
-        let in_pane = gtk::prelude::GtkWindowExt::focus(self)
-            .is_some_and(|focus| focus.is_ancestor(&*imp.playlist_pane))
-            || (imp.split_view.is_collapsed() && self.playlist_visible());
+        let in_pane =
+            self.focus_in_pane() || (imp.split_view.is_collapsed() && self.playlist_visible());
         let target = zoom_target(
             in_pane,
             LibraryPage::named(&self.page()).is_some(),

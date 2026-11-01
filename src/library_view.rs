@@ -127,18 +127,16 @@ impl LibraryPage {
 }
 
 // What Play a Random … picks from on the page shown, see
-// `LibraryView::random_pool()`
-pub enum RandomPool {
-    // The albums with a track the filter matches, which play whole
-    Albums(TrackFilter),
-    // The tracks the filter matches
-    Tracks(TrackFilter),
-    // The works listed for the filter, only the favorite ones with the
-    // heart on, and the recordings of them that it matches
-    Works {
-        filter: TrackFilter,
-        favorites_only: bool,
-    },
+// `LibraryView::random_pool()`: on the Albums page, the albums with a track
+// the filter matches, which play whole; on the Tracks page, the tracks the
+// filter matches; on the Works page, the works listed for the filter, and
+// the recordings of them that it matches
+pub struct RandomPool {
+    pub page: LibraryPage,
+    pub filter: TrackFilter,
+    // Whether the heart is on, which only the Works page leaves out of the
+    // filter, as it shows only the favorite works
+    pub favorites_only: bool,
 }
 
 // The albums dragged from the grid, with the words of the search each was
@@ -1963,14 +1961,10 @@ impl LibraryView {
     // the grid and the works are searched with it, rather than what the
     // page shows, which is still the other page's just after a page switch
     pub fn random_pool(&self) -> RandomPool {
-        let filter = self.wanted_filter();
-        match self.page() {
-            LibraryPage::Albums => RandomPool::Albums(filter),
-            LibraryPage::Tracks => RandomPool::Tracks(filter),
-            LibraryPage::Works => RandomPool::Works {
-                filter,
-                favorites_only: self.imp().favorites_button.is_active(),
-            },
+        RandomPool {
+            page: self.page(),
+            filter: self.wanted_filter(),
+            favorites_only: self.imp().favorites_button.is_active(),
         }
     }
 

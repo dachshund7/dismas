@@ -4,15 +4,20 @@
 use super::*;
 
 impl Window {
+    // Whether the focus is in the playlist pane, where Ctrl+F, typing and
+    // zooming go to what the pane shows, rather than to the page beside it
+    pub(super) fn focus_in_pane(&self) -> bool {
+        gtk::prelude::GtkWindowExt::focus(self)
+            .is_some_and(|focus| focus.is_ancestor(&*self.imp().playlist_pane))
+    }
+
     // The search that Ctrl+F and typing go to: the album search on the
     // albums, the tracks and the works, unless the focus is in the playlist
     // pane, and the queue's otherwise, as the player and the playlists have
     // no search of their own
     fn focused_search(&self) -> gtk::SearchEntry {
         let imp = self.imp();
-        let in_pane = gtk::prelude::GtkWindowExt::focus(self)
-            .is_some_and(|focus| focus.is_ancestor(&*imp.playlist_pane));
-        if !in_pane && LibraryPage::named(&self.page()).is_some() {
+        if !self.focus_in_pane() && LibraryPage::named(&self.page()).is_some() {
             imp.library_view.search_entry()
         } else {
             imp.playlist_view.queue_searchentry()

@@ -484,13 +484,15 @@ pub fn playlist_menu_label(name: &str) -> String {
     short_playlist_name(name).replace('_', "__")
 }
 
+// The position of a track in a list of tracks
+pub fn track_position(model: &gio::ListModel, track: &Track) -> Option<u32> {
+    (0..model.n_items()).find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
+}
+
 // Selects the tracks of a list from `from` to `to`, both included, in the
 // order of the list; returns false if either is not in it
 pub fn select_track_range(model: &gio::ListModel, from: &Track, to: &Track) -> bool {
-    let position = |track: &Track| {
-        (0..model.n_items()).find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
-    };
-    let (Some(from), Some(to)) = (position(from), position(to)) else {
+    let (Some(from), Some(to)) = (track_position(model, from), track_position(model, to)) else {
         return false;
     };
 
