@@ -982,14 +982,10 @@ impl Track {
             .clone()
             .unwrap_or_else(|| data.shown_title().to_string());
         // As the library tells works apart without the plugin's id
-        let work_key = credits.work_id.clone().unwrap_or_else(|| {
-            let composers = composers
-                .iter()
-                .map(|composer| composer.key.as_str())
-                .sorted()
-                .join("\x1f");
-            format!("t:{}\x1f{composers}", library::composer_key(&work_name))
-        });
+        let work_key = credits
+            .work_id
+            .clone()
+            .unwrap_or_else(|| library::named_work_key(&work_name, &composers));
         super::sort::Entry {
             continues_work: false,
             album: data.album().map(ToString::to_string),

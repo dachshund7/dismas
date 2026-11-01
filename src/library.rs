@@ -623,7 +623,7 @@ fn keep_added_times(conn: &Connection) {
 }
 
 // Whether the database has a table, which one made by an older version
-// can lack, as the tables other than the tracks are only made at a bump
+// can lack
 fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
@@ -1638,9 +1638,9 @@ pub struct WorkInfo {
     // For an arrangement, the work it arranges, and what it is, if
     // MusicBrainz says
     pub arrangement: Option<Arrangement>,
-    // The arrangements of it that are listed under it, rather than on
-    // their own, see `listed_under()`
-    pub arrangements: Vec<ArrangedWork>,
+    // The keys of the arrangements of it that are listed under it, rather
+    // than on their own, see `listed_under()`
+    pub arrangements: Vec<String>,
     pub composers: Vec<WorkComposer>,
     // The number of its recordings that the filter matches, those of its
     // arrangements included, see `recordings_of_works()`
@@ -1650,21 +1650,15 @@ pub struct WorkInfo {
     pub favorite: bool,
 }
 
-// An arrangement listed under the work it arranges: its key, and what it is
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ArrangedWork {
-    pub key: String,
-    pub arrangement: Arrangement,
-}
-
 impl WorkInfo {
     // Its key and those of the arrangements listed under it, the key first,
     // which take its tracks from the albums, see `TrackFilter`
     pub fn keys(&self) -> Vec<String> {
-        std::iter::once(&self.key)
-            .chain(self.arrangements.iter().map(|arranged| &arranged.key))
-            .cloned()
-            .collect()
+        self.all_keys().cloned().collect()
+    }
+
+    fn all_keys(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.key).chain(&self.arrangements)
     }
 
     // Whether it's among the `favorites`, the keys of the works marked and
@@ -1672,9 +1666,7 @@ impl WorkInfo {
     // `play_stats::favorite_work_keys()`: by its own key, or by that of an
     // arrangement listed under it
     pub fn is_among(&self, favorites: &HashSet<String>) -> bool {
-        std::iter::once(&self.key)
-            .chain(self.arrangements.iter().map(|arranged| &arranged.key))
-            .any(|key| favorites.contains(key))
+        self.all_keys().any(|key| favorites.contains(key))
     }
 
     // The names of its composers, as a list
@@ -1843,18 +1835,13 @@ fn query_work_recording_candidates(
     Ok(listed_works(&rows)
         .into_iter()
         .map(|listed| {
-            let arranged: HashSet<&str> = listed
-                .info
-                .arrangements
-                .iter()
-                .map(|arranged| arranged.key.as_str())
-                .collect();
+            let arranged = &listed.info.arrangements;
             WorkCandidate {
                 recordings: listed
                     .recordings
                     .iter()
                     .filter(|recording| recording.matching)
-                    .map(|recording| recording_candidate(&rows, &recording.rows, &arranged))
+                    .map(|recording| recording_candidate(&rows, &recording.rows, arranged))
                     .collect(),
                 paths: listed
                     .recordings
@@ -1873,7 +1860,7 @@ fn query_work_recording_candidates(
 fn recording_candidate(
     rows: &[WorkRow],
     recording: &[usize],
-    arranged: &HashSet<&str>,
+    arranged: &[String],
 ) -> RecordingCandidate {
     let rows: Vec<&WorkRow> = recording.iter().map(|&i| &rows[i]).collect();
     let first = rows[0];
@@ -1888,12 +1875,21 @@ fn recording_candidate(
             .then(|| known.iter().sum::<u64>() * tracks / known.len() as u64),
         single_movement: place
             .is_some_and(|place| rows.iter().all(|row| row.order.as_ref() == Some(place))),
-        arrangement: rows
-            .iter()
-            .all(|row| arranged.contains(row.work.as_str()))
-            .then(|| first.arrangement())
-            .flatten(),
+        arrangement: recording_arrangement(&rows, |work| arranged.iter().any(|key| key == work)),
     }
+}
+
+// What a recording is, from its rows, when they're all of arrangements
+// listed under its work, as `arranged` tells by their keys, rather than
+// of the work itself
+fn recording_arrangement(
+    rows: &[&WorkRow],
+    arranged: impl Fn(&str) -> bool,
+) -> Option<Arrangement> {
+    rows.iter()
+        .all(|row| arranged(&row.work))
+        .then(|| rows.first()?.arrangement())
+        .flatten()
 }
 
 // The works of the rows with a recording that the filter matches, sorted
@@ -1999,13 +1995,12 @@ fn listed_works(rows: &[WorkRow]) -> Vec<ListedWork> {
     let mut arranged: Vec<(&str, &str)> = listed.into_iter().collect();
     arranged.sort_unstable();
     for (key, under) in arranged {
-        if let Some(arrangement) = works.remove(key).and_then(|work| work.arrangement)
+        if works
+            .remove(key)
+            .is_some_and(|work| work.arrangement.is_some())
             && let Some(work) = works.get_mut(under)
         {
-            work.arrangements.push(ArrangedWork {
-                key: key.to_owned(),
-                arrangement,
-            });
+            work.arrangements.push(key.to_owned());
         }
     }
     sort_works(
@@ -2239,24 +2234,19 @@ fn query_track_work(
     path: &Path,
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Option<String>> {
-    let key: Option<String> = conn
-        .query_row(
-            "SELECT work_key FROM tracks WHERE path = ?1 AND work_key IS NOT NULL",
-            [path_bytes(path)],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(key) = key else {
-        return Ok(None);
-    };
-    let rows = query_work_rows(
-        conn,
-        &TrackFilter::default(),
-        std::slice::from_ref(&key),
-        hidden,
-        Lengths::Skip,
-    )?;
-    Ok((!rows.is_empty()).then_some(key))
+    // Only a work with tracks outside the hidden folders is listed
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    conn.query_row(
+        &format!(
+            "SELECT work_key FROM tracks AS track
+             WHERE path = ? AND work_key IS NOT NULL AND EXISTS (
+                 SELECT 1 FROM tracks
+                 WHERE work_key = track.work_key AND album_id IS NOT NULL{hidden_sql})"
+        ),
+        rusqlite::params_from_iter(std::iter::once(path_bytes(path).to_vec()).chain(hidden_params)),
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 // The recordings of a work that the filter matches, and those of the
@@ -2310,11 +2300,7 @@ fn query_work_recordings(
                     ),
                     paths: rows.iter().map(|row| row.path.clone()).collect(),
                     work_key: rows[0].work.clone(),
-                    arrangement: rows
-                        .iter()
-                        .all(|row| listed.contains_key(row.work.as_str()))
-                        .then(|| rows[0].arrangement())
-                        .flatten(),
+                    arrangement: recording_arrangement(&rows, |work| listed.contains_key(work)),
                 };
                 (collation, recording)
             })
@@ -2875,19 +2861,11 @@ fn scan_with(
         }
     }
     // When the files were added whose tracks an older version of the
-    // schema dropped, see `keep_added_times()`; a database of the version
-    // before them has no table for them until the next bump, which makes it
-    let mut kept = HashMap::new();
-    if has_table(conn, "added_times")? {
-        let mut stmt = conn.prepare("SELECT file, added FROM added_times")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
-        })?;
-        for row in rows {
-            let (file, added) = row?;
-            kept.insert(file, added);
-        }
-    }
+    // schema dropped, see `keep_added_times()`
+    let kept: HashMap<Vec<u8>, i64> = conn
+        .prepare("SELECT file, added FROM added_times")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
 
     // Find the files that are new or changed since the last scan
     let mut present = HashSet::new();
@@ -3427,21 +3405,11 @@ fn read_tags_only(path: &Path) -> Option<FileTags> {
 // The tracks of an audio file: the file, or the tracks that the CUE sheet
 // in its tags splits it into
 fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
-    let Some(FileTags {
-        tag,
-        extra,
-        properties,
-        format,
-        ..
-    }) = read_tags_only(path)
-    else {
+    let Some(tags) = read_tags_only(path) else {
         return vec![(path.to_path_buf(), TrackTags::default())];
     };
-    let file = Audio {
-        format: format.as_deref(),
-        properties: AudioProperties::of(&properties),
-        duration: properties.duration(),
-    };
+    let file = Audio::of(&tags);
+    let FileTags { tag, extra, .. } = tags;
 
     let sheet = extra
         .cue_sheet
@@ -3461,22 +3429,34 @@ fn read_tags(path: &Path) -> Vec<(PathBuf, TrackTags)> {
 }
 
 // What the fields take from an audio file
-struct Audio<'a> {
-    format: Option<&'a str>,
+#[derive(Default)]
+struct Audio {
+    format: Option<Cow<'static, str>>,
     properties: AudioProperties,
     duration: Duration,
 }
 
-impl<'a> Audio<'a> {
+impl Audio {
+    fn of(tags: &FileTags) -> Self {
+        Self {
+            format: tags.format.clone(),
+            properties: AudioProperties::of(&tags.properties),
+            duration: tags.properties.duration(),
+        }
+    }
+
     // The format and the properties of the whole file
-    fn whole(&self) -> (Option<&'a str>, Option<AudioProperties>) {
-        (self.format, Some(self.properties))
+    fn whole(&self) -> (Option<&str>, Option<AudioProperties>) {
+        (self.format.as_deref(), Some(self.properties))
     }
 
     // Those of a track of a CUE sheet, as long as its part of the file
-    fn part(&self, track: &CueTrack) -> (Option<&'a str>, Option<AudioProperties>) {
+    fn part(&self, track: &CueTrack) -> (Option<&str>, Option<AudioProperties>) {
         let length = track.length(self.duration);
-        (self.format, Some(self.properties.with_length(length)))
+        (
+            self.format.as_deref(),
+            Some(self.properties.with_length(length)),
+        )
     }
 }
 
@@ -3489,20 +3469,13 @@ fn read_sheet_tags(
     tracks
         .into_iter()
         .map(|(track, audio)| {
-            let (album_tag, format, properties) = files.entry(audio).or_insert_with(|| {
+            let (album_tag, file) = files.entry(audio).or_insert_with(|| {
                 let file = read_tags_only(audio);
                 let album_tag =
                     cue_sheet::album_tag(file.as_ref().map(|file| &file.tag), &sheet.sheet);
-                let format = file.as_ref().and_then(|file| file.format.clone());
-                (album_tag, format, file.map(|file| file.properties))
+                (album_tag, file.as_ref().map(Audio::of).unwrap_or_default())
             });
-            let properties = properties.clone().unwrap_or_default();
-            let file = Audio {
-                format: format.as_deref(),
-                properties: AudioProperties::of(&properties),
-                duration: properties.duration(),
-            };
-            cue_track_tags(sheet, album_tag, track, &file)
+            cue_track_tags(sheet, album_tag, track, file)
         })
         .collect()
 }
@@ -3702,9 +3675,6 @@ fn work_entry(credits: &TrackCredits, artist: Option<&str>) -> Option<WorkEntry>
     let is_movement = credits.is_movement();
 
     let composers = credited_work_composers(credits, artist);
-    let work_names: Vec<String> = composers.iter().map(|c| c.name.clone()).collect();
-    let work_sorts: Vec<String> = composers.into_iter().map(|c| c.sort).collect();
-
     let key = credits
         .work_id
         .clone()
@@ -3716,14 +3686,9 @@ fn work_entry(credits: &TrackCredits, artist: Option<&str>) -> Option<WorkEntry>
                 .filter(|_| !is_movement || credits.work_arrangement.is_some())
                 .cloned()
         })
-        .unwrap_or_else(|| {
-            let composers = work_names
-                .iter()
-                .map(|name| composer_key(name))
-                .sorted()
-                .join("\x1f");
-            format!("t:{}\x1f{composers}", composer_key(name))
-        });
+        .unwrap_or_else(|| named_work_key(name, &composers));
+    let work_names: Vec<String> = composers.iter().map(|c| c.name.clone()).collect();
+    let work_sorts: Vec<String> = composers.into_iter().map(|c| c.sort).collect();
     let order = credits
         .movement_order
         .as_ref()
@@ -3750,6 +3715,17 @@ fn work_entry(credits: &TrackCredits, artist: Option<&str>) -> Option<WorkEntry>
             .and_then(|arrangement| arrangement.of_id.clone()),
         part_ids: (!credits.work_part_ids.is_empty()).then(|| credits.work_part_ids.join("\n")),
     })
+}
+
+// The key of a work without a MusicBrainz id, see `work_entry()`: its name
+// and its composers, ignoring case and accents
+pub(crate) fn named_work_key(name: &str, composers: &[WorkComposer]) -> String {
+    let composers = composers
+        .iter()
+        .map(|composer| composer.key.as_str())
+        .sorted()
+        .join("\x1f");
+    format!("t:{}\x1f{composers}", composer_key(name))
 }
 
 // The composers a track's work is listed under, as the queue's headers
@@ -5027,25 +5003,6 @@ mod tests {
             fields.as_secs_f64() * 1000.0
         );
         assert!(words.as_secs_f64() <= before.as_secs_f64() * 1.5);
-    }
-
-    #[test]
-    fn a_database_made_before_the_kept_times_is_scanned() {
-        let music = test_dir("no-added-times");
-        crate::utils::write_test_wav(&music.join("Track.wav"), 1);
-        crate::utils::write_test_wav(&music.join("Other.wav"), 1);
-        let mut conn = test_db();
-        conn.execute_batch("DROP TABLE added_times").unwrap();
-        let (sender, _receiver) = async_channel::unbounded();
-
-        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
-        assert_eq!(result.n_changed, 2);
-        // A track whose file is gone is still forgotten
-        std::fs::remove_file(music.join("Track.wav")).unwrap();
-        let (result, _) = scan_roots(&mut conn, &roots_of(&[&music]), &sender).unwrap();
-        assert_eq!(result.n_changed, 1);
-
-        std::fs::remove_dir_all(&music).unwrap();
     }
 
     #[test]
@@ -6708,14 +6665,7 @@ mod tests {
             let mut works = super::query_works(&conn, filter, &[])
                 .unwrap()
                 .into_iter()
-                .map(|work| {
-                    let arrangements = work
-                        .arrangements
-                        .iter()
-                        .map(|arranged| arranged.key.clone())
-                        .collect::<Vec<_>>();
-                    (work.key, work.recordings, arrangements)
-                })
+                .map(|work| (work.key, work.recordings, work.arrangements))
                 .collect::<Vec<_>>();
             works.sort();
             works

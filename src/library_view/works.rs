@@ -178,7 +178,7 @@ impl LibraryView {
         (0..store.n_items()).find_map(|i| {
             let item = store.item(i).and_downcast::<glib::BoxedAnyObject>()?;
             let work = item.borrow::<library::WorkInfo>();
-            let listed = work.key == key || work.arrangements.iter().any(|a| a.key == key);
+            let listed = work.key == key || work.arrangements.iter().any(|a| a == key);
             listed.then(|| (i, work.clone()))
         })
     }

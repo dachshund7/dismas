@@ -725,14 +725,16 @@ fn set_albums(
     added: i64,
 ) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
-    for id in ids {
-        if favorite {
-            tx.execute(
-                "INSERT OR IGNORE INTO favorite_albums (album_id, added) VALUES (?1, ?2)",
-                params![id, added],
-            )?;
-        } else {
-            tx.execute("DELETE FROM favorite_albums WHERE album_id = ?1", [id])?;
+    if favorite {
+        let mut insert =
+            tx.prepare("INSERT OR IGNORE INTO favorite_albums (album_id, added) VALUES (?1, ?2)")?;
+        for id in ids {
+            insert.execute(params![id, added])?;
+        }
+    } else {
+        let mut delete = tx.prepare("DELETE FROM favorite_albums WHERE album_id = ?1")?;
+        for id in ids {
+            delete.execute([id])?;
         }
     }
     tx.commit()
@@ -796,18 +798,19 @@ pub fn update_favorite_albums(updates: &FavoriteAlbumUpdates) {
 fn update_albums(conn: &mut Connection, updates: &FavoriteAlbumUpdates) -> rusqlite::Result<()> {
     let FavoriteAlbumUpdates { moves, uris } = updates;
     let tx = conn.transaction()?;
-    for (old, new) in moves {
-        tx.execute(
-            "UPDATE OR IGNORE favorite_albums SET album_id = ?2 WHERE album_id = ?1",
-            [old, new],
-        )?;
-        tx.execute("DELETE FROM favorite_albums WHERE album_id = ?1", [old])?;
-    }
-    for (id, uri) in uris {
-        tx.execute(
-            "UPDATE favorite_albums SET uri = ?2 WHERE album_id = ?1 AND uri IS NULL",
-            [id, uri],
-        )?;
+    {
+        let mut move_to =
+            tx.prepare("UPDATE OR IGNORE favorite_albums SET album_id = ?2 WHERE album_id = ?1")?;
+        let mut delete = tx.prepare("DELETE FROM favorite_albums WHERE album_id = ?1")?;
+        for (old, new) in moves {
+            move_to.execute([old, new])?;
+            delete.execute([old])?;
+        }
+        let mut set_uri =
+            tx.prepare("UPDATE favorite_albums SET uri = ?2 WHERE album_id = ?1 AND uri IS NULL")?;
+        for (id, uri) in uris {
+            set_uri.execute([id, uri])?;
+        }
     }
     tx.commit()
 }
