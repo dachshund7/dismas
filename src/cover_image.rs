@@ -116,6 +116,14 @@ impl CoverImage {
         })
     }
 
+    // One of the album grid's thumbnails, to make a smaller one from it.
+    // Dismas made it, from pixels decoded in the sandbox, so it's decoded
+    // in the process, like `read_thumbnail`
+    pub fn open_thumbnail(path: &Path) -> Option<Self> {
+        let image = image::ImageReader::open(path).ok()?.decode().ok()?;
+        Some(Self::from_image(image))
+    }
+
     // A copy of the cover, scaled down to fit in `max_size`
     pub fn thumbnail(&self, max_size: u32) -> Option<Self> {
         match self.size_within(max_size) {

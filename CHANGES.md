@@ -10,9 +10,10 @@ All notable changes to this project will be documented in this file.
   and Works pages, with the buttons at the top of the main menu, with
   Ctrl+plus and Ctrl+minus, with Ctrl and the mouse wheel over them, or
   with a pinch on a touchscreen or a touchpad; Ctrl+0 puts them back to
-  their normal size. Smaller, more of them fit on a row. The first time
-  they're made larger, the covers are made again at that size, which the
-  progress bar counts
+  their normal size. Smaller, more of them fit on a row. When they're
+  made larger, the covers are made again at that size, which the
+  progress bar counts, and they're made smaller again once they're back
+  to their normal size
 - The text of the lyrics can be made larger or smaller the same way: with
   Text Size, in their header, with Ctrl+plus, Ctrl+minus and Ctrl+0 while
   the focus is on them, or while they show beside the player, and with

@@ -41,6 +41,7 @@ use crate::{
         title_from_file_name, track_search_text, track_title,
     },
     catalogue::{self, CatalogueNumber},
+    cover_image::CoverImage,
     cue_sheet::{self, Claims, CueTrack, SplitSheet},
     i18n::i18n,
     utils,
@@ -2242,9 +2243,9 @@ fn query_track_album(
 }
 
 // Updates the database with the tracks in the music folders, and makes the
-// covers of the albums for the grid `thumbnail_size` pixels wide; this
-// blocks, so it should be called from a separate thread
-pub fn scan(folders: &[MusicFolder], thumbnail_size: u32, sender: &Sender<ScanEvent>) {
+// covers of the albums for the grid at the sizes `thumbnail_sizes` gives;
+// this blocks, so it should be called from a separate thread
+pub fn scan(folders: &[MusicFolder], thumbnail_sizes: ThumbnailSizes, sender: &Sender<ScanEvent>) {
     let now = Instant::now();
     let roots = roots(folders);
     debug!("Library: reading {roots:?}");
@@ -2260,7 +2261,7 @@ pub fn scan(folders: &[MusicFolder], thumbnail_size: u32, sender: &Sender<ScanEv
             conn,
             &stale_albums,
             &roots.unavailable,
-            thumbnail_size,
+            thumbnail_sizes,
             sender,
         )? > 0;
         Ok(result)
@@ -2665,10 +2666,12 @@ fn update_covers(
     conn: &mut Connection,
     stale_albums: &HashSet<String>,
     hidden: &[PathBuf],
-    size: u32,
+    sizes: ThumbnailSizes,
     sender: &Sender<ScanEvent>,
 ) -> rusqlite::Result<usize> {
     let dir = covers_dir();
+    // Each album with its first track, and the thumbnail to make smaller,
+    // with its new size, when it's only too large
     let mut missing = Vec::new();
     let mut cover_times = HashMap::new();
     {
@@ -2689,16 +2692,16 @@ fn update_covers(
         })?;
         for row in rows {
             let (id, first_track, has_row, cover) = row?;
-            // Thumbnails smaller than the grid shows them, or in the format
-            // of older versions, are made again. A larger one, made while a
-            // monitor with a larger scale was connected, is kept, as the
-            // monitors can change from one start to the next
-            let outdated = cover.as_deref().is_some_and(|p| {
-                thumbnail_size(Path::new(p), &dir, &id).is_none_or(|made| made < size)
+            // Thumbnails at another size than the grid shows them, or in
+            // the format of older versions, are made again, or smaller
+            let update = cover.as_deref().map_or(ThumbnailUpdate::Keep, |p| {
+                sizes.update(thumbnail_size(Path::new(p), &dir, &id))
             });
             // Albums without cover art have no thumbnail, so we only check
             // that the thumbnails we created are still there
-            let made = cover.map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+            let made = cover
+                .as_ref()
+                .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
             let removed = matches!(made, Some(None));
             // A cover file next to the tracks can change without them: it's
             // newer than the thumbnail, or the album had no cover before. The
@@ -2714,12 +2717,19 @@ fn update_covers(
                 Some(None) => false,
                 None => cover_time().is_some(),
             };
-            // A track that's gone since the scan would leave its album
-            // without a cover for good
-            if (!has_row || outdated || removed || cover_file_changed || stale_albums.contains(&id))
-                && cue_sheet::real_path(&first_track).is_file()
+            if !has_row
+                || update == ThumbnailUpdate::Remake
+                || removed
+                || cover_file_changed
+                || stale_albums.contains(&id)
             {
-                missing.push((id, first_track));
+                // A track that's gone since the scan would leave its album
+                // without a cover for good
+                if cue_sheet::real_path(&first_track).is_file() {
+                    missing.push((id, first_track, None));
+                }
+            } else if let (ThumbnailUpdate::Shrink(size), Some(cover)) = (update, cover) {
+                missing.push((id, first_track, Some((PathBuf::from(cover), size))));
             }
         }
     }
@@ -2734,18 +2744,25 @@ fn update_covers(
         let mut upsert =
             tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
         let total = missing.len();
-        for (i, (id, first_track)) in missing.into_iter().enumerate() {
+        for (i, (id, first_track, larger)) in missing.into_iter().enumerate() {
             // Each cover is decoded in a sandboxed process, so making all
             // of them again, as when the grid shows them larger, takes a
-            // while
+            // while; making them smaller takes a fraction of that
             let _ = sender.try_send(ScanEvent::Covers(i, total));
             let made = utils::guarded(
                 first_track.display(),
-                || create_thumbnail(&first_track, &dir, &id, size),
+                || match &larger {
+                    Some((thumbnail, size)) => shrink_thumbnail(thumbnail, &dir, &id, *size)
+                        .or_else(|| create_thumbnail(&first_track, &dir, &id, sizes.wanted)),
+                    None => create_thumbnail(&first_track, &dir, &id, sizes.wanted),
+                },
                 || None,
             );
             n_made += usize::from(made.is_some());
-            let cover = made.map(|path| path.to_string_lossy().to_string());
+            // A thumbnail that couldn't be made smaller is kept as it is
+            let cover = made
+                .or_else(|| larger.map(|(thumbnail, _)| thumbnail))
+                .map(|path| path.to_string_lossy().to_string());
             upsert.execute(params![id, cover])?;
         }
         tx.execute(
@@ -2758,6 +2775,48 @@ fn update_covers(
 
     remove_unused_covers(conn, &dir)?;
     Ok(n_made)
+}
+
+// The sizes the album grid's thumbnails are made at, in pixels
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThumbnailSizes {
+    // As large as the grid shows the covers, on the monitor with the
+    // largest scale
+    pub wanted: u32,
+    // As large as the grid shows them at a scale of 2, the largest the
+    // thumbnails are made for
+    pub scale_2: u32,
+}
+
+// What a scan does with an album's thumbnail
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThumbnailUpdate {
+    Keep,
+    // Made smaller, at this size, from the thumbnail itself
+    Shrink(u32),
+    // Made again from the album's cover
+    Remake,
+}
+
+impl ThumbnailSizes {
+    // What to do with a thumbnail made at `made` pixels, or in the format
+    // of older versions (`None`), which is made again, as is one smaller
+    // than wanted. One made for a monitor at a scale of 2 is kept, as the
+    // monitors can change from one start to the next, and docking a laptop
+    // would otherwise make every thumbnail again. Another one larger than
+    // wanted was made while the covers were zoomed in: reading a cover
+    // smaller than its thumbnail scales it down each time, which takes
+    // several times as long, so it's made smaller instead
+    pub fn update(self, made: Option<u32>) -> ThumbnailUpdate {
+        match made {
+            Some(made) if made == self.wanted || made == self.scale_2 => ThumbnailUpdate::Keep,
+            Some(made) if made > self.scale_2.max(self.wanted) => {
+                ThumbnailUpdate::Shrink(self.scale_2.max(self.wanted))
+            }
+            Some(made) if made > self.wanted => ThumbnailUpdate::Shrink(self.wanted),
+            _ => ThumbnailUpdate::Remake,
+        }
+    }
 }
 
 // The name of the thumbnail of an album: a JPEG, or a PNG for a cover with
@@ -2838,6 +2897,19 @@ fn create_thumbnail(track: &Path, dir: &Path, album_id: &str, size: u32) -> Opti
     let tags = read_file_tags(track, ReadOptions::ALL)?;
     // A file without tags can still have a cover file next to it
     let image = CoverCache::load_cover(&tags.tag, track.parent(), size)?;
+    save_thumbnail(&image, dir, album_id, size)
+}
+
+// Makes a smaller thumbnail of an album from a larger one, made while the
+// covers were zoomed in, and returns its path. The larger one is read in the
+// process (`CoverImage::open_thumbnail`), which takes a fraction of the time
+// that decoding the cover again in the sandbox would
+fn shrink_thumbnail(thumbnail: &Path, dir: &Path, album_id: &str, size: u32) -> Option<PathBuf> {
+    let image = CoverImage::open_thumbnail(thumbnail)?.thumbnail(size)?;
+    save_thumbnail(&image, dir, album_id, size)
+}
+
+fn save_thumbnail(image: &CoverImage, dir: &Path, album_id: &str, size: u32) -> Option<PathBuf> {
     let dest = dir.join(thumbnail_name(album_id, size, image.has_alpha()));
     let saved = if image.has_alpha() {
         image.save_png(&dest)
@@ -3285,7 +3357,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        MusicFolder, Roots, is_mbid, path_bytes, path_from_bytes, thumbnail_name, thumbnail_size,
+        MusicFolder, Roots, ThumbnailSizes, ThumbnailUpdate, is_mbid, path_bytes, path_from_bytes,
+        shrink_thumbnail, thumbnail_name, thumbnail_size,
     };
 
     fn roots_of(paths: &[&Path]) -> Roots {
@@ -3813,6 +3886,77 @@ mod tests {
             thumbnail_size(Path::new("/elsewhere/album-240.jpg"), dir, "album"),
             None
         );
+    }
+
+    // The thumbnails follow the zoom: made again when the covers are zoomed
+    // in, made smaller when they come back, and kept when they were made for
+    // a monitor at a scale of 2
+    #[test]
+    fn thumbnails_follow_the_zoom() {
+        use ThumbnailUpdate::{Keep, Remake, Shrink};
+
+        // At the normal size: 240 pixels at a scale of 1, and 480 at 2
+        let scale_1 = ThumbnailSizes {
+            wanted: 240,
+            scale_2: 480,
+        };
+        let scale_2 = ThumbnailSizes {
+            wanted: 480,
+            scale_2: 480,
+        };
+        assert_eq!(scale_1.update(Some(240)), Keep);
+        assert_eq!(scale_2.update(Some(480)), Keep);
+        // Made while a monitor at a scale of 2 was connected
+        assert_eq!(scale_1.update(Some(480)), Keep);
+        // Made while the covers were zoomed in
+        assert_eq!(scale_1.update(Some(320)), Shrink(240));
+        assert_eq!(scale_1.update(Some(640)), Shrink(480));
+        assert_eq!(scale_2.update(Some(640)), Shrink(480));
+        // Too small, or in the format of older versions
+        assert_eq!(scale_2.update(Some(240)), Remake);
+        assert_eq!(scale_2.update(None), Remake);
+
+        // Zoomed in, at a scale of 2
+        let zoomed = ThumbnailSizes {
+            wanted: 640,
+            scale_2: 640,
+        };
+        assert_eq!(zoomed.update(Some(480)), Remake);
+        assert_eq!(zoomed.update(Some(640)), Keep);
+    }
+
+    // A thumbnail made smaller keeps its shape, and its format: a JPEG, or a
+    // PNG for one with transparency
+    #[test]
+    fn thumbnails_are_made_smaller_from_larger_ones() {
+        let dir = gtk::glib::mkdtemp("dismas-shrink-XXXXXX").unwrap();
+        let jpeg = dir.join("album-640.jpg");
+        image::RgbImage::from_pixel(640, 320, image::Rgb([200, 100, 50]))
+            .save(&jpeg)
+            .unwrap();
+        let png = dir.join("other-640-alpha.png");
+        image::RgbaImage::from_pixel(640, 640, image::Rgba([200, 100, 50, 128]))
+            .save(&png)
+            .unwrap();
+
+        let made = shrink_thumbnail(&jpeg, &dir, "album", 480).unwrap();
+        assert_eq!(made, dir.join("album-480.jpg"));
+        assert_eq!(image::image_dimensions(&made).unwrap(), (480, 240));
+
+        let made = shrink_thumbnail(&png, &dir, "other", 480).unwrap();
+        assert_eq!(made, dir.join("other-480-alpha.png"));
+        assert_eq!(image::image_dimensions(&made).unwrap(), (480, 480));
+
+        assert!(shrink_thumbnail(&dir.join("missing.jpg"), &dir, "gone", 480).is_none());
+        for name in [
+            "album-640.jpg",
+            "album-480.jpg",
+            "other-640-alpha.png",
+            "other-480-alpha.png",
+        ] {
+            std::fs::remove_file(dir.join(name)).unwrap();
+        }
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     // A track in the database, with paths relative to a folder

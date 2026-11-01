@@ -24,7 +24,10 @@ use crate::{
     audio::{Arrangement, PerformerKind, normalize_search_text},
     cover_image,
     i18n::{i18n, i18n_k, ni18n_f},
-    library::{self, Album, AlbumSort, Counted, Favorites, ScanEvent, ScanResult, TrackFilter},
+    library::{
+        self, Album, AlbumSort, Counted, Favorites, ScanEvent, ScanResult, ThumbnailUpdate,
+        TrackFilter,
+    },
     play_stats, utils,
     work_sections::{WorkSectionModel, same_section_of},
     zoom::{self, Zoom},
@@ -1236,11 +1239,11 @@ impl LibraryView {
         self.notify_cover_zoom();
         self.reset_covers();
 
-        // Larger than the covers were made, they're made again; until then,
-        // they're shown scaled up. The first scan makes them at the size
-        // they're zoomed to
+        // Larger than the covers were made, they're made again, and until
+        // then shown scaled up; back from a zoom in, they're made smaller.
+        // The first scan makes them at the size they're zoomed to
         let made = imp.thumbnail_size.get();
-        if made != 0 && thumbnail_size(step) > made {
+        if made != 0 && thumbnail_sizes(step).update(Some(made)) != ThumbnailUpdate::Keep {
             self.start_scan(false);
         }
 
@@ -2593,9 +2596,9 @@ impl LibraryView {
         );
 
         let (sender, receiver) = async_channel::unbounded();
-        let thumbnail_size = thumbnail_size(imp.cover_zoom.get());
-        imp.thumbnail_size.set(thumbnail_size);
-        std::thread::spawn(move || library::scan(&folders, thumbnail_size, &sender));
+        let thumbnail_sizes = thumbnail_sizes(imp.cover_zoom.get());
+        imp.thumbnail_size.set(thumbnail_sizes.wanted);
+        std::thread::spawn(move || library::scan(&folders, thumbnail_sizes, &sender));
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
@@ -2976,12 +2979,13 @@ fn mapped_album_cells(widget: &gtk::Widget) -> Vec<AlbumCell> {
     cells
 }
 
-// The width the covers of the grid are made at: the largest the grid shows
-// them, in the pixels of the monitor with the largest scale. A cover twice
-// as large as it's shown takes four times the memory, and the time to read.
+// The widths the covers of the grid are made at: the largest the grid shows
+// them, in the pixels of the monitor with the largest scale, and at a scale
+// of 2, which the scan keeps (`ThumbnailSizes::update`). A cover twice as
+// large as it's shown takes four times the memory, and the time to read.
 // Zoomed out, they're made at the normal size, as they're scaled down as
 // they're read, and zooming back in would make them all again
-fn thumbnail_size(zoom: i32) -> u32 {
+fn thumbnail_sizes(zoom: i32) -> library::ThumbnailSizes {
     let scale = gdk::Display::default()
         .and_then(|display| {
             display
@@ -2994,7 +2998,10 @@ fn thumbnail_size(zoom: i32) -> u32 {
         .unwrap_or(1)
         .clamp(1, 2);
     let (_, max_size) = grid_cover_sizes(zoom.max(0));
-    (max_size * scale) as u32
+    library::ThumbnailSizes {
+        wanted: (max_size * scale) as u32,
+        scale_2: (max_size * 2) as u32,
+    }
 }
 
 // The copy of an album that follows the pointer while it's dragged: its
