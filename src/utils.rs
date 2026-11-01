@@ -19,6 +19,23 @@ thread_local! {
     static CANCELLED_DRAG: RefCell<glib::WeakRef<gdk::Drag>> = RefCell::default();
 }
 
+// Fills the heart of a toggle button while it's on, and gives it the
+// tooltip that says what a click does then, if there are `tooltips`: to
+// add, and to remove
+pub fn setup_heart_button(button: &gtk::ToggleButton, tooltips: Option<(String, String)>) {
+    button.connect_active_notify(move |button| {
+        let on = button.is_active();
+        button.set_icon_name(if on {
+            "heart-filled-symbolic"
+        } else {
+            "heart-outline-symbolic"
+        });
+        if let Some((add, remove)) = &tooltips {
+            button.set_tooltip_text(Some(if on { remove } else { add }));
+        }
+    });
+}
+
 // Cancels the drag of a source, if it's dragging, and says if it was
 pub fn cancel_drag(source: &gtk::DragSource) -> bool {
     let Some(drag) = source.drag() else {

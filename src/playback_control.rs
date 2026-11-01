@@ -4,7 +4,7 @@
 use adw::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib, prelude::*};
 
-use crate::{audio::RepeatMode, i18n::i18n, volume_control::VolumeControl};
+use crate::{audio::RepeatMode, i18n::i18n, utils, volume_control::VolumeControl};
 
 mod imp {
     use super::*;
@@ -116,15 +116,10 @@ mod imp {
 
             // The heart is filled for a favorite, and the tooltip says what
             // a click does
-            self.favorite_button.connect_active_notify(|button| {
-                let (icon, tooltip) = if button.is_active() {
-                    ("heart-filled-symbolic", i18n("Remove from Favorites"))
-                } else {
-                    ("heart-outline-symbolic", i18n("Add to Favorites"))
-                };
-                button.set_icon_name(icon);
-                button.set_tooltip_text(Some(&tooltip));
-            });
+            utils::setup_heart_button(
+                &self.favorite_button,
+                Some((i18n("Add to Favorites"), i18n("Remove from Favorites"))),
+            );
 
             // Enter in the minutes starts the timer
             self.sleep_timer_minutes.connect_activate(|spin| {

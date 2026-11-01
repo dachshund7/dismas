@@ -8,9 +8,9 @@
 //! Ctrl and the mouse wheel, and with a pinch on a touchscreen or a
 //! touchpad.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
-use gtk::{gdk, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 
 // How a view is zoomed
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +34,35 @@ impl Zoom {
     }
 }
 
+// The steps a view is zoomed to: the setting that keeps the step, and
+// the smallest and the largest
+pub struct ZoomSteps {
+    pub key: &'static str,
+    pub min: i32,
+    pub max: i32,
+}
+
+impl ZoomSteps {
+    // The step the view is at
+    pub fn step(&self, settings: &gio::Settings) -> i32 {
+        settings.int(self.key).clamp(self.min, self.max)
+    }
+
+    // Zooms the view a step, or back to its normal size; false when it's
+    // at that end already
+    pub fn zoom(&self, settings: &gio::Settings, zoom: Zoom) -> bool {
+        zoom.step_from(settings.int(self.key), self.min, self.max)
+            .is_some_and(|step| settings.set_int(self.key, step).is_ok())
+    }
+
+    // What a table with a value for each step, from the smallest, has at
+    // `step`
+    pub fn at<T: Copy>(&self, table: &[T], step: i32) -> T {
+        let index = usize::try_from(step - self.min).unwrap_or(0);
+        table[index.min(table.len() - 1)]
+    }
+}
+
 // How many pixels a touchpad scrolls for a step, which takes about a
 // third of its height on a laptop
 const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
@@ -43,7 +72,7 @@ const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
 // and a touchpad scrolls by pixels. Scrolling up zooms in, as in browsers
 // and file managers
 #[derive(Debug, Default)]
-pub struct ScrollSteps {
+struct ScrollSteps {
     // Up to a step, in either direction; down is positive
     total: f64,
 }
@@ -75,7 +104,7 @@ const PINCH_STEP: f64 = 1.25;
 
 // Turns a pinch into zoom steps, as its fingers move apart or together
 #[derive(Debug)]
-pub struct PinchSteps {
+struct PinchSteps {
     // The scale of the pinch at the last step, from 1 where it started
     base: f64,
 }
@@ -102,14 +131,43 @@ impl PinchSteps {
     }
 }
 
+// Zooms the widget's view with Ctrl and the mouse wheel or a touchpad,
+// and with a pinch. The scrolling is in the capture phase, so that the
+// view doesn't scroll as well
+pub fn add_zoom_input(widget: &impl IsA<gtk::Widget>, zoom: impl Fn(Zoom) + 'static) {
+    let zoom = Rc::new(zoom);
+    let steps = RefCell::new(ScrollSteps::default());
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    scroll.connect_scroll({
+        let zoom = zoom.clone();
+        move |controller, _, dy| {
+            if !controller
+                .current_event_state()
+                .contains(gdk::ModifierType::CONTROL_MASK)
+            {
+                return glib::Propagation::Proceed;
+            }
+            let n = steps.borrow_mut().add(dy, controller.unit());
+            let step = if n > 0 { Zoom::In } else { Zoom::Out };
+            for _ in 0..n.unsigned_abs() {
+                zoom(step);
+            }
+            glib::Propagation::Stop
+        }
+    });
+    widget.add_controller(scroll);
+    add_pinch(widget, move |step| zoom(step));
+}
+
 // Zooms the widget's view with a pinch, which GTK takes from two fingers on
 // a touchscreen or on a touchpad, never from the mouse. It's in the capture
 // phase, and claims the fingers as it begins, which cancels the scrolling
 // and the long press that the first finger started
-pub fn add_pinch(widget: &impl IsA<gtk::Widget>, zoom: impl Fn(Zoom) + 'static) {
+fn add_pinch(widget: &impl IsA<gtk::Widget>, zoom: impl Fn(Zoom) + 'static) {
     let pinch = gtk::GestureZoom::new();
     pinch.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let steps = std::rc::Rc::new(RefCell::new(PinchSteps::default()));
+    let steps = Rc::new(RefCell::new(PinchSteps::default()));
     pinch.connect_begin({
         let steps = steps.clone();
         move |gesture, _| {

@@ -38,12 +38,14 @@ const BACK_TOLERANCE: Duration = Duration::from_millis(300);
 const FOLLOW_PAUSE: Duration = Duration::from_secs(4);
 
 // The sizes of the text, in percent of the normal size, at each step of the
-// zoom from the smallest (the `lyrics-zoom` setting, from MIN_ZOOM, with 0
-// for the normal size); each but the normal size has a style class
+// zoom from the smallest (`LYRICS_ZOOM`, with 0 for the normal size); each but the normal size has a style class
 // `zoom-{percent}` in style.css
 const ZOOM_PERCENTS: [u32; 5] = [85, 100, 125, 150, 200];
-const MIN_ZOOM: i32 = -1;
-const MAX_ZOOM: i32 = 3;
+const LYRICS_ZOOM: zoom::ZoomSteps = zoom::ZoomSteps {
+    key: "lyrics-zoom",
+    min: -1,
+    max: 3,
+};
 
 mod imp {
     use super::*;
@@ -86,8 +88,9 @@ mod imp {
         // While the lines stay where the user scrolled them
         pub follow_pause: RefCell<Option<glib::SourceId>>,
         pub glide: RefCell<Option<adw::TimedAnimation>>,
-        // Where the text's zoom is kept
-        pub settings: RefCell<Option<gio::Settings>>,
+        // Where the text's zoom is kept, which is kept, as its signals stop
+        // once it's dropped
+        pub settings: OnceCell<gio::Settings>,
     }
 
     #[glib::object_subclass]
@@ -553,46 +556,20 @@ impl LyricsView {
     // The text is as large as the `lyrics-zoom` setting says, with Ctrl
     // and the mouse wheel over it as well as with the keys
     fn setup_zoom(&self) {
-        let settings = utils::settings_manager();
-        settings.connect_changed(
-            Some("lyrics-zoom"),
+        self.settings().connect_changed(
+            Some(LYRICS_ZOOM.key),
             clone!(
                 #[weak(rename_to = view)]
                 self,
-                move |settings, _| view.apply_zoom(settings.int("lyrics-zoom"))
+                move |_, _| view.apply_zoom()
             ),
         );
-        self.apply_zoom(settings.int("lyrics-zoom"));
+        self.apply_zoom();
 
         // On the view, so that it comes before the scrolling of the lines
         // that leaves them where the user scrolls them for a while, see
         // `pause_following()`, and the lines don't scroll either
-        let steps = RefCell::new(zoom::ScrollSteps::default());
-        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
-        scroll.connect_scroll(clone!(
-            #[weak(rename_to = view)]
-            self,
-            #[upgrade_or]
-            glib::Propagation::Proceed,
-            move |controller, _, dy| {
-                if !controller
-                    .current_event_state()
-                    .contains(gdk::ModifierType::CONTROL_MASK)
-                {
-                    return glib::Propagation::Proceed;
-                }
-                let n = steps.borrow_mut().add(dy, controller.unit());
-                let zoom = if n > 0 { Zoom::In } else { Zoom::Out };
-                for _ in 0..n.unsigned_abs() {
-                    view.zoom(zoom);
-                }
-                glib::Propagation::Stop
-            }
-        ));
-        self.add_controller(scroll);
-
-        zoom::add_pinch(
+        zoom::add_zoom_input(
             self,
             clone!(
                 #[weak(rename_to = view)]
@@ -602,28 +579,22 @@ impl LyricsView {
                 }
             ),
         );
+    }
 
-        // Kept, as its signals stop once it's dropped
-        self.imp().settings.replace(Some(settings));
+    fn settings(&self) -> &gio::Settings {
+        self.imp().settings.get_or_init(utils::settings_manager)
     }
 
     // Makes the text of the lyrics a step larger or smaller, or its normal
     // size; false when it's at that end already
     pub fn zoom(&self, zoom: Zoom) -> bool {
-        let Some(settings) = self.imp().settings.borrow().clone() else {
-            return false;
-        };
-        let step = settings.int("lyrics-zoom");
-        match zoom.step_from(step, MIN_ZOOM, MAX_ZOOM) {
-            Some(step) => settings.set_int("lyrics-zoom", step).is_ok(),
-            None => false,
-        }
+        LYRICS_ZOOM.zoom(self.settings(), zoom)
     }
 
-    fn apply_zoom(&self, step: i32) {
+    fn apply_zoom(&self) {
         let imp = self.imp();
-        let step = step.clamp(MIN_ZOOM, MAX_ZOOM);
-        let percent = ZOOM_PERCENTS[usize::try_from(step - MIN_ZOOM).unwrap_or(0)];
+        let step = LYRICS_ZOOM.step(self.settings());
+        let percent = LYRICS_ZOOM.at(&ZOOM_PERCENTS, step);
 
         // The plain lyrics keep the line at the top where it is
         let text_view = &*imp.text_view;
@@ -642,8 +613,8 @@ impl LyricsView {
 
         imp.zoom_row.set_percent(percent);
         // The size between them stays on, so that it reads as the size
-        self.action_set_enabled("lyrics.zoom-in", step < MAX_ZOOM);
-        self.action_set_enabled("lyrics.zoom-out", step > MIN_ZOOM);
+        self.action_set_enabled("lyrics.zoom-in", step < LYRICS_ZOOM.max);
+        self.action_set_enabled("lyrics.zoom-out", step > LYRICS_ZOOM.min);
 
         // The line sung goes back to the middle, as the user asked for the
         // lyrics to change

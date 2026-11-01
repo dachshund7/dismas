@@ -389,15 +389,13 @@ impl AlbumTracks {
         // The heart is filled for a favorite, and the tooltip says what a
         // click does, as on the player's. Only a click marks the album, as
         // the heart is also set to show one marked elsewhere
-        imp.favorite_button.connect_active_notify(|button| {
-            let (icon, tooltip) = if button.is_active() {
-                ("heart-filled-symbolic", i18n("Remove Album from Favorites"))
-            } else {
-                ("heart-outline-symbolic", i18n("Add Album to Favorites"))
-            };
-            button.set_icon_name(icon);
-            button.set_tooltip_text(Some(&tooltip));
-        });
+        utils::setup_heart_button(
+            &imp.favorite_button,
+            Some((
+                i18n("Add Album to Favorites"),
+                i18n("Remove Album from Favorites"),
+            )),
+        );
         imp.favorite_button.connect_clicked(clone!(
             #[weak(rename_to = this)]
             self,

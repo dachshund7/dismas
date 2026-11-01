@@ -9,7 +9,10 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -35,15 +38,17 @@ use crate::{
 };
 
 // The covers in the grid grow with the width of the columns, between
-// these sizes, at each step of the zoom from the smallest (the
-// `cover-zoom` setting, from MIN_COVER_ZOOM, with 0 for the normal size,
-// 160 to 240). GridView picks how many columns it has by the covers'
+// these sizes, at each step of the zoom from the smallest (`COVER_ZOOM`,
+// with 0 for the normal size, 160 to 240). GridView picks how many columns it has by the covers'
 // smallest size, and stretches them to fill the row, so each step starts
 // where the one before ends: when they overlapped, a step could leave the
 // same columns, as wide as before
 const COVER_SIZES: [(i32, i32); 4] = [(90, 120), (120, 160), (160, 240), (240, 320)];
-const MIN_COVER_ZOOM: i32 = -2;
-const MAX_COVER_ZOOM: i32 = 1;
+const COVER_ZOOM: zoom::ZoomSteps = zoom::ZoomSteps {
+    key: "cover-zoom",
+    min: -2,
+    max: 1,
+};
 
 // The widest the grid gets, at any step: six columns of the largest covers
 // at the normal size. Past it, it stays centered, rather than spreading
@@ -347,8 +352,9 @@ mod imp {
         pub textures: RefCell<TextureCache>,
         pub pending_covers: RefCell<super::PendingCovers>,
         // Bumped when the size the covers are read at changes, so that the
-        // covers still being read at the size before aren't kept
-        pub cover_generation: Cell<u32>,
+        // covers still to be read at the size before aren't read, and those
+        // being read aren't kept; the reading threads look at it too
+        pub cover_generation: Arc<AtomicU32>,
         // The size the last scan made the covers at, 0 before the first
         pub thumbnail_size: Cell<u32>,
         // The buttons that zoom the covers, in the main menu
@@ -1054,6 +1060,15 @@ impl LibraryView {
     // never is while the grid scrolls, as GTK binds its cells again at about
     // every frame
     fn show_cover(&self, cell: &AlbumCell) {
+        self.show_cell_cover(cell);
+        if let Some(position) = cell.position() {
+            self.read_ahead(position, position);
+        }
+    }
+
+    // Shows the cover of the album in the cell, from the cache, or once
+    // it's read
+    fn show_cell_cover(&self, cell: &AlbumCell) {
         let Some(album) = cell.album() else {
             return;
         };
@@ -1064,13 +1079,11 @@ impl LibraryView {
                 None => self.read_cover(path.to_owned(), Some((album.id(), cell))),
             }
         }
-        if let Some(position) = cell.position() {
-            self.read_ahead(position);
-        }
     }
 
-    // Reads ahead the covers of the albums a screenful before and after the
-    // one at this position, which has just come on screen, into the cache:
+    // Reads ahead the covers of the albums a screenful before and after
+    // those from `first` to `last`, which have just come on screen, into
+    // the cache:
     // GridView only shows a cell once it's within a few pixels of the
     // screen, which would leave the albums coming into view without their
     // covers while they're read. Those on screen and a screenful on each
@@ -1078,20 +1091,21 @@ impl LibraryView {
     // out the ones on screen: while the grid opens, GTK maps a few hundred
     // cells before it hides those off screen, and a large screen can show
     // as many
-    fn read_ahead(&self, position: u32) {
+    fn read_ahead(&self, first: u32, last: u32) {
         let imp = self.imp();
         let Some(model) = imp.grid_view.model() else {
             return;
         };
         let capacity = imp.textures.borrow().capacity();
         let screenful = imp.mapped_cells.get().clamp(1, (capacity / 3) as u32);
-        let end = position
+        let end = last
             .saturating_add(screenful)
             .min(model.n_items().saturating_sub(1));
-        for position in position.saturating_sub(screenful)..=end {
+        for position in first.saturating_sub(screenful)..=end {
             if let Some(album) = model.item(position).and_downcast::<Album>()
                 && let Some(path) = album.cover_path_str()
                 && !imp.textures.borrow().contains(path)
+                && !imp.pending_covers.borrow().contains_key(path)
             {
                 self.read_cover(path.to_owned(), None);
             }
@@ -1121,23 +1135,31 @@ impl LibraryView {
         pending.insert(path.clone(), waiting.into_iter().collect());
 
         let size = self.cover_pixels();
-        let generation = imp.cover_generation.get();
+        let current = imp.cover_generation.clone();
+        let generation = current.load(Ordering::Relaxed);
         glib::spawn_future_local(clone!(
             #[weak(rename_to = this)]
             self,
             async move {
                 let texture = {
                     let path = path.clone();
-                    gio::spawn_blocking(move || cover_image::read_thumbnail(Path::new(&path), size))
-                        .await
-                        .ok()
-                        .flatten()
+                    let current = current.clone();
+                    gio::spawn_blocking(move || {
+                        // Not if it's no longer wanted by the time it would
+                        // be read, as quick steps of the zoom leave many
+                        (current.load(Ordering::Relaxed) == generation)
+                            .then(|| cover_image::read_thumbnail(Path::new(&path), size))
+                            .flatten()
+                    })
+                    .await
+                    .ok()
+                    .flatten()
                 };
 
                 let imp = this.imp();
                 // Read at a size the covers are no longer shown at; the
                 // cells waiting for it read it again
-                if imp.cover_generation.get() != generation {
+                if current.load(Ordering::Relaxed) != generation {
                     return;
                 }
                 let waiting = imp.pending_covers.borrow_mut().remove(&path);
@@ -1170,12 +1192,17 @@ impl LibraryView {
     // show until then, and the covers still being read are dropped
     fn reset_covers(&self) {
         let imp = self.imp();
-        imp.cover_generation
-            .set(imp.cover_generation.get().wrapping_add(1));
+        imp.cover_generation.fetch_add(1, Ordering::Relaxed);
         imp.textures.borrow_mut().clear();
         imp.pending_covers.borrow_mut().clear();
-        for cell in mapped_album_cells(self.upcast_ref()) {
-            self.show_cover(&cell);
+        let cells = mapped_album_cells(self.upcast_ref());
+        for cell in &cells {
+            self.show_cell_cover(cell);
+        }
+        // Around them all at once, rather than around each
+        let positions: Vec<u32> = cells.iter().filter_map(AlbumCell::position).collect();
+        if let (Some(&first), Some(&last)) = (positions.iter().min(), positions.iter().max()) {
+            self.read_ahead(first, last);
         }
     }
 
@@ -1183,7 +1210,7 @@ impl LibraryView {
     // and the mouse wheel over them as well as with the keys
     fn setup_zoom(&self) {
         self.app_settings().connect_changed(
-            Some("cover-zoom"),
+            Some(COVER_ZOOM.key),
             clone!(
                 #[weak(rename_to = this)]
                 self,
@@ -1192,33 +1219,7 @@ impl LibraryView {
         );
         self.apply_cover_zoom();
 
-        // In the capture phase, so that the grid doesn't scroll as well
-        let steps = RefCell::new(zoom::ScrollSteps::default());
-        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
-        scroll.connect_scroll(clone!(
-            #[weak(rename_to = this)]
-            self,
-            #[upgrade_or]
-            glib::Propagation::Proceed,
-            move |controller, _, dy| {
-                if !controller
-                    .current_event_state()
-                    .contains(gdk::ModifierType::CONTROL_MASK)
-                {
-                    return glib::Propagation::Proceed;
-                }
-                let n = steps.borrow_mut().add(dy, controller.unit());
-                let zoom = if n > 0 { Zoom::In } else { Zoom::Out };
-                for _ in 0..n.unsigned_abs() {
-                    this.zoom_covers(zoom);
-                }
-                glib::Propagation::Stop
-            }
-        ));
-        self.imp().albums_stack.add_controller(scroll);
-
-        zoom::add_pinch(
+        zoom::add_zoom_input(
             &*self.imp().albums_stack,
             clone!(
                 #[weak(rename_to = this)]
@@ -1233,20 +1234,12 @@ impl LibraryView {
     // Zooms the covers of the grid and of the works a step, or back to
     // their normal size; false when they're at that end already
     pub fn zoom_covers(&self, zoom: Zoom) -> bool {
-        let settings = self.app_settings();
-        let step = settings.int("cover-zoom");
-        match zoom.step_from(step, MIN_COVER_ZOOM, MAX_COVER_ZOOM) {
-            Some(step) => settings.set_int("cover-zoom", step).is_ok(),
-            None => false,
-        }
+        COVER_ZOOM.zoom(self.app_settings(), zoom)
     }
 
     fn apply_cover_zoom(&self) {
         let imp = self.imp();
-        let step = self
-            .app_settings()
-            .int("cover-zoom")
-            .clamp(MIN_COVER_ZOOM, MAX_COVER_ZOOM);
+        let step = COVER_ZOOM.step(self.app_settings());
         imp.cover_zoom.set(step);
         imp.zoom_row.set_percent(cover_zoom_percent(step));
 
@@ -1283,8 +1276,8 @@ impl LibraryView {
             }
         };
         // The size between them stays on, so that it reads as the size
-        enable("zoom-in", step < MAX_COVER_ZOOM);
-        enable("zoom-out", step > MIN_COVER_ZOOM);
+        enable("zoom-in", step < COVER_ZOOM.max);
+        enable("zoom-out", step > COVER_ZOOM.min);
 
         // The columns change, and the album with the focus could go out
         // of view
@@ -1424,19 +1417,16 @@ impl LibraryView {
     // and the works on the Works page. It's filled and highlighted while it
     // does
     fn setup_favorites_filter(&self) {
-        self.imp().favorites_button.connect_toggled(clone!(
+        let button = &self.imp().favorites_button;
+        // Its tooltip says what it shows, see `update_view()`
+        utils::setup_heart_button(button, None);
+        button.connect_toggled(clone!(
             #[weak(rename_to = this)]
             self,
-            move |button| {
-                button.set_icon_name(if button.is_active() {
-                    "heart-filled-symbolic"
-                } else {
-                    "heart-outline-symbolic"
-                });
+            move |_| {
                 // The works are read again, as for a favorite marked
-                let generation = &this.imp().works_generation;
-                generation.set(generation.get().wrapping_add(1));
-                this.update_search();
+                this.refresh_favorites();
+                this.update_album_matches();
                 this.update_stack();
             }
         ));
@@ -3016,15 +3006,9 @@ fn first_track_uri(album_id: &str) -> Option<String> {
     Some(gio::File::for_path(path).uri().to_string())
 }
 
-// What a table of the covers' sizes has at a step of the zoom
-fn at_zoom_step<T: Copy>(sizes: &[T], step: i32) -> T {
-    let index = usize::try_from(step - MIN_COVER_ZOOM).unwrap_or(0);
-    sizes[index.min(sizes.len() - 1)]
-}
-
 // The sizes the covers of the grid grow between at a step of the zoom
 fn grid_cover_sizes(step: i32) -> (i32, i32) {
-    at_zoom_step(&COVER_SIZES, step)
+    COVER_ZOOM.at(&COVER_SIZES, step)
 }
 
 // The size of the covers at a step of the zoom, in percent of the normal
@@ -3193,15 +3177,15 @@ mod tests {
         // A step starts where the one before ends, so the covers change
         // size even where the grid keeps its columns
         for sizes in [&COVER_SIZES, &works::WORK_COVER_SIZES] {
-            assert_eq!(sizes.len(), (MAX_COVER_ZOOM - MIN_COVER_ZOOM + 1) as usize);
+            assert_eq!(sizes.len(), (COVER_ZOOM.max - COVER_ZOOM.min + 1) as usize);
             for pair in sizes.windows(2) {
                 let ((min, max), (next_min, _)) = (pair[0], pair[1]);
                 assert!(min < max && max <= next_min, "{sizes:?}");
             }
         }
         assert_eq!(grid_cover_sizes(0), (160, 240));
-        assert_eq!(grid_cover_sizes(MIN_COVER_ZOOM), (90, 120));
-        assert_eq!(grid_cover_sizes(MAX_COVER_ZOOM), (240, 320));
+        assert_eq!(grid_cover_sizes(COVER_ZOOM.min), (90, 120));
+        assert_eq!(grid_cover_sizes(COVER_ZOOM.max), (240, 320));
         // A step out of range, from a hand edit of the setting
         assert_eq!(grid_cover_sizes(9), (240, 320));
     }

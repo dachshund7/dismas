@@ -171,13 +171,20 @@ impl LibraryView {
         self.imp().work_rows.borrow().get(key)?.upgrade()
     }
 
-    // The position of the work that a work is listed under, itself or the
-    // work it arranges, and the work there
-    fn listing(&self, key: &str) -> Option<(u32, library::WorkInfo)> {
+    // What `found` gives for the first work of the list, at its position,
+    // that it gives something for
+    fn find_work<T>(&self, found: impl Fn(u32, &library::WorkInfo) -> Option<T>) -> Option<T> {
         let store = self.imp().works.borrow().clone()?;
         (0..store.n_items()).find_map(|i| {
             let item = store.item(i).and_downcast::<glib::BoxedAnyObject>()?;
-            let work = item.borrow::<library::WorkInfo>();
+            found(i, &item.borrow::<library::WorkInfo>())
+        })
+    }
+
+    // The position of the work that a work is listed under, itself or the
+    // work it arranges, and the work there
+    fn listing(&self, key: &str) -> Option<(u32, library::WorkInfo)> {
+        self.find_work(|i, work| {
             let listed = work.key == key || work.arrangements.iter().any(|a| a == key);
             listed.then(|| (i, work.clone()))
         })
@@ -185,13 +192,7 @@ impl LibraryView {
 
     // The position of a work in the list
     fn work_position(&self, key: &str) -> Option<u32> {
-        let store = self.imp().works.borrow().clone()?;
-        (0..store.n_items()).find(|&i| {
-            store
-                .item(i)
-                .and_downcast::<glib::BoxedAnyObject>()
-                .is_some_and(|work| work.borrow::<library::WorkInfo>().key == key)
-        })
+        self.find_work(|i, work| (work.key == key).then_some(i))
     }
 
     // What's taken from the albums of the open work: its tracks
@@ -773,8 +774,8 @@ impl LibraryView {
             .as_ref()
             .map(|work| work.key.clone());
         if let Some(key) = open {
-            match self.listing(&key).filter(|(_, work)| work.key == key) {
-                Some((_, work)) => self.open_work(&work, false, focused),
+            match self.find_work(|_, work| (work.key == key).then(|| work.clone())) {
+                Some(work) => self.open_work(&work, false, focused),
                 None => self.close_work(false),
             }
         }
@@ -1034,7 +1035,7 @@ fn fill_work_covers(view: &LibraryView, bin: &RevealBin, work: &ExpandedWork) {
     if !same {
         flowbox.remove_all();
         for cover in &work.covers {
-            let cell = AlbumCell::new(|step| super::at_zoom_step(&WORK_COVER_SIZES, step));
+            let cell = AlbumCell::new(|step| super::COVER_ZOOM.at(&WORK_COVER_SIZES, step));
             view.setup_cell(&cell, false);
             cell.show_album(&cover.album);
             cover
