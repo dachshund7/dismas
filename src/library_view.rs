@@ -440,7 +440,25 @@ mod imp {
             self.parent_constructed();
 
             self.zoom_row.set_action_prefix("library");
-            crate::utils::setup_primary_menu_button(&self.menu_button, Some(&self.zoom_row));
+            // What used to be on the Playlists page, as it plays what the
+            // album pages show; Random Work hides while there's no work,
+            // as its action is off then
+            let items = gio::Menu::new();
+            items.append(
+                Some(&crate::i18n::i18n("Play a _Random Album")),
+                Some("win.play-random-album"),
+            );
+            let work = gio::MenuItem::new(
+                Some(&crate::i18n::i18n("Play a Random _Work")),
+                Some("win.play-random-work"),
+            );
+            work.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
+            items.append_item(&work);
+            crate::utils::setup_primary_menu_button(
+                &self.menu_button,
+                Some(&self.zoom_row),
+                Some(items.upcast_ref()),
+            );
 
             let obj = self.obj();
             obj.setup_grid();

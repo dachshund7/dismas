@@ -114,17 +114,18 @@ What Dismas adds
   `C:\Users\…\Music\Artist\Album\01.flac`, in the playlist's folder or
   in the music folders, whatever the case of their names.
 - **Smart playlists and favorites:** mark tracks as favorites with the heart
-  next to the sleep timer, or with Ctrl+D. On the Playlists page, Favorites
-  plays them in the order you marked them, Recently Played plays the last
-  100 tracks you heard, Most Played plays the tracks you played the most in
-  the last 6 months, and Not Heard Lately plays the tracks you played the
-  most but haven't heard in the last 2 months. Random Album plays an album
-  picked at random, more likely one you haven't heard lately, and Random
-  Work plays a recording of a work picked the same way. Works and
-  particular recordings can be favorites too, from their menus: the Works
-  page marks them with a heart and can show only them, and Favorite Works
-  plays them, the recording you marked or else one picked like Random
-  Work. They play in place of the queue, with an Undo.
+  next to the sleep timer, or with Ctrl+D; the heart beside the album search
+  shows them on the Tracks page, and the favorite albums on the Albums page,
+  and Select All and Play there play them. On the Playlists page, Recently
+  Played plays the last 100 tracks you heard, Most Played plays the tracks
+  you played the most in the last 6 months, and Not Heard Lately plays the
+  tracks you played the most but haven't heard in the last 2 months. Works
+  and particular recordings can be favorites too, from their menus: the
+  Works page marks them with a heart and can show only them. Play a Random
+  Album, in the menu of the album pages, plays an album picked at random,
+  more likely one you haven't heard lately, and Play a Random Work plays a
+  recording of a work picked the same way. They play in place of the queue,
+  with an Undo.
 - **Queue editing and drag and drop:** drag tracks by their handle to
   reorder them, and select ranges with Shift+click. Play Next, in the menu
   of a track, puts it after the playing track, or after the last movement

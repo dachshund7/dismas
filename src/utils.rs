@@ -45,29 +45,38 @@ pub fn primary_menu() -> gio::MenuModel {
 }
 
 // Gives a page's menu button the main menu, with the buttons that zoom the
-// page's view at its top, if it has one, as Text Editor's menu has them.
+// page's view at its top, if it has one, as Text Editor's menu has them,
+// and the page's own items, `page_items`, under them.
 // GTK opens the primary menu of the visible page with F10, but doesn't
 // close it with F10 again, as the menu has the keyboard; its popover takes
 // care of that
-pub fn setup_primary_menu_button(button: &gtk::MenuButton, zoom: Option<&ZoomRow>) {
+pub fn setup_primary_menu_button(
+    button: &gtk::MenuButton,
+    zoom: Option<&ZoomRow>,
+    page_items: Option<&gio::MenuModel>,
+) {
     let menu = primary_menu();
-    match zoom {
-        Some(_) => {
-            let with_zoom = gio::Menu::new();
+    if zoom.is_some() || page_items.is_some() {
+        let full = gio::Menu::new();
+        if zoom.is_some() {
             let item = gio::MenuItem::new(None, None);
             item.set_attribute_value("custom", Some(&"zoom".to_variant()));
             let section = gio::Menu::new();
             section.append_item(&item);
-            with_zoom.append_section(None, &section);
-            // The main menu is all sections
-            for i in 0..menu.n_items() {
-                if let Some(section) = menu.item_link(i, gio::MENU_LINK_SECTION) {
-                    with_zoom.append_section(None, &section);
-                }
-            }
-            button.set_menu_model(Some(&with_zoom));
+            full.append_section(None, &section);
         }
-        None => button.set_menu_model(Some(&menu)),
+        if let Some(items) = page_items {
+            full.append_section(None, items);
+        }
+        // The main menu is all sections
+        for i in 0..menu.n_items() {
+            if let Some(section) = menu.item_link(i, gio::MENU_LINK_SECTION) {
+                full.append_section(None, &section);
+            }
+        }
+        button.set_menu_model(Some(&full));
+    } else {
+        button.set_menu_model(Some(&menu));
     }
     button.set_primary(true);
 

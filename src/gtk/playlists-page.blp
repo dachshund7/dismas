@@ -73,51 +73,11 @@ template $DismasPlaylistsPage: Widget {
           }
 
           // They play a snapshot in place of the queue, so they're never
-          // the selected playlist; the favorites too, though they're made
-          // by hand
+          // the selected playlist. The favorite tracks, albums and works are
+          // shown by the heart beside the album search, and Random Album and
+          // Random Work are in the album pages' menu
           Adw.PreferencesGroup {
             title: _("Smart Playlists");
-
-            Adw.ActionRow {
-              title: _("Favorite Albums");
-              subtitle: _("The albums marked as favorites, each whole");
-              activatable: true;
-              action-name: "win.play-smart-playlist";
-              action-target: "'favorite-albums'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
-
-            Adw.ActionRow {
-              title: _("Favorites");
-              subtitle: _("The tracks marked as favorites");
-              activatable: true;
-              action-name: "win.play-smart-playlist";
-              action-target: "'favorites'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
-
-            // There while a track is part of a work, like the Works page
-            Adw.ActionRow {
-              title: _("Favorite Works");
-              subtitle: _("The works and recordings marked as favorites, each a recording");
-              activatable: true;
-              visible: bind template.works-available;
-              action-name: "win.play-smart-playlist";
-              action-target: "'favorite-works'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
 
             Adw.ActionRow {
               title: _("Recently Played");
@@ -151,35 +111,6 @@ template $DismasPlaylistsPage: Widget {
               activatable: true;
               action-name: "win.play-smart-playlist";
               action-target: "'not-heard-lately'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
-
-            // Not a playlist, but it plays in place of the queue like them
-            Adw.ActionRow {
-              title: _("Random Album");
-              subtitle: _("An album picked at random, more likely one not heard lately");
-              activatable: true;
-              action-name: "win.play-smart-playlist";
-              action-target: "'random-album'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
-
-            // There while a track is part of a work, like the Works page
-            Adw.ActionRow {
-              title: _("Random Work");
-              subtitle: _("A recording of a work picked at random, more likely one not heard lately");
-              activatable: true;
-              visible: bind template.works-available;
-              action-name: "win.play-smart-playlist";
-              action-target: "'random-work'";
 
               [suffix]
               Image {

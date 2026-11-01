@@ -66,18 +66,17 @@ All notable changes to this project will be documented in this file.
   read again when the album grid is shown instead, at most every 5 minutes
 - Keep a Play History, in Preferences, to stop adding the tracks played
   to the history, and Clear History, to delete it; the favorites are kept
-- Random Album, on the Playlists page, plays an album picked at random in
-  place of the queue, with an Undo; an album not heard lately is more
-  likely, and choosing it again plays another
+- Play a Random Album, in the menu of the Albums, Tracks and Works pages,
+  plays an album picked at random in place of the queue, with an Undo; an
+  album not heard lately is more likely, and choosing it again plays
+  another
 - Works and recordings can be favorites, not only tracks: Add Work to
   Favorites is in the menu of a work's header and of the rows of the
   Works page, with a right click, a long press or the Menu key, and Add
   Recording to Favorites in the menu of the cover of a work's album. The
   Works page shows a heart on the rows of favorite works, and on the
   covers of the favorite recordings of an open work, and the heart beside
-  its search shows only them. Favorite Works, on the Playlists page, plays them in
-  the order they were marked: each recording marked, and for a work, a
-  recording of it picked as Random Work picks one
+  its search shows only them
 - Albums can be favorites too: Add Album to Favorites is in the menu of an
   album of the grid, with a right click, a long press or the Menu key, and
   takes all the selected albums in selection mode, and the heart in the
@@ -89,13 +88,11 @@ All notable changes to this project will be documented in this file.
   albums. On the Tracks page, it shows the albums with favorite tracks,
   and takes only those tracks from them: an album opened there lists only
   its favorite tracks, under a bar that says how many of its tracks they
-  are. The page says how to mark favorites when there are none. Favorite
-  Albums, on the Playlists page, plays the favorite albums whole, in the
-  order they were marked
-- Random Work, below Random Album, plays a recording of a work picked at
+  are. The page says how to mark favorites when there are none
+- Play a Random Work, below it, plays a recording of a work picked at
   random in the same way. A work that hasn't been heard lately in any of
   its recordings is more likely to be picked, and so is a recording of it
-  that hasn't been heard lately. It's on the page while a track is part of
+  that hasn't been heard lately. It's in the menu while a track is part of
   a work
 - Composers, the button next to the album search, lists the composers of
   the albums, sorted by their last names, with the number of their albums;
@@ -394,6 +391,9 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 - Ctrl+G, as Ctrl+2 shows the albums
+- Favorites, on the Playlists page, to make the page shorter: on the
+  Tracks page, the heart beside the search shows the favorite tracks, and
+  Select All and Play play them
 
 ## [2026.11] - 2026-11-01
 

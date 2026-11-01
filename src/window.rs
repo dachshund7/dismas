@@ -450,6 +450,16 @@ mod imp {
                     }
                 },
             );
+            // In the album pages' menu; a recording of a work only while a
+            // track is part of a work, see `works-available`
+            klass.install_action("win.play-random-album", None, move |win, _, _| {
+                debug!("Window::win.play-random-album()");
+                win.play_random_album();
+            });
+            klass.install_action("win.play-random-work", None, move |win, _, _| {
+                debug!("Window::win.play-random-work()");
+                win.play_random_work();
+            });
             klass.install_action(
                 "win.play-smart-playlist",
                 Some(glib::VariantTy::STRING),
@@ -683,6 +693,11 @@ mod imp {
                 .bind_property("has-works", &*self.obj(), "works-available")
                 .sync_create()
                 .build();
+            let obj = self.obj();
+            obj.action_set_enabled("win.play-random-work", obj.works_available());
+            obj.connect_works_available_notify(|win| {
+                win.action_set_enabled("win.play-random-work", win.works_available());
+            });
             // The works going away shows the albums
             self.library_view.connect_page_notify(clone!(
                 #[weak(rename_to = obj)]
@@ -761,7 +776,7 @@ mod imp {
 
             // Each page has the main menu; F10 opens the one of the
             // visible page
-            utils::setup_primary_menu_button(&self.menu_button, None);
+            utils::setup_primary_menu_button(&self.menu_button, None, None);
         }
     }
 
