@@ -6,9 +6,13 @@
 // item it's in tell screen readers whether it's selected. The cover says
 // how many of the album's tracks are taken from it, when it's only some of
 // them, and with a heart, whether the album is a favorite; among the covers
-// of the albums of a work, whether one of its recordings there is one
+// of the recordings of a work, whether the recording is one
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::{
+    cell::{Cell, OnceCell, RefCell},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -20,17 +24,16 @@ use crate::{
     utils,
 };
 
-// The work whose tracks a cell takes from its album, among the covers of the
-// albums of a work, with its name and its recordings on the album
+// The recording of a work whose tracks a cell takes from its album, among
+// the covers of the recordings of a work, with the work's name
 #[derive(Clone, Debug)]
 pub struct CellWork {
     // The key of the work whose covers it's among, which finds its row
     pub key: String,
-    // That key and those of the arrangements listed under the work, which
-    // take their tracks from the album
-    pub keys: Vec<String>,
     pub name: String,
-    pub recordings: Vec<FavoriteRecording>,
+    // The recording, which can be marked as a favorite, and its tracks
+    pub recording: FavoriteRecording,
+    pub paths: Arc<[PathBuf]>,
 }
 
 // The smallest and largest sizes of a cover at a step of the zoom, 0 for
@@ -54,7 +57,7 @@ mod imp {
         #[property(get, set = Self::set_total)]
         pub total: Cell<u32>,
         // Whether the heart shows: in the grid, for a favorite album, and
-        // among the covers of a work, for a favorite recording
+        // among the covers of a work's recordings, for a favorite recording
         #[property(get, set = Self::set_favorite)]
         pub favorite: Cell<bool>,
         // The step the covers are zoomed to, 0 for the normal size

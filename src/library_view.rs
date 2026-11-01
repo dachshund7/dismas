@@ -28,8 +28,8 @@ use crate::{
     cover_image,
     i18n::{i18n, i18n_k, ni18n_f},
     library::{
-        self, Album, AlbumSort, Counted, Favorites, ScanEvent, ScanResult, ThumbnailUpdate,
-        TrackFilter,
+        self, Album, AlbumSort, Counted, Favorites, ScanEvent, ScanResult, SelectionKey,
+        ThumbnailUpdate, TrackFilter,
     },
     play_stats, utils,
     work_sections::{WorkSectionModel, same_section_of},
@@ -302,7 +302,7 @@ mod imp {
         pub works_filter: RefCell<Option<(TrackFilter, u32)>>,
         pub works_generation: Cell<u32>,
         // The work of the list that's open, showing the covers of its
-        // albums, and the rows the list shows its works in, by their keys,
+        // recordings, and the rows the list shows its works in, by their keys,
         // to open and close them. The generation goes up each time the
         // covers of a work are read, so that those of one opened before
         // are dropped
@@ -314,9 +314,10 @@ mod imp {
         // once one was
         pub pending_work: RefCell<Option<super::works::PendingWork>>,
         pub works_revealed: Cell<u32>,
-        // The ids of the selected albums; a new search clears them, so
-        // they're all among the albums it shows
-        pub selected: RefCell<HashSet<String>>,
+        // The selected albums, or on the Works page the covers of the open
+        // work's recordings, see `Album::selection_key()`; a new search
+        // clears them, so they're all among the albums it shows
+        pub selected: RefCell<HashSet<SelectionKey>>,
         // The ids of the albums marked as favorites
         pub favorite_albums: RefCell<BTreeSet<String>>,
         // The paths of the favorite tracks, read when the heart first needs
@@ -1403,6 +1404,12 @@ impl LibraryView {
             LibraryPage::Works => i18n("Show Only Favorite Works"),
         };
         imp.favorites_button.set_tooltip_text(Some(&favorites));
+        // So does the select button: the covers of a work are its recordings
+        imp.select_button.set_tooltip_text(Some(&if works {
+            i18n("Select Recordings")
+        } else {
+            i18n("Select Albums")
+        }));
         self.update_match_counts();
         self.update_select_button();
         self.update_selection();
@@ -1826,6 +1833,7 @@ impl LibraryView {
             composer: imp.composer.borrow().as_ref().map(|c| c.key.clone()),
             performer: imp.performer.borrow().as_ref().map(|p| p.key.clone()),
             works: Vec::new(),
+            tracks: None,
             favorites,
         }
     }
@@ -1947,12 +1955,12 @@ impl LibraryView {
     // added, played, dragged or shown, and the names of the composer and the
     // performer it picks: on the Tracks page, the words of the search and
     // the composer and the performer picked; on the Albums page, nothing,
-    // as they're taken whole; on the Works page, the open work's tracks
+    // as they're taken whole. The covers of the Works page take the tracks
+    // of their recordings, see `taken_by()`, and the grid isn't there
     pub fn taken(&self) -> (TrackFilter, PickNames) {
         match self.imp().page.get() {
-            LibraryPage::Albums => Default::default(),
+            LibraryPage::Albums | LibraryPage::Works => Default::default(),
             LibraryPage::Tracks => (self.search_filter(), self.search_pick_names()),
-            LibraryPage::Works => self.taken_from_open_work(),
         }
     }
 
@@ -1980,11 +1988,12 @@ impl LibraryView {
         menu.append(Some(&label), Some("win.play-random"));
     }
 
-    // What's taken from the album of a cell: among the covers of the albums
-    // of a work, its tracks, and otherwise as for the grid, see `taken()`
+    // What's taken from the album of a cell: among the covers of the
+    // recordings of a work, its recording's tracks, and otherwise as for
+    // the grid, see `taken()`
     pub fn taken_by(&self, cell: &AlbumCell) -> (TrackFilter, PickNames) {
         match cell.work() {
-            Some(work) => works::taken_from_work(work.keys, work.name),
+            Some(work) => works::taken_from_recording(work.paths, work.name),
             None => self.taken(),
         }
     }
@@ -2153,13 +2162,13 @@ impl LibraryView {
 
     fn set_album_selected(&self, album: &Album, selected: bool) {
         album.set_selected(selected);
-        let mut ids = self.imp().selected.borrow_mut();
+        let mut keys = self.imp().selected.borrow_mut();
         if selected {
-            ids.insert(album.id());
+            keys.insert(album.selection_key());
         } else {
-            ids.remove(album.id_str());
+            keys.remove(&album.selection_key());
         }
-        drop(ids);
+        drop(keys);
         self.update_selection();
     }
 
@@ -2231,13 +2240,20 @@ impl LibraryView {
                 album.set_selected(false);
             }
         }
+        for album in self.open_work_albums() {
+            album.set_selected(false);
+        }
         self.imp().selected.borrow_mut().clear();
         self.update_selection();
     }
 
     // The selected albums, in the order of the grid or of the covers, with
-    // what their tracks have to match to be taken
+    // what their tracks have to match to be taken; the covers of the open
+    // work each take their recording's
     pub fn selected_albums(&self) -> Vec<(String, TrackFilter)> {
+        if self.shows_works() {
+            return self.selected_recordings();
+        }
         let filter = self.taken().0;
         self.selectable_albums()
             .into_iter()
@@ -2291,31 +2307,46 @@ impl LibraryView {
             LibraryPage::Tracks => imp.search_matches.borrow().as_ref().map(|matches| {
                 selected
                     .iter()
-                    .filter_map(|id| matches.get(id))
+                    .filter_map(|key| matches.get(&key.album))
                     .map(|(matching, _)| matching)
                     .sum()
             }),
             LibraryPage::Works => self.open_work_tracks(&selected),
         };
         drop(selected);
-        let label = if n_selected == 0 {
+        let recordings = imp.page.get() == LibraryPage::Works;
+        let label = if n_selected == 0 && recordings {
+            i18n("No recording selected")
+        } else if n_selected == 0 {
             i18n("No album selected")
         } else {
-            let albums = ni18n_f(
-                // Translators: The '{}' must be left unmodified, and
-                // it is expanded to the number of albums selected
-                "{} album selected",
-                "{} albums selected",
-                n_selected,
-                &[&n_selected.to_string()],
-            );
+            let albums = if recordings {
+                ni18n_f(
+                    // Translators: The '{}' must be left unmodified, and it
+                    // is expanded to the number of recordings of a work
+                    // selected, whose covers are those of their albums
+                    "{} recording selected",
+                    "{} recordings selected",
+                    n_selected,
+                    &[&n_selected.to_string()],
+                )
+            } else {
+                ni18n_f(
+                    // Translators: The '{}' must be left unmodified, and
+                    // it is expanded to the number of albums selected
+                    "{} album selected",
+                    "{} albums selected",
+                    n_selected,
+                    &[&n_selected.to_string()],
+                )
+            };
             match matching {
                 Some(n) => {
                     let tracks = ni18n_f(
                         // Translators: The '{}' must be left unmodified, and
                         // it is expanded to the number of tracks of the
-                        // albums selected that the search matches, or that
-                        // are of a work
+                        // albums selected that the search matches, or of the
+                        // recordings of a work selected
                         "{} track",
                         "{} tracks",
                         n,
@@ -2439,13 +2470,15 @@ impl LibraryView {
         let albums: Vec<Album> = albums.into_iter().map(Album::new).collect();
         debug!("Library: {} albums", albums.len());
 
-        // Keep the selection, minus the albums that are gone
+        // Keep the selection, minus the albums that are gone; the covers of
+        // an open work's recordings that are gone are left out once they're
+        // read again
         {
             let mut selected = imp.selected.borrow_mut();
             let ids: HashSet<&str> = albums.iter().map(Album::id_str).collect();
-            selected.retain(|id| ids.contains(id.as_str()));
+            selected.retain(|key| ids.contains(key.album.as_str()));
             for album in &albums {
-                album.set_selected(selected.contains(album.id_str()));
+                album.set_selected(selected.contains(&album.selection_key()));
             }
         }
         self.update_selection();

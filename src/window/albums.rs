@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::path::{Path, PathBuf};
+
 use super::{adding::Tracks, *};
 use crate::album_cell::AlbumCell;
 
@@ -99,7 +101,7 @@ impl Window {
     }
 
     // Adds to the end of a section of a menu the item that goes to the work
-    // of a track on the Works page, with the work open and the album of the
+    // of a track on the Works page, with the work open and the cover of the
     // track's recording pointed out among its covers, and with `favorite`,
     // the item that marks the work as a favorite after it. The work and the
     // album are looked up while the menu opens, in a separate thread, so the
@@ -112,8 +114,9 @@ impl Window {
         track: &Track,
         favorite: bool,
     ) {
-        // The work's key, and the album's id
-        let found: Rc<std::cell::OnceCell<(String, Option<String>)>> = Rc::default();
+        // The work's key, the album's id, and the track's path
+        type Found = (String, Option<String>, PathBuf);
+        let found: Rc<std::cell::OnceCell<Found>> = Rc::default();
         let action = gio::SimpleAction::new("go-to-work", None);
         action.set_enabled(false);
         action.connect_activate(clone!(
@@ -122,8 +125,8 @@ impl Window {
             #[strong]
             found,
             move |_, _| {
-                if let Some((key, album)) = found.get() {
-                    win.go_to_work(key, album.as_deref());
+                if let Some((key, album, path)) = found.get() {
+                    win.go_to_work(key, album.as_deref(), Some(path));
                 }
             }
         ));
@@ -151,29 +154,30 @@ impl Window {
             async move {
                 let looked_up = gio::spawn_blocking(move || {
                     let work = library::track_work(&path, &hidden)?;
-                    Some((work, library::track_album(&path, &hidden)))
+                    let album = library::track_album(&path, &hidden);
+                    Some((work, album, path))
                 })
                 .await
                 .ok()
                 .flatten();
-                let Some((work, album)) = looked_up else {
+                let Some((work, album, path)) = looked_up else {
                     return;
                 };
                 if favorite {
                     let item = win.favorite_work_item(&actions, &prefix, &work);
                     section.insert_item(position, &item);
                 }
-                let _ = found.set((work, album));
+                let _ = found.set((work, album, path));
                 action.set_enabled(true);
             }
         ));
     }
 
     // Goes to a work on the Works page, which opens it, gliding to the
-    // cover of the album, if any, which takes the focus and flashes, or
-    // else to the work, which takes it; the collapsed split view hides the
-    // pane, which covers the page
-    pub(super) fn go_to_work(&self, key: &str, album: Option<&str>) {
+    // cover of the recording of `track` on `album`, if any, which takes the
+    // focus and flashes, or else to the work, which takes it; the collapsed
+    // split view hides the pane, which covers the page
+    pub(super) fn go_to_work(&self, key: &str, album: Option<&str>, track: Option<&Path>) {
         self.set_page(LibraryPage::Works.name());
         if !self.imp().library_view.shows_works() {
             return;
@@ -181,7 +185,7 @@ impl Window {
         if self.imp().split_view.is_collapsed() {
             self.set_playlist_visible(false);
         }
-        self.imp().library_view.reveal_work(key, album);
+        self.imp().library_view.reveal_work(key, album, track);
     }
 
     // The menu of a work, at a point of its header in the queue or among
@@ -239,7 +243,7 @@ impl Window {
     // selection mode, its items take all the selected ones, and leave
     // selection mode like the buttons of its bar; on another, only that
     // one. On the Tracks page, a search takes only the tracks that match it,
-    // as elsewhere, and on the Works page a cover takes the work's tracks
+    // as elsewhere, and on the Works page a cover takes its recording's
     fn show_album_menu(&self, cell: &AlbumCell, x: f64, y: f64) {
         let Some(album) = cell.album() else {
             return;
@@ -285,9 +289,9 @@ impl Window {
         self.append_adding_items(&section, "album", true, true);
         let menu = gio::Menu::new();
         menu.append_section(None, &section);
-        // Among the covers of the albums of a work, an album of its own can
-        // be gone to on the Albums page, and the work's recordings on it
-        // marked as favorites
+        // Among the covers of the recordings of a work, an album of its own
+        // can be gone to on the Albums page, and the recording marked as a
+        // favorite
         if let Some(work) = cell.work().filter(|_| !selection) {
             let go = gio::SimpleAction::new("go-to-album", None);
             let album_id = album.id();
@@ -298,24 +302,13 @@ impl Window {
             ));
             actions.add_action(&go);
 
-            // As its heart shows, when any of them is
+            // As its heart shows
             let favorite = cell.favorite();
             let mark = gio::SimpleAction::new("favorite-recording", None);
             mark.connect_activate(clone!(
                 #[weak(rename_to = win)]
                 self,
-                move |_, _| {
-                    // The first is marked, and all are unmarked
-                    let recordings = if favorite {
-                        work.recordings.as_slice()
-                    } else {
-                        work.recordings
-                            .first()
-                            .map(std::slice::from_ref)
-                            .unwrap_or_default()
-                    };
-                    win.mark_favorite_recordings(recordings, !favorite);
-                }
+                move |_, _| win.mark_favorite_recording(&work.recording, !favorite)
             ));
             actions.add_action(&mark);
             let label = if favorite {

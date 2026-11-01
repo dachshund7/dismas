@@ -4,9 +4,9 @@
 // The row of a work in the list of works: a line with its name, then,
 // dimmed, what it arranges and the collection it's in, a heart if it's a
 // favorite, and the number of its recordings. Under the line, once the work
-// opens, the covers of the albums it's recorded on
+// opens, the covers of its recordings
 
-use super::*;
+use super::{works::CoverRef, *};
 use crate::reveal_bin::RevealBin;
 
 mod imp {
@@ -122,17 +122,30 @@ impl WorkRow {
         bin
     }
 
-    // The cover of an album among the covers: the flow box's child that
-    // holds its cell, which takes the focus
-    pub fn cover_of(&self, album: &str) -> Option<gtk::Widget> {
+    // A cover among the covers: the flow box's child that holds its cell,
+    // which takes the focus. It's the one of the recording of the track on
+    // the album, or else the album's first, see `CoverRef`
+    pub fn cover_of(&self, cover: &CoverRef) -> Option<gtk::Widget> {
         let flowbox = self.covers()?.child().and_downcast::<gtk::FlowBox>()?;
-        std::iter::successors(flowbox.first_child(), WidgetExt::next_sibling).find(|child| {
-            child
-                .first_child()
-                .and_downcast::<AlbumCell>()
-                .and_then(|cell| cell.album())
-                .is_some_and(|cell_album| cell_album.id_str() == album)
-        })
+        let of_album: Vec<(gtk::Widget, AlbumCell)> =
+            std::iter::successors(flowbox.first_child(), WidgetExt::next_sibling)
+                .filter_map(|child| {
+                    let cell = child.first_child().and_downcast::<AlbumCell>()?;
+                    let album = cell.album()?;
+                    (album.id_str() == cover.album).then_some((child, cell))
+                })
+                .collect();
+        let holds_track = |cell: &AlbumCell| {
+            cover
+                .track
+                .as_ref()
+                .is_some_and(|track| cell.work().is_some_and(|work| work.paths.contains(track)))
+        };
+        of_album
+            .iter()
+            .find(|(_, cell)| holds_track(cell))
+            .or(of_album.first())
+            .map(|(child, _)| child.clone())
     }
 
     // Asks for the menu of the work from the keyboard, in the middle of the

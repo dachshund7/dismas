@@ -36,6 +36,16 @@ impl AlbumSort {
     }
 }
 
+// What tells a selected album apart: its id, and for a copy of an album
+// that shows a recording of a work, see `Album::recording_copy()`, the URI
+// of the recording's first track, as an album can have two recordings of a
+// work, each with a cover of its own
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SelectionKey {
+    pub album: String,
+    pub recording: Option<String>,
+}
+
 // Compares two values in the given direction, with the missing ones last
 // either way
 fn cmp_present_first<T: Ord>(a: Option<&T>, b: Option<&T>, descending: bool) -> Ordering {
@@ -64,6 +74,9 @@ mod imp {
         pub year: RefCell<Option<String>>,
         #[property(get)]
         pub cover_path: OnceCell<Option<String>>,
+        // For a copy that shows a recording of a work, the URI of its first
+        // track, see `Album::recording_copy()`
+        pub recording: OnceCell<String>,
         // The record label, and the number it gives the release
         #[property(get)]
         pub label: RefCell<Option<String>>,
@@ -122,6 +135,35 @@ impl Album {
             .title_key
             .set(glib::CollationKey::from(imp.title.borrow().as_str()));
         album
+    }
+
+    // A copy of the album for the cover of a recording of a work on it,
+    // which is selected on its own, as the album can have two, and shows
+    // the album's heart. It isn't sorted, so it has no sort keys
+    pub fn recording_copy(&self, uri: &str) -> Self {
+        let copy: Self = glib::Object::new();
+        let (from, to) = (self.imp(), copy.imp());
+        let _ = to.id.set(self.id());
+        to.title.replace(self.title());
+        to.artist.replace(self.artist());
+        to.year.replace(self.year());
+        let _ = to.cover_path.set(self.cover_path());
+        to.label.replace(self.label());
+        to.catalog_number.replace(self.catalog_number());
+        to.added.set(from.added.get());
+        let _ = to.recording.set(uri.to_owned());
+        self.bind_property("favorite", &copy, "favorite")
+            .sync_create()
+            .build();
+        copy
+    }
+
+    // What tells it apart among the selected albums
+    pub fn selection_key(&self) -> SelectionKey {
+        SelectionKey {
+            album: self.id(),
+            recording: self.imp().recording.get().cloned(),
+        }
     }
 
     // The id and the cover, borrowed: the grid's search and the covers read
@@ -185,6 +227,27 @@ mod tests {
             label: None,
             catalog_number: None,
         })
+    }
+
+    #[test]
+    fn a_recording_copy_is_selected_on_its_own() {
+        let original = album("Gidon Kremer", "Bach", Some("2005"), Some(10));
+        let first = original.recording_copy("file:///m/b/01.opus");
+        let second = original.recording_copy("file:///m/b/05.opus");
+        assert_eq!(first.id(), original.id());
+        assert_eq!(first.title(), original.title());
+        assert_eq!(first.cover_path(), original.cover_path());
+        // Each copy is a selection of its own
+        let keys = [&original, &first, &second].map(Album::selection_key);
+        assert_ne!(keys[0], keys[1]);
+        assert_ne!(keys[1], keys[2]);
+        assert!(keys.iter().all(|key| key.album == original.id()));
+        assert_eq!(keys[0].recording, None);
+        first.set_selected(true);
+        assert!(!original.selected() && !second.selected());
+        // The heart follows the album's
+        original.set_favorite(true);
+        assert!(first.favorite() && second.favorite());
     }
 
     fn sorted(albums: &[Album], sort: AlbumSort, descending: bool) -> Vec<String> {

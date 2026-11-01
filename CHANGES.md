@@ -81,7 +81,7 @@ All notable changes to this project will be documented in this file.
 - Works and recordings can be favorites, not only tracks: Add Work to
   Favorites is in the menu of a work's header and of the rows of the
   Works page, with a right click, a long press or the Menu key, and Add
-  Recording to Favorites in the menu of the cover of a work's album. The
+  Recording to Favorites in the menu of the cover of a recording. The
   Works page shows a heart on the rows of favorite works, and on the
   covers of the favorite recordings of an open work, and the heart beside
   its search shows only them
@@ -121,18 +121,19 @@ All notable changes to this project will be documented in this file.
   albums under the names of their composers, with the number of their
   recordings. It shares the albums' search and the composer and performer
   picked, so switching between the pages keeps them. Clicking a work, or
-  Enter, opens it, one at a time, to show the covers of the albums it's
-  recorded on, the oldest recording first, each with its performers and
-  the year it was made. A cover takes only the work's tracks from its
-  album, as the Tracks page takes the tracks a search matches: its badge
-  says how many, and it opens the album with only those tracks. Several
-  covers can be selected, as on the Albums page, to play or add the work
-  from each of them at once, and Go to Album, in the menu of a cover,
-  shows its album on the Albums page and opens it there
+  Enter, opens it, one at a time, to show a cover for each of its
+  recordings, the oldest first, each with its performers and the year it
+  was made; an album with two performances of a work, or with the work and
+  an arrangement of it, has a cover for each. A cover takes only its
+  recording's tracks from its album, as the Tracks page takes the tracks a
+  search matches: its badge says how many, and it opens the album with
+  only those tracks. Several covers can be selected, as on the Albums
+  page, to play or add their recordings at once, and Go to Album, in the
+  menu of a cover, shows its album on the Albums page and opens it there
 - Go to Work, in the menu of a track of a work and in the menu of the
   header of a work, with a right click or a long press, opens the work on
-  the Works page, with the cover of the track's album pointed out among
-  those of its recordings
+  the Works page, with the cover of the track's recording pointed out
+  among those of the work's other recordings
 - Searching the queue and the albums also finds tracks by the names that
   the Work Hierarchy plugin gives their works, the works those are part
   of and the collections they're in, such as "Well-Tempered" for the

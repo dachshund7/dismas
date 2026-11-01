@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant, UNIX_EPOCH},
 };
 
-pub use album::{Album, AlbumSort};
+pub use album::{Album, AlbumSort, SelectionKey};
 use async_channel::Sender;
 use gtk::{gio, gio::prelude::*, glib};
 use itertools::Itertools;
@@ -798,8 +798,9 @@ fn main_artists(
 // What the tracks taken from albums match: a search in the search syntax,
 // matched as in the queue (`dismas_match()`), a composer and a performer, by
 // their keys (`composer_key()`), a work, by its key (see `work_entry()`) and
-// those of the arrangements listed under it, as the covers of a work's
-// albums take its tracks, and the favorites. An empty one matches every
+// those of the arrangements listed under it, tracks by their paths, as
+// the cover of a recording of a work takes its tracks, and the favorites.
+// An empty one matches every
 // track. Two filters made from the same search and picks are equal, as the
 // time its relative dates go by is only taken when it's matched
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -811,6 +812,9 @@ pub struct TrackFilter {
     pub composer: Option<String>,
     pub performer: Option<String>,
     pub works: Vec<String>,
+    // The tracks themselves, by their paths in the library; none matches an
+    // empty list
+    pub tracks: Option<Arc<[PathBuf]>>,
     pub favorites: Option<Favorites>,
 }
 
@@ -824,15 +828,6 @@ pub enum Favorites {
     Albums(Arc<[String]>),
     // The favorite tracks, by their paths in the library
     Tracks(Arc<[PathBuf]>),
-}
-
-impl Favorites {
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Albums(ids) => ids.is_empty(),
-            Self::Tracks(paths) => paths.is_empty(),
-        }
-    }
 }
 
 // What a search needs that the library doesn't keep
@@ -1030,6 +1025,7 @@ impl TrackFilter {
             && self.composer.is_none()
             && self.performer.is_none()
             && self.works.is_empty()
+            && self.tracks.is_none()
             && self.favorites.is_none()
     }
 
@@ -1070,19 +1066,28 @@ impl TrackFilter {
                     .map(|key| Value::Text(key).into()),
             );
         }
+        // The tracks of a list of paths, and none for an empty one
+        let mut in_paths = |paths: &[PathBuf]| {
+            if paths.is_empty() {
+                sql.push_str(" AND 0");
+                return;
+            }
+            sql.push_str(&format!(" AND path IN ({})", placeholders(paths.len())));
+            values.extend(
+                paths
+                    .iter()
+                    .map(|path| Value::Blob(path_bytes(path).to_vec()).into()),
+            );
+        };
+        if let Some(paths) = &self.tracks {
+            in_paths(paths);
+        }
         match &self.favorites {
-            Some(favorites) if favorites.is_empty() => sql.push_str(" AND 0"),
+            Some(Favorites::Tracks(paths)) => in_paths(paths),
+            Some(Favorites::Albums(ids)) if ids.is_empty() => sql.push_str(" AND 0"),
             Some(Favorites::Albums(ids)) => {
                 sql.push_str(&format!(" AND album_id IN ({})", placeholders(ids.len())));
                 values.extend(ids.iter().cloned().map(|id| Value::Text(id).into()));
-            }
-            Some(Favorites::Tracks(paths)) => {
-                sql.push_str(&format!(" AND path IN ({})", placeholders(paths.len())));
-                values.extend(
-                    paths
-                        .iter()
-                        .map(|path| Value::Blob(path_bytes(path).to_vec()).into()),
-                );
             }
             None => {}
         }
@@ -7428,6 +7433,28 @@ mod tests {
             .map(|(_, path)| path.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         assert_eq!(tracks, strings(&["/m/E/03"]));
+        // The tracks of a recording, as its cover takes them, and none of
+        // an empty one
+        let recording = super::TrackFilter {
+            tracks: Some(std::sync::Arc::from([
+                PathBuf::from("/m/B/01"),
+                PathBuf::from("/m/B/02"),
+            ])),
+            ..Default::default()
+        };
+        assert!(!recording.is_empty());
+        assert_eq!(albums(&recording), [("b".to_string(), (2, 4))]);
+        let tracks = super::query_album_tracks(&conn, "b", &recording, &hidden)
+            .unwrap()
+            .into_iter()
+            .map(|(_, path)| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(tracks, strings(&["/m/B/01", "/m/B/02"]));
+        let nothing = super::TrackFilter {
+            tracks: Some(std::sync::Arc::from([])),
+            ..Default::default()
+        };
+        assert_eq!(albums(&nothing), []);
 
         // The work of a track
         let work = |path: &str| super::query_track_work(&conn, Path::new(path), &hidden).unwrap();
