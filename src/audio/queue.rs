@@ -323,12 +323,22 @@ impl Queue {
     // longer after the current track
     pub fn sort(&self, key: SortKey) -> bool {
         let tracks = self.tracks();
+        // Only the first track of each unit is sorted by, so the movements
+        // that continue a work, and every track for Reverse, need nothing
+        // else, see `sort::sorted_order()`
         let entries: Vec<sort::Entry> = tracks
             .iter()
             .enumerate()
-            .map(|(pos, track)| sort::Entry {
-                continues_work: pos > 0 && continues_work(&tracks[pos - 1], track),
-                ..track.sort_entry()
+            .map(|(pos, track)| {
+                let continues = pos > 0 && continues_work(&tracks[pos - 1], track);
+                if continues || key == SortKey::Reverse {
+                    sort::Entry {
+                        continues_work: continues,
+                        ..sort::Entry::default()
+                    }
+                } else {
+                    track.sort_entry()
+                }
             })
             .collect();
         let sorted: Vec<Track> = sort::sorted_order(&entries, key)

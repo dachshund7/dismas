@@ -88,7 +88,9 @@ pub(super) struct Entry {
     pub year: Option<String>,
 }
 
-// The positions of the tracks in their sorted order
+// The positions of the tracks in their sorted order. Past
+// `continues_work`, only the first entry of each unit is read, so the
+// others can be left empty
 pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
     let units = work_units(entries.iter().map(|entry| entry.continues_work));
     let firsts: Vec<&Entry> = units.iter().map(|unit| &entries[unit.start]).collect();
@@ -313,6 +315,48 @@ mod tests {
             let order = sorted_order(&entries, key);
             assert!(is_permutation(&order, entries.len()), "{key:?}: {order:?}");
         }
+    }
+
+    // `Queue::sort` leaves empty the entries of the movements that continue
+    // a work, and every entry for Reverse
+    #[test]
+    fn only_the_first_track_of_a_work_is_sorted_by() {
+        let entries = |empty: fn(&Entry) -> bool| -> Vec<Entry> {
+            [
+                movement("Suite", "B", 3, true),
+                movement("Suite", "B", 4, false),
+                track("C", 1),
+                movement("Partita", "A", 1, true),
+                movement("Partita", "A", 2, false),
+                movement("Partita", "A", 3, false),
+                track("A", 9),
+            ]
+            .into_iter()
+            .map(|entry| {
+                if empty(&entry) {
+                    Entry {
+                        continues_work: entry.continues_work,
+                        ..Entry::default()
+                    }
+                } else {
+                    entry
+                }
+            })
+            .collect()
+        };
+        let full = entries(|_| false);
+        let movements_empty = entries(|entry| entry.continues_work);
+        for key in KEYS {
+            assert_eq!(
+                sorted_order(&movements_empty, key),
+                sorted_order(&full, key),
+                "{key:?}"
+            );
+        }
+        assert_eq!(
+            sorted_order(&entries(|_| true), SortKey::Reverse),
+            sorted_order(&full, SortKey::Reverse)
+        );
     }
 
     #[test]
