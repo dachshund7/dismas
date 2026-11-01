@@ -325,6 +325,8 @@ mod imp {
         // Bumped when the size the covers are read at changes, so that the
         // covers still being read at the size before aren't kept
         pub cover_generation: Cell<u32>,
+        // The size the last scan made the covers at, 0 before the first
+        pub thumbnail_size: Cell<u32>,
         // The `library` actions, of which zooming is only on short of the
         // ends it goes to
         pub actions: gio::SimpleActionGroup,
@@ -1217,6 +1219,14 @@ impl LibraryView {
             .set_capacity(cache_capacity(max_size));
         self.notify_cover_zoom();
         self.reset_covers();
+
+        // Larger than the covers were made, they're made again; until then,
+        // they're shown scaled up. The first scan makes them at the size
+        // they're zoomed to
+        let made = imp.thumbnail_size.get();
+        if made != 0 && thumbnail_size(step) > made {
+            self.start_scan(false);
+        }
 
         let enable = |name: &str, on: bool| {
             if let Some(action) = imp
@@ -2567,7 +2577,8 @@ impl LibraryView {
         );
 
         let (sender, receiver) = async_channel::unbounded();
-        let thumbnail_size = thumbnail_size();
+        let thumbnail_size = thumbnail_size(imp.cover_zoom.get());
+        imp.thumbnail_size.set(thumbnail_size);
         std::thread::spawn(move || library::scan(&folders, thumbnail_size, &sender));
 
         glib::spawn_future_local(clone!(
@@ -2579,16 +2590,28 @@ impl LibraryView {
                 while let Ok(event) = receiver.recv().await {
                     let imp = this.imp();
                     match event {
-                        ScanEvent::Progress(done, total) => {
+                        ScanEvent::Progress(done, total) | ScanEvent::Covers(done, total) => {
                             counting.set(true);
                             let fraction = done as f64 / total.max(1) as f64;
-                            let text = i18n_k(
-                                // Translators: the `{done}` and `{total}` must be left
-                                // unmodified; they are the number of tracks read so far
-                                // and the number of tracks to read
-                                "{done} of {total} tracks",
-                                &[("done", &done.to_string()), ("total", &total.to_string())],
-                            );
+                            let (done, total) = (done.to_string(), total.to_string());
+                            let numbers = [("done", done.as_str()), ("total", total.as_str())];
+                            let text = if matches!(event, ScanEvent::Covers(..)) {
+                                i18n_k(
+                                    // Translators: the `{done}` and `{total}` must be left
+                                    // unmodified; they are the number of album covers made
+                                    // so far and the number of covers to make
+                                    "{done} of {total} covers",
+                                    &numbers,
+                                )
+                            } else {
+                                i18n_k(
+                                    // Translators: the `{done}` and `{total}` must be left
+                                    // unmodified; they are the number of tracks read so far
+                                    // and the number of tracks to read
+                                    "{done} of {total} tracks",
+                                    &numbers,
+                                )
+                            };
                             imp.scan_progress.set_fraction(fraction);
                             imp.scan_progress.set_text(Some(&text));
                             imp.update_progress.set_fraction(fraction);
@@ -2932,8 +2955,10 @@ fn mapped_album_cells(widget: &gtk::Widget) -> Vec<AlbumCell> {
 
 // The width the covers of the grid are made at: the largest the grid shows
 // them, in the pixels of the monitor with the largest scale. A cover twice
-// as large as it's shown takes four times the memory, and the time to read
-fn thumbnail_size() -> u32 {
+// as large as it's shown takes four times the memory, and the time to read.
+// Zoomed out, they're made at the normal size, as they're scaled down as
+// they're read, and zooming back in would make them all again
+fn thumbnail_size(zoom: i32) -> u32 {
     let scale = gdk::Display::default()
         .and_then(|display| {
             display
@@ -2945,7 +2970,7 @@ fn thumbnail_size() -> u32 {
         })
         .unwrap_or(1)
         .clamp(1, 2);
-    let (_, max_size) = grid_cover_sizes(0);
+    let (_, max_size) = grid_cover_sizes(zoom.max(0));
     (max_size * scale) as u32
 }
 

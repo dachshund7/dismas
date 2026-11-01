@@ -98,6 +98,9 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
 pub enum ScanEvent {
     // The number of files read so far, out of the files that changed
     Progress(usize, usize),
+    // The number of album covers made so far, out of those to make, after
+    // the files are read
+    Covers(usize, usize),
     Finished(ScanResult),
 }
 
@@ -2253,8 +2256,13 @@ pub fn scan(folders: &[MusicFolder], thumbnail_size: u32, sender: &Sender<ScanEv
         .collect();
     let mut result = with_connection(|conn| {
         let (mut result, stale_albums) = scan_with(conn, &roots, paths, sender)?;
-        result.covers_changed =
-            update_covers(conn, &stale_albums, &roots.unavailable, thumbnail_size)? > 0;
+        result.covers_changed = update_covers(
+            conn,
+            &stale_albums,
+            &roots.unavailable,
+            thumbnail_size,
+            sender,
+        )? > 0;
         Ok(result)
     })
     .unwrap_or_else(|e| {
@@ -2658,6 +2666,7 @@ fn update_covers(
     stale_albums: &HashSet<String>,
     hidden: &[PathBuf],
     size: u32,
+    sender: &Sender<ScanEvent>,
 ) -> rusqlite::Result<usize> {
     let dir = covers_dir();
     let mut missing = Vec::new();
@@ -2724,7 +2733,12 @@ fn update_covers(
     {
         let mut upsert =
             tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
-        for (id, first_track) in missing {
+        let total = missing.len();
+        for (i, (id, first_track)) in missing.into_iter().enumerate() {
+            // Each cover is decoded in a sandboxed process, so making all
+            // of them again, as when the grid shows them larger, takes a
+            // while
+            let _ = sender.try_send(ScanEvent::Covers(i, total));
             let made = utils::guarded(
                 first_track.display(),
                 || create_thumbnail(&first_track, &dir, &id, size),
