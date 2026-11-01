@@ -85,9 +85,9 @@ impl Window {
                     win.add_toast(random.none_found());
                     return;
                 };
+                let message = random.announce(&picked.name, picked.part.as_ref());
                 random.last(&win).replace(Some(picked.id));
                 let files = picked.paths.into_iter().map(gio::File::for_path).collect();
-                let message = random.announce(&picked.name);
                 win.play_announced_in_place_of_queue(files, Some(message));
             }
         ));
@@ -156,7 +156,31 @@ enum Random {
 struct Picked {
     id: String,
     name: String,
+    // For a work, what of it the recording is, if it isn't the work itself
+    part: Option<Part>,
     paths: Vec<PathBuf>,
+}
+
+// What a recording of a work is, when it isn't the work itself, which the
+// toast says
+#[derive(Debug, PartialEq, Eq)]
+enum Part {
+    // A single movement of it, such as an aria of an opera on a recital
+    Movement,
+    // An arrangement listed under it, and what that is
+    Arrangement(String),
+}
+
+impl Part {
+    // What of its work a recording is, a single movement first, as a
+    // movement of an arrangement is still only part of the work
+    fn of(recording: &RecordingCandidate) -> Option<Self> {
+        if recording.single_movement {
+            return Some(Self::Movement);
+        }
+        let arrangement = recording.arrangement.as_ref()?;
+        Some(Self::Arrangement(arrangement.shown()))
+    }
 }
 
 impl Random {
@@ -187,17 +211,31 @@ impl Random {
     }
 
     // The toast that names the one picked, as it plays
-    fn announce(self, name: &str) -> String {
-        match self {
+    fn announce(self, name: &str, part: Option<&Part>) -> String {
+        match (self, part) {
             // Translators: `{album}` must be left unmodified; it is
             // expanded to the title of an album
-            Self::Album => i18n_k("Playing “{album}”", &[("album", name)]),
+            (Self::Album, _) => i18n_k("Playing “{album}”", &[("album", name)]),
             // Translators: `{track}` must be left unmodified; it is
             // expanded to the title of a track
-            Self::Track => i18n_k("Playing “{track}”", &[("track", name)]),
+            (Self::Track, _) => i18n_k("Playing “{track}”", &[("track", name)]),
             // Translators: `{work}` must be left unmodified; it is expanded
             // to the name of a musical work, such as “Goldberg Variations”
-            Self::Work => i18n_k("Playing “{work}”", &[("work", name)]),
+            (Self::Work, None) => i18n_k("Playing “{work}”", &[("work", name)]),
+            // Translators: `{work}` must be left unmodified; it is expanded
+            // to the name of a musical work, such as “Don Giovanni”, of
+            // which a single movement plays, such as an aria
+            (Self::Work, Some(Part::Movement)) => {
+                i18n_k("Playing part of “{work}”", &[("work", name)])
+            }
+            // Translators: `{work}` and `{arrangement}` must be left
+            // unmodified; they are expanded to the name of a musical work and
+            // to what the arrangement of it that plays is, such as “for
+            // piano, Busoni”, or “arrangement”
+            (Self::Work, Some(Part::Arrangement(arrangement))) => i18n_k(
+                "Playing “{work}”, {arrangement}",
+                &[("work", name), ("arrangement", arrangement)],
+            ),
         }
     }
 }
@@ -255,6 +293,7 @@ fn pick_album(
     Some(Picked {
         id: album.id,
         name: album.title,
+        part: None,
         paths,
     })
 }
@@ -279,6 +318,7 @@ fn pick_track(
     Some(Picked {
         id: uris.swap_remove(pos),
         name: title.unwrap_or_else(|| crate::audio::title_from_file_name(&path)),
+        part: None,
         paths: vec![path],
     })
 }
@@ -318,8 +358,10 @@ fn pick_work(
 
     let (pos, recording) = choose_work(&works, &heard, favorites.as_ref(), last, now, rng)?;
     let mut work = works.swap_remove(pos);
+    let recording = work.recordings.swap_remove(recording);
     Some(Picked {
-        paths: work.recordings.swap_remove(recording).paths,
+        part: Part::of(&recording),
+        paths: recording.paths,
         id: work.info.key,
         name: work.info.name,
     })
@@ -470,6 +512,8 @@ mod tests {
             work_key: work_key.to_string(),
             paths: vec![PathBuf::from(format!("/m/{album}/01.flac"))],
             length: Some(600),
+            single_movement: false,
+            arrangement: None,
         }
     }
 
@@ -640,5 +684,39 @@ mod tests {
         let picks = picks(&works, 6);
         let a = f64::from(picks[&(0, 0)]) / 2000.0;
         assert!((0.45..0.55).contains(&a), "{a}");
+    }
+
+    #[test]
+    fn the_toast_says_what_of_a_work_plays() {
+        use crate::audio::Arrangement;
+
+        let whole = recording("a", "w");
+        assert_eq!(Part::of(&whole), None);
+        let aria = RecordingCandidate {
+            single_movement: true,
+            ..recording("b", "w")
+        };
+        assert_eq!(Part::of(&aria), Some(Part::Movement));
+        let arrangement = Arrangement {
+            of: "The work".to_string(),
+            of_id: Some("w".to_string()),
+            label: Some("for piano, Busoni".to_string()),
+        };
+        let busoni = RecordingCandidate {
+            arrangement: Some(arrangement.clone()),
+            ..recording("c", "busoni")
+        };
+        assert_eq!(
+            Part::of(&busoni),
+            Some(Part::Arrangement("for piano, Busoni".to_string()))
+        );
+        // A single movement of an arrangement is still only part of the
+        // work
+        let movement = RecordingCandidate {
+            single_movement: true,
+            arrangement: Some(arrangement),
+            ..recording("d", "busoni")
+        };
+        assert_eq!(Part::of(&movement), Some(Part::Movement));
     }
 }

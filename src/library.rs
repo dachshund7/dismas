@@ -1815,6 +1815,12 @@ pub struct RecordingCandidate {
     // Its length in whole seconds, from those of its tracks that are known,
     // as if the others were as long, or `None` when none is
     pub length: Option<u64>,
+    // Whether it's a single movement of the work, in one track or several,
+    // such as an aria of an opera on a recital
+    pub single_movement: bool,
+    // What it is, if it's all of an arrangement listed under the work, as
+    // in `WorkRecording`
+    pub arrangement: Option<Arrangement>,
 }
 
 // The works that `works()` lists for the filter, in its order, each with
@@ -1833,41 +1839,60 @@ fn query_work_recording_candidates(
     hidden: &[PathBuf],
 ) -> rusqlite::Result<Vec<WorkCandidate>> {
     let rows = query_work_rows(conn, filter, &[], hidden, Lengths::Read)?;
-    let paths = |recording: &RecordingRows| -> Vec<PathBuf> {
-        recording
-            .rows
-            .iter()
-            .map(|&i| rows[i].path.clone())
-            .collect()
-    };
     Ok(listed_works(&rows)
         .into_iter()
-        .map(|listed| WorkCandidate {
-            recordings: listed
-                .recordings
+        .map(|listed| {
+            let arranged: HashSet<&str> = listed
+                .info
+                .arrangements
                 .iter()
-                .filter(|recording| recording.matching)
-                .map(|recording| {
-                    let first = &rows[recording.rows[0]];
-                    let known: Vec<u64> = recording
-                        .rows
-                        .iter()
-                        .filter_map(|&i| rows[i].length)
-                        .collect();
-                    let tracks = recording.rows.len() as u64;
-                    RecordingCandidate {
-                        album_id: first.album_id.clone(),
-                        work_key: first.work.clone(),
-                        paths: paths(recording),
-                        length: (!known.is_empty())
-                            .then(|| known.iter().sum::<u64>() * tracks / known.len() as u64),
-                    }
-                })
-                .collect(),
-            paths: listed.recordings.iter().flat_map(paths).collect(),
-            info: listed.info,
+                .map(|arranged| arranged.key.as_str())
+                .collect();
+            WorkCandidate {
+                recordings: listed
+                    .recordings
+                    .iter()
+                    .filter(|recording| recording.matching)
+                    .map(|recording| recording_candidate(&rows, &recording.rows, &arranged))
+                    .collect(),
+                paths: listed
+                    .recordings
+                    .iter()
+                    .flat_map(|recording| &recording.rows)
+                    .map(|&i| rows[i].path.clone())
+                    .collect(),
+                info: listed.info,
+            }
         })
         .collect())
+}
+
+// A recording of a work, from its `rows`, with the keys of the
+// arrangements `arranged` under the work
+fn recording_candidate(
+    rows: &[WorkRow],
+    recording: &[usize],
+    arranged: &HashSet<&str>,
+) -> RecordingCandidate {
+    let rows: Vec<&WorkRow> = recording.iter().map(|&i| &rows[i]).collect();
+    let first = rows[0];
+    let known: Vec<u64> = rows.iter().filter_map(|row| row.length).collect();
+    let tracks = rows.len() as u64;
+    let place = first.order.as_ref().filter(|place| !place.is_empty());
+    RecordingCandidate {
+        album_id: first.album_id.clone(),
+        work_key: first.work.clone(),
+        paths: rows.iter().map(|row| row.path.clone()).collect(),
+        length: (!known.is_empty())
+            .then(|| known.iter().sum::<u64>() * tracks / known.len() as u64),
+        single_movement: place
+            .is_some_and(|place| rows.iter().all(|row| row.order.as_ref() == Some(place))),
+        arrangement: rows
+            .iter()
+            .all(|row| arranged.contains(row.work.as_str()))
+            .then(|| first.arrangement())
+            .flatten(),
+    }
 }
 
 // The works of the rows with a recording that the filter matches, sorted
@@ -6804,7 +6829,7 @@ mod tests {
 
         // Play a Random Work picks from the works as they're listed, each
         // with the recordings that `work_recordings()` gives for its keys
-        let sorted_paths = |recordings: Vec<(Vec<String>, String)>| {
+        let sorted_paths = |recordings: Vec<(Vec<String>, String, Option<String>)>| {
             let mut recordings = recordings;
             recordings.sort();
             recordings
@@ -6830,16 +6855,32 @@ mod tests {
                     candidate.recordings.len(),
                     candidate.info.recordings as usize
                 );
+                // The same tracks, of the same works, which are as much
+                // arrangements
                 let expected =
                     super::query_work_recordings(&conn, &candidate.info.keys(), &filter, &[])
                         .unwrap()
                         .into_iter()
-                        .map(|recording| (strings_of(&recording.paths), recording.work_key))
+                        .map(|recording| {
+                            let arrangement = recording.arrangement.map(|a| a.shown());
+                            (
+                                strings_of(&recording.paths),
+                                recording.work_key,
+                                arrangement,
+                            )
+                        })
                         .collect();
                 let found = candidate
                     .recordings
                     .iter()
-                    .map(|recording| (strings_of(&recording.paths), recording.work_key.clone()))
+                    .map(|recording| {
+                        let arrangement = recording
+                            .arrangement
+                            .as_ref()
+                            .map(super::Arrangement::shown);
+                        let work_key = recording.work_key.clone();
+                        (strings_of(&recording.paths), work_key, arrangement)
+                    })
                     .collect();
                 assert_eq!(
                     sorted_paths(found),
@@ -7371,6 +7412,26 @@ mod tests {
                 vec![strings(&["/m/A/01", "/m/A/02"])],
                 requiem
             )]
+        );
+        // The recordings that are a single movement of their work: not two
+        // movements, nor the parts of one with another, nor movements whose
+        // places aren't known, nor a whole work
+        let single_movements = super::query_work_recording_candidates(&conn, &all, &hidden)
+            .unwrap()
+            .into_iter()
+            .flat_map(|work| work.recordings)
+            .filter(|recording| recording.single_movement)
+            .map(|recording| {
+                recording
+                    .paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            single_movements,
+            [strings(&["/m/B/04"]), strings(&["/m/E/03"])]
         );
     }
 

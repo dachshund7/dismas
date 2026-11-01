@@ -75,7 +75,9 @@ All notable changes to this project will be documented in this file.
   again plays another. A work plays in one of its recordings that the
   search matches; with the heart on, in a favorite recording if it has one.
   A long work is more likely to be picked than a short one, and a whole
-  recording than an excerpt of the same work
+  recording than an excerpt of the same work. When the recording is only a
+  movement of the work, such as an aria of an opera, or an arrangement of
+  it, the toast says so
 - Works and recordings can be favorites, not only tracks: Add Work to
   Favorites is in the menu of a work's header and of the rows of the
   Works page, with a right click, a long press or the Menu key, and Add
