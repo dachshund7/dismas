@@ -756,8 +756,18 @@ impl Window {
     }
 
     // Removes tracks from the queue, in a single change, and saves it; the
-    // toast's Undo puts them back
+    // toast's Undo puts them back. When the focus goes with them, it goes to
+    // the track next to them, rather than wherever GTK puts it, which was
+    // the first track of the list
     pub fn remove_tracks(&self, tracks: &[Track]) {
+        let removed: HashSet<&Track> = tracks.iter().collect();
+        let focused = utils::focused_child::<QueueRow>(&self.imp().playlist_view.queue_view())
+            .and_then(|row| row.track());
+        let refocus = self.removal_takes_focus(focused.as_ref(), &removed);
+        let next = refocus
+            .then(|| self.track_after_removal(focused.as_ref(), &removed))
+            .flatten();
+
         let mut undo = self.take_queue_undo();
         let runs = self.player().remove_tracks(tracks);
         if runs.is_empty() {
@@ -771,6 +781,59 @@ impl Window {
         self.store_queue();
         undo.runs.extend(runs);
         self.add_removed_toast(undo);
+        if refocus {
+            self.focus_queue_track(next.as_ref());
+        }
+    }
+
+    // Whether removing these tracks takes the focus away: it's on one of
+    // them, on the selection bar's Remove button, which leaving selection
+    // mode hides, or nowhere, as once the track menu closed
+    fn removal_takes_focus(&self, focused: Option<&Track>, removed: &HashSet<&Track>) -> bool {
+        if let Some(track) = focused {
+            return removed.contains(track);
+        }
+        gtk::prelude::GtkWindowExt::focus(self)
+            .is_none_or(|focus| focus.is_ancestor(&self.imp().playlist_view.queue_actionbar()))
+    }
+
+    // The first track shown after the focused one, or else after the first
+    // one removed, that isn't removed, or else the last one before it that
+    // isn't, for the focus to go to once they're gone
+    fn track_after_removal(
+        &self,
+        focused: Option<&Track>,
+        removed: &HashSet<&Track>,
+    ) -> Option<Track> {
+        let model = self.imp().playlist_view.queue_view().model()?;
+        let shown: Vec<Track> = (0..model.n_items())
+            .filter_map(|i| model.item(i).and_downcast::<Track>())
+            .collect();
+        let from = focused
+            .and_then(|focused| shown.iter().position(|t| t == focused))
+            .or_else(|| shown.iter().position(|t| removed.contains(t)))?;
+        let kept = |t: &&Track| !removed.contains(t);
+        shown[from..]
+            .iter()
+            .find(kept)
+            .or_else(|| shown[..from].iter().rev().find(kept))
+            .cloned()
+    }
+
+    // Gives the focus to a track's row in the queue, or, when the search
+    // shows none of the tracks left, to the search
+    fn focus_queue_track(&self, track: Option<&Track>) {
+        let playlist_view = &self.imp().playlist_view;
+        let queue_view = playlist_view.queue_view();
+        let pos = track.zip(queue_view.model()).and_then(|(track, model)| {
+            (0..model.n_items()).find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
+        });
+        if let Some(pos) = pos {
+            queue_view.scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
+            queue_view.grab_focus();
+        } else if self.queue_search() && !self.player().queue().is_empty() {
+            playlist_view.queue_searchentry().grab_focus();
+        }
     }
 
     // Remove All empties the selected playlist like removing each of its

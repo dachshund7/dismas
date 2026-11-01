@@ -307,6 +307,10 @@ All notable changes to this project will be documented in this file.
   artist, the parts of a work or the performers under it, go on to a
   second line rather than being cut short after a few words in a narrow
   pane
+- Removing the selected tracks from the playlist pane leaves selection
+  mode, as the album grid's selection bar does once its buttons have taken
+  the albums, rather than staying in it with no track selected. The
+  keyboard focus goes to the track after the ones removed
 
 ### Fixed
 

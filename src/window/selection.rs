@@ -101,11 +101,18 @@ impl Window {
         self.update_selected_count();
     }
 
+    // Removes the selected tracks, from the bar's Remove button, Delete or
+    // the track menu, and leaves selection mode, as nothing selected is left
+    // to act on, like the album grid's bar once it took the albums
     pub(super) fn remove_selected_tracks(&self) {
         let player = self.player();
         let queue = player.queue();
         let tracks = queue.selected_tracks();
+        if tracks.is_empty() {
+            return;
+        }
         self.remove_tracks(&tracks);
+        self.set_queue_selection(false);
     }
 
     // Leaves selection mode in the grid, the tracks of an album and the
