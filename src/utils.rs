@@ -605,6 +605,51 @@ pub fn guarded<T>(
     })
 }
 
+// How many files are read at a time where reading them mostly waits, as
+// decoding a cover waits for its sandboxed loader: a few at a time go
+// faster, even on fewer cores
+pub const READING_THREADS: usize = 4;
+
+// Runs `work` on each of the `items` in up to `threads` threads, and hands
+// each result to `each` on this thread as it comes, with the position of
+// its item, in no particular order. It returns once every item is done, or
+// with the first error of `each`, once the threads have finished the items
+// they were on
+pub fn in_threads<T: Sync, R: Send, E>(
+    items: &[T],
+    threads: usize,
+    work: impl Fn(&T) -> R + Sync,
+    mut each: impl FnMut(usize, R) -> Result<(), E>,
+) -> Result<(), E> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let next = AtomicUsize::new(0);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        for _ in 0..threads.min(items.len()) {
+            let sender = sender.clone();
+            let (next, work) = (&next, &work);
+            scope.spawn(move || {
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(index) else {
+                        break;
+                    };
+                    // The receiver is gone once `each` failed
+                    if sender.send((index, work(item))).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        for (index, result) in receiver {
+            each(index, result)?;
+        }
+        Ok(())
+    })
+}
+
 // Whether a file is an audio track, guessing from its name only, which is
 // much faster than looking at its contents when scanning a whole library
 pub fn is_audio_path(path: &std::path::Path) -> bool {
@@ -912,6 +957,59 @@ pub fn write_test_id3v2(path: &std::path::Path, tag: &lofty::id3::v2::Id3v2Tag, 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_item_is_worked_on_once_in_threads() {
+        let items: Vec<u32> = (0..100).collect();
+        let mut seen = vec![0; items.len()];
+        super::in_threads(
+            &items,
+            4,
+            |n| n * 2,
+            |i, doubled| {
+                assert_eq!(doubled, items[i] * 2);
+                seen[i] += 1;
+                Ok::<_, ()>(())
+            },
+        )
+        .unwrap();
+        assert!(seen.iter().all(|&n| n == 1));
+
+        // More threads than items, and no items
+        let mut count = 0;
+        super::in_threads(
+            &items[..2],
+            8,
+            |n| *n,
+            |_, _| {
+                count += 1;
+                Ok::<_, ()>(())
+            },
+        )
+        .unwrap();
+        assert_eq!(count, 2);
+        let none: [u32; 0] = [];
+        super::in_threads(&none, 4, |n| *n, |_, _| Err("called")).unwrap();
+    }
+
+    #[test]
+    fn an_error_stops_the_threads() {
+        // Each item takes long enough that the threads can't get through
+        // them all before the first result is handed over
+        let items: Vec<u32> = (0..200).collect();
+        let worked = std::sync::atomic::AtomicUsize::new(0);
+        let result = super::in_threads(
+            &items,
+            4,
+            |_| {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                worked.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            },
+            |_, ()| Err("stop"),
+        );
+        assert_eq!(result, Err("stop"));
+        assert!(worked.into_inner() < items.len());
+    }
+
     use super::*;
 
     #[test]

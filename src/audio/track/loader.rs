@@ -210,73 +210,48 @@ fn placeholder(uri: &str, files: &FileCache) -> Option<TrackData> {
     Some(TrackData::missing(file, reason))
 }
 
-// Decoding a cover mostly waits for its sandboxed loader, so a few at a
-// time go faster, even on fewer cores
-const MAX_LOADING_THREADS: usize = 4;
-
 // Reading the tags and decoding the covers takes a while, so the tracks
-// are read in a few threads. They are sent in the order of the files, all
-// the tracks of a file at once, which can be none; the threads stop once
-// the receiver is dropped. With `placeholders`, for the tracks of a
-// playlist, a file that gives no track is one that `placeholder()` makes,
-// so that saving the playlist doesn't lose it
+// are read in a few threads (`utils::in_threads`). They are sent in the
+// order of the files, all the tracks of a file at once, which can be none;
+// the threads stop once the receiver is dropped. With `placeholders`, for
+// the tracks of a playlist, a file that gives no track is one that
+// `placeholder()` makes, so that saving the playlist doesn't lose it
 pub fn load_tracks(
     files: Vec<gio::File>,
     placeholders: bool,
 ) -> async_channel::Receiver<Vec<TrackData>> {
     let (sender, receiver) = async_channel::unbounded();
 
-    let uris: Arc<Vec<String>> = Arc::new(files.iter().map(|f| f.uri().to_string()).collect());
+    let uris: Vec<String> = files.iter().map(|f| f.uri().to_string()).collect();
     let paths: Vec<PathBuf> = files.iter().filter_map(FileExt::path).collect();
     std::thread::spawn(move || {
         // Which sheets split the audio files, before any is read
-        let cache = Arc::new(FileCache::new(Claims::new(
-            paths.iter().map(PathBuf::as_path),
-        )));
-
-        let next = Arc::new(AtomicUsize::new(0));
-        let (read_sender, read_receiver) = std::sync::mpsc::channel();
-        let n_threads = MAX_LOADING_THREADS.min(uris.len()).max(1);
-        for _ in 0..n_threads {
-            let uris = Arc::clone(&uris);
-            let next = Arc::clone(&next);
-            let cache = Arc::clone(&cache);
-            let read_sender = read_sender.clone();
-            std::thread::spawn(move || {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(uri) = uris.get(index) else {
-                        break;
-                    };
-                    // A file whose tags make the reader panic is skipped,
-                    // rather than leaving the tracks after it unread
-                    let mut data = utils::guarded(uri, || TrackData::read(uri, &cache), Vec::new);
-                    if data.is_empty()
-                        && placeholders
-                        && let Some(placeholder) = placeholder(uri, &cache)
-                    {
-                        data.push(placeholder);
-                    }
-                    if read_sender.send((index, data)).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-        drop(read_sender);
+        let cache = FileCache::new(Claims::new(paths.iter().map(PathBuf::as_path)));
 
         // The tracks read out of order wait for the ones before them
         let mut waiting = BTreeMap::new();
         let mut next_index = 0;
-        for (index, data) in read_receiver {
+        let read = |uri: &String| {
+            // A file whose tags make the reader panic is skipped, rather
+            // than leaving the tracks after it unread
+            let mut data = utils::guarded(uri, || TrackData::read(uri, &cache), Vec::new);
+            if data.is_empty()
+                && placeholders
+                && let Some(placeholder) = placeholder(uri, &cache)
+            {
+                data.push(placeholder);
+            }
+            data
+        };
+        // Stops once the receiver is gone
+        let _ = utils::in_threads(&uris, utils::READING_THREADS, read, |index, data| {
             waiting.insert(index, data);
             while let Some(data) = waiting.remove(&next_index) {
-                if sender.try_send(data).is_err() {
-                    return;
-                }
+                sender.try_send(data).map_err(drop)?;
                 next_index += 1;
             }
-        }
+            Ok::<_, ()>(())
+        });
     });
 
     receiver
