@@ -134,12 +134,7 @@ pub(super) fn tokens(text: &str) -> Vec<Spanned> {
                             },
                         ],
                         false,
-                    ) => match text.as_str() {
-                        "AND" => Token::And,
-                        "OR" => Token::Or,
-                        "NOT" => Token::Not,
-                        _ => Token::Word(word),
-                    },
+                    ) => keyword(text).unwrap_or(Token::Word(word)),
                     _ => Token::Word(word),
                 };
                 tokens.push(Spanned {
@@ -151,6 +146,17 @@ pub(super) fn tokens(text: &str) -> Vec<Spanned> {
         }
     }
     tokens
+}
+
+// The operator a word is, unquoted; only in capitals, so that "and" and
+// "or" are searched for as words
+pub(super) fn keyword(text: &str) -> Option<Token> {
+    match text {
+        "AND" => Some(Token::And),
+        "OR" => Some(Token::Or),
+        "NOT" => Some(Token::Not),
+        _ => None,
+    }
 }
 
 // Reads a word from its first character, and returns it and where it ends.

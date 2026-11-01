@@ -40,10 +40,9 @@ pub struct QueueSources {
 
 impl QueueSources {
     fn read(needs: &Needs) -> Self {
-        let from_library = needs.added || needs.favorite_albums || needs.favorite_works;
         Self {
             stats: play_stats::search_stats(needs),
-            tracks: if from_library {
+            tracks: if needs.library_entry() {
                 library::track_entries()
             } else {
                 HashMap::new()
@@ -65,7 +64,8 @@ mod imp {
         // without one, the search doesn't filter the queue
         #[property(name = "filtering", get = Self::filtering, type = bool)]
         pub query: RefCell<Option<Query>>,
-        // When the search was typed, for its relative dates
+        // When the search was typed, which its relative dates were worked
+        // out at, see `Query::at()`
         pub context: Cell<Option<Context>>,
         // What the search needs from the library and plays.db, read when
         // it's typed, and again when a favorite is marked
@@ -89,10 +89,12 @@ mod imp {
                 return;
             }
 
+            let context = Context::now();
             let query = search
                 .as_deref()
                 .map(|text| Query::parse(text, Mode::Search))
-                .filter(|query| !query.matches_all());
+                .filter(|query| !query.matches_all())
+                .map(|query| query.at(&context));
             let sources = query
                 .as_ref()
                 .map(|query| QueueSources::read(&query.needs()));
@@ -101,7 +103,7 @@ mod imp {
             let was_filtering = self.filtering();
             self.search.replace(search);
             self.query.replace(query);
-            self.context.set(Some(Context::now()));
+            self.context.set(Some(context));
 
             let obj = self.obj();
             obj.changed(gtk::FilterChange::Different);
@@ -120,7 +122,7 @@ mod imp {
         fn strictness(&self) -> gtk::FilterMatch {
             match &*self.query.borrow() {
                 None => gtk::FilterMatch::All,
-                Some(query) if query.matches_none() => gtk::FilterMatch::None,
+                Some(query) if query.has_errors() => gtk::FilterMatch::None,
                 Some(_) => gtk::FilterMatch::Some,
             }
         }
@@ -159,12 +161,13 @@ impl SearchFilter {
     pub fn favorites_changed(&self) {
         let imp = self.imp();
         let needs = imp.query.borrow().as_ref().map(Query::needs);
-        let Some(needs) =
-            needs.filter(|needs| needs.favorites || needs.favorite_albums || needs.favorite_works)
-        else {
+        let Some(needs) = needs.filter(Needs::any_favorites) else {
             return;
         };
-        imp.sources.replace(Some(QueueSources::read(&needs)));
+        // What the library keeps of the tracks stays the same
+        if let Some(sources) = imp.sources.borrow_mut().as_mut() {
+            sources.stats = play_stats::search_stats(&needs);
+        }
         self.changed(gtk::FilterChange::Different);
     }
 }

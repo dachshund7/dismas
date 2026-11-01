@@ -75,9 +75,9 @@ pub use sort::SortKey;
 pub use state::PlayerState;
 pub use track::{
     Arrangement, AudioProperties, ExtraComments, FieldCode, FieldParts, FileDetails, FileTags,
-    Gains, ListedPerformer, Missing, MusicBrainzIds, PerformerKind, ReadOptions, Track,
-    TrackCredits, discovered, load_tracks, normalize_key_text, normalize_search_text, plain_commas,
-    read_file_tags, search_key, title_from_file_name, track_search_text, track_title,
+    Flag, Gains, ListedPerformer, Missing, MusicBrainzIds, PerformerKind, ReadOptions, Track,
+    TrackCredits, discovered, field_values, load_tracks, normalize_key_text, normalize_search_text,
+    plain_commas, read_file_tags, search_key, title_from_file_name, track_search_text, track_title,
 };
 pub use waveform_generator::WaveformGenerator;
 

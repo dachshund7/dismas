@@ -41,9 +41,9 @@ pub use watch::FolderWatch;
 use crate::{
     audio::{
         Arrangement, AudioProperties, CoverCache, ExtraComments, FieldCode, FieldParts, FileTags,
-        ListedPerformer, PerformerKind, ReadOptions, TrackCredits, normalize_key_text,
-        normalize_search_text, plain_commas, read_file_tags, search_key, title_from_file_name,
-        track_search_text, track_title,
+        ListedPerformer, PerformerKind, ReadOptions, TrackCredits, field_values,
+        normalize_key_text, normalize_search_text, plain_commas, read_file_tags, search_key,
+        title_from_file_name, track_search_text, track_title,
     },
     catalogue::{self, CatalogueNumber},
     cover_image::CoverImage,
@@ -848,7 +848,8 @@ pub struct SearchSources {
 // than matching with another's. The play stats and the favorites are read
 // as the statement is made, in the thread it runs in
 struct Matcher {
-    query: Arc<Query>,
+    // With its relative dates worked out at `context`, see `Query::at()`
+    query: Query,
     context: Context,
     // From plays.db, by path rather than by URI
     heard: HashMap<PathBuf, play_stats::TrackStats>,
@@ -882,9 +883,10 @@ impl Matcher {
         // As the library keeps the tracks, whose paths are those of their
         // URIs, even for the tracks of CUE sheets
         let by_path = |uri: &String| gio::File::for_uri(uri).path();
+        let context = Context::now();
         Self {
-            query: Arc::clone(query),
-            context: Context::now(),
+            query: query.at(&context),
+            context,
             heard: stats
                 .heard
                 .into_iter()
@@ -952,12 +954,11 @@ fn add_functions(conn: &Connection) -> rusqlite::Result<()> {
             let ValueRef::Text(fields) = ctx.get_raw(0) else {
                 return Ok(None);
             };
-            let code = FieldCode::Length.code();
             Ok(std::str::from_utf8(fields).ok().and_then(|fields| {
-                fields.lines().find_map(|line| {
-                    let (field, value) = line.split_once('\t')?;
-                    (field == code).then(|| value.parse::<i64>().ok())?
-                })
+                field_values(fields, &[FieldCode::Length])
+                    .next()?
+                    .parse::<i64>()
+                    .ok()
             }))
         },
     )?;

@@ -62,7 +62,7 @@ mod work_hierarchy;
 use credits::is_composer;
 pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
 use fields::sane_duration;
-pub use fields::{AudioProperties, FieldCode, FieldParts};
+pub use fields::{AudioProperties, FieldCode, FieldParts, Flag, field_values};
 pub use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
 pub use loader::load_tracks;
@@ -1048,7 +1048,7 @@ impl Track {
             .and_then(|(stats, uri)| stats.heard.get(uri));
         self.with_search_key(|search_key| {
             let data = self.imp().data.borrow();
-            let path = (needs.path || needs.added || needs.favorite_albums || needs.favorite_works)
+            let path = (needs.path || needs.library_entry())
                 .then(|| data.file.path())
                 .flatten();
             // As the library keeps it, under its sheet for a track of a CUE

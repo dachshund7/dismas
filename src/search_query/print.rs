@@ -8,7 +8,7 @@
 
 use itertools::Itertools;
 
-use super::{Directives, Limit, Node, SortKey};
+use super::{Directives, Limit, Node, SortKey, lexer, parser::RESERVED};
 
 pub(super) fn query(root: &Node, directives: &Directives) -> String {
     let mut parts = Vec::new();
@@ -73,9 +73,9 @@ fn node(node: &Node) -> String {
 fn needs_quotes(text: &str) -> bool {
     text.is_empty()
         || text.chars().any(|c| {
-            c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\\' | '*' | '?' | '@' | '[' | ']')
+            c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\\') || RESERVED.contains(&c)
         })
-        || matches!(text, "AND" | "OR" | "NOT")
+        || lexer::keyword(text).is_some()
 }
 
 fn quoted(text: &str) -> String {

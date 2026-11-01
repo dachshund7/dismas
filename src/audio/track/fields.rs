@@ -9,6 +9,8 @@
 //! are made here, from the same parts, so that the two searches find the
 //! same tracks.
 
+use std::collections::HashSet;
+
 use super::*;
 use crate::catalogue;
 
@@ -179,7 +181,7 @@ impl FieldCode {
 }
 
 // The flags of a track, the values of its `FieldCode::Is` lines
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Flag {
     // Part of a larger work
     Movement,
@@ -371,8 +373,23 @@ impl FieldParts<'_> {
             lines.push_number(FieldCode::Channels, properties.channels);
         }
 
-        lines.0
+        lines.text
     }
+}
+
+// The values of the fields `codes` in a track's fields, as `encode()`
+// writes them
+pub fn field_values<'a>(
+    fields: &'a str,
+    codes: &'a [FieldCode],
+) -> impl Iterator<Item = &'a str> + 'a {
+    fields.lines().filter_map(move |line| {
+        let (code, value) = line.split_once('\t')?;
+        codes
+            .iter()
+            .any(|field| field.code() == code)
+            .then_some(value)
+    })
 }
 
 // The catalogue numbers of a track: those of its work, or of its title,
@@ -402,7 +419,12 @@ pub(super) fn catalogue_numbers(
 
 // The lines, each value folded and written once per field
 #[derive(Default)]
-struct Lines(String);
+struct Lines {
+    text: String,
+    // The lines written, as a track that credits every player of an
+    // orchestra has hundreds
+    written: HashSet<String>,
+}
 
 impl Lines {
     fn push(&mut self, field: FieldCode, value: Option<&str>) {
@@ -417,8 +439,9 @@ impl Lines {
             return;
         }
         let line = format!("{}\t{value}\n", field.code());
-        if !self.0.contains(&line) {
-            self.0.push_str(&line);
+        if !self.written.contains(&line) {
+            self.text.push_str(&line);
+            self.written.insert(line);
         }
     }
 

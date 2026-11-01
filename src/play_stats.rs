@@ -674,18 +674,10 @@ fn query_search_stats(
             .collect::<rusqlite::Result<_>>()?;
     }
     if needs.favorite_albums {
-        let mut stmt = conn.prepare("SELECT album_id FROM favorite_albums")?;
-        stats.favorite_albums = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
+        stats.favorite_albums = query_favorite_album_ids(conn)?;
     }
     if needs.favorite_works {
-        let mut stmt = conn.prepare(
-            "SELECT key FROM favorite_works UNION SELECT work_key FROM favorite_recordings",
-        )?;
-        stats.favorite_works = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
+        stats.favorite_works = query_favorite_work_keys(conn)?;
     }
     Ok(stats)
 }
@@ -748,14 +740,15 @@ fn set_albums(
 
 // The ids of the favorite albums, in a set whose order doesn't change
 pub fn favorite_album_ids() -> BTreeSet<String> {
-    with_connection(|conn| {
-        let mut stmt = conn.prepare("SELECT album_id FROM favorite_albums")?;
-        stmt.query_map([], |row| row.get(0))?.collect()
-    })
-    .unwrap_or_else(|e| {
+    with_connection(|conn| query_favorite_album_ids(conn)).unwrap_or_else(|e| {
         warn!("Unable to load the favorite albums: {e}");
         Default::default()
     })
+}
+
+fn query_favorite_album_ids(conn: &Connection) -> rusqlite::Result<BTreeSet<String>> {
+    let mut stmt = conn.prepare("SELECT album_id FROM favorite_albums")?;
+    stmt.query_map([], |row| row.get(0))?.collect()
 }
 
 // The favorite albums, in the order they were marked

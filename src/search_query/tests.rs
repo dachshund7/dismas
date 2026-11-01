@@ -31,7 +31,17 @@ fn track<'a>(search_key: &'a str, fields: &'a str) -> Candidate<'a> {
 const NOW: Context = Context { now: 1_793_448_000 };
 
 fn finds(query: &str, candidate: &Candidate) -> bool {
-    search(query).matches(candidate, &NOW)
+    let parsed = search(query);
+    let found = parsed.matches(candidate, &NOW);
+    // With its relative dates worked out at that time, it finds the same,
+    // whenever it's matched
+    let resolved = parsed.at(&NOW);
+    assert_eq!(
+        resolved.matches(candidate, &Context { now: 0 }),
+        found,
+        "{query}"
+    );
+    found
 }
 
 const BACH: &str = "co\tjohann sebastian bach\nco\tbach, johann sebastian\nyr\t1985\n\
@@ -160,7 +170,7 @@ fn text_fields_contain_or_equal() {
     assert!(finds("form:cantata genre:baroque", &candidate));
     let query = search("title:<b");
     assert_eq!(kinds(&query), [ProblemKind::CantCompare(Field::Title)]);
-    assert!(query.matches_none());
+    assert!(query.has_errors());
 }
 
 #[test]
@@ -386,7 +396,7 @@ fn errors_make_the_query_match_nothing() {
     ] {
         let query = search(text);
         assert!(query.has_errors(), "{text}");
-        assert!(query.matches_none(), "{text}");
+        assert!(query.has_errors(), "{text}");
         assert!(!query.matches_all(), "{text}");
         assert!(!query.matches(&candidate, &NOW), "{text}");
     }

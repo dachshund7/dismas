@@ -33,7 +33,7 @@ pub use eval::{Candidate, Context};
 use values::{CatalogueTest, DateRange, NumberRange, PathTest};
 
 use crate::{
-    audio::FieldCode,
+    audio::{FieldCode, Flag},
     i18n::{i18n, i18n_k},
 };
 
@@ -60,6 +60,8 @@ pub enum Mode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query {
     root: Node,
+    // What the root looks at, worked out once, as each track matched asks
+    needs: Needs,
     directives: Directives,
     problems: Vec<Problem>,
     mode: Mode,
@@ -77,10 +79,6 @@ impl Query {
     }
 
     // Whether it can't match a track, as while it has an error
-    pub fn matches_none(&self) -> bool {
-        self.has_errors()
-    }
-
     pub fn has_errors(&self) -> bool {
         self.problems
             .iter()
@@ -91,19 +89,22 @@ impl Query {
         &self.problems
     }
 
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
-
     pub fn directives(&self) -> &Directives {
         &self.directives
     }
 
     // What the query looks at, so that only that is read for each track
     pub fn needs(&self) -> Needs {
-        let mut needs = Needs::default();
-        self.root.add_needs(&mut needs);
-        needs
+        self.needs
+    }
+
+    // The query with its relative dates worked out at the time of
+    // `context`, so that matching many tracks doesn't work them out for
+    // each; `matches()` gives the same answers with it at that time
+    pub fn at(&self, context: &Context) -> Self {
+        let mut query = self.clone();
+        query.root.resolve_dates(context.now);
+        query
     }
 
     // Whether a track matches, at the time `context` gives for the relative
@@ -136,6 +137,18 @@ pub struct Needs {
     pub favorite_works: bool,
 }
 
+impl Needs {
+    // Whether it needs what the library keeps of a track, see `TrackEntry`
+    pub fn library_entry(&self) -> bool {
+        self.added || self.favorite_albums || self.favorite_works
+    }
+
+    // Whether marking a favorite can change what it matches
+    pub fn any_favorites(&self) -> bool {
+        self.favorites || self.favorite_albums || self.favorite_works
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Node {
     // Every track, as for an empty search, or a term that isn't finished
@@ -152,6 +165,13 @@ pub(crate) enum Node {
 }
 
 impl Node {
+    // What the node looks at
+    fn needs(&self) -> Needs {
+        let mut needs = Needs::default();
+        self.add_needs(&mut needs);
+        needs
+    }
+
     fn add_needs(&self, needs: &mut Needs) {
         match self {
             Self::All => (),
@@ -162,13 +182,29 @@ impl Node {
             Self::Is(IsFlag::FavoriteAlbum) => needs.favorite_albums = true,
             Self::Is(IsFlag::FavoriteWork) => needs.favorite_works = true,
             Self::Is(IsFlag::Missing) => (),
-            Self::Is(_) => needs.fields = true,
+            Self::Is(IsFlag::Tagged(_)) => needs.fields = true,
             Self::Not(node) => node.add_needs(needs),
             Self::And(nodes) | Self::Or(nodes) => {
                 for node in nodes {
                     node.add_needs(needs);
                 }
             }
+        }
+    }
+
+    fn resolve_dates(&mut self, now: i64) {
+        match self {
+            Self::Term(Term {
+                test: Test::Dates(range),
+                ..
+            }) => *range = range.at(now),
+            Self::Not(node) => node.resolve_dates(now),
+            Self::And(nodes) | Self::Or(nodes) => {
+                for node in nodes {
+                    node.resolve_dates(now);
+                }
+            }
+            _ => (),
         }
     }
 }
@@ -548,11 +584,8 @@ pub enum IsFlag {
     FavoriteAlbum,
     // A part of a favorite work, or of a work with a favorite recording
     FavoriteWork,
-    Movement,
-    Arrangement,
-    Live,
-    Partial,
-    Lossless,
+    // A flag the fields keep, see `FieldCode::Is`
+    Tagged(Flag),
     // A track whose file is gone, in the queue
     Missing,
 }
@@ -562,11 +595,11 @@ impl IsFlag {
         Self::Favorite,
         Self::FavoriteAlbum,
         Self::FavoriteWork,
-        Self::Movement,
-        Self::Arrangement,
-        Self::Live,
-        Self::Partial,
-        Self::Lossless,
+        Self::Tagged(Flag::Movement),
+        Self::Tagged(Flag::Arrangement),
+        Self::Tagged(Flag::Live),
+        Self::Tagged(Flag::Partial),
+        Self::Tagged(Flag::Lossless),
         Self::Missing,
     ];
 
@@ -575,11 +608,7 @@ impl IsFlag {
             Self::Favorite => "favorite",
             Self::FavoriteAlbum => "favorite-album",
             Self::FavoriteWork => "favorite-work",
-            Self::Movement => "movement",
-            Self::Arrangement => "arrangement",
-            Self::Live => "live",
-            Self::Partial => "partial",
-            Self::Lossless => "lossless",
+            Self::Tagged(flag) => flag.name(),
             Self::Missing => "missing",
         }
     }
@@ -597,11 +626,11 @@ impl IsFlag {
             Self::FavoriteWork => {
                 i18n("Tracks of works marked with the heart, or of their marked recordings")
             }
-            Self::Movement => i18n("Movements of a larger work"),
-            Self::Arrangement => i18n("Arrangements of another work"),
-            Self::Live => i18n("Live recordings"),
-            Self::Partial => i18n("Recordings of part of a work"),
-            Self::Lossless => i18n("Files in a lossless format"),
+            Self::Tagged(Flag::Movement) => i18n("Movements of a larger work"),
+            Self::Tagged(Flag::Arrangement) => i18n("Arrangements of another work"),
+            Self::Tagged(Flag::Live) => i18n("Live recordings"),
+            Self::Tagged(Flag::Partial) => i18n("Recordings of part of a work"),
+            Self::Tagged(Flag::Lossless) => i18n("Files in a lossless format"),
             Self::Missing => i18n("Tracks whose files are gone"),
         }
     }

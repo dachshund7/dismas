@@ -45,15 +45,8 @@ pub(super) fn numbers(
         if lo.is_none() && hi.is_none() {
             return Err(error);
         }
-        if let (Some(lo), Some(upper)) = (lo, hi)
-            && upper < lo
-        {
-            if at_end {
-                hi = None;
-            } else {
-                return Err(ProblemKind::ReversedRange);
-            }
-        }
+        let reversed = matches!((lo, hi), (Some(lo), Some(hi)) if hi < lo);
+        open_if_reversed(&mut hi, reversed, at_end)?;
         return Ok(Test::Numbers(NumberRange { lo, hi }));
     }
 
@@ -70,6 +63,23 @@ pub(super) fn numbers(
 
 pub(super) fn number(s: &str) -> Option<i64> {
     s.parse().ok()
+}
+
+// A range whose end is before its start is an error, unless it's typed
+// at the end of the search (`at_end`), where its end reads as open, see
+// `numbers()`
+fn open_if_reversed<T>(
+    end: &mut Option<T>,
+    reversed: bool,
+    at_end: bool,
+) -> Result<(), ProblemKind> {
+    if reversed {
+        if !at_end {
+            return Err(ProblemKind::ReversedRange);
+        }
+        *end = None;
+    }
+    Ok(())
 }
 
 // A length in seconds: `3:30` or `1:02:03`, a number of seconds, or a
@@ -165,6 +175,15 @@ pub(crate) struct DateRange {
 }
 
 impl DateRange {
+    // The range with its relative dates worked out at `now`
+    pub fn at(self, now: i64) -> Self {
+        let at = |point: Option<DatePoint>| point.map(|point| DatePoint::At(point.at(now)));
+        Self {
+            from: at(self.from),
+            until: at(self.until),
+        }
+    }
+
     // Whether the range and the times from `start` until `end` overlap
     pub fn overlaps(self, start: i64, end: i64, now: i64) -> bool {
         self.from.is_none_or(|from| end > from.at(now))
@@ -275,15 +294,11 @@ pub(super) fn dates(field: Field, op: Op, value: &str, at_end: bool) -> Result<T
             from: from.as_ref().map(DateValue::start),
             until: until.as_ref().map(DateValue::end),
         };
-        if let (Some(DatePoint::At(from)), Some(DatePoint::At(until))) = (range.from, range.until)
-            && until <= from
-        {
-            if at_end {
-                range.until = None;
-            } else {
-                return Err(ProblemKind::ReversedRange);
-            }
-        }
+        let reversed = matches!(
+            (range.from, range.until),
+            (Some(DatePoint::At(from)), Some(DatePoint::At(until))) if until <= from
+        );
+        open_if_reversed(&mut range.until, reversed, at_end)?;
         return Ok(Test::Dates(range));
     }
 
@@ -352,15 +367,8 @@ pub(super) fn catalogue(op: Op, value: &str, at_end: bool) -> Result<Test, Probl
             "" => None,
             until => Some(until.parse::<u32>().ok().ok_or_else(error)?),
         };
-        if let (Some(lo), Some(upper)) = (lo, hi)
-            && upper < lo
-        {
-            if at_end {
-                hi = None;
-            } else {
-                return Err(ProblemKind::ReversedRange);
-            }
-        }
+        let reversed = matches!((lo, hi), (Some(lo), Some(hi)) if hi < lo);
+        open_if_reversed(&mut hi, reversed, at_end)?;
         return Ok(Test::Catalogue(CatalogueTest {
             catalogue: from.catalogue,
             number: CatalogueNumberTest::Range(lo, hi),

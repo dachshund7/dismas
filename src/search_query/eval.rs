@@ -7,7 +7,7 @@
 use std::{cell::OnceCell, path::Path};
 
 use super::{Field, IsFlag, Node, Term, Test, values};
-use crate::audio::{FieldCode, normalize_search_text};
+use crate::audio::{FieldCode, field_values, normalize_search_text};
 
 // What a query looks at in a track, borrowed from wherever the track keeps
 // it; `Query::needs()` says which parts a query needs
@@ -48,27 +48,16 @@ impl Context {
     }
 }
 
-// A track's fields, split into lines once for a whole query
+// A track being matched, with its path folded once for a whole query
 struct Track<'a> {
     candidate: &'a Candidate<'a>,
-    lines: OnceCell<Vec<(&'a str, &'a str)>>,
     path: OnceCell<Option<String>>,
     now: i64,
 }
 
 impl<'a> Track<'a> {
-    fn values(&self, codes: &'static [FieldCode]) -> impl Iterator<Item = &'a str> + '_ {
-        let lines = self.lines.get_or_init(|| {
-            self.candidate
-                .fields
-                .lines()
-                .filter_map(|line| line.split_once('\t'))
-                .collect()
-        });
-        lines
-            .iter()
-            .filter(move |(code, _)| codes.iter().any(|field| field.code() == *code))
-            .map(|(_, value)| *value)
+    fn values(&self, codes: &'static [FieldCode]) -> impl Iterator<Item = &'a str> {
+        field_values(self.candidate.fields, codes)
     }
 
     fn path(&self) -> Option<&str> {
@@ -85,7 +74,6 @@ impl<'a> Track<'a> {
 pub(super) fn matches(node: &Node, candidate: &Candidate, context: &Context) -> bool {
     let track = Track {
         candidate,
-        lines: OnceCell::new(),
         path: OnceCell::new(),
         now: context.now,
     };
@@ -111,7 +99,7 @@ fn eval(node: &Node, track: &Track) -> bool {
             IsFlag::FavoriteAlbum => track.candidate.favorite_album,
             IsFlag::FavoriteWork => track.candidate.favorite_work,
             IsFlag::Missing => track.candidate.missing,
-            _ => track
+            IsFlag::Tagged(flag) => track
                 .values(&[FieldCode::Is])
                 .any(|value| value == flag.name()),
         },

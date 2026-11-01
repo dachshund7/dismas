@@ -25,7 +25,7 @@ use super::{
 use crate::audio::normalize_search_text;
 
 // The characters a rule must quote, for wildcards later
-const RESERVED: [char; 5] = ['*', '?', '@', '[', ']'];
+pub(super) const RESERVED: [char; 5] = ['*', '?', '@', '[', ']'];
 
 pub(super) fn parse(text: &str, mode: Mode) -> Query {
     let mut parser = Parser {
@@ -49,8 +49,10 @@ pub(super) fn parse(text: &str, mode: Mode) -> Query {
             _ => break,
         }
     }
+    let root = and(nodes);
     Query {
-        root: and(nodes),
+        needs: root.needs(),
+        root,
         directives: parser.directives,
         problems: parser.problems,
         mode,

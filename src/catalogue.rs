@@ -70,13 +70,6 @@ pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
         .filter(|word| !word.is_empty())
         .collect();
 
-    let catalogue = |word: &str| {
-        let word = word.strip_suffix('.').unwrap_or(word).to_lowercase();
-        CATALOGUES
-            .iter()
-            .copied()
-            .find(|catalogue| *catalogue == word)
-    };
     let is_number = |catalogue: &str, number: &str| {
         number.starts_with(|c: char| c.is_ascii_digit())
             || (ROMAN_CATALOGUES.contains(&catalogue) && number.starts_with(['I', 'V', 'X']))
@@ -85,7 +78,7 @@ pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
     let mut numbers = Vec::new();
     for (i, word) in words.iter().enumerate() {
         let following = words.get(i + 1).copied().unwrap_or_default();
-        let (found, number, after) = match catalogue(word) {
+        let (found, number, after) = match catalogue_name(word) {
             Some(found) if is_number(found, following) => (found, following, i + 2),
             _ => {
                 // Written as one word, as in "op.2" or "W389"
@@ -94,7 +87,7 @@ pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
                     .find(|(_, c)| !c.is_alphabetic())
                     .map_or(word.len(), |(at, _)| at);
                 let number = word[split..].strip_prefix('.').unwrap_or(&word[split..]);
-                match catalogue(&word[..split]) {
+                match catalogue_name(&word[..split]) {
                     Some(found) if is_number(found, number) => (found, number, i + 1),
                     _ => continue,
                 }
@@ -111,7 +104,7 @@ pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
             order.extend(number_order(set_number));
         }
         numbers.push(CatalogueNumber {
-            catalogue: if found == "kv" { "k" } else { found },
+            catalogue: found,
             order,
         });
     }
