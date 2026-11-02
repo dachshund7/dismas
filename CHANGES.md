@@ -446,6 +446,9 @@ All notable changes to this project will be documented in this file.
 - A CUE sheet that named many files, as a crafted one can, made each scan
   of the music folders take minutes, as each file was looked for in a new
   listing of its folder
+- A file with many pictures that were slow to decode, as a crafted one can
+  have, held up the tracks after it in the playlist, and the scan, for 10
+  to 20 seconds for each picture
 
 ### Removed
 

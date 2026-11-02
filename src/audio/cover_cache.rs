@@ -6,6 +6,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, Weak},
+    time::{Duration, Instant},
 };
 
 use gtk::{gdk, gio, glib};
@@ -39,6 +40,12 @@ const ROW_COVER_SIZE: u32 = 48 * 2;
 // Cover files next to the tracks larger than this are not read; covers
 // are rarely more than a few megabytes, and this one could be anything
 const MAX_COVER_FILE_SIZE: u64 = 32 * 1024 * 1024;
+
+// How long the pictures and the cover files of a track are tried for, as
+// each can take the sandbox's whole timeout, and a crafted file can have a
+// hundred pictures, which held up the queue and the scan for half an hour;
+// a cover decodes in a fraction of a second
+const COVER_SEARCH_TIME: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug)]
 pub struct CoverArt {
@@ -175,11 +182,11 @@ impl CoverCache {
             .flat_map(Self::cover_files_for)
             .filter_map(|file| read_cover_file(&file));
 
-        let cover = front
-            .into_iter()
-            .chain(fallbacks)
-            .chain(files)
-            .find_map(|data| CoverImage::decode(data, max_size));
+        let cover = first_within(
+            front.into_iter().chain(fallbacks).chain(files),
+            COVER_SEARCH_TIME,
+            |data| CoverImage::decode(data, max_size),
+        );
         if cover.is_none() {
             debug!("No cover art");
         }
@@ -348,6 +355,20 @@ fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
     (named.into_iter().map(|(_, _, path)| path).collect(), only)
 }
 
+// The first of the candidates that `decode` makes something of, trying no
+// more of them once `limit` has passed
+fn first_within<T, U>(
+    candidates: impl IntoIterator<Item = T>,
+    limit: Duration,
+    decode: impl FnMut(T) -> Option<U>,
+) -> Option<U> {
+    let start = Instant::now();
+    candidates
+        .into_iter()
+        .take_while(|_| start.elapsed() < limit)
+        .find_map(decode)
+}
+
 // Reads a cover file next to the tracks, unless it's too large
 fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
     debug!("Looking for external cover file: {file:?}");
@@ -449,8 +470,26 @@ mod tests {
 
     use gtk::{gdk, gio, glib, prelude::*};
 
-    use super::{COVER_SIZE, CoverCache, read_cover_file, write_cover_file};
+    use super::{COVER_SIZE, CoverCache, first_within, read_cover_file, write_cover_file};
     use crate::cover_image::{accent_color, oklch_chroma};
+
+    // A crafted file can have a hundred pictures, each taking the whole
+    // timeout of the sandbox
+    #[test]
+    fn covers_are_looked_for_for_a_while_at_most() {
+        use std::time::Duration;
+
+        let mut tried = 0;
+        let found: Option<u32> = first_within(0..100, Duration::from_millis(30), |_| {
+            tried += 1;
+            std::thread::sleep(Duration::from_millis(10));
+            None
+        });
+        assert_eq!(found, None);
+        assert!(tried < 20, "{tried} tried");
+        let first = first_within(0..3, Duration::from_secs(10), |i| (i > 0).then_some(i));
+        assert_eq!(first, Some(1));
+    }
 
     #[test]
     fn changed_covers_get_a_new_file() {
