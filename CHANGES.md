@@ -409,6 +409,10 @@ All notable changes to this project will be documented in this file.
   place as a track that couldn't be read. A cover file or a CUE sheet
   swapped for one as the music folders were read could stop the scan the
   same way
+- Importing or opening a playlist read the whole file, however large, so
+  one of millions of short lines could fill the memory. A playlist from
+  elsewhere over 32 MiB, or with more than 200,000 tracks, is now turned
+  down
 
 ### Removed
 

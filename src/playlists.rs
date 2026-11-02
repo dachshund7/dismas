@@ -10,13 +10,14 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
+    io::Read,
     path::{Path, PathBuf},
 };
 
 use gtk::{gio, glib, prelude::*};
 use log::{debug, warn};
 
-use crate::cue_sheet;
+use crate::{cue_sheet, utils};
 
 const EXTENSION: &str = "m3u8";
 
@@ -295,19 +296,52 @@ pub fn read_m3u(path: &Path) -> Option<Vec<gio::File>> {
     }
 }
 
+// The largest playlist from elsewhere that's read, and the most tracks it
+// can name. Dismas writes a path a line, about 100 bytes, and other players
+// add an #EXTINF line to each, so 32 MiB is 170,000 tracks or more, while
+// a file of short lines, such as "a", would make 16 million entries, each
+// a `gio::File` and then a track. Dismas's own playlists aren't limited, as
+// one that couldn't be read would be saved again without its tracks
+const MAX_PLAYLIST_SIZE: u64 = 32 * 1024 * 1024;
+const MAX_PLAYLIST_ENTRIES: usize = 200_000;
+
 // The tracks of an M3U playlist from elsewhere, like one to import: an
 // entry that isn't where the playlist says is looked for where it can be,
 // as the playlist can come from another computer, or from Windows, see
-// `Finder`; the entries that aren't found are left as they are
+// `Finder`; the entries that aren't found are left as they are. A playlist
+// over the limits isn't read at all, rather than read in part
 pub fn import_m3u(path: &Path, music_folders: &[PathBuf]) -> Option<Vec<gio::File>> {
-    let contents = std::fs::read(path)
-        .inspect_err(|e| warn!("Unable to read the playlist {path:?}: {e}"))
-        .ok()?;
+    import_m3u_within(path, music_folders, MAX_PLAYLIST_SIZE, MAX_PLAYLIST_ENTRIES)
+}
+
+fn import_m3u_within(
+    path: &Path,
+    music_folders: &[PathBuf],
+    max_size: u64,
+    max_entries: usize,
+) -> Option<Vec<gio::File>> {
+    let mut contents = Vec::new();
+    // Not a named pipe, which would wait for something to write to it
+    let read = utils::open_regular_file(path)
+        .and_then(|file| file.take(max_size + 1).read_to_end(&mut contents));
+    if let Err(e) = read {
+        warn!("Unable to read the playlist {path:?}: {e}");
+        return None;
+    }
+    if contents.len() as u64 > max_size {
+        warn!("Not reading the playlist {path:?}, which is larger than {max_size} bytes");
+        return None;
+    }
+    let text = cue_sheet::decode(&contents);
+    if m3u_entries(&text).nth(max_entries).is_some() {
+        warn!("Not reading the playlist {path:?}, which names more than {max_entries} tracks");
+        return None;
+    }
     let dir = path.parent()?;
     let base = gio::File::for_path(dir);
     let mut finder = Finder::default();
     Some(
-        m3u_entries(&cue_sheet::decode(&contents))
+        m3u_entries(&text)
             .map(|line| {
                 let file = m3u_entry(line, &base);
                 if file.path().is_some_and(|p| cue_sheet::location_exists(&p)) {
@@ -843,6 +877,36 @@ mod tests {
         .unwrap();
         let files = read_m3u(&playlist).unwrap();
         assert_eq!(paths(&files), ["/music/Café.flac", "/music/Bär.flac"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_playlist_from_elsewhere_over_the_limits_is_not_read() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let playlist = dir.join("list.m3u");
+        // At most 20 bytes and 2 tracks
+        let read = |text: &str| {
+            std::fs::write(&playlist, text).unwrap();
+            import_m3u_within(&playlist, &[], 20, 2).map(|files| files.len())
+        };
+
+        // Comments aren't tracks
+        assert_eq!(read("#EXTM3U\n#x\na\nb\n"), Some(2));
+        assert_eq!(read("a\nb\nc\n"), None);
+        // 20 bytes, then 21
+        assert_eq!(read(&format!("#{}\na\n", "x".repeat(16))), Some(1));
+        assert_eq!(read(&format!("#{}\na\n", "x".repeat(17))), None);
+
+        // A named pipe isn't waited on
+        let pipe = dir.join("pipe.m3u");
+        utils::make_test_pipe(&pipe);
+        let music_folders = [dir.clone()];
+        assert!(utils::within_seconds(move || import_m3u(
+            &pipe,
+            &music_folders
+        )
+        .is_none()));
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
