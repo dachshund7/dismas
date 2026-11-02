@@ -50,8 +50,9 @@ impl Window {
         }
     }
 
-    // Runs `f` once no tracks are being read for the queue, right away if
-    // none are, so that loads happen one at a time. A switch to another
+    // Runs `f` once no tracks are being read for the queue, or looked for
+    // in folders (`find_audio_files()`), right away if none are, so that
+    // loads happen one at a time. A switch to another
     // playlist, tracks played in place of the queue, or tracks added, while
     // other tracks are read, would otherwise go among them, or take the
     // place of tracks that aren't in the queue yet: tracks played while a
@@ -419,51 +420,64 @@ impl Window {
         ));
     }
 
-    // Adds the audio files, and the ones in the folders, to the queue, at
-    // the end or before a track; looking into the folders takes a while, so
-    // it's done in a separate thread
-    fn add_files_to_queue(&self, files: Vec<gio::File>, mode: QueueMode, before: Option<Track>) {
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = win)]
-            self,
-            async move {
-                let music_folders = library::music_folder_paths();
-                match gio::spawn_blocking(move || audio_files(files, &music_folders)).await {
-                    Ok(queue) => win.load_into_queue(
-                        queue,
-                        mode,
-                        LoadOptions {
-                            place: before.map_or(Place::End, Place::Before),
-                            ..Default::default()
-                        },
-                    ),
-                    Err(_) => win.end_startup(),
+    // Looks for the audio files among `files` and in the folders, which
+    // takes a while, in a separate thread, and passes them to `then`. The
+    // search counts as a load, so that what's asked for meanwhile waits for
+    // it and for the tracks `then` reads, in the order asked: otherwise,
+    // as the search returns at once, a track clicked meanwhile, or a
+    // playlist switched to, would go first, and the files would then take
+    // its place, or go into the other playlist. The search itself waits
+    // for the tracks being read, which come first
+    fn find_audio_files(
+        &self,
+        files: Vec<gio::File>,
+        then: impl FnOnce(&Self, Vec<gio::File>) + 'static,
+    ) {
+        self.after_loads(move |win| {
+            win.set_loading(true);
+            glib::spawn_future_local(clone!(
+                #[weak]
+                win,
+                async move {
+                    let music_folders = library::music_folder_paths();
+                    let found = gio::spawn_blocking(move || audio_files(files, &music_folders))
+                        .await
+                        .unwrap_or_default();
+                    // `then` starts its load right away, as no other is on
+                    win.set_loading(false);
+                    then(&win, found);
+                    win.run_after_loads();
                 }
-            }
-        ));
+            ));
+        });
+    }
+
+    // Adds the audio files, and the ones in the folders, to the queue, at
+    // the end or before a track
+    fn add_files_to_queue(&self, files: Vec<gio::File>, mode: QueueMode, before: Option<Track>) {
+        self.find_audio_files(files, move |win, queue| {
+            win.load_into_queue(
+                queue,
+                mode,
+                LoadOptions {
+                    place: before.map_or(Place::End, Place::Before),
+                    ..Default::default()
+                },
+            );
+        });
     }
 
     // Plays the audio files, and the ones in the folders, in place of the
     // tracks of the queue, like an album's Play button, for files dropped
     // or from the command line; nothing is replaced until some are found
     fn play_dropped_files(&self, files: Vec<gio::File>) {
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = win)]
-            self,
-            async move {
-                let music_folders = library::music_folder_paths();
-                let Ok(queue) =
-                    gio::spawn_blocking(move || audio_files(files, &music_folders)).await
-                else {
-                    return;
-                };
-                if queue.is_empty() {
-                    win.add_toast(i18n("No available track found"));
-                    return;
-                }
-                win.play_in_place_of_queue(queue);
+        self.find_audio_files(files, |win, queue| {
+            if queue.is_empty() {
+                win.add_toast(i18n("No available track found"));
+                return;
             }
-        ));
+            win.play_in_place_of_queue(queue);
+        });
     }
 
     // Plays the tracks in place of those of the queue, selecting it if a
