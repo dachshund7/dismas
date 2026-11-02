@@ -227,11 +227,7 @@ const MAX_SEARCHED_TEXT: usize = 16 * 1024;
 
 // The text up to `max` bytes, cut between characters
 fn text_start(text: &str, max: usize) -> &str {
-    let mut end = max.min(text.len());
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
+    &text[..text.floor_char_boundary(max)]
 }
 
 fn is_link(word: &str) -> bool {
