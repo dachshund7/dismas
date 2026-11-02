@@ -10,7 +10,7 @@ Dismas is a fork of [Amberol](https://gitlab.gnome.org/World/amberol) by
 Emmanuele Bassi. Amberol sets out to play music and nothing else: it doesn't
 manage a collection or playlists. Dismas keeps Amberol's look and its
 GStreamer core, and adds the album grid and the playlists that Amberol leaves
-out on purpose. It also keeps Amberol's values:
+out on purpose. Whatever it adds, Dismas holds to these rules:
 
 - **It only reads your music.** Dismas never changes your music files or
   folders. It doesn't edit tags, rename or move files, or save covers next to
@@ -91,14 +91,14 @@ What Dismas adds
   the tracks played often but not in the last two months, and `added:-30d`,
   `favorited:2026`, `is:favorite-album` and `is:favorite-work` what they
   say; `played:` is the last time a track was listened to for 30 seconds
-  or more. Dates are a
-  year, a month or a day (`2026-10`), or a time ago, `-30d`, `-2w`, `-6m` or
-  `-1y`; `path:bach/cantatas` looks for folders from the start of their
-  names, and `disc:` is the disc number in the tags. A search with a
-  mistake, like `year:abc`, finds nothing, and a line under it says why.
-  Search Syntax, in the main menu, lists every field. In the album search,
-  an album shows when any of its tracks matches, so `-live` keeps an album
-  with a track that isn't live; `-releasetype:live` leaves out live albums.
+  or more. Dates are a year, a month or a day (`2026-10`), or a time ago,
+  `-30d`, `-2w`, `-6m` or `-1y`; `path:bach/cantatas` looks for folders
+  from the start of their names, and `disc:` is the disc number in the
+  tags. A search with a mistake, like `year:abc`, finds nothing, and a
+  line under it says why. Search Syntax, in the main menu, lists every
+  field. In the album search, an album shows when any of its tracks
+  matches, so `-live` keeps an album with a track that isn't live;
+  `-releasetype:live` leaves out live albums.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
   playlists. Switch between them from the title of the playlist pane or on
   the Playlists page. Add to Playlist, in the menu of a track, adds it to
@@ -125,32 +125,38 @@ What Dismas adds
   Album, Track or Work, in the menu of the album pages, plays one of the
   albums, tracks or works the page shows, picked at random, more likely one
   you haven't heard lately, in place of the queue, with an Undo.
-- **Queue editing and drag and drop:** drag tracks by their handle to
-  reorder them, and select ranges with Shift+click. Play Next, in the menu
-  of a track, puts it after the playing track, or after the last movement
-  of the work that's playing. Drop files between the
-  tracks of the playlist pane, or drag albums from the grid into place there.
-  Elsewhere on the window, files go to one of two zones: the large one adds
-  them to the selected playlist, and the one below it plays them in place of
-  the queue, with an Undo.
+- **Queue editing and drag and drop:** drag tracks by their handle, or
+  move them with Alt+Up and Alt+Down, to reorder them, and select ranges
+  with Shift+click. Play Next, in the menu of a track, puts it after the
+  playing track, or after the last movement of the work that's playing.
+  The sort button puts the playlist in order once, by album, artist,
+  composer, title, year or file name, keeping the movements of a work
+  together. Sorting, removing tracks and Remove All can be undone with
+  the toast's Undo or Ctrl+Z. Drop files between the tracks of the
+  playlist pane, or drag albums from the grid into place there. Elsewhere
+  on the window, files go to one of two zones: the large one adds them to
+  the selected playlist, and the one below it plays them in place of the
+  queue, with an Undo.
 - **Classical music:** the queue and the album view show the name of each
-  work above its movements, the album view shows where each disc starts, and the player and the queue show the composers
-  and the performers, naming an orchestra or a choir and its soloists rather
-  than every player. Track Information shows the work, the performers and
-  the production credits. Albums and recordings go by the year they were
-  recorded, or else first released, rather than the year of a reissue, and
-  the tracks of an album show it with the record label and catalogue
+  work above its movements, the album view shows where each disc starts,
+  and the player and the queue show the composers and the performers,
+  naming an orchestra or a choir and its soloists rather than every
+  player. Track Information shows the work, the performers and the
+  production credits. Albums and recordings go by the year they were
+  recorded, or else first released, rather than the year of a reissue,
+  and the tracks of an album show it with the record label and catalogue
   number. Open Booklet, in the menus of an album and of a track and over
   an album's tracks, opens any PDF in the album's folder, such as the
-  booklet that comes with a download. Dismas reads the tags written by the [Work
-  Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for
-  Picard, in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio, WavPack
-  and Musepack files; from version 0.4, it also writes when each recording
-  was made, and from version 0.5, which works are arrangements of others,
-  which the Works page marks. MusicBrainz names some composers in the script of
-  their language, such as Валентин Сильвестров; to have their names in Latin
-  letters, turn on "Translate artist names" and "Use artist sort name for
-  translation" in Picard's Metadata options before tagging.
+  booklet that comes with a download. Dismas reads the tags written by the
+  [Work Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin
+  for Picard, in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio,
+  WavPack and Musepack files; from version 0.4, it also writes when each
+  recording was made, and from version 0.5, which works are arrangements
+  of others, which the Works page marks. MusicBrainz names some composers
+  in the script of their language, such as Валентин Сильвестров; to have
+  their names in Latin letters, turn on "Translate artist names" and "Use
+  artist sort name for translation" in Picard's Metadata options before
+  tagging.
 - **CUE sheets:** an album ripped to a single file is split into its tracks
   by its CUE sheet, a `.cue` file next to it or a `CUESHEET` tag, in the
   album grid, the queue and playlists. Each track gets its own ReplayGain.
@@ -165,14 +171,15 @@ What Dismas adds
   loses the track number and the date, and it takes a conductor for a
   performer.
 - **Lyrics:** Lyrics, in the More menu of the player (Ctrl+Shift+L), shows
-  the lyrics of the playing track in the playlist pane: those of an LRC file
-  next to it with the same name, as lyrics downloaders write them, or of a
-  text file (`.txt`), or else those in its tags. Synchronized lyrics, in the LRC format or in an MP3's
-  SYLT frame, follow the music, with the line sung in the middle; a click on
-  a line, or Enter, plays from it, and scrolling them lets them be for a few
-  seconds. A track of a CUE sheet shows the part of its file's synchronized
-  lyrics that it plays. In the Flatpak, a track opened or dropped from
-  outside the Music folder comes without its lyrics files.
+  the lyrics of the playing track in the playlist pane: those of an LRC
+  file next to it with the same name, as lyrics downloaders write them, or
+  of a text file (`.txt`), or else those in its tags. Synchronized lyrics,
+  in the LRC format or in an MP3's SYLT frame, follow the music, with the
+  line sung in the middle; a click on a line, or Enter, plays from it, and
+  scrolling them lets them be for a few seconds. A track of a CUE sheet
+  shows the part of its file's synchronized lyrics that it plays. In the
+  Flatpak, a track opened or dropped from outside the Music folder comes
+  without its lyrics files.
 - **Sleep timer:** stops the music after a set number of minutes. It can
   stop right away, or let the track that's playing when time runs out finish
   first. It can also stop the music at the end of the playing track, or at
@@ -195,18 +202,24 @@ What Dismas adds
   the middle, and the cover grows into the room the controls leave. In
   fullscreen (F11), the player is by itself, larger, over a blurred copy of
   the cover, and its controls fade out the same way while the pointer stays
-  still.
+  still. The album covers, and the text of the lyrics, can be made larger
+  or smaller with Ctrl+plus and Ctrl+minus, with Ctrl and the mouse wheel,
+  or with a pinch; Ctrl+0 puts them back to their normal size.
 
 Screenshots
 -----------
 
 ![The player, with the queue showing the movements of each work under its name](./data/screenshots/dismas1.png)
 
-![The album grid](./data/screenshots/dismas4.png)
+![The Albums page, with the Composers, Performers and favorites buttons beside its search](./data/screenshots/dismas4.png)
+
+![The Works page, with the recordings of a Brandenburg Concerto](./data/screenshots/dismas6.png)
+
+![Synchronized lyrics in the playlist pane, following the music](./data/screenshots/dismas7.png)
 
 ![Track Information, with the work and the performers of a track](./data/screenshots/dismas5.png)
 
-![The player in a narrow window](./data/screenshots/dismas3.png)
+![The player in a narrow window, in the colors of the cover](./data/screenshots/dismas3.png)
 ![The Playlists page in a narrow window, with the smart playlists](./data/screenshots/dismas2.png)
 
 Fixes and improvements over Amberol
@@ -279,6 +292,9 @@ And it fixes these bugs of Amberol's:
   crashed the player.
 - A crafted MusicBrainz release ID could make Amberol write cover thumbnails
   outside its cache directory.
+- A file named as an audio file but holding an HLS, DASH or Smooth
+  Streaming playlist made the player fetch the addresses in it, sending
+  requests to the servers that the file names.
 - Other users of the computer could read the folders made for the covers,
   the waveforms and the saved queue, which lists the files in it. The folders
   Dismas makes are private.
@@ -295,7 +311,13 @@ And it fixes these bugs of Amberol's:
   ready, or was drawn over it, and a waveform that couldn't be read whole was
   cached. When a track repeated, its cover and waveform were loaded again,
   and a track that decodes slower than it plays never got a waveform.
-- Seeking in a track that hadn't played yet didn't show.
+- Seeking in a track that hadn't played yet didn't show, and a click on
+  the waveform went to the whole second before it.
+- Scrolling over the volume slider with a touchpad on Wayland moved it a
+  step for each pixel, so that a light scroll sent the volume to 0 or to
+  100%.
+- Screen readers found no name for the volume slider, and read the time
+  played as "Elapsed time" rather than the time.
 - With PulseAudio, a track paused before it had started playing, such as by a
   Pause from the desktop's media controls just after startup, stayed silent
   when played a few seconds later, or played with its time and waveform stuck
@@ -310,7 +332,8 @@ And it fixes these bugs of Amberol's:
 - Symbolic links to tracks and folders that were opened or dropped weren't
   followed, nor those inside a folder that was.
 - Ctrl+Left and Ctrl+Right seeked instead of moving the cursor in the search
-  entry.
+  entry, and Ctrl+C there copied the playing track's details rather than
+  the text selected.
 - Searching the queue for "unknown" found every track missing an artist,
   album or title tag, by the words shown in their place.
 - A title with braces in it, such as "Hymn to {artist}", came out changed
@@ -337,17 +360,26 @@ Keyboard shortcuts
 | Alt+← / Alt+→                    | Previous / next track                          |
 | Ctrl+← / Ctrl+→                  | Seek backward / forward                        |
 | Ctrl+↑ / Ctrl+↓                  | Volume up / down                               |
+| Ctrl+M                           | Mute or unmute                                 |
+| Ctrl+T                           | Change the repeat mode                         |
+| Ctrl+S                           | Shuffle, or put back the order from before     |
 | Ctrl+D                           | Mark or unmark the playing track as a favorite |
 | Ctrl+I                           | Track information                              |
 | Ctrl+Shift+L                     | Show or hide the lyrics                        |
-| Ctrl+C                           | Copy the playing track's title and artist      |
+| Ctrl+C                           | Copy the details of the track with the focus, or else of the playing track |
 | Ctrl+1 to Ctrl+4                 | Player / albums / tracks / works               |
 | Ctrl+P                           | Playlists                                      |
 | Ctrl+F                           | Search where the focus is: the albums, tracks or works, or the playlist |
-| Ctrl+R                           | Shuffle, or put back the order from before     |
+| Ctrl+R or F5                     | Scan the music folders for changes             |
+| Ctrl+O / Ctrl+Shift+O            | Add tracks / a folder to the playlist          |
 | Ctrl+L                           | Remove all the tracks of the playlist          |
 | Ctrl+A                           | Select all the tracks or albums                |
 | Delete                           | Remove the selected tracks                     |
+| Alt+↑ / Alt+↓                    | Move the track with the focus up / down        |
+| Ctrl+Z                           | Undo                                           |
+| Menu or Shift+F10                | Open the menu of a track or an album           |
+| Ctrl+plus / Ctrl+minus           | Make the album covers or the lyrics larger / smaller; Ctrl and the mouse wheel too |
+| Ctrl+0                           | Album covers or lyrics at their normal size    |
 | Esc                              | Cancel a drag, leave selection mode, hide the playlist pane, or leave fullscreen |
 | Page Up / Page Down / Home / End | Scroll the list under the pointer              |
 | F9                               | Show or hide the playlist pane                 |
@@ -355,6 +387,7 @@ Keyboard shortcuts
 | F11                              | Fullscreen                                     |
 | Ctrl+,                           | Preferences                                    |
 | Ctrl+?                           | Keyboard shortcuts                             |
+| Ctrl+W                           | Close the window, or the dialog over it        |
 | Ctrl+Q                           | Quit                                           |
 
 Command line

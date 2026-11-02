@@ -11,23 +11,27 @@
       by Emmanuele Bassi, that adds a library and playlists.
     </p>
     <p>
-      Like Amberol, it only reads your music: it never changes your files, and
-      it doesn't need the network. Everything it shows comes from the tags and
-      the covers of your tracks.
+      It only reads your music: it never changes your files, and it doesn't
+      need the network. Everything it shows comes from the tags and the
+      covers of your tracks.
     </p>
     <p>Features:</p>
     <ul>
-      <li>an album grid of your music folders, with search and sorting</li>
-      <li>search by any tag, such as the conductor, the orchestra or the label</li>
+      <li>an album grid of your music folders, with search and sorting, that follows changes to the files</li>
+      <li>search by any tag, such as the conductor, the orchestra or the label, or by fields such as composer:, year: and catalogue:</li>
+      <li>the albums of a composer or a performer, picked from a list</li>
+      <li>a Works page that lists the works of each composer and compares their recordings</li>
       <li>playlists, with M3U import and export</li>
       <li>playlists that resume where they were</li>
-      <li>smart playlists of the tracks played recently or the most, and favorites</li>
-      <li>a queue you can search and reorder</li>
+      <li>smart playlists of the tracks played recently or the most, and favorite tracks, albums and works</li>
+      <li>a queue you can search, sort and reorder, with Play Next</li>
       <li>gapless playback</li>
       <li>CUE sheets, which split an album ripped to a single file into its tracks</li>
       <li>work, movement and performer details for classical music</li>
+      <li>lyrics from files next to the tracks or from their tags, synchronized lyrics following the music</li>
       <li>a shuffle that goes by what you've heard, and repeat</li>
-      <li>a sleep timer</li>
+      <li>ReplayGain that takes the album gain while an album plays in order</li>
+      <li>a sleep timer, which can also stop after the playing track or work</li>
       <li>colors that match the cover art</li>
       <li>a tray icon while playing in the background</li>
       <li>MPRIS integration</li>
@@ -45,6 +49,14 @@
     <screenshot>
       <caption>The album grid</caption>
       <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas4.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The works, with the recordings of a concerto</caption>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas6.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Synchronized lyrics</caption>
+      <image>https://raw.githubusercontent.com/dachshund7/dismas/main/data/screenshots/dismas7.png</image>
     </screenshot>
     <screenshot>
       <caption>The work and the performers of a track</caption>
@@ -87,8 +99,20 @@
   <releases>
     <release version="2026.11" date="2026-11-01">
       <description>
-        <p>Gapless playback, CUE sheets, smart playlists and favorites.</p>
+        <p>Works and Tracks pages, a search syntax, lyrics, gapless playback, CUE sheets, smart playlists and favorites.</p>
         <ul>
+          <li>Browse the works of each composer on the Works page, and compare their recordings</li>
+          <li>See only the tracks that a search matches on the Tracks page</li>
+          <li>Show the albums of a composer, a conductor, an ensemble or a soloist</li>
+          <li>Search by fields, such as composer:, year: or catalogue:, with OR and NOT</li>
+          <li>Show the lyrics of the playing track, following the music when they're synchronized</li>
+          <li>Play a track next, or add it to another playlist, from its menu</li>
+          <li>Stop the music after the playing track or work</li>
+          <li>Mark albums, works and recordings as favorites, and play a random album, track or work</li>
+          <li>See new, changed and removed files in the album grid by themselves</li>
+          <li>Open the booklets of albums</li>
+          <li>Keep the quiet movements of a symphony quiet with Automatic ReplayGain, and set a pre-amp</li>
+          <li>Undo removing tracks, sorting the playlist and replacing the queue</li>
           <li>Play tracks back to back, without a gap</li>
           <li>Split albums ripped to a single file into their tracks by their CUE sheets</li>
           <li>Play the tracks you played recently, the most, or not lately, and mark favorites</li>

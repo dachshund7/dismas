@@ -6,6 +6,84 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.11] - 2026-11-01
+
+### Added
+
+- Gapless playback: tracks play back to back, such as movements that run
+  into each other
+- CUE sheets split audio files into their tracks, from a `.cue` file next
+  to them or a `CUESHEET` tag, in the queue, the album grid and playlists,
+  each track with its own ReplayGain; `.cue` files can be opened and
+  dropped too
+- Each playlist resumes where it was, paused at the same track and
+  position, at startup and when switching back to it
+- A tray icon while playing in the background, to show or hide the window,
+  control playback, change the volume by scrolling, and quit
+- Switch playlists from a menu on the playlist pane's title
+- Drop files between the tracks of the playlist pane, and drag albums from
+  the grid into place there
+- A drop zone that plays the dropped tracks in place of the queue, with an
+  Undo
+- The toast after saving the queue as a playlist has an Open button, to
+  switch to the new playlist without interrupting playback
+- A Preferences dialog (Ctrl+,), with a switch for moving the window from
+  its header bars, for window managers that move windows themselves
+- Show Waveform, in Preferences, to show a plain seek bar instead of the
+  waveform
+- Zen Mode, in Preferences: with the playlist hidden, the controls fade
+  out once the pointer leaves the window, leaving the cover and the track
+  details in the middle, the cover growing into the room the controls
+  leave; the pointer, a tap or a key brings them back
+- Fullscreen, with F11 or from the main menu: the player by itself, with
+  larger text and controls, in white over a blurred copy of the cover; the
+  controls and the pointer fade out while the pointer stays still, as the
+  cover grows into their room, and come back with the pointer or a key;
+  Esc or F11 leaves it
+- Change the volume with Ctrl+Up and Ctrl+Down
+- Music folders, in Preferences, to show albums from other folders than
+  the Music folder, like a second drive; while a folder isn't there, its
+  albums are hidden, and they come back without being read again. A music
+  folder's row expands to leave out folders in it, such as audiobooks or
+  podcasts, whose albums then aren't in the album grid
+- Remember the volume, the repeat mode, and whether the playlist pane is
+  open
+- The track menu has Open Directory, and in the playlist pane Remove,
+  which removes all the selected tracks when the track is one of them,
+  and Go to Album
+- Recently Played, Most Played and Not Heard Lately, on the Playlists
+  page, play the last 100 tracks heard, in the order they were heard, the
+  ones played the most in the last 6 months, or the ones played the most
+  that weren't heard in the last 2 months, in place of the queue, with an
+  Undo
+- Mark tracks as favorites with the heart next to the Sleep Timer, Ctrl+D
+  or the track menu; on the Tracks page, the heart beside the search shows
+  them, and Select All and Play play them
+- `dismas --add FILE…` adds files and folders to the end of the selected
+  playlist, also in a Dismas that's already running, without bringing up
+  its window; `dismas --play FILE…` plays them in place of the queue, with
+  an Undo
+- A Flatpak of each release, `dismas.flatpak`, on the release's page on
+  GitHub
+- A prebuilt tarball of each release for x86_64,
+  `dismas-<version>-x86_64.tar.xz`, on the release's page on GitHub, for
+  distributions with GNOME 49's libraries or newer: it runs from wherever
+  it's unpacked, and its `install.sh` adds it to the menu
+- The tags of the Work Hierarchy plugin for Picard are read from MP3, M4A,
+  AIFF, WAV, Monkey's Audio, WavPack and Musepack files too, not only from
+  FLAC, Ogg and Opus files
+- Play only the tracks that a search of the playlist pane found, with the
+  button next to the search, in place of the queue, with an Undo; Next and
+  the end of a track still go through all the tracks otherwise
+- Show in Playlist, in the menu of a track that a search of the playlist
+  pane found, closes the search and shows the track among all the tracks
+  of the playlist
 - The searches, of the playlist and of the albums, tracks and works, take
   fields, as in composer:bach, year:<1970, catalogue:bwv1046..1051,
   released:-30d or length:>10min, with OR, "-" or NOT to leave tracks
@@ -119,17 +197,21 @@ All notable changes to this project will be documented in this file.
   album says how many, and an album opened there lists only those tracks
 - A Works page, next to the tracks (Ctrl+4), lists the works of the
   albums under the names of their composers, with the number of their
-  recordings. It shares the albums' search and the composer and performer
-  picked, so switching between the pages keeps them. Clicking a work, or
-  Enter, opens it, one at a time, to show a cover for each of its
-  recordings, the oldest first, each with its performers and the year it
-  was made; an album with two performances of a work, or with the work and
-  an arrangement of it, has a cover for each. A cover takes only its
-  recording's tracks from its album, as the Tracks page takes the tracks a
-  search matches: its badge says how many, and it opens the album with
-  only those tracks. Several covers can be selected, as on the Albums
-  page, to play or add their recordings at once, and Go to Album, in the
-  menu of a cover, shows its album on the Albums page and opens it there
+  recordings. A composer's works are in the order of their catalogue
+  numbers, BWV 1004 before BWV 1007: by the catalogue that most of them
+  are in, then by any other, as Beethoven's WoO after his opus numbers,
+  and then the works without a number, by title. It shares the albums'
+  search and the composer and performer picked, so switching between the
+  pages keeps them. Clicking a work, or Enter, opens it, one at a time, to
+  show a cover for each of its recordings, the oldest first, each with its
+  performers and the year it was made; an album with two performances of
+  a work, or with the work and an arrangement of it, has a cover for each.
+  A cover takes only its recording's tracks from its album, as the Tracks
+  page takes the tracks a search matches: its badge says how many, and it
+  opens the album with only those tracks. Several covers can be selected,
+  as on the Albums page, to play or add their recordings at once, and Go
+  to Album, in the menu of a cover, shows its album on the Albums page and
+  opens it there
 - Go to Work, in the menu of a track of a work and in the menu of the
   header of a work, with a right click or a long press, opens the work on
   the Works page, with the cover of the track's recording pointed out
@@ -189,7 +271,6 @@ All notable changes to this project will be documented in this file.
 - Show the Playing Track, Show in Playlist and Go to Album put the focus
   on the track they show, and Go to Work on the cover of its album, so
   that the keys go on from there
-- Fullscreen, in the main menu, for tablets and phones without F11
 - Add Tracks… and Add Folder…, in the main menu (Ctrl+O and Ctrl+Shift+O),
   add tracks from outside the music folders to the selected playlist, as a
   phone has nothing to drag them from. They're back from before 2026.10,
@@ -232,320 +313,6 @@ All notable changes to this project will be documented in this file.
   number, as on the Works page. The movements of a work stay together, in
   their order. The toast's Undo, or Ctrl+Z, puts the order back. Sorting a
   shuffled playlist turns shuffle off, and Undo turns it back on
-
-### Changed
-
-- Ctrl+S turns shuffling on and off, as in other music players, rather
-  than Ctrl+R. Ctrl+R and F5 now scan the music folders for changes, as
-  Reload does in other GNOME apps
-- When there are no albums to show, the album page says which folder
-  Dismas looked in, or that the music folders are missing or empty, as
-  when their drive isn't plugged in, rather than only "No Albums". Its
-  Choose Music Folders… button opens Preferences with Add Folder… ready
-- Go to Album, in the menu of a track of the playlist and in the player's
-  More menu, goes to the Albums page, where the albums scroll to the
-  album, as Go to Work goes to the Works page, and opens the album in the
-  playlist pane with the track flashing, as before. It's off in
-  fullscreen
-- The Works page lists the works of each composer in the order of their
-  catalogue numbers, BWV 1004 before BWV 1007, rather than by title: by
-  the catalogue that most of the composer's works are in, then by any
-  other, as Beethoven's WoO after his opus numbers, and then the works
-  without a number, by title
-- The year of an album, which the grid can be sorted by, is when its
-  tracks were recorded, if their tags say, or else when they were first
-  released, rather than the year of a reissue
-- Ctrl+P shows the playlists, rather than Ctrl+3, which shows the new
-  Tracks page, and Ctrl+4 the new Works page, so that the shortcuts follow
-  the order of the page buttons, and none is missing without works
-- The music folders are read again once after updating, as the library
-  now keeps the composers, the works and the performers of each track,
-  when it was made, whether its work is an arrangement, and the other
-  names of its works
-- Scan the Music Folders moved from the main menu to Preferences, as Scan
-  Now, as the music folders are watched
-- Whole Albums, next to the album search, is gone, as it made the search
-  narrow: during a search, the Albums page takes whole albums, and the new
-  Tracks page only the tracks the search matches
-- In Zen Mode and in fullscreen, pressing a key brings back the controls,
-  as moving the pointer does, so that Tab doesn't go through buttons that
-  can't be seen
-- Cover files are also found as `front.jpg` and as Windows Media Player's
-  `AlbumArt` files, in the album's folder for tracks in a disc folder like
-  `CD1`, and as the only image in a folder, whatever its name
-- Composers written in one value, joined by " & " or " / ", as in "John
-  Lennon & Paul McCartney", are each a composer of their own, in the
-  Composers list, the works and the credits of the track
-- The folders of an album's discs are also recognised with more after the
-  number, as in "Disc 1 - Live" or "CD1 (Bonus)", and in a few other
-  languages, as in "Disco 2" or "Disque 1", so that their tracks make one
-  album without album tags, and find the cover in the album's folder
-- Importing a playlist finds its tracks when it was made on another
-  computer or on Windows, by the end of their paths, in the playlist's
-  folder or in the music folders, whatever the case of their names
-- Ctrl+F and typing go to the search of where the focus is: on the
-  Albums, Tracks and Works pages, their own search, rather than the
-  playlist's, and in the playlist pane, on the player and on the
-  playlists, the playlist's. The cursor moves into the search with what's
-  typed, and typing in the playlist goes on with a search that's open.
-  Ctrl+F selects the text of the search, so that what's typed next starts
-  a new search
-- The binary in the prebuilt tarball is about half the size, 12 MB rather
-  than 21 MB, and the Flatpak's is smaller too: both are optimized across
-  the crates they're built from, and the tarball's leaves out its symbol
-  table
-- The desktop's media controls and the tray icon's tooltip name the
-  composer of a classical track after the performers, or the performers
-  after the composer, as Copy does, rather than only the artist; the
-  artist stays first, for scrobblers that take only the first. Programs
-  that read MPRIS also get the composers, the album artist, the lyricists,
-  the genres, the track and disc numbers, the date and the file
-- The icon of the track playing, or paused, is over its cover in the
-  playlist pane and in an album's tracks, rather than at the end of the
-  row, where every other row kept room for it, so the titles and the names
-  under them have more room
-- In the playlist pane and in an album's tracks, a long title, and the
-  artist, the parts of a work or the performers under it, go on to a
-  second line rather than being cut short after a few words in a narrow
-  pane
-- Removing the selected tracks from the playlist pane leaves selection
-  mode, as the album grid's selection bar does once its buttons have taken
-  the albums, rather than staying in it with no track selected. The
-  keyboard focus goes to the track after the ones removed
-- Scanning the music folders reads the tags of several files at a time,
-  as the playlist already did, so a first scan, or the one after updating
-  Dismas, takes less time
-- Update dependencies
-
-### Fixed
-
-- Enter on a row of the preferences, or of another dialog, played or paused
-  the music, rather than turning its switch, picking its option or
-  pressing its button
-- Ctrl+F did nothing when the playlist's search had been left open and the
-  playlist pane hidden; it shows the pane again, with the cursor in the
-  search
-- Screen readers didn't say which tracks of the queue or of an album, or
-  which albums of the grid, were selected in selection mode
-- Playing other tracks in place of the queue a few seconds after the last
-  time kept the toast about the last time up, whose Undo put back the queue
-  from before it; the new toast only showed once that one was gone
-- The tracks of a long album could open below the name of their first
-  work
-- Ctrl+C in a search copied the details of the playing track, rather than
-  the text selected
-- On a touchscreen, a flick that started on the name of a work, over its
-  movements, didn't scroll the list
-- Screen readers found no name for the seek bar, the volume slider or the
-  album search, read the time played as "Elapsed time" rather than the time,
-  and read a playing icon on every track of the playlist
-- An album that a CUE sheet splits from one file, whose sheet names another
-  performer than the file's album artist, sorted in the grid by the name of
-  the file's album artist
-- MP3, AIFF, WAV and AAC files showed no record label, and AAC files
-  (.aac) also lost the work and recording date that the Work Hierarchy
-  plugin writes
-- MP3, AIFF, WAV and AAC files tagged by MusicBrainz Picard didn't show
-  their soloists and other performers, only their conductor
-- Tracks and folders behind symbolic links in the music folders, as in a
-  library that beets links to, or in a folder that was opened or dropped,
-  were left out
-- An album without an album artist tag showed as by Various Artists as
-  soon as one of its tracks had another artist, as with "feat."; it's by
-  the artist of most of its tracks, if one has more than half of them
-- The tracks of an album without track numbers played with "10" before
-  "2", and the discs of an album in folders of their own, without disc
-  numbers, played with their tracks mixed together: the first track of
-  each disc, then the second of each
-- Adding or dropping a folder, like the root of a drive, also added the
-  tracks in its trash and other hidden folders, and the recycle bins and
-  snapshots of network drives (`#recycle`, `#snapshot`, `@Recycle`) showed
-  in the album grid
-- An imported playlist written by a Windows player in its legacy encoding,
-  as Winamp and foobar2000 write `.m3u` files, lost the tracks with accents
-  in their names, and one with the line endings of old Macs lost them all
-- An album with tracks in a folder left out, or on a drive that wasn't
-  there, listed and counted them among its tracks, and played the ones
-  left out until the next scan
-- Importing a playlist file whose name was a saved playlist's with a dot
-  and a space before it, or a control character after it, like
-  ". Road Trip.m3u", wrote over that playlist rather than making
-  "Road Trip 2"
-- A file in the music folders named as an audio file but holding an HLS,
-  DASH or Smooth Streaming playlist made Dismas fetch the addresses in it
-  when it read or played the file, outside the Flatpak
-- Ctrl+F, while the playlist pane showed the tracks of an album, opened the
-  playlist's search behind them rather than showing it
-- Searching for a number found tracks by the times in their synchronized
-  lyrics, such as "[01:12.50]" for "12"
-- Searching found every track that a CUE sheet splits from one file by the
-  lyrics of the whole file
-- A click on the waveform, or a position set from the desktop's media
-  controls, went to the whole second before it
-- Starting Dismas by opening a file, as from a file manager, opened the
-  playlist pane even when it had been hidden, and made the window wider by
-  the pane, which it then kept the next time
-- A player credited with an instrument whose name has parentheses of its
-  own, as MusicBrainz names a drum kit "drums (drum set)", showed in Track
-  Information with half the instrument in their name and a role ending in
-  ")", and counted as a second player, which could put the album artist in
-  place of a list of five players
-- The player listed every session player of a song that its singer had
-  written, as the singer's name among the composers kept the album artist
-  from standing in for a list of more than five players; for a song by
-  another writer, it already did, and the line was left out
-- After an update that read the whole library again, tracks could count
-  as added when their files were last written, rather than when they were
-  first added, which changed the order of the albums sorted by when they
-  were added: on drives that don't keep the time a file was made, and for
-  files that a sync tool had replaced
-- A file that a CUE sheet split into hundreds of tracks, with a very large
-  tag, could fill the memory at every start, as each of its tracks kept a
-  copy of the whole tag
-- A cover file that was a symbolic link to one of the system's own files
-  that say they're empty but aren't, such as `/proc/self/pagemap`, could
-  fill the memory at every start
-- A playlist that listed a named pipe, a special file that waits for a
-  program to write to it, stopped loading there for good; it now keeps its
-  place as a track that couldn't be read. A cover file or a CUE sheet
-  swapped for one as the music folders were read could stop the scan the
-  same way
-- Importing or opening a playlist read the whole file, however large, so
-  one of millions of short lines could fill the memory. A playlist from
-  elsewhere over 32 MiB, or with more than 200,000 tracks, is now turned
-  down
-- Opening a smart playlist with no tracks, such as Not Heard Lately before
-  any track had gone unheard for two months, while a track played, lost
-  what had been heard of that track when it was under 30 seconds, and
-  otherwise counted the rest of the track as another listen, which could
-  make it two plays
-- Playing tracks in place of the queue, by dropping them on the drop zone
-  or with `dismas --play`, while another playlist was being switched to,
-  saved them in that playlist's file
-- Choosing a playlist from the menu of the pane's title while another one
-  was being switched to could end with the other one selected
-- Files opened from a file manager while the playlist of the last session
-  was being read went among its tracks, rather than being added to it once
-  it was read
-- Saving the queue as a playlist right after startup, while its tracks
-  were still being read, saved an empty playlist
-- The scan forgot the tracks of a folder it couldn't read, like one on a
-  network share that stopped answering, and those of a drive unplugged
-  while it read them, and read them and made their covers again once they
-  were back
-- Scrolling over the volume slider with a touchpad on Wayland moved it a
-  step for each pixel, so that a light scroll sent the volume to 0 or to
-  100%
-- Started from the prebuilt tarball, Dismas trusted the settings schemas
-  compiled in the folder it was started from over those of the system,
-  and so did the apps it opened
-- Seeking to a time from another app, over MPRIS, in a track whose length
-  couldn't be read went back to its start
-- A file with tens of thousands of performers or composers in its tags,
-  as only a crafted one has, made the player and its rows in the playlist
-  take seconds to show it
-- A CUE sheet that named many files, as a crafted one can, made each scan
-  of the music folders take minutes, as each file was looked for in a new
-  listing of its folder
-- A file with many pictures that were slow to decode, as a crafted one can
-  have, held up the tracks after it in the playlist, and the scan, for 10
-  to 20 seconds for each picture
-- A cover file added to the folder of an album, or replaced, showed in the
-  album grid, but the player, the playlist and the album's tracks only
-  showed it once Dismas was started again
-- A cover replaced in the folder of an album while the album grid showed
-  it kept the old cover in the grid
-- A cover file moved or copied into the folder of an album wasn't noticed
-  when it kept an older date, as moving a file does, and the album kept
-  its old cover. A cover file that was removed wasn't noticed either. A
-  cover file dated in the future, as on a drive written where the clock
-  was ahead, made the album's cover again at every scan of the music
-  folders
-
-### Removed
-
-- Ctrl+G, as Ctrl+2 shows the albums
-- Favorites, on the Playlists page, to make the page shorter: on the
-  Tracks page, the heart beside the search shows the favorite tracks, and
-  Select All and Play play them
-
-## [2026.11] - 2026-11-01
-
-### Added
-
-- Gapless playback: tracks play back to back, such as movements that run
-  into each other
-- CUE sheets split audio files into their tracks, from a `.cue` file next
-  to them or a `CUESHEET` tag, in the queue, the album grid and playlists,
-  each track with its own ReplayGain; `.cue` files can be opened and
-  dropped too
-- Each playlist resumes where it was, paused at the same track and
-  position, at startup and when switching back to it
-- A tray icon while playing in the background, to show or hide the window,
-  control playback, change the volume by scrolling, and quit
-- Switch playlists from a menu on the playlist pane's title
-- Drop files between the tracks of the playlist pane, and drag albums from
-  the grid into place there
-- A drop zone that plays the dropped tracks in place of the queue, with an
-  Undo
-- The toast after saving the queue as a playlist has an Open button, to
-  switch to the new playlist without interrupting playback
-- A Preferences dialog (Ctrl+,), with a switch for moving the window from
-  its header bars, for window managers that move windows themselves
-- Show Waveform, in Preferences, to show a plain seek bar instead of the
-  waveform
-- Zen Mode, in Preferences: with the playlist hidden, the controls fade
-  out once the pointer leaves the window, leaving the cover and the track
-  details in the middle, the cover growing into the room the controls
-  leave; the pointer or a tap brings them back
-- Fullscreen with F11: the player by itself, with larger text and
-  controls, in white over a blurred copy of the cover; the controls and the
-  pointer fade out while the pointer stays still, as the cover grows into
-  their room, and Esc or F11 leaves it
-- Change the volume with Ctrl+Up and Ctrl+Down
-- Music folders, in Preferences, to show albums from other folders than
-  the Music folder, like a second drive; while a folder isn't there, its
-  albums are hidden, and they come back without being read again. A music
-  folder's row expands to leave out folders in it, such as audiobooks or
-  podcasts, whose albums then aren't in the album grid
-- Remember the volume, the repeat mode, and whether the playlist pane is
-  open
-- The track menu has Open Directory, and in the playlist pane Remove,
-  which removes all the selected tracks when the track is one of them;
-  Go to Album is in the playlist pane, and in an album's tracks while a
-  search leaves some of them out
-- While a search of the album grid matches only some of an album's tracks,
-  its cover and its track list say how many. Whole Albums, next to the
-  search or over the album's tracks, makes adding, playing, dragging and
-  opening the albums the search found take all their tracks, rather than
-  only those that match
-- Recently Played, Most Played and Not Heard Lately, on the Playlists
-  page, play the last 100 tracks heard, in the order they were heard, the
-  ones played the most in the last 6 months, or the ones played the most
-  that weren't heard in the last 2 months, in place of the queue, with an
-  Undo
-- Mark tracks as favorites with the heart next to the Sleep Timer, Ctrl+D
-  or the track menu; Favorites, on the Playlists page, plays them in the
-  order they were marked, in place of the queue, with an Undo
-- `dismas --add FILE…` adds files and folders to the end of the selected
-  playlist, also in a Dismas that's already running, without bringing up
-  its window; `dismas --play FILE…` plays them in place of the queue, with
-  an Undo
-- A Flatpak of each release, `dismas.flatpak`, on the release's page on
-  GitHub
-- A prebuilt tarball of each release for x86_64,
-  `dismas-<version>-x86_64.tar.xz`, on the release's page on GitHub, for
-  distributions with GNOME 49's libraries or newer: it runs from wherever
-  it's unpacked, and its `install.sh` adds it to the menu
-- The tags of the Work Hierarchy plugin for Picard are read from MP3, M4A,
-  AIFF, WAV, Monkey's Audio, WavPack and Musepack files too, not only from
-  FLAC, Ogg and Opus files
-- Play only the tracks that a search of the playlist pane found, with the
-  button next to the search, in place of the queue, with an Undo; Next and
-  the end of a track still go through all the tracks otherwise
-- Show in Playlist, in the menu of a track that a search of the playlist
-  pane found, closes the search and shows the track among all the tracks
-  of the playlist
 
 ### Changed
 
@@ -597,9 +364,11 @@ All notable changes to this project will be documented in this file.
   playing again starts over from the first one
 - Closing the window while playing in the background hides it, so it comes
   back as it was
-- Find cover files named cover or folder in any case and image type, such
-  as `Cover.JPG` or `folder.webp`, and use them when the cover in the tags
-  can't be decoded
+- Find cover files named cover, folder or front in any case and image
+  type, such as `Cover.JPG` or `folder.webp`, Windows Media Player's
+  `AlbumArt` files, and a folder's only image, whatever its name; look in
+  the album's folder for tracks in a disc folder like `CD1`; and use cover
+  files when the cover in the tags can't be decoded
 - The playlist pane's labels and tooltips name the selected playlist
 - Clicking the clear icon of a search entry puts the cursor in it
 - Read dates written with dots, such as 2024.06.03
@@ -650,6 +419,71 @@ All notable changes to this project will be documented in this file.
   leaving the pane empty
 - Update dependencies
 - Update the Cornish translation
+- Ctrl+S turns shuffling on and off, as in other music players, rather
+  than Ctrl+R. Ctrl+R and F5 now scan the music folders for changes, as
+  Reload does in other GNOME apps
+- When there are no albums to show, the album page says which folder
+  Dismas looked in, or that the music folders are missing or empty, as
+  when their drive isn't plugged in, rather than only "No Albums". Its
+  Choose Music Folders… button opens Preferences with Add Folder… ready
+- Go to Album, in the menu of a track of the playlist and in the player's
+  More menu, goes to the Albums page, where the albums scroll to the
+  album, as Go to Work goes to the Works page, and opens the album in the
+  playlist pane with the track flashing, as before. It's off in
+  fullscreen
+- The year of an album, which the grid can be sorted by, is when its
+  tracks were recorded, if their tags say, or else when they were first
+  released, rather than the year of a reissue
+- Ctrl+P shows the playlists, rather than Ctrl+3, which shows the new
+  Tracks page, and Ctrl+4 the new Works page, so that the shortcuts follow
+  the order of the page buttons, and none is missing without works
+- The music folders are read again once after updating, as the library
+  now keeps the composers, the works and the performers of each track,
+  when it was made, whether its work is an arrangement, and the other
+  names of its works
+- Scan the Music Folders moved from the main menu to Preferences, as Scan
+  Now, as the music folders are watched
+- A search of the albums shows the albums with a track that matches, and
+  adding, playing or opening them takes the whole albums, rather than only
+  the tracks that match, which the new Tracks page takes
+- Composers written in one value, joined by " & " or " / ", as in "John
+  Lennon & Paul McCartney", are each a composer of their own, in the
+  Composers list, the works and the credits of the track
+- The folders of an album's discs are also recognised with more after the
+  number, as in "Disc 1 - Live" or "CD1 (Bonus)", and in a few other
+  languages, as in "Disco 2" or "Disque 1", so that their tracks make one
+  album without album tags, and find the cover in the album's folder
+- Importing a playlist finds its tracks when it was made on another
+  computer or on Windows, by the end of their paths, in the playlist's
+  folder or in the music folders, whatever the case of their names
+- Ctrl+F and typing go to the search of where the focus is: on the
+  Albums, Tracks and Works pages, their own search, rather than the
+  playlist's, and in the playlist pane, on the player and on the
+  playlists, the playlist's. The cursor moves into the search with what's
+  typed, and typing in the playlist goes on with a search that's open.
+  Ctrl+F selects the text of the search, so that what's typed next starts
+  a new search
+- The desktop's media controls and the tray icon's tooltip name the
+  composer of a classical track after the performers, or the performers
+  after the composer, as Copy does, rather than only the artist; the
+  artist stays first, for scrobblers that take only the first. Programs
+  that read MPRIS also get the composers, the album artist, the lyricists,
+  the genres, the track and disc numbers, the date and the file
+- The icon of the track playing, or paused, is over its cover in the
+  playlist pane and in an album's tracks, rather than at the end of the
+  row, where every other row kept room for it, so the titles and the names
+  under them have more room
+- In the playlist pane and in an album's tracks, a long title, and the
+  artist, the parts of a work or the performers under it, go on to a
+  second line rather than being cut short after a few words in a narrow
+  pane
+- Removing the selected tracks from the playlist pane leaves selection
+  mode, as the album grid's selection bar does once its buttons have taken
+  the albums, rather than staying in it with no track selected. The
+  keyboard focus goes to the track after the ones removed
+- Scanning the music folders reads the tags of several files at a time,
+  as the playlist already did, so a first scan, or the one after updating
+  Dismas, takes less time
 
 ### Fixed
 
@@ -776,6 +610,115 @@ All notable changes to this project will be documented in this file.
 - After hiding the playlist pane on the album page, typing didn't always
   search the albums, and Esc didn't always clear their search; the cursor
   goes to the album search now
+- Enter on a row of the preferences, or of another dialog, played or paused
+  the music, rather than turning its switch, picking its option or
+  pressing its button
+- Ctrl+F did nothing when the playlist's search had been left open and the
+  playlist pane hidden; it shows the pane again, with the cursor in the
+  search
+- Screen readers didn't say which tracks of the queue or of an album, or
+  which albums of the grid, were selected in selection mode
+- The tracks of a long album could open below the name of their first
+  work
+- Ctrl+C in a search copied the details of the playing track, rather than
+  the text selected
+- On a touchscreen, a flick that started on the name of a work, over its
+  movements, didn't scroll the list
+- Screen readers found no name for the seek bar, the volume slider or the
+  album search, read the time played as "Elapsed time" rather than the time,
+  and read a playing icon on every track of the playlist
+- MP3, AIFF, WAV and AAC files showed no record label
+- MP3, AIFF, WAV and AAC files tagged by MusicBrainz Picard didn't show
+  their soloists and other performers, only their conductor
+- Tracks and folders behind symbolic links in the music folders, as in a
+  library that beets links to, or in a folder that was opened or dropped,
+  were left out
+- An album without an album artist tag showed as by Various Artists as
+  soon as one of its tracks had another artist, as with "feat."; it's by
+  the artist of most of its tracks, if one has more than half of them
+- The tracks of an album without track numbers played with "10" before
+  "2", and the discs of an album in folders of their own, without disc
+  numbers, played with their tracks mixed together: the first track of
+  each disc, then the second of each
+- Adding or dropping a folder, like the root of a drive, also added the
+  tracks in its trash and other hidden folders, and the recycle bins and
+  snapshots of network drives (`#recycle`, `#snapshot`, `@Recycle`) showed
+  in the album grid
+- An imported playlist written by a Windows player in its legacy encoding,
+  as Winamp and foobar2000 write `.m3u` files, lost the tracks with accents
+  in their names, and one with the line endings of old Macs lost them all
+- Importing a playlist file whose name was a saved playlist's with a dot
+  and a space before it, or a control character after it, like
+  ". Road Trip.m3u", wrote over that playlist rather than making
+  "Road Trip 2"
+- A file in the music folders named as an audio file but holding an HLS,
+  DASH or Smooth Streaming playlist made Dismas fetch the addresses in it
+  when it read or played the file, outside the Flatpak
+- Ctrl+F, while the playlist pane showed the tracks of an album, opened the
+  playlist's search behind them rather than showing it
+- Searching for a number found tracks by the times in their synchronized
+  lyrics, such as "[01:12.50]" for "12"
+- A click on the waveform, or a position set from the desktop's media
+  controls, went to the whole second before it
+- Starting Dismas by opening a file, as from a file manager, opened the
+  playlist pane even when it had been hidden, and made the window wider by
+  the pane, which it then kept the next time
+- A player credited with an instrument whose name has parentheses of its
+  own, as MusicBrainz names a drum kit "drums (drum set)", showed in Track
+  Information with half the instrument in their name and a role ending in
+  ")", and counted as a second player
+- After an update that read the whole library again, tracks could count
+  as added when their files were last written, rather than when they were
+  first added, which changed the order of the albums sorted by when they
+  were added: on drives that don't keep the time a file was made, and for
+  files that a sync tool had replaced
+- A cover file that was a symbolic link to one of the system's own files
+  that say they're empty but aren't, such as `/proc/self/pagemap`, could
+  fill the memory at every start
+- A playlist that listed a named pipe, a special file that waits for a
+  program to write to it, stopped loading there for good; it now keeps its
+  place as a track that couldn't be read. A cover file or a CUE sheet
+  swapped for one as the music folders were read could stop the scan the
+  same way
+- Importing or opening a playlist read the whole file, however large, so
+  one of millions of short lines could fill the memory. A playlist from
+  elsewhere over 32 MiB, or with more than 200,000 tracks, is now turned
+  down
+- Files opened from a file manager while the playlist of the last session
+  was being read went among its tracks, rather than being added to it once
+  it was read
+- Saving the queue as a playlist right after startup, while its tracks
+  were still being read, saved an empty playlist
+- The scan forgot the tracks of a folder it couldn't read, like one on a
+  network share that stopped answering, and those of a drive unplugged
+  while it read them, and read them and made their covers again once they
+  were back
+- Scrolling over the volume slider with a touchpad on Wayland moved it a
+  step for each pixel, so that a light scroll sent the volume to 0 or to
+  100%
+- Seeking to a time from another app, over MPRIS, in a track whose length
+  couldn't be read went back to its start
+- A file with tens of thousands of performers or composers in its tags,
+  as only a crafted one has, made the player and its rows in the playlist
+  take seconds to show it
+- A file with many pictures that were slow to decode, as a crafted one can
+  have, held up the tracks after it in the playlist, and the scan, for 10
+  to 20 seconds for each picture
+- A cover file added to the folder of an album, or replaced, showed in the
+  album grid, but the player, the playlist and the album's tracks only
+  showed it once Dismas was started again
+- A cover replaced in the folder of an album while the album grid showed
+  it kept the old cover in the grid
+- A cover file moved or copied into the folder of an album wasn't noticed
+  when it kept an older date, as moving a file does, and the album kept
+  its old cover. A cover file that was removed wasn't noticed either. A
+  cover file dated in the future, as on a drive written where the clock
+  was ahead, made the album's cover again at every scan of the music
+  folders
+
+### Removed
+
+- Ctrl+G, as Ctrl+2 shows the albums
 
 ## [2026.10] - 2026-10-20
 

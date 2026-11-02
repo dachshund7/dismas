@@ -7,34 +7,52 @@ QA Plan
 1. First run
   - Copying Amberol's library, queue, playlists and settings
   - Scanning the Music folder
-2. Albums
+2. Albums, tracks and works
   - Sorting: artist, title, year, date added
-  - Search
-  - Open an album; play it; add it to the queue
+  - Search, with fields such as `composer:` and `year:<1970`, and a
+    mistake, which says why it finds nothing
+  - The Composers and Performers lists, and the heart beside the search
+  - Open an album; play it; add it to the queue; its menu: Play Next, Add
+    to Playlist, Open Booklet
+  - The Tracks page: an album opened there lists only the tracks that match
+  - The Works page: open a work, play one of its recordings; Go to Work
+    from a track
   - Select albums and tracks, with Shift+click and Ctrl+A
+  - Make the covers larger and smaller: Ctrl+plus, Ctrl+minus, Ctrl+0,
+    Ctrl and the mouse wheel
   - Music folders in Preferences: add one, remove one and undo, and
     unplug or rename one, whose albums are hidden until it's back
+  - Add, change and remove a file in the music folders while Dismas runs
 3. Player
   - Play/pause, with Space too
   - Previous/next
   - Scrubbing
-  - Sleep timer, stopping right away and finishing the track
+  - Sleep timer, stopping right away and finishing the track; Stop After
+    This Track and This Work
+  - Lyrics, plain and synchronized; click a line to play from it
+  - ReplayGain: Album, Track, Automatic, and the pre-amp
 4. Queue
   - Open folder; open file; drag and drop
-  - Shuffle
+  - Shuffle, and putting back the order from before
   - Repeat: all, one, continuous
-  - Search
-  - Drag to reorder
-  - Select; remove track; remove all
+  - Search, and playing only the tracks it found
+  - Drag to reorder; Alt+Up and Alt+Down
+  - Play Next and Add to Playlist, in the menu of a track
+  - Sort, and its Undo
+  - Select; remove track; remove all; Undo
   - Toggle the playlist pane
 5. Playlists
   - Save the queue as a playlist; create, rename, delete
   - Switch between playlists
   - Import and export M3U
-  - Restore the queue at startup, resuming paused at the same track and position
+  - Restore the queue at startup, resuming paused at the same track and
+    position
+  - Smart playlists; Play a Random Album, Track or Work; favorites
 6. Desktop
   - Media keys and the media controls of the desktop (MPRIS)
-  - Playing in the background
+  - Playing in the background, and the tray icon
+  - The menus of tracks and albums with the Menu key, and the names that
+    a screen reader reads
 
 Release
 -------
