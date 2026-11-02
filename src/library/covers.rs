@@ -130,10 +130,17 @@ pub(super) fn update_covers(
             // reached the playlist before its cover file, as when a download
             // is added to it before its cover is written, so they're listed
             // too, once, as the key is kept
-            let cover_files_changed = if has_row {
-                kept_files.as_ref().is_some_and(|k| *k != cover_files)
-            } else {
-                files.is_some()
+            let cover_files_changed = match (has_row, &kept_files) {
+                (true, Some(kept)) => *kept != cover_files,
+                // An older version kept no key, and went by the times of
+                // the cover files: one newer than the thumbnail changed
+                // while it wasn't running, which is noticed once, as the
+                // key is kept then
+                (true, None) => cover.as_deref().is_some_and(|thumbnail| {
+                    let folders = album_folders.get(&id).into_iter().flatten();
+                    cover_file_newer(folders, Path::new(thumbnail))
+                }),
+                (false, _) => files.is_some(),
             };
             // An album without a thumbnail whose cover file couldn't be
             // decoded is tried again, as it was before keys were kept; the
@@ -387,6 +394,19 @@ fn cover_files_key(dir: &Path) -> Option<String> {
         any = true;
     }
     any.then(|| utils::hex(&hasher.finalize()))
+}
+
+// Whether a cover file for the folders of an album's tracks is newer than
+// its thumbnail, as older versions checked, before the key of the cover
+// files was kept; a thumbnail that's gone is made again anyway
+fn cover_file_newer<'a>(folders: impl Iterator<Item = &'a PathBuf>, thumbnail: &Path) -> bool {
+    let Ok(made) = std::fs::metadata(thumbnail).and_then(|m| m.modified()) else {
+        return false;
+    };
+    folders
+        .flat_map(|folder| CoverCache::cover_files_for(folder))
+        .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
+        .any(|time| time > made)
 }
 
 // The key of the cover files of an album from the keys of the folders its

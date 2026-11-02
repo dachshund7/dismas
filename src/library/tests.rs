@@ -758,17 +758,28 @@ fn a_changed_cover_file_is_noticed_whatever_its_time() {
 
 // The covers outlive the versions of the schema, so the key of the cover
 // files is added to the covers of an older version, which keep their
-// thumbnails, and the next scan fills it in without making them again
+// thumbnails, and the next scan fills it in without making them again,
+// but for a cover file replaced while the older version wasn't running,
+// which that version would have noticed by its time
 #[test]
 fn a_new_version_of_the_schema_adds_the_key_of_the_cover_files() {
+    use std::time::{Duration, SystemTime};
+
     use crate::utils::write_test_wav;
 
     let music = test_dir("cover-key-music");
     let covers = test_dir("cover-key-thumbnails");
-    write_test_wav(&music.join("1.wav"), 1);
-    image::RgbImage::from_pixel(8, 8, image::Rgb([255, 0, 0]))
-        .save(music.join("cover.png"))
-        .unwrap();
+    let save_cover = |folder: &str, color| {
+        image::RgbImage::from_pixel(8, 8, image::Rgb(color))
+            .save(music.join(folder).join("cover.png"))
+            .unwrap();
+    };
+    let replaced = music.join("Replaced/1.wav");
+    for folder in ["Kept", "Replaced"] {
+        std::fs::create_dir_all(music.join(folder)).unwrap();
+        write_test_wav(&music.join(folder).join("1.wav"), 1);
+        save_cover(folder, [255, 0, 0]);
+    }
     let dir = test_dir("cover-key-db");
     let path = dir.join("library.db");
     let (sender, _receiver) = async_channel::unbounded();
@@ -802,13 +813,32 @@ fn a_new_version_of_the_schema_adds_the_key_of_the_cover_files() {
     conn.pragma_update(None, "user_version", super::SCHEMA_VERSION - 1)
         .unwrap();
     drop(conn);
+    // Newer than its thumbnail, which was just made
+    save_cover("Replaced", [0, 0, 255]);
+    std::fs::File::options()
+        .write(true)
+        .open(music.join("Replaced/cover.png"))
+        .unwrap()
+        .set_modified(SystemTime::now() + Duration::from_secs(60 * 60))
+        .unwrap();
 
     let mut conn = super::open_at(&path).unwrap();
-    assert_eq!(keys(&conn), [None]);
+    assert_eq!(keys(&conn), [None, None]);
+    let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
+    let made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
+    assert_eq!(
+        (made.count, made.tracks_with_new_cover),
+        (1, vec![replaced])
+    );
+    assert!(
+        keys(&conn)
+            .iter()
+            .all(|key| key.as_ref().is_some_and(|key| !key.is_empty()))
+    );
+    // Once the keys are kept, the times no longer count
     let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
     let made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
     assert_eq!((made.count, made.tracks_with_new_cover), (0, vec![]));
-    assert!(keys(&conn)[0].as_ref().is_some_and(|key| !key.is_empty()));
 
     std::fs::remove_dir_all(&music).unwrap();
     std::fs::remove_dir_all(&covers).unwrap();
