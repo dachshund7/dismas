@@ -22,6 +22,7 @@
 
 use std::{
     borrow::Cow,
+    cell::OnceCell,
     cmp::Ordering,
     collections::{HashMap, HashSet},
     io::Read,
@@ -379,8 +380,14 @@ fn audio_files(dir: &Path) -> Vec<PathBuf> {
 // The audio file that a sheet names. It's often not quite the one next to
 // it: rippers name the WAV file they wrote, which was compressed after,
 // e.g. "Album.wav" for "Album.flac", sometimes with the folder it was in on
-// Windows, and the files are renamed without the sheet
-fn resolve_file(sheet: &Path, name: &str, single_file: bool) -> Option<PathBuf> {
+// Windows, and the files are renamed without the sheet. The audio files in
+// its folder are listed once for all the files a sheet names, in `listing`
+fn resolve_file(
+    sheet: &Path,
+    name: &str,
+    single_file: bool,
+    listing: &OnceCell<Vec<PathBuf>>,
+) -> Option<PathBuf> {
     let dir = sheet.parent()?;
     let exact = dir.join(name);
     if is_audio_file(&exact) {
@@ -392,7 +399,7 @@ fn resolve_file(sheet: &Path, name: &str, single_file: bool) -> Option<PathBuf> 
         return Some(in_dir);
     }
 
-    let files = audio_files(dir);
+    let files = listing.get_or_init(|| audio_files(dir));
     let stem = |path: &Path| path.file_stem().map(|s| s.to_string_lossy().to_lowercase());
     let named = stem(Path::new(base));
     let mut candidates: Vec<&PathBuf> = files
@@ -426,10 +433,19 @@ impl SplitSheet {
     pub fn read(path: &Path) -> Option<Self> {
         let sheet = read_sheet(path)?;
         let single_file = sheet.files.len() == 1;
+        // Only the files that tracks are in: a crafted sheet can name a
+        // hundred thousand, and the library reads each sheet at each scan
+        let used: HashSet<usize> = sheet.tracks.iter().filter_map(|track| track.file).collect();
+        let listing = OnceCell::new();
         let audio: Vec<Option<PathBuf>> = sheet
             .files
             .iter()
-            .map(|name| resolve_file(path, name, single_file))
+            .enumerate()
+            .map(|(i, name)| {
+                used.contains(&i)
+                    .then(|| resolve_file(path, name, single_file, &listing))
+                    .flatten()
+            })
             .collect();
         Self::split(path, sheet, |file| audio.get(file?)?.clone())
     }
@@ -918,6 +934,31 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    // A crafted sheet can name a hundred thousand files, each of which was
+    // looked for, with a listing of the folder, at each scan
+    #[test]
+    fn only_the_files_that_tracks_are_in_are_looked_for() {
+        let dir = std::env::temp_dir().join(format!("dismas-cue-unused-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sheet = dir.join("Album.cue");
+        let unused: String = (0..5000)
+            .map(|i| format!("FILE \"Missing {i}.wav\" WAVE\n"))
+            .collect();
+        std::fs::write(
+            &sheet,
+            SHEET.replace("FILE \"Elgar", &format!("{unused}FILE \"Elgar")),
+        )
+        .unwrap();
+        let flac = dir.join("Elgar - Enigma Variations.flac");
+        std::fs::write(&flac, b"").unwrap();
+
+        let split = SplitSheet::read(&sheet);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let split = split.unwrap();
+        assert_eq!(split.tracks().count(), 3);
+        assert!(split.splits(&flac));
+    }
+
     #[test]
     fn the_file_named_is_found_with_another_extension() {
         let dir = std::env::temp_dir().join(format!("dismas-cue-resolve-{}", std::process::id()));
@@ -927,17 +968,15 @@ FILE "Elgar - Enigma Variations.wav" WAVE
         let flac = dir.join("Elgar - Enigma Variations.flac");
         std::fs::write(&flac, b"").unwrap();
 
+        let resolve = |name, single_file| resolve_file(&sheet, name, single_file, &OnceCell::new());
         let name = "Elgar - Enigma Variations.wav";
-        assert_eq!(resolve_file(&sheet, name, true), Some(flac.clone()));
+        assert_eq!(resolve(name, true), Some(flac.clone()));
         let windows = r"C:\Rips\Elgar - Enigma Variations.wav";
-        assert_eq!(resolve_file(&sheet, windows, true), Some(flac.clone()));
+        assert_eq!(resolve(windows, true), Some(flac.clone()));
         // Renamed, with the sheet's name
         std::fs::rename(&flac, dir.join("Album.flac")).unwrap();
-        assert_eq!(
-            resolve_file(&sheet, name, true),
-            Some(dir.join("Album.flac"))
-        );
-        assert_eq!(resolve_file(&sheet, name, false), None);
+        assert_eq!(resolve(name, true), Some(dir.join("Album.flac")));
+        assert_eq!(resolve(name, false), None);
 
         let split = SplitSheet::read(&sheet).unwrap();
         assert_eq!(split.tracks().count(), 3);

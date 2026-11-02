@@ -443,6 +443,9 @@ All notable changes to this project will be documented in this file.
 - A file with tens of thousands of performers or composers in its tags,
   as only a crafted one has, made the player and its rows in the playlist
   take seconds to show it
+- A CUE sheet that named many files, as a crafted one can, made each scan
+  of the music folders take minutes, as each file was looked for in a new
+  listing of its folder
 
 ### Removed
 
