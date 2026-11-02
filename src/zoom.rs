@@ -67,6 +67,14 @@ impl ZoomSteps {
 // third of its height on a laptop
 const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
 
+// How long the scrolling stops before what's left of a step is dropped, so
+// that it doesn't add to a scroll made later
+const SCROLL_PAUSE_MS: u32 = 500;
+
+// The most steps a scroll event makes: as many as the view with the most
+// steps has from one end to the other, where more only ring the bell
+const MAX_SCROLL_STEPS: f64 = 4.0;
+
 // Adds up the scrolling done with Ctrl held into zoom steps. A notch of a
 // mouse wheel is a step, which a high-resolution wheel sends in fractions,
 // and a touchpad scrolls by pixels. Scrolling up zooms in, as in browsers
@@ -75,12 +83,15 @@ const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
 struct ScrollSteps {
     // Up to a step, in either direction; down is positive
     total: f64,
+    // The time of the last event, in milliseconds
+    last: Option<u32>,
 }
 
 impl ScrollSteps {
-    // The steps that the scroll makes: positive to zoom in, negative to
-    // zoom out. Turning back drops what had been scrolled the other way
-    pub fn add(&mut self, dy: f64, unit: gdk::ScrollUnit) -> i32 {
+    // The steps that the scroll at `time` makes: positive to zoom in,
+    // negative to zoom out. Turning back drops what had been scrolled the
+    // other way, and so does a pause
+    pub fn add(&mut self, dy: f64, unit: gdk::ScrollUnit, time: u32) -> i32 {
         let delta = match unit {
             gdk::ScrollUnit::Surface => dy / SCROLL_PIXELS_PER_STEP,
             _ => dy,
@@ -88,13 +99,19 @@ impl ScrollSteps {
         if !delta.is_finite() || delta == 0.0 {
             return 0;
         }
-        if self.total != 0.0 && delta.signum() != self.total.signum() {
+        // The times of events count from when the display started, and
+        // go back to 0 after 49 days
+        let paused = self
+            .last
+            .replace(time)
+            .is_some_and(|last| time.wrapping_sub(last) > SCROLL_PAUSE_MS);
+        if paused || (self.total != 0.0 && delta.signum() != self.total.signum()) {
             self.total = 0.0;
         }
         self.total += delta;
         let steps = self.total.trunc();
         self.total -= steps;
-        -(steps as i32)
+        -(steps.clamp(-MAX_SCROLL_STEPS, MAX_SCROLL_STEPS) as i32)
     }
 }
 
@@ -148,7 +165,9 @@ pub fn add_zoom_input(widget: &impl IsA<gtk::Widget>, zoom: impl Fn(Zoom) + 'sta
             {
                 return glib::Propagation::Proceed;
             }
-            let n = steps.borrow_mut().add(dy, controller.unit());
+            let n = steps
+                .borrow_mut()
+                .add(dy, controller.unit(), controller.current_event_time());
             let step = if n > 0 { Zoom::In } else { Zoom::Out };
             for _ in 0..n.unsigned_abs() {
                 zoom(step);
@@ -218,29 +237,53 @@ mod tests {
     fn a_notch_of_the_wheel_is_a_step() {
         let mut steps = ScrollSteps::default();
         // Up zooms in
-        assert_eq!(steps.add(-1.0, ScrollUnit::Wheel), 1);
-        assert_eq!(steps.add(1.0, ScrollUnit::Wheel), -1);
-        assert_eq!(steps.add(2.0, ScrollUnit::Wheel), -2);
+        assert_eq!(steps.add(-1.0, ScrollUnit::Wheel, 0), 1);
+        assert_eq!(steps.add(1.0, ScrollUnit::Wheel, 0), -1);
+        assert_eq!(steps.add(2.0, ScrollUnit::Wheel, 0), -2);
     }
 
     #[test]
     fn fractions_of_a_notch_add_up_to_a_step() {
         let mut steps = ScrollSteps::default();
-        assert_eq!(steps.add(-0.5, ScrollUnit::Wheel), 0);
-        assert_eq!(steps.add(-0.25, ScrollUnit::Wheel), 0);
-        assert_eq!(steps.add(-0.25, ScrollUnit::Wheel), 1);
+        assert_eq!(steps.add(-0.5, ScrollUnit::Wheel, 0), 0);
+        assert_eq!(steps.add(-0.25, ScrollUnit::Wheel, 0), 0);
+        assert_eq!(steps.add(-0.25, ScrollUnit::Wheel, 0), 1);
         // Turning back starts again
-        assert_eq!(steps.add(-0.75, ScrollUnit::Wheel), 0);
-        assert_eq!(steps.add(0.5, ScrollUnit::Wheel), 0);
-        assert_eq!(steps.add(0.5, ScrollUnit::Wheel), -1);
+        assert_eq!(steps.add(-0.75, ScrollUnit::Wheel, 0), 0);
+        assert_eq!(steps.add(0.5, ScrollUnit::Wheel, 0), 0);
+        assert_eq!(steps.add(0.5, ScrollUnit::Wheel, 0), -1);
+    }
+
+    #[test]
+    fn what_is_left_of_a_step_goes_after_a_pause() {
+        let mut steps = ScrollSteps::default();
+        assert_eq!(steps.add(-0.75, ScrollUnit::Wheel, 1_000), 0);
+        assert_eq!(steps.add(-0.25, ScrollUnit::Wheel, 1_500), 1);
+        assert_eq!(steps.add(-0.75, ScrollUnit::Wheel, 2_000), 0);
+        // A scroll made later starts again
+        assert_eq!(steps.add(-0.25, ScrollUnit::Wheel, 2_501), 0);
+        assert_eq!(steps.add(-0.75, ScrollUnit::Wheel, 2_600), 1);
+        // The times of events go back to 0 after 49 days
+        assert_eq!(steps.add(-0.75, ScrollUnit::Wheel, u32::MAX - 50), 0);
+        assert_eq!(steps.add(-0.25, ScrollUnit::Wheel, 50), 1);
+    }
+
+    #[test]
+    fn a_scroll_makes_no_more_steps_than_a_view_has() {
+        let mut steps = ScrollSteps::default();
+        assert_eq!(steps.add(-1e12, ScrollUnit::Wheel, 0), 4);
+        assert_eq!(steps.add(f64::MAX, ScrollUnit::Wheel, 0), -4);
+        assert_eq!(steps.add(f64::MIN, ScrollUnit::Surface, 0), 4);
+        // Nothing is left over for the next one
+        assert_eq!(steps.add(-0.5, ScrollUnit::Wheel, 0), 0);
     }
 
     #[test]
     fn a_touchpad_scrolls_by_pixels() {
         let mut steps = ScrollSteps::default();
-        assert_eq!(steps.add(-20.0, ScrollUnit::Surface), 0);
-        assert_eq!(steps.add(-20.0, ScrollUnit::Surface), 0);
-        assert_eq!(steps.add(-20.0, ScrollUnit::Surface), 1);
-        assert_eq!(steps.add(0.0, ScrollUnit::Surface), 0);
+        assert_eq!(steps.add(-20.0, ScrollUnit::Surface, 0), 0);
+        assert_eq!(steps.add(-20.0, ScrollUnit::Surface, 0), 0);
+        assert_eq!(steps.add(-20.0, ScrollUnit::Surface, 0), 1);
+        assert_eq!(steps.add(0.0, ScrollUnit::Surface, 0), 0);
     }
 }
