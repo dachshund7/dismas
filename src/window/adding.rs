@@ -46,6 +46,7 @@ impl Window {
             Tracks::Albums(_) => {}
         }
 
+        let selected = self.selected_playlist();
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
             self,
@@ -53,6 +54,12 @@ impl Window {
                 let Some(files) = tracks.files(&win).await else {
                     return;
                 };
+                // Another playlist could have been switched to while the
+                // albums' tracks were read, and they'd go among its tracks
+                if win.imp().loads.get() > 0 || win.selected_playlist() != selected {
+                    win.add_toast(i18n("Unable to add to the playlist"));
+                    return;
+                }
                 win.load_into_queue(
                     files,
                     QueueMode::Add,
@@ -117,10 +124,16 @@ impl Window {
                 let Some(files) = tracks.files(&win).await else {
                     return;
                 };
-                if to_queue {
-                    win.queue_tracks(files, QueueMode::Add);
-                } else {
+                // The playlists could have been switched while the albums'
+                // tracks were read: the one named goes on getting them,
+                // through the queue if it's selected now, and the one
+                // that's selected instead doesn't
+                if name != win.selected_playlist() {
                     win.append_to_playlist(&name, &files);
+                } else if win.imp().loads.get() > 0 {
+                    win.add_toast(i18n("Unable to add to the playlist"));
+                } else {
+                    win.queue_tracks(files, QueueMode::Add);
                 }
             }
         ));
