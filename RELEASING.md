@@ -72,3 +72,29 @@ Checklist for a release.
   immutable (Settings → General → Releases): once published, a release's
   tag and files can't be changed, so a mistake found afterwards needs a new
   version
+
+Dependencies
+------------
+
+At the start of each cycle, right after a release, on the branch for the
+next one, so that the new versions are used for a month before they ship:
+
+- [ ] `cargo update`, then build and run the tests
+- [ ] `cargo update --verbose` lists the crates with newer versions that
+  `Cargo.toml` doesn't allow, as `Unchanged … (available: …)`; take the
+  ones worth the changes they need. For lofty, `cargo test lofty_gaps`
+  says what to change (see CLAUDE.md)
+- [ ] Update the actions in `.github/workflows/`, in all the files
+  together, to releases at least two weeks old: pinned to the release's
+  commit, with the release in the comment
+- [ ] When a new GNOME runtime is out (in March and September), move the
+  `runtime-version` of both Flatpak manifests and the `gnome-NN` image of
+  the CI and Release workflows to it, together
+
+When the Advisories workflow fails, read the advisory:
+
+- If Dismas reaches the code it's about, update the crate on main (`cargo
+  update -p <crate>`), release a new version with it, e.g. `2026.11.1`,
+  and rebase the branch for the next release on main
+- Otherwise, add the advisory's ID to `ignore` in
+  [`deny.toml`](./deny.toml), with the reason
