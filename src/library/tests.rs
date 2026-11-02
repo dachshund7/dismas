@@ -661,7 +661,7 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
         let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
         let mut made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender)
             .unwrap()
-            .cover_changed;
+            .tracks_with_new_cover;
         made.sort();
         made
     };
@@ -718,7 +718,7 @@ fn a_changed_cover_file_is_noticed_whatever_its_time() {
     let mut scan = || {
         let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
         let made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
-        (made.count, made.cover_changed)
+        (made.count, made.tracks_with_new_cover)
     };
     let listed = vec![track];
 
@@ -788,7 +788,7 @@ fn a_new_version_of_the_schema_adds_the_key_of_the_cover_files() {
     assert_eq!(keys(&conn), [None]);
     let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
     let made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
-    assert_eq!((made.count, made.cover_changed), (0, vec![]));
+    assert_eq!((made.count, made.tracks_with_new_cover), (0, vec![]));
     assert!(keys(&conn)[0].as_ref().is_some_and(|key| !key.is_empty()));
 
     std::fs::remove_dir_all(&music).unwrap();

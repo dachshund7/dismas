@@ -289,7 +289,7 @@ impl LibraryView {
                 let uris: Vec<String> = result
                     .updated
                     .iter()
-                    .chain(&result.cover_changed)
+                    .chain(&result.tracks_with_new_cover)
                     .map(|path| gio::File::for_path(path).uri().to_string())
                     .collect();
                 let n_changed = u32::try_from(result.n_changed).unwrap_or(u32::MAX);

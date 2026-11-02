@@ -18,7 +18,7 @@ pub(super) struct MadeCovers {
     pub(super) count: usize,
     // The tracks of the albums whose cover files changed without them,
     // which the queue has to look for their cover again
-    pub(super) cover_changed: Vec<PathBuf>,
+    pub(super) tracks_with_new_cover: Vec<PathBuf>,
 }
 
 // An album whose thumbnail `update_covers` makes
@@ -206,7 +206,9 @@ pub(super) fn update_covers(
         for id in new_cover_files {
             let paths = album_tracks.query_map([id], |row| row.get::<_, Vec<u8>>(0))?;
             for path in paths {
-                made_covers.cover_changed.push(path_from_bytes(path?));
+                made_covers
+                    .tracks_with_new_cover
+                    .push(path_from_bytes(path?));
             }
         }
     }

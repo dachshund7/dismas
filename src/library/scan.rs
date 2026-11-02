@@ -22,10 +22,11 @@ pub(crate) struct ScanResult {
     // Whether covers of the albums were made again, which can keep their
     // names, as when a cover file next to the tracks changed
     pub(crate) covers_changed: bool,
-    // The tracks of the albums whose cover file changed without them, such
-    // as a cover added next to them, so that the queue can look for their
-    // cover again
-    pub(crate) cover_changed: Vec<PathBuf>,
+    // The tracks of the albums whose cover files changed without them, as
+    // when a cover is added next to them, replaced or removed, so that the
+    // queue can look for their cover again; not the same as
+    // `covers_changed`, which is about the grid's thumbnails
+    pub(crate) tracks_with_new_cover: Vec<PathBuf>,
     // What to watch for changes, see `folders_to_watch()`
     pub(crate) watch: WatchList,
 }
@@ -137,7 +138,7 @@ pub(crate) fn scan(
             sender,
         )?;
         result.covers_changed = made.count > 0;
-        result.cover_changed = made.cover_changed;
+        result.tracks_with_new_cover = made.tracks_with_new_cover;
         Ok(result)
     })
     .unwrap_or_else(|e| {
