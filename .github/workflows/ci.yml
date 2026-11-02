@@ -103,9 +103,11 @@ jobs:
       # Meson, clippy and the tests run Cargo without --locked, so a
       # Cargo.toml change committed without its Cargo.lock would build from
       # a lockfile that isn't the committed one, which the advisories check
-      # doesn't see
+      # doesn't see. The container runs as root, but the runner's user owns
+      # the workspace, and git takes a repository someone else owns for no
+      # repository at all unless it's marked safe
       - name: Check that the build left Cargo.lock as committed
-        run: git diff --exit-code Cargo.lock
+        run: git -c safe.directory="$GITHUB_WORKSPACE" diff --exit-code Cargo.lock
 
   # A Flatpak of the development profile, for trying a change without
   # building it; the bundle is in the artifacts of the run
