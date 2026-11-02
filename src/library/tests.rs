@@ -789,9 +789,12 @@ fn a_new_version_of_the_schema_adds_the_key_of_the_cover_files() {
     let mut conn = super::open_at(&path).unwrap();
     let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
     super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
-    // As if an older version had made the database, without the column
+    // As if an older version had made the database, without the column;
+    // the table is made as it made it, as `CREATE TABLE … AS` would leave
+    // out the primary key that the scan's `INSERT OR REPLACE` goes by
     conn.execute_batch(
-        "CREATE TABLE old_covers AS SELECT album_id, path FROM covers;
+        "CREATE TABLE old_covers (album_id TEXT PRIMARY KEY, path TEXT);
+         INSERT INTO old_covers SELECT album_id, path FROM covers;
          DROP TABLE covers;
          ALTER TABLE old_covers RENAME TO covers;",
     )
