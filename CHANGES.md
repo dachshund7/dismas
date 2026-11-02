@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
-## [2026.11] - 2026-11-01
+## [2026.11] - 2026-11-02
 
 ### Added
 
