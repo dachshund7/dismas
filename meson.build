@@ -16,8 +16,9 @@ dependency('gstreamer-play-1.0', version: '>= 1.20')
 dependency('gstreamer-plugins-base-1.0', version: '>= 1.20')
 dependency('gstreamer-plugins-bad-1.0', version: '>= 1.20')
 dependency('gstreamer-bad-audio-1.0', version: '>= 1.20')
-# The library database: rusqlite links against the system SQLite
-dependency('sqlite3')
+# The library database: rusqlite links against the system SQLite, and
+# supports 3.45.3 or later
+dependency('sqlite3', version: '>= 3.45.3')
 # glycin, which decodes the covers in sandboxed loaders, links against these;
 # the loaders themselves (glycin-loaders) are only needed at runtime
 if host_machine.system() == 'linux'

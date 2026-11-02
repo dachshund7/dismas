@@ -424,7 +424,7 @@ out again. It needs, from your distribution:
 - GStreamer 1.20 or later, with the base, good and bad plugins, and for
   WMA files, the ugly plugins and gst-libav
 - the glycin loaders and `bwrap`, to read the covers
-- SQLite, libseccomp and fontconfig
+- SQLite 3.45.3 or later, libseccomp and fontconfig
 
 It's the same app as Dismas built from source, with the same settings,
 library and playlists, and `install.sh` doesn't replace a build from source
@@ -432,9 +432,9 @@ installed in `~/.local`.
 
 Otherwise, you need to build Dismas from source. You'll need Meson, Ninja,
 Rust, `blueprint-compiler`, gettext, and the development files for gtk4 ≥
-4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20 (including plugins-bad), SQLite,
-libseccomp and fontconfig. Decoding cover art needs the glycin loaders at run
-time, plus `bwrap` outside Flatpak.
+4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20 (including plugins-bad), SQLite
+≥ 3.45.3, libseccomp and fontconfig. Decoding cover art needs the glycin
+loaders at run time, plus `bwrap` outside Flatpak.
 
 ```sh
 meson setup _build                     # add -Dprofile=development for a debug build

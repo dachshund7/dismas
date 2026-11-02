@@ -8,7 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Update dependencies
+- Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
+  later
 
 ### Fixed
 
