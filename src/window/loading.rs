@@ -34,13 +34,19 @@ impl Window {
 
     // The playlist of the last session is read at startup, at the same
     // time as tracks loaded meanwhile, which would land in the middle of it
-    // and be stored without it, so they wait until it's in the queue
+    // and be stored without it, so they wait until it's in the queue.
+    // While it's read, they wait with what waits for the load, such as a
+    // track clicked meanwhile, so that they all run in the order they were
+    // asked for, once startup has ended; the end of a load runs without
+    // yielding, so what waits for startup alone is older than all of those
     fn after_startup(&self, f: impl FnOnce(&Self) + 'static) {
         let imp = self.imp();
-        if imp.starting.get() {
-            imp.after_startup.borrow_mut().push(Box::new(f));
-        } else {
+        if !imp.starting.get() {
             f(self);
+        } else if imp.loads.get() > 0 {
+            self.after_loads(f);
+        } else {
+            imp.after_startup.borrow_mut().push(Box::new(f));
         }
     }
 
