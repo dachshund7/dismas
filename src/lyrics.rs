@@ -30,6 +30,11 @@ const MAX_LYRICS_FILE_SIZE: u64 = 1024 * 1024;
 // whose copies come to more than this aren't lyrics
 const MAX_SYNCED_TEXT: usize = 4 * 1024 * 1024;
 
+// The most lines synchronized lyrics have, far more than a song has: each
+// is a row of a list, and a crafted file of a hundred thousand lines took
+// the window seconds to show, and gigabytes; it shows as plain lyrics
+const MAX_SYNCED_LINES: usize = 5000;
+
 // The length of the longest time `timestamp()` takes, "99999:59.999"
 const MAX_TIMESTAMP_LEN: usize = 12;
 
@@ -79,7 +84,16 @@ pub fn find(audio_file: &Path, part: Option<(Duration, Option<Duration>)>) -> Op
         }
     }
     if let Some(tags) = read_file_tags(audio_file, ReadOptions::LYRICS) {
-        if let Some(lyrics) = tags.extra.synced_lyrics.and_then(sylt_lyrics) {
+        // Like the lyrics in the tags below, not when they'd make a larger
+        // file than one of lyrics that's read, counting a byte for each line
+        let sylt = tags.extra.synced_lyrics.filter(|entries| {
+            entries
+                .iter()
+                .map(|(_, text)| text.len() as u64 + 1)
+                .sum::<u64>()
+                <= MAX_LYRICS_FILE_SIZE
+        });
+        if let Some(lyrics) = sylt.and_then(sylt_lyrics) {
             return in_part(lyrics, part);
         }
         // Lyrics in the tags larger than a file of lyrics that's read
@@ -262,6 +276,9 @@ fn synced(mut entries: Vec<(Duration, String)>) -> Option<Lyrics> {
             last.text.push('\n');
             last.text.push_str(text);
         } else {
+            if lines.len() == MAX_SYNCED_LINES {
+                return None;
+            }
             lines.push(Line {
                 time,
                 end: None,
@@ -628,6 +645,31 @@ mod tests {
             ]))
         );
         assert_eq!(scanned.extra.synced_lyrics, None);
+    }
+
+    // Each line is a row of a list, so a hundred thousand of them took the
+    // window seconds to show
+    #[test]
+    fn too_many_synchronized_lines_are_plain_lyrics() {
+        let lrc: String = (0..MAX_SYNCED_LINES + 1)
+            .map(|i| format!("[{}:{:02}.{:02}]la\n", i / 6000, i / 100 % 60, i % 100))
+            .collect();
+        assert!(matches!(parse(&lrc), Some(Lyrics::Plain(_))));
+
+        // A SYLT frame with too many lines, or larger than a file of lyrics
+        // that's read, gives way to the lyrics in the tags
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-lyrics-XXXXXX")).unwrap();
+        let audio = dir.join("Die Forelle.wav");
+        let many: Vec<(&str, u32)> = (0..=MAX_SYNCED_LINES as u32).map(|ms| ("la", ms)).collect();
+        tagged_wav(&audio, Some("Ave Maria"), Some(sylt_frame(&many)));
+        let found_many = find(&audio, None);
+        let long = "la ".repeat(200_000);
+        let large = [(long.as_str(), 1000), (long.as_str(), 2000)];
+        tagged_wav(&audio, Some("Ave Maria"), Some(sylt_frame(&large)));
+        let found_large = find(&audio, None);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found_many, Some(Lyrics::Plain("Ave Maria".to_string())));
+        assert_eq!(found_large, Some(Lyrics::Plain("Ave Maria".to_string())));
     }
 
     #[test]
