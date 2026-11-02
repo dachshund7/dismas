@@ -795,17 +795,29 @@ impl AudioPlayer {
     }
 
     // Seeks to a share of the track, between seconds too, as a click on the
-    // waveform can be
+    // waveform can be; there's none of a track whose length isn't known,
+    // which a seek to its start would have taken the place of
     pub fn seek_position_rel(&self, position: f64) {
         let duration = self.state.duration() as f64;
+        if duration == 0.0 {
+            return;
+        }
         let pos = (duration * position).clamp(0.0, duration);
         self.finished.set(false);
         let pos = Duration::try_from_secs_f64(pos).unwrap_or_default();
         self.show_start(self.backend.seek_position(pos));
     }
 
+    // Seeks to a time, which MPRIS and the lines of the lyrics ask for; in a
+    // track whose length isn't known, as far as it goes, rather than to its
+    // start
     pub fn seek_position_abs(&self, position: Duration) {
-        let pos = position.min(Duration::from_secs(self.state.duration()));
+        let duration = self.state.duration();
+        let pos = if duration > 0 {
+            position.min(Duration::from_secs(duration))
+        } else {
+            position
+        };
         self.finished.set(false);
         self.show_start(self.backend.seek_position(pos));
     }

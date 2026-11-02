@@ -438,6 +438,8 @@ All notable changes to this project will be documented in this file.
 - Started from the prebuilt tarball, Dismas trusted the settings schemas
   compiled in the folder it was started from over those of the system,
   and so did the apps it opened
+- Seeking to a time from another app, over MPRIS, in a track whose length
+  couldn't be read went back to its start
 
 ### Removed
 
