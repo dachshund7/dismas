@@ -31,7 +31,7 @@ use std::{
 };
 
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
-use lofty::tag::{ItemKey, Tag, TagType};
+use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
 
 use crate::utils;
 
@@ -45,6 +45,17 @@ const MAX_SHEET_SIZE: u64 = 1024 * 1024;
 // audiobooks into chapters can go on. Every track takes the tags of the
 // whole file, so a sheet with any number of tracks could fill the memory
 const MAX_TRACK_NUMBER: u32 = 999;
+
+// CD-Text fields are at most 80 characters, so a longer value in a sheet
+// is something else. Every track keeps a copy of the album's values, so
+// they're cut there
+const MAX_SHEET_VALUE: usize = 1024;
+
+// lofty reads each item of a file up to its allocation limit, 16 MiB, and
+// every track of a sheet takes the items of the audio file. All the tracks
+// of a sheet together keep no more of them than lofty reads of one item,
+// so a large item in a file split into many tracks can't fill the memory
+const MAX_SHEET_TAG_TEXT: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct CueSheet {
@@ -116,26 +127,36 @@ fn split_word(s: &str) -> (&str, &str) {
 
 // A value, which can be quoted or not; a quoted one ends at the last
 // quote, as some sheets have quotes inside
-fn unquote(s: &str) -> Option<String> {
+fn unquote_whole(s: &str) -> Option<&str> {
     let s = s.trim();
     let value = match s.strip_prefix('"') {
         Some(rest) => rest.rfind('"').map_or(rest, |end| &rest[..end]),
         None => s,
     };
     let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+// A value, cut between characters where it's longer than MAX_SHEET_VALUE
+fn unquote(s: &str) -> Option<String> {
+    let value = unquote_whole(s)?;
+    let value = value[..value.floor_char_boundary(MAX_SHEET_VALUE)].trim_end();
     (!value.is_empty()).then(|| value.to_string())
 }
 
-// The name in `FILE "name" TYPE`; unquoted, the type is the last word
+// The name in `FILE "name" TYPE`; unquoted, the type is the last word.
+// The sheet keeps it once, not each track, so it's never cut
 fn file_name(s: &str) -> Option<String> {
     let s = s.trim();
-    if s.starts_with('"') {
-        return unquote(s);
-    }
-    match s.rsplit_once(char::is_whitespace) {
-        Some((name, _)) => unquote(name),
-        None => unquote(s),
-    }
+    let name = if s.starts_with('"') {
+        unquote_whole(s)
+    } else {
+        match s.rsplit_once(char::is_whitespace) {
+            Some((name, _)) => unquote_whole(name),
+            None => unquote_whole(s),
+        }
+    };
+    name.map(str::to_string)
 }
 
 // "mm:ss:ff"; the minutes can go past 99, but not past what a duration in
@@ -595,21 +616,60 @@ fn set_name(tag: &mut Tag, key: ItemKey, sort_key: ItemKey, value: Option<&Strin
     }
 }
 
+// What an item of the file takes in each track that keeps it: the item
+// itself, even with an empty value, and its text
+fn item_size(item: &TagItem) -> usize {
+    let value = match item.value() {
+        ItemValue::Text(text) | ItemValue::Locator(text) => text.len(),
+        ItemValue::Binary(bytes) => bytes.len(),
+    };
+    size_of::<TagItem>() + item.description().len() + value
+}
+
+// The items of an audio file that each of the `tracks` tracks of a sheet
+// takes, in the file's order: all but those about the whole file, as far
+// as a track's share of MAX_SHEET_TAG_TEXT goes. The smallest are kept
+// first, so that a long comment is the one left out, rather than the
+// artist and the album after it
+fn album_items(file_tag: &Tag, tracks: usize) -> Vec<&TagItem> {
+    let items: Vec<&TagItem> = file_tag
+        .items()
+        .filter(|item| !FILE_ITEMS.contains(&item.key()))
+        .collect();
+    let sizes: Vec<usize> = items.iter().map(|item| item_size(item)).collect();
+    let mut smallest_first: Vec<usize> = (0..items.len()).collect();
+    smallest_first.sort_by_key(|&i| sizes[i]);
+
+    let share = MAX_SHEET_TAG_TEXT / tracks.max(1);
+    let mut kept = vec![false; items.len()];
+    let mut total: usize = 0;
+    for i in smallest_first {
+        total = total.saturating_add(sizes[i]);
+        if total > share {
+            break;
+        }
+        kept[i] = true;
+    }
+    items
+        .into_iter()
+        .zip(kept)
+        .filter_map(|(item, kept)| kept.then_some(item))
+        .collect()
+}
+
 // The tags of an album that a sheet splits from an audio file: the file's,
 // with the album's from the sheet over them. The tag is a Vorbis comment,
 // which takes any item, whatever the file has
 pub fn album_tag(file_tag: Option<&Tag>, sheet: &CueSheet) -> Tag {
     let mut tag = Tag::new(TagType::VorbisComments);
     if let Some(file_tag) = file_tag {
-        for item in file_tag.items() {
+        for item in album_items(file_tag, sheet.tracks.len()) {
             tag.push_unchecked(item.clone());
         }
+        // The cover, read once for the album; the tracks don't take them
         for picture in file_tag.pictures() {
             tag.push_picture(picture.clone());
         }
-    }
-    for key in FILE_ITEMS {
-        tag.remove_key(key);
     }
 
     set(&mut tag, ItemKey::AlbumTitle, sheet.title.as_ref());
@@ -1011,5 +1071,96 @@ FILE "Strings.flac" WAVE
         let parry = track_tag(&album, &sheet, &sheet.tracks[1]);
         assert_eq!(parry.get_string(ItemKey::Composer), Some("Hubert Parry"));
         assert_eq!(parry.get_string(ItemKey::ComposerSortOrder), None);
+    }
+
+    #[test]
+    fn long_values_are_cut_between_characters_but_file_names_are_not() {
+        // The cut at 1024 bytes falls inside an "é", which starts at 1023
+        let long = format!("a{}", "é".repeat(600));
+        let quoted = format!("{}.flac", "b".repeat(2000));
+        let unquoted = format!("{}.flac", "c".repeat(2000));
+        let sheet = parse(&format!(
+            "TITLE \"{long}\"\nREM COMPOSER {long}\n\
+             FILE \"{quoted}\" WAVE\nTRACK 01 AUDIO\nTITLE {long}\nINDEX 01 00:00:00\n\
+             FILE {unquoted} WAVE\nTRACK 02 AUDIO\nINDEX 01 00:00:00\n"
+        ))
+        .unwrap();
+        let cut = format!("a{}", "é".repeat(511));
+        assert_eq!(sheet.title.as_deref(), Some(cut.as_str()));
+        assert_eq!(sheet.composer.as_deref(), Some(cut.as_str()));
+        assert_eq!(sheet.tracks[0].title.as_deref(), Some(cut.as_str()));
+        assert_eq!(sheet.files, vec![quoted, unquoted]);
+    }
+
+    // The sheet of an audiobook with `count` chapters, which says nothing
+    // about the album
+    fn chapters(count: u32) -> CueSheet {
+        let mut text = String::from("FILE \"book.flac\" WAVE\n");
+        for number in 1..=count {
+            text.push_str(&format!("TRACK {number} AUDIO\nINDEX 01 {number}:00:00\n"));
+        }
+        parse(&text).unwrap()
+    }
+
+    #[test]
+    fn the_tracks_of_a_sheet_share_what_they_take_of_the_tags() {
+        let mut file_tag = Tag::new(TagType::VorbisComments);
+        for (key, value) in [
+            (ItemKey::Comment, "x".repeat(64 * 1024)),
+            (ItemKey::TrackArtist, "Kathleen Ferrier".to_string()),
+            (ItemKey::AlbumTitle, "Blow the Wind Southerly".to_string()),
+            (ItemKey::Label, "Decca".to_string()),
+        ] {
+            file_tag.push_unchecked(TagItem::new(key, ItemValue::Text(value)));
+        }
+
+        // A track's share of 999, about 16 KiB, can't take the comment,
+        // which is left out rather than the smaller items after it
+        let sheet = chapters(999);
+        let album = album_tag(Some(&file_tag), &sheet);
+        let keys: Vec<ItemKey> = album.items().map(TagItem::key).collect();
+        assert_eq!(
+            keys,
+            [ItemKey::TrackArtist, ItemKey::AlbumTitle, ItemKey::Label]
+        );
+        let track = track_tag(&album, &sheet, &sheet.tracks[998]);
+        assert_eq!(track.artist().as_deref(), Some("Kathleen Ferrier"));
+        assert_eq!(track.album().as_deref(), Some("Blow the Wind Southerly"));
+        assert_eq!(track.get_string(ItemKey::Comment), None);
+
+        // A few tracks keep it, in the file's order
+        let sheet = chapters(2);
+        let album = album_tag(Some(&file_tag), &sheet);
+        let keys: Vec<ItemKey> = album.items().map(TagItem::key).collect();
+        assert_eq!(
+            keys,
+            [
+                ItemKey::Comment,
+                ItemKey::TrackArtist,
+                ItemKey::AlbumTitle,
+                ItemKey::Label
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_items_count_against_the_share_of_a_track() {
+        let mut file_tag = Tag::new(TagType::VorbisComments);
+        for _ in 0..100_000 {
+            file_tag.push_unchecked(TagItem::new(
+                ItemKey::CopyrightMessage,
+                ItemValue::Text(String::new()),
+            ));
+        }
+
+        let sheet = chapters(999);
+        let album = album_tag(Some(&file_tag), &sheet);
+        let track = track_tag(&album, &sheet, &sheet.tracks[0]);
+        let copied = track
+            .items()
+            .filter(|item| item.key() == ItemKey::CopyrightMessage)
+            .count();
+        assert!(copied > 0);
+        assert!(copied * size_of::<TagItem>() <= MAX_SHEET_TAG_TEXT / 999);
     }
 }

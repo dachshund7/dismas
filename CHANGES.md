@@ -398,6 +398,9 @@ All notable changes to this project will be documented in this file.
   first added, which changed the order of the albums sorted by when they
   were added: on drives that don't keep the time a file was made, and for
   files that a sync tool had replaced
+- A file that a CUE sheet split into hundreds of tracks, with a very large
+  tag, could fill the memory at every start, as each of its tracks kept a
+  copy of the whole tag
 
 ### Removed
 
