@@ -601,10 +601,15 @@ impl LyricsView {
         let target = match imp.current.get() {
             Place::Start => adjustment.lower(),
             Place::Line(line) => {
+                // Rows that aren't laid out yet, as right after the lines
+                // are shown again, have no place to scroll to; a glide
+                // toward the rows they replaced would go on until
+                // `center_when_laid_out()` jumps, so it stops now
                 let Some(bounds) = self
                     .row(line)
                     .and_then(|row| row.compute_bounds(&*imp.lines_box))
                 else {
+                    self.stop_glide();
                     return;
                 };
                 let middle = f64::from(bounds.y() + bounds.height() / 2.0);
