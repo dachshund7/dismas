@@ -16,8 +16,9 @@ pub(super) struct MadeCovers {
     // The number of thumbnails made: one made again can keep its name,
     // which the grid can't tell otherwise
     pub(super) count: usize,
-    // The tracks of the albums whose cover files changed without them,
-    // which the queue has to look for their cover again
+    // The tracks of the albums whose cover files changed without them, or
+    // that are new with cover files, which the queue has to look for
+    // their cover again
     pub(super) tracks_with_new_cover: Vec<PathBuf>,
 }
 
@@ -96,8 +97,15 @@ pub(super) fn update_covers(
                         .clone()
                 });
             let cover_files = files.clone().unwrap_or_default();
-            let cover_files_changed =
-                has_row && kept_files.as_ref().is_some_and(|k| *k != cover_files);
+            // The tracks of an album that's new to the library can have
+            // reached the playlist before its cover file, as when a download
+            // is added to it before its cover is written, so they're listed
+            // too, once, as the key is kept
+            let cover_files_changed = if has_row {
+                kept_files.as_ref().is_some_and(|k| *k != cover_files)
+            } else {
+                files.is_some()
+            };
             // An album without a thumbnail whose cover file couldn't be
             // decoded is tried again, as it was before keys were kept
             let retried = has_row && cover.is_none() && files.is_some();
@@ -109,8 +117,7 @@ pub(super) fn update_covers(
                 || stale_albums.contains(&id)
             {
                 // A track that's gone since the scan would leave its album
-                // without a cover for good. The tracks of an album that's
-                // new to the scan were read with the cover file there
+                // without a cover for good
                 if cue_sheet::real_path(&first_track).is_file() {
                     missing.push(CoverJob {
                         id,

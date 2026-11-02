@@ -626,10 +626,10 @@ fn thumbnails_are_made_smaller_from_larger_ones() {
     std::fs::remove_dir(&dir).unwrap();
 }
 
-// A cover file added next to the tracks of an album the library knows makes
-// the scan list all its tracks, so that the queue looks for their cover
-// again, once, even when it can't be read; an album that's new to it
-// doesn't
+// A cover file added next to the tracks of an album makes the scan list
+// all its tracks, so that the queue looks for their cover again, once,
+// even when it can't be read; so does an album that's new to the library
+// with a cover file, as its tracks can have reached the queue before it
 #[test]
 fn a_cover_file_added_to_an_album_lists_its_tracks() {
     use crate::utils::write_test_wav;
@@ -648,7 +648,8 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
     for track in [&plain, &first_disc, &second_disc, &unreadable] {
         write_test_wav(track, 1);
     }
-    write_test_wav(&music.join("Covered/1.wav"), 1);
+    let covered = music.join("Covered/1.wav");
+    write_test_wav(&covered, 1);
 
     let mut conn = test_db();
     let (sender, _receiver) = async_channel::unbounded();
@@ -665,8 +666,7 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
         made.sort();
         made
     };
-    // The cover of a new album is made, and its tracks were read with it
-    assert_eq!(scan(), Vec::<PathBuf>::new());
+    assert_eq!(scan(), [covered]);
 
     red.save(music.join("Plain/cover.png")).unwrap();
     red.save(music.join("Discs/folder.png")).unwrap();
@@ -723,7 +723,7 @@ fn a_changed_cover_file_is_noticed_whatever_its_time() {
     let listed = vec![track];
 
     save_cover([255, 0, 0], now);
-    assert_eq!(scan(), (1, vec![]));
+    assert_eq!(scan(), (1, listed.clone()));
     save_cover([0, 255, 0], now - 7 * day);
     assert_eq!(scan(), (1, listed.clone()));
     save_cover([0, 0, 255], now + day);

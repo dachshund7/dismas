@@ -23,8 +23,9 @@ pub(crate) struct ScanResult {
     // names, as when a cover file next to the tracks changed
     pub(crate) covers_changed: bool,
     // The tracks of the albums whose cover files changed without them, as
-    // when a cover is added next to them, replaced or removed, so that the
-    // queue can look for their cover again; not the same as
+    // when a cover is added next to them, replaced or removed, and of the
+    // new albums with cover files, so that the queue can look for their
+    // cover again; not the same as
     // `covers_changed`, which is about the grid's thumbnails
     pub(crate) tracks_with_new_cover: Vec<PathBuf>,
     // What to watch for changes, see `folders_to_watch()`
