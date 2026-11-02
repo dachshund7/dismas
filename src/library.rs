@@ -837,48 +837,30 @@ pub struct SearchSources {
 
 // What `dismas_match()` matches a track with, bound to each statement, so
 // that each has its own search, and a statement without one fails rather
-// than matching with another's. The play stats and the favorites are read
-// as the statement is made, in the thread it runs in
+// than matching with another's
 struct Matcher {
     // With its relative dates worked out at `context`, see `Query::at()`
     query: Query,
     context: Context,
-    // From plays.db, by path rather than by URI
+    stats: Arc<PathStats>,
+    shown_folders: Vec<(PathBuf, PathBuf)>,
+}
+
+// The play stats and the favorites that a search reads from plays.db, by
+// path rather than by URI, as the library keeps the tracks, whose paths
+// are those of their URIs, even for the tracks of CUE sheets
+#[derive(Debug, Default)]
+struct PathStats {
     heard: HashMap<PathBuf, play_stats::TrackStats>,
     favorites: HashMap<PathBuf, i64>,
     favorite_albums: BTreeSet<String>,
     favorite_works: HashSet<String>,
-    shown_folders: Vec<(PathBuf, PathBuf)>,
 }
 
-// What a search reads from plays.db; tests give their own, and never read
-// the user's
-#[cfg(not(test))]
-fn search_stats(needs: &Needs) -> play_stats::SearchStats {
-    play_stats::search_stats(needs)
-}
-
-#[cfg(test)]
-thread_local! {
-    static TEST_SEARCH_STATS: RefCell<play_stats::SearchStats> = RefCell::default();
-}
-
-#[cfg(test)]
-fn search_stats(_needs: &Needs) -> play_stats::SearchStats {
-    TEST_SEARCH_STATS.with_borrow(Clone::clone)
-}
-
-impl Matcher {
-    fn new(query: &Arc<Query>, sources: Option<&SearchSources>) -> Self {
-        let needs = query.needs();
-        let stats = search_stats(&needs);
-        // As the library keeps the tracks, whose paths are those of their
-        // URIs, even for the tracks of CUE sheets
+impl From<play_stats::SearchStats> for PathStats {
+    fn from(stats: play_stats::SearchStats) -> Self {
         let by_path = |uri: &String| gio::File::for_uri(uri).path();
-        let context = Context::now();
         Self {
-            query: query.at(&context),
-            context,
             heard: stats
                 .heard
                 .into_iter()
@@ -891,6 +873,60 @@ impl Matcher {
                 .collect(),
             favorite_albums: stats.favorite_albums,
             favorite_works: stats.favorite_works,
+        }
+    }
+}
+
+// What a search reads from plays.db, in the thread of its statement. A key
+// typed in the album search makes several statements, each with its
+// `Matcher` (the albums, the works, the pickers), in threads of their own,
+// and each read the stats of every track heard and turned their URIs into
+// paths: so the ones read last are kept, with what they were read for,
+// until plays.db is written to. Statements that come at the same time wait
+// for the one that reads them. Tests give their own, and never read the
+// user's
+#[cfg(not(test))]
+fn search_stats(needs: &Needs) -> Arc<PathStats> {
+    type Read = ([bool; 4], u64, Arc<PathStats>);
+    static LAST: std::sync::Mutex<Option<Read>> = std::sync::Mutex::new(None);
+    let wanted = [
+        needs.stats,
+        needs.favorites,
+        needs.favorite_albums,
+        needs.favorite_works,
+    ];
+    let mut last = LAST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let writes = play_stats::writes();
+    if let Some((read_for, read_at, stats)) = &*last
+        && *read_for == wanted
+        && *read_at == writes
+    {
+        return Arc::clone(stats);
+    }
+    let stats = Arc::new(PathStats::from(play_stats::search_stats(needs)));
+    *last = Some((wanted, writes, Arc::clone(&stats)));
+    stats
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_SEARCH_STATS: RefCell<play_stats::SearchStats> = RefCell::default();
+}
+
+#[cfg(test)]
+fn search_stats(_needs: &Needs) -> Arc<PathStats> {
+    Arc::new(TEST_SEARCH_STATS.with_borrow(Clone::clone).into())
+}
+
+impl Matcher {
+    fn new(query: &Arc<Query>, sources: Option<&SearchSources>) -> Self {
+        let context = Context::now();
+        Self {
+            query: query.at(&context),
+            context,
+            stats: search_stats(&query.needs()),
             shown_folders: sources
                 .map(|sources| sources.shown_folders.clone())
                 .unwrap_or_default(),
@@ -974,10 +1010,10 @@ fn add_functions(conn: &Connection) -> rusqlite::Result<()> {
             };
             let favorited = path
                 .as_ref()
-                .and_then(|path| matcher.favorites.get(path.as_ref()).copied());
+                .and_then(|path| matcher.stats.favorites.get(path.as_ref()).copied());
             let heard = path
                 .as_ref()
-                .and_then(|path| matcher.heard.get(path.as_ref()));
+                .and_then(|path| matcher.stats.heard.get(path.as_ref()));
             let needs = matcher.query.needs();
             let shown = path.as_ref().map(|path| {
                 matcher
@@ -1001,8 +1037,10 @@ fn add_functions(conn: &Connection) -> rusqlite::Result<()> {
                 plays: needs
                     .stats
                     .then(|| heard.map_or(0, |heard| i64::from(heard.plays))),
-                favorite_album: text(5).is_some_and(|id| matcher.favorite_albums.contains(id)),
-                favorite_work: text(6).is_some_and(|key| matcher.favorite_works.contains(key)),
+                favorite_album: text(5)
+                    .is_some_and(|id| matcher.stats.favorite_albums.contains(id)),
+                favorite_work: text(6)
+                    .is_some_and(|key| matcher.stats.favorite_works.contains(key)),
             };
             Ok(matcher.query.matches(&candidate, &matcher.context))
         },
