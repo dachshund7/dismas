@@ -231,6 +231,15 @@ impl LibraryView {
         ));
     }
 
+    // Drops the covers in the cache, and those still being read, which are
+    // no longer the ones to show
+    pub(super) fn forget_covers(&self) {
+        let imp = self.imp();
+        imp.cover_generation.fetch_add(1, Ordering::Relaxed);
+        imp.textures.borrow_mut().clear();
+        imp.pending_covers.borrow_mut().clear();
+    }
+
     // The width the covers are read at, in the pixels of the screen the
     // grid is on: as large as the grid shows them
     fn cover_pixels(&self) -> u32 {
@@ -242,10 +251,7 @@ impl LibraryView {
     // they're read again for the cells on screen, which keep the ones they
     // show until then, and the covers still being read are dropped
     pub(super) fn reset_covers(&self) {
-        let imp = self.imp();
-        imp.cover_generation.fetch_add(1, Ordering::Relaxed);
-        imp.textures.borrow_mut().clear();
-        imp.pending_covers.borrow_mut().clear();
+        self.forget_covers();
         let cells = mapped_album_cells(self.upcast_ref());
         for cell in &cells {
             self.show_cell_cover(cell);

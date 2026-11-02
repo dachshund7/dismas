@@ -452,6 +452,8 @@ All notable changes to this project will be documented in this file.
 - A cover file added to the folder of an album, or replaced, showed in the
   album grid, but the player, the playlist and the album's tracks only
   showed it once Dismas was started again
+- A cover replaced in the folder of an album while the album grid showed
+  it kept the old cover in the grid
 
 ### Removed
 

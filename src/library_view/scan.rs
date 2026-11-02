@@ -135,14 +135,15 @@ impl LibraryView {
         }
         self.update_selection();
 
+        // A cover made again can keep its path, so the covers in the cache
+        // go before the albums do: GTK binds the cells on screen to them as
+        // they go in, and they'd show the old cover. Otherwise, the covers
+        // in the cache are still the ones of these albums
+        if covers_changed {
+            self.forget_covers();
+        }
         if let Some(model) = imp.model.borrow().as_ref() {
             model.splice(0, model.n_items(), &albums);
-        }
-
-        // A cover made again can keep its path; otherwise, the covers in
-        // the cache are still the ones of these albums
-        if covers_changed {
-            imp.textures.borrow_mut().clear();
         }
         self.update_stack();
 
