@@ -376,6 +376,12 @@ impl TrackData {
             .map(AlbumCover::uuid)
     }
 
+    // The id of the cover the track shares with its album in the cache,
+    // even when the album has none, which the cache keeps too
+    pub(crate) fn album_cover_uuid(&self) -> Option<&str> {
+        self.cover.as_ref().map(AlbumCover::uuid)
+    }
+
     pub(crate) fn duration(&self) -> u64 {
         self.duration
     }
@@ -843,6 +849,14 @@ impl Track {
             .data
             .borrow()
             .cover_uuid()
+            .map(ToString::to_string)
+    }
+
+    pub(crate) fn album_cover_uuid(&self) -> Option<String> {
+        self.imp()
+            .data
+            .borrow()
+            .album_cover_uuid()
             .map(ToString::to_string)
     }
 

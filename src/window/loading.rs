@@ -546,11 +546,13 @@ impl Window {
             .collect();
 
         // The cover of their album might have changed too, and the other
-        // tracks of the album share it, so they are read again with them
+        // tracks of the album share it, so they are read again with them.
+        // An album without a cover is looked for again too, as the cache
+        // would otherwise give its tracks the lack of one it found before
         let covers: HashSet<String> = shown
             .iter()
             .filter(|track| uris.contains(&track.uri()))
-            .filter_map(Track::cover_uuid)
+            .filter_map(Track::album_cover_uuid)
             .collect();
         let tracks: Vec<Track> = shown
             .into_iter()
@@ -558,7 +560,7 @@ impl Window {
                 track.missing()
                     || uris.contains(&track.uri())
                     || track
-                        .cover_uuid()
+                        .album_cover_uuid()
                         .is_some_and(|uuid| covers.contains(&uuid))
             })
             .collect();

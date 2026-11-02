@@ -22,6 +22,10 @@ pub(crate) struct ScanResult {
     // Whether covers of the albums were made again, which can keep their
     // names, as when a cover file next to the tracks changed
     pub(crate) covers_changed: bool,
+    // The tracks of the albums whose cover file changed without them, such
+    // as a cover added next to them, so that the queue can look for their
+    // cover again
+    pub(crate) cover_changed: Vec<PathBuf>,
     // What to watch for changes, see `folders_to_watch()`
     pub(crate) watch: WatchList,
 }
@@ -124,13 +128,16 @@ pub(crate) fn scan(
         .collect();
     let mut result = with_connection(|conn| {
         let (mut result, stale_albums) = scan_with(conn, &roots, paths, &unread, sender)?;
-        result.covers_changed = update_covers(
+        let made = update_covers(
             conn,
+            &covers_dir(),
             &stale_albums,
             &roots.unavailable,
             thumbnail_sizes,
             sender,
-        )? > 0;
+        )?;
+        result.covers_changed = made.count > 0;
+        result.cover_changed = made.cover_changed;
         Ok(result)
     })
     .unwrap_or_else(|e| {

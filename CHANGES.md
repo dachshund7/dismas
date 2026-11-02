@@ -449,6 +449,9 @@ All notable changes to this project will be documented in this file.
 - A file with many pictures that were slow to decode, as a crafted one can
   have, held up the tracks after it in the playlist, and the scan, for 10
   to 20 seconds for each picture
+- A cover file added to the folder of an album, or replaced, showed in the
+  album grid, but the player, the playlist and the album's tracks only
+  showed it once Dismas was started again
 
 ### Removed
 

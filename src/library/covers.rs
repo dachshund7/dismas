@@ -3,31 +3,42 @@
 
 use super::*;
 
-fn covers_dir() -> PathBuf {
+pub(super) fn covers_dir() -> PathBuf {
     let mut dir = glib::user_cache_dir();
     dir.push("dismas");
     dir.push("album-covers");
     dir
 }
 
+// What `update_covers` made
+#[derive(Debug, Default)]
+pub(super) struct MadeCovers {
+    // The number of thumbnails made: one made again can keep its name,
+    // which the grid can't tell otherwise
+    pub(super) count: usize,
+    // The tracks of the albums whose cover file changed without them,
+    // which the queue has to look for their cover again
+    pub(super) cover_changed: Vec<PathBuf>,
+}
+
 // Creates the thumbnails of the albums that don't have one yet, or whose
-// tracks changed; the thumbnails are in the cache directory, so they might
-// have been removed since the last scan. They're made from the tracks that
-// are there, so the albums of the `hidden` folders, which aren't, keep
-// theirs until they're back. Returns the number of thumbnails made: one
-// made again can keep its name, which the grid can't tell otherwise. An
-// album whose cover can't be decoded is tried at every scan, and counts
-// for nothing, as its thumbnail stays as it was, missing
+// tracks changed, in `dir`, the cache directory, so they might have been
+// removed since the last scan. They're made from the tracks that are
+// there, so the albums of the `hidden` folders, which aren't, keep theirs
+// until they're back. An album whose cover can't be decoded is tried at
+// every scan, and counts for nothing, as its thumbnail stays as it was,
+// missing
 pub(super) fn update_covers(
     conn: &mut Connection,
+    dir: &Path,
     stale_albums: &HashSet<String>,
     hidden: &[PathBuf],
     sizes: ThumbnailSizes,
     sender: &Sender<ScanEvent>,
-) -> rusqlite::Result<usize> {
-    let dir = covers_dir();
-    // Each album with its first track, and the thumbnail to make smaller,
-    // with its new size, when it's only too large
+) -> rusqlite::Result<MadeCovers> {
+    // Each album with its first track, the thumbnail to make smaller, with
+    // its new size, when it's only too large, and whether its cover file
+    // changed without its tracks
     let mut missing = Vec::new();
     let mut cover_times = HashMap::new();
     {
@@ -51,7 +62,7 @@ pub(super) fn update_covers(
             // Thumbnails at another size than the grid shows them, or in
             // the format of older versions, are made again, or smaller
             let update = cover.as_deref().map_or(ThumbnailUpdate::Keep, |p| {
-                sizes.update(thumbnail_size(Path::new(p), &dir, &id))
+                sizes.update(thumbnail_size(Path::new(p), dir, &id))
             });
             // Albums without cover art have no thumbnail, so we only check
             // that the thumbnails we created are still there
@@ -80,20 +91,25 @@ pub(super) fn update_covers(
                 || stale_albums.contains(&id)
             {
                 // A track that's gone since the scan would leave its album
-                // without a cover for good
+                // without a cover for good. The tracks of an album that's
+                // new to the scan were read with the cover file there
                 if cue_sheet::real_path(&first_track).is_file() {
-                    missing.push((id, first_track, None));
+                    missing.push((id, first_track, None, has_row && cover_file_changed));
                 }
             } else if let (ThumbnailUpdate::Shrink(size), Some(cover)) = (update, cover) {
-                missing.push((id, first_track, Some((PathBuf::from(cover), size))));
+                missing.push((id, first_track, Some((PathBuf::from(cover), size)), false));
             }
         }
     }
 
     debug!("Library: generating {} album covers", missing.len());
-    let mut n_made = 0;
+    let mut made_covers = MadeCovers::default();
+    // The albums whose cover file changed and made a thumbnail; one that
+    // doesn't decode is tried at every scan, and would have its tracks read
+    // again each time
+    let mut new_cover_files = Vec::new();
 
-    glib::mkdir_with_parents(&dir, 0o700);
+    glib::mkdir_with_parents(dir, 0o700);
 
     let tx = conn.transaction()?;
     {
@@ -108,23 +124,27 @@ pub(super) fn update_covers(
         // few are made at a time, which goes faster, as for the loader.
         // Making them smaller takes a fraction of that. They're written in
         // this thread, which has the transaction
-        let make = |(id, first_track, larger): &(String, PathBuf, Option<(PathBuf, u32)>)| {
-            utils::guarded(
-                first_track.display(),
-                || match larger {
-                    Some((thumbnail, size)) => shrink_thumbnail(thumbnail, &dir, id, *size)
-                        .or_else(|| create_thumbnail(first_track, &dir, id, sizes.wanted)),
-                    None => create_thumbnail(first_track, &dir, id, sizes.wanted),
-                },
-                || None,
-            )
-        };
+        let make =
+            |(id, first_track, larger, _): &(String, PathBuf, Option<(PathBuf, u32)>, bool)| {
+                utils::guarded(
+                    first_track.display(),
+                    || match larger {
+                        Some((thumbnail, size)) => shrink_thumbnail(thumbnail, dir, id, *size)
+                            .or_else(|| create_thumbnail(first_track, dir, id, sizes.wanted)),
+                        None => create_thumbnail(first_track, dir, id, sizes.wanted),
+                    },
+                    || None,
+                )
+            };
         let mut done = 0;
         utils::in_threads(&missing, utils::READING_THREADS, make, |i, made| {
-            let (id, _, larger) = &missing[i];
+            let (id, _, larger, cover_file_changed) = &missing[i];
             done += 1;
             let _ = sender.try_send(ScanEvent::Covers(done, total));
-            n_made += usize::from(made.is_some());
+            made_covers.count += usize::from(made.is_some());
+            if *cover_file_changed && made.is_some() {
+                new_cover_files.push(id.as_str());
+            }
             // A thumbnail that couldn't be made smaller is kept as it is
             let cover = made
                 .as_deref()
@@ -138,11 +158,22 @@ pub(super) fn update_covers(
              (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)",
             [],
         )?;
+
+        // All the tracks of the album, as those in another disc folder than
+        // its first track's keep their cover apart, and can show the same
+        // cover file, in the folder above
+        let mut album_tracks = tx.prepare("SELECT path FROM tracks WHERE album_id = ?1")?;
+        for id in new_cover_files {
+            let paths = album_tracks.query_map([id], |row| row.get::<_, Vec<u8>>(0))?;
+            for path in paths {
+                made_covers.cover_changed.push(path_from_bytes(path?));
+            }
+        }
     }
     tx.commit()?;
 
-    remove_unused_covers(conn, &dir)?;
-    Ok(n_made)
+    remove_unused_covers(conn, dir)?;
+    Ok(made_covers)
 }
 
 // The sizes the album grid's thumbnails are made at, in pixels

@@ -626,6 +626,58 @@ fn thumbnails_are_made_smaller_from_larger_ones() {
     std::fs::remove_dir(&dir).unwrap();
 }
 
+// A cover file added next to the tracks of an album the library knows makes
+// the scan list all its tracks, so that the queue looks for their cover
+// again; an album that's new to it doesn't, nor a cover that can't be read
+#[test]
+fn a_cover_file_added_to_an_album_lists_its_tracks() {
+    use crate::utils::write_test_wav;
+
+    let music = test_dir("cover-added");
+    let covers = test_dir("cover-added-thumbnails");
+    for folder in ["Plain", "Unreadable", "Covered", "Discs/CD1", "Discs/CD2"] {
+        std::fs::create_dir_all(music.join(folder)).unwrap();
+    }
+    let red = image::RgbImage::from_pixel(8, 8, image::Rgb([255, 0, 0]));
+    red.save(music.join("Covered/cover.png")).unwrap();
+    let plain = music.join("Plain/1.wav");
+    let first_disc = music.join("Discs/CD1/1.wav");
+    let second_disc = music.join("Discs/CD2/1.wav");
+    for track in [&plain, &first_disc, &second_disc] {
+        write_test_wav(track, 1);
+    }
+    write_test_wav(&music.join("Unreadable/1.wav"), 1);
+    write_test_wav(&music.join("Covered/1.wav"), 1);
+
+    let mut conn = test_db();
+    let (sender, _receiver) = async_channel::unbounded();
+    let roots = roots_of(&[&music]);
+    let sizes = ThumbnailSizes {
+        wanted: 240,
+        scale_2: 480,
+    };
+    let mut scan = || {
+        let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
+        let mut made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender)
+            .unwrap()
+            .cover_changed;
+        made.sort();
+        made
+    };
+    // The cover of a new album is made, and its tracks were read with it
+    assert_eq!(scan(), Vec::<PathBuf>::new());
+
+    red.save(music.join("Plain/cover.png")).unwrap();
+    red.save(music.join("Discs/folder.png")).unwrap();
+    std::fs::write(music.join("Unreadable/cover.jpg"), b"not an image").unwrap();
+    assert_eq!(scan(), [first_disc, second_disc, plain]);
+    // Once made, and while the one that can't be read is tried again
+    assert_eq!(scan(), Vec::<PathBuf>::new());
+
+    std::fs::remove_dir_all(&music).unwrap();
+    std::fs::remove_dir_all(&covers).unwrap();
+}
+
 // A track in the database, with paths relative to a folder
 #[derive(Debug, PartialEq)]
 struct Row {
