@@ -274,6 +274,9 @@ fn dates_are_periods_and_relative_ones_moments() {
     assert!(!finds("recorded:1938-04", &span));
     assert!(search("released:yesterday").has_errors());
     assert!(search("released:-3x").has_errors());
+    // A unit of more than one byte isn't cut in two
+    assert!(search("played:-é").has_errors());
+    assert!(search("released:-3日").has_errors());
 }
 
 #[test]

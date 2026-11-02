@@ -216,7 +216,9 @@ impl DateValue {
 
 fn date_value(s: &str) -> Option<DateValue> {
     if let Some(ago) = s.strip_prefix('-') {
-        let (digits, unit) = ago.split_at(ago.len().checked_sub(1)?);
+        // The unit is a letter of one byte; the é of "-é" takes two, so
+        // the text isn't cut between them
+        let (digits, unit) = ago.split_at_checked(ago.len().checked_sub(1)?)?;
         let count = digits.parse().ok()?;
         let unit = match unit {
             "d" => DateUnit::Day,
