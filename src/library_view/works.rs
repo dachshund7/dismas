@@ -9,7 +9,7 @@
 
 use super::{work_row::WorkRow, *};
 use crate::{
-    album_cell::CellWork, play_stats::FavoriteRecording, queue_row, reveal_bin::RevealBin,
+    album_cell::CellWork, list_scroll, play_stats::FavoriteRecording, reveal_bin::RevealBin,
 };
 
 // The sizes the covers of the albums of an open work grow between, at each
@@ -658,7 +658,11 @@ impl LibraryView {
                 below.max(0.0)
             };
             if by != 0.0 {
-                queue_row::glide_adjustment(list, &adjustment, adjustment.value() + f64::from(by));
+                list_scroll::glide_adjustment(
+                    list,
+                    &adjustment,
+                    adjustment.value() + f64::from(by),
+                );
             }
         }
         let Some(cell) = cover.first_child() else {
@@ -666,7 +670,7 @@ impl LibraryView {
         };
         cell.add_css_class("flash");
         glib::timeout_add_local_once(
-            queue_row::FLASH_DURATION,
+            list_scroll::FLASH_DURATION,
             clone!(
                 #[weak]
                 cell,

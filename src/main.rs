@@ -17,6 +17,7 @@ mod fit_bin;
 mod i18n;
 mod library;
 mod library_view;
+mod list_scroll;
 mod lyrics;
 mod lyrics_view;
 mod marquee;

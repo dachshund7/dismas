@@ -472,7 +472,7 @@ impl Window {
     // around it in view
     pub(super) fn reveal_queue_track(&self, track: &Track) {
         let view = self.imp().playlist_view.queue_view();
-        self.set_queue_scroll(Some(crate::queue_row::reveal_track(&view, track)));
+        self.set_queue_scroll(Some(crate::list_scroll::reveal_track(&view, track)));
     }
 
     // Scrolling the queue takes the place of the scrolling before it, so
@@ -547,7 +547,7 @@ impl Window {
             return;
         };
         let view = self.imp().playlist_view.queue_view();
-        if crate::queue_row::track_position(&view, &track).is_none() && self.queue_search() {
+        if crate::list_scroll::track_position(&view, &track).is_none() && self.queue_search() {
             self.close_queue_search();
         }
         self.flash_queue_track(&track);
@@ -564,14 +564,14 @@ impl Window {
     fn flash_queue_track(&self, track: &Track) {
         let imp = self.imp();
         let view = imp.playlist_view.queue_view();
-        let Some(pos) = crate::queue_row::track_position(&view, track) else {
+        let Some(pos) = crate::list_scroll::track_position(&view, track) else {
             return;
         };
 
         self.show_playlist_view();
         self.set_playlist_visible(true);
         // A track change stops the glide, and scrolls to the new track
-        self.set_queue_scroll(Some(crate::queue_row::flash_track(&view, pos, track)));
+        self.set_queue_scroll(Some(crate::list_scroll::flash_track(&view, pos, track)));
     }
 
     // Alt+Up and Alt+Down move the track with the focus up or down a place,

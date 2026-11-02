@@ -904,7 +904,7 @@ impl AlbumTracks {
                 });
             if let Some((pos, track)) = found {
                 revealed.set(true);
-                crate::queue_row::flash_track(&imp.tracks_view, pos, track);
+                crate::list_scroll::flash_track(&imp.tracks_view, pos, track);
             } else if !revealed.get() {
                 // The list keeps its first track at the top as tracks are
                 // added, which hides the header of its work above it, unless

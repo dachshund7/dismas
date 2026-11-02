@@ -21,8 +21,8 @@ use std::sync::LazyLock;
 use crate::{
     audio::{PlayerState, Track},
     i18n::pi18n,
+    list_scroll::{glide_adjustment, within_scroll},
     lyrics::{self, Line, Lyrics},
-    queue_row::{glide_adjustment, within_scroll},
     utils,
     zoom::{self, Zoom},
     zoom_row::ZoomRow,
