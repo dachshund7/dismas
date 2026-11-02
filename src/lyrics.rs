@@ -25,6 +25,14 @@ use crate::{
 // The largest file of lyrics that's read, as lyrics take a few kilobytes
 const MAX_LYRICS_FILE_SIZE: u64 = 1024 * 1024;
 
+// The most that the lines of synchronized lyrics are copied into, in
+// bytes: a line sung several times is copied for each time, and lyrics
+// whose copies come to more than this aren't lyrics
+const MAX_SYNCED_TEXT: usize = 4 * 1024 * 1024;
+
+// The length of the longest time `timestamp()` takes, "99999:59.999"
+const MAX_TIMESTAMP_LEN: usize = 12;
+
 // The extensions of the files of lyrics next to an audio file, with the
 // same name: LRC files, which lyrics downloaders write, then text files,
 // which can be in the LRC format too
@@ -74,9 +82,12 @@ pub fn find(audio_file: &Path, part: Option<(Duration, Option<Duration>)>) -> Op
         if let Some(lyrics) = tags.extra.synced_lyrics.and_then(sylt_lyrics) {
             return in_part(lyrics, part);
         }
+        // Lyrics in the tags larger than a file of lyrics that's read
+        // aren't read either
         let text = [ItemKey::Lyrics, ItemKey::UnsyncLyrics]
             .into_iter()
             .filter_map(|key| tags.tag.get_string(key))
+            .filter(|text| text.len() as u64 <= MAX_LYRICS_FILE_SIZE)
             .find(|text| !text.trim().is_empty());
         match text.and_then(parse) {
             Some(lyrics @ Lyrics::Synced(_)) => return in_part(lyrics, part),
@@ -157,6 +168,8 @@ fn parse(text: &str) -> Option<Lyrics> {
     // The entries of the last line with times
     let mut last = 0..0;
     let (mut timed, mut untimed) = (0, 0);
+    // What the entries take so far, in bytes
+    let mut copied = 0;
     for line in text.lines() {
         if let Some((tag, value)) = header(line) {
             if tag.eq_ignore_ascii_case("offset") {
@@ -173,11 +186,18 @@ fn parse(text: &str) -> Option<Lyrics> {
                 continue;
             }
             untimed += 1;
+            if too_much_to_copy(&mut copied, last.len(), line_text.len() + 1) {
+                return plain(text);
+            }
             for (_, text) in &mut entries[last.clone()] {
                 text.push('\n');
                 text.push_str(line_text);
             }
             continue;
+        }
+        let entry_size = size_of::<(Duration, String)>() + line_text.len();
+        if too_much_to_copy(&mut copied, times.len(), entry_size) {
+            return plain(text);
         }
         let start = entries.len();
         entries.extend(times.into_iter().map(|time| (time, line_text.to_string())));
@@ -196,6 +216,13 @@ fn parse(text: &str) -> Option<Lyrics> {
         .map(|(time, text)| (shifted(time, offset), text))
         .collect();
     synced(entries).or_else(|| plain(text))
+}
+
+// Adds `copies` of `size` bytes to what's `copied` into the entries of
+// synchronized lyrics, and says whether that comes to more than they take
+fn too_much_to_copy(copied: &mut usize, copies: usize, size: usize) -> bool {
+    *copied = copied.saturating_add(copies.saturating_mul(size));
+    *copied > MAX_SYNCED_TEXT
 }
 
 fn shifted(time: Duration, offset: i64) -> Duration {
@@ -402,11 +429,16 @@ fn without_word_times(line: &str) -> Cow<'_, str> {
     Cow::Owned(text)
 }
 
-// The text between `open`, at the start of `text`, and the next `close`,
-// and what follows
+// The text of a time between `open`, at the start of `text`, and the next
+// `close`, and what follows. A `close` further on than the longest time
+// isn't looked for, so a line with many an `open` and no `close` takes no
+// longer than its length
 fn bracketed(text: &str, open: char, close: char) -> Option<(&str, &str)> {
     let inner = text.strip_prefix(open)?;
-    let end = inner.find(close)?;
+    let (end, _) = inner
+        .char_indices()
+        .take(MAX_TIMESTAMP_LEN + 1)
+        .find(|&(_, c)| c == close)?;
     Some((&inner[..end], &inner[end + close.len_utf8()..]))
 }
 
@@ -637,6 +669,41 @@ mod tests {
     }
 
     #[test]
+    fn a_line_with_too_many_times_is_not_copied_for_each() {
+        // A refrain sung a thousand times is still synchronized
+        let times: String = (0..1000)
+            .map(|second| format!("[{}:{:02}]", second / 60, second % 60))
+            .collect();
+        assert!(matches!(
+            parse(&format!("{times}Ave Maria\n")),
+            Some(Lyrics::Synced(lines)) if lines.len() == 1000
+        ));
+
+        // 100,000 copies of 500 kB would take 50 GB
+        let text = "Ave Maria ".repeat(50_000);
+        let lrc = format!("{}{text}", "[0:0]".repeat(100_000));
+        assert_eq!(parse(&lrc), Some(Lyrics::Plain(text.trim().to_string())));
+    }
+
+    #[test]
+    fn a_line_going_on_from_too_many_times_is_not_copied_for_each() {
+        let times = "[0:0]".repeat(40_000);
+        // Its translation would be copied to each of its 40,000 times
+        let translation = "Hail Mary, full of grace, the Lord is with thee; blessed art thou \
+            among women, and blessed";
+        assert_eq!(
+            parse(&format!("{times}Ave\n{translation}\n")),
+            Some(Lyrics::Plain(format!("Ave\n{translation}")))
+        );
+        // And so would each of 1,000 lines
+        let lines = "\ngratia plena".repeat(1000);
+        assert_eq!(
+            parse(&format!("{times}Ave Maria{lines}")),
+            Some(Lyrics::Plain(format!("Ave Maria{lines}")))
+        );
+    }
+
+    #[test]
     fn sylt_entries_are_lines_or_words() {
         let entries = |entries: &[(u64, &str)]| {
             entries
@@ -699,6 +766,16 @@ mod tests {
     }
 
     #[test]
+    fn lyrics_too_large_in_the_tags_are_left_out() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-lyrics-XXXXXX")).unwrap();
+        let audio = dir.join("Ave Maria.wav");
+        tagged_wav(&audio, Some(&"Ave ".repeat(300_000)), None);
+        let found = find(&audio, None);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found, None);
+    }
+
+    #[test]
     fn times_are_taken_out_of_lines() {
         let lines = [
             (
@@ -714,6 +791,15 @@ mod tests {
             ("[00:12:50]Da schoß in froher Eil", "Da schoß in froher Eil"),
             // Past the first hour
             ("[125:07.25]Die launische Forelle", "Die launische Forelle"),
+            // The longest times
+            (
+                "[99999:59.999]Die launische Forelle",
+                "Die launische Forelle",
+            ),
+            (
+                "[00:12.00]<99999:59.999>In einem Bächlein",
+                "In einem Bächlein",
+            ),
             (
                 "[00:20.00][01:05.50]Vorüber wie ein Pfeil",
                 "Vorüber wie ein Pfeil",
@@ -749,6 +835,10 @@ mod tests {
             "[:12]Ave Maria",
             "<00:12.0x>Ave Maria",
             "Dominus tecum < benedicta tu",
+            // Too long for a time, with the bracket further on than one
+            "[12345678901234567890]Ave Maria",
+            "<12345678901234567890>Ave Maria",
+            "<00:12.00 benedicta tu>Ave Maria",
             // Not a header tag
             "[Solo: Sopran]",
         ] {
@@ -756,6 +846,18 @@ mod tests {
                 matches!(text_without_times(line), Cow::Borrowed(text) if text == line),
                 "{line}"
             );
+        }
+    }
+
+    #[test]
+    fn a_run_of_brackets_is_no_time() {
+        // Looking for the closing bracket of each one would go through the
+        // rest of the line 100,000 times
+        let run = "<".repeat(100_000);
+        for line in [run.clone(), format!("{run}>"), format!("[00:12.00]{run}")] {
+            let text = line.strip_prefix("[00:12.00]").unwrap_or(&line);
+            assert!(matches!(without_word_times(text), Cow::Borrowed(t) if t == text));
+            assert_eq!(text_without_times(&line), text);
         }
     }
 
