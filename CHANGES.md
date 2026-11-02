@@ -413,6 +413,11 @@ All notable changes to this project will be documented in this file.
   one of millions of short lines could fill the memory. A playlist from
   elsewhere over 32 MiB, or with more than 200,000 tracks, is now turned
   down
+- Opening a smart playlist with no tracks, such as Not Heard Lately before
+  any track had gone unheard for two months, while a track played, lost
+  what had been heard of that track when it was under 30 seconds, and
+  otherwise counted the rest of the track as another listen, which could
+  make it two plays
 
 ### Removed
 

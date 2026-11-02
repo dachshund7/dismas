@@ -869,13 +869,22 @@ impl AudioPlayer {
         }
     }
 
-    // Logs it right away: on quitting, which wouldn't wait for the
-    // background, and before a smart playlist is read, so that the track
-    // playing is on it. If the track keeps playing, the rest of it is
-    // another listen
+    // Logs the listen so far right away: on quitting, which wouldn't wait
+    // for the background, and before a smart playlist or a random pick
+    // reads the play stats, so that the track playing counts. The listen
+    // goes on, as the track can keep playing, as when the smart playlist
+    // was empty: when it ends, it takes the place of the one saved, so
+    // that it's one listen, and a play once. One too short to log yet
+    // keeps what was heard
     pub fn save_listen(&self) {
-        if let Some(listen) = self.finish_listen() {
-            play_stats::record(&listen, play_stats::history_generation());
+        if !self.settings.boolean("keep-play-history") {
+            return;
+        }
+        let Some(listen) = self.listens.borrow().so_far(play_stats::now()) else {
+            return;
+        };
+        if let Some(row) = play_stats::record(&listen, play_stats::history_generation()) {
+            self.listens.borrow_mut().saved_as(row);
         }
     }
 

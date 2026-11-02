@@ -19,7 +19,7 @@ use std::{
 
 use gtk::glib;
 use log::{debug, warn};
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 const SCHEMA_VERSION: i32 = 4;
 
@@ -97,6 +97,9 @@ pub struct Listen {
     pub heard: u64,
     // Whether it counts as a play
     pub counted: bool,
+    // The row it was saved in while it went on, see
+    // `ListenTracker::saved_as()`, which it takes the place of
+    pub row: Option<i64>,
 }
 
 // What was heard of a track, from its totals
@@ -134,6 +137,8 @@ pub struct ListenTracker {
     track: Option<(String, u64)>,
     heard: u64,
     last: Option<u64>,
+    // The row the listen so far was saved in, see `saved_as()`
+    row: Option<i64>,
 }
 
 impl ListenTracker {
@@ -141,6 +146,7 @@ impl ListenTracker {
         self.track = Some((uri, duration));
         self.heard = 0;
         self.last = None;
+        self.row = None;
     }
 
     pub fn advance(&mut self, position: u64, playing: bool) {
@@ -156,19 +162,33 @@ impl ListenTracker {
         self.last = Some(position);
     }
 
-    // The listen so far, if it was heard long enough to log. The track
-    // stays, so playing it again, e.g. once the queue finished, is another
-    // listen
-    pub fn finish(&mut self, ended: i64) -> Option<Listen> {
-        let heard = std::mem::take(&mut self.heard);
+    // The listen so far, if it was heard long enough to log, which goes on
+    pub fn so_far(&self, ended: i64) -> Option<Listen> {
         let (uri, duration) = self.track.as_ref()?;
         let (logged, played) = thresholds(*duration);
-        (heard >= logged).then(|| Listen {
+        (self.heard >= logged).then(|| Listen {
             uri: uri.clone(),
             ended,
-            heard,
-            counted: heard >= played,
+            heard: self.heard,
+            counted: self.heard >= played,
+            row: self.row,
         })
+    }
+
+    // The listen so far was saved in `row` while it goes on. When it ends,
+    // it takes the place of that row, so that it's still one listen, and
+    // counts as a play once
+    pub fn saved_as(&mut self, row: i64) {
+        self.row = Some(row);
+    }
+
+    // The listen, if it was heard long enough to log. The track stays, so
+    // playing it again, e.g. once the queue finished, is another listen
+    pub fn finish(&mut self, ended: i64) -> Option<Listen> {
+        let listen = self.so_far(ended);
+        self.heard = 0;
+        self.row = None;
+        listen
     }
 
     pub fn clear(&mut self) {
@@ -248,7 +268,9 @@ pub fn history_generation() -> u64 {
 // listens older than a year; unless the history was cleared since the
 // listen ended, at `generation`. That's checked once the database is this
 // thread's to write, as clearing it bumps the generation first
-pub fn record(listen: &Listen, generation: u64) {
+// Writes the listen, and gives the row it's in, which a listen that goes
+// on takes the place of when it ends
+pub fn record(listen: &Listen, generation: u64) -> Option<i64> {
     let result = with_connection(|conn| {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if history_generation() != generation {
@@ -256,33 +278,60 @@ pub fn record(listen: &Listen, generation: u64) {
                 "Dropping the listen to {}, from before the history was cleared",
                 listen.uri
             );
-            return Ok(());
+            return Ok(None);
         }
-        write_listen(&tx, listen)?;
-        tx.commit()
+        let row = write_listen(&tx, listen)?;
+        tx.commit()?;
+        Ok(Some(row))
     });
-    if let Err(e) = result {
+    result.unwrap_or_else(|e| {
         warn!("Unable to record the listen to {}: {e}", listen.uri);
-    }
+        None
+    })
 }
 
 #[cfg(test)]
-fn insert_listen(conn: &mut Connection, listen: &Listen) -> rusqlite::Result<()> {
+fn insert_listen(conn: &mut Connection, listen: &Listen) -> rusqlite::Result<i64> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    write_listen(&tx, listen)?;
-    tx.commit()
+    let row = write_listen(&tx, listen)?;
+    tx.commit()?;
+    Ok(row)
 }
 
-fn write_listen(tx: &rusqlite::Transaction, listen: &Listen) -> rusqlite::Result<()> {
-    tx.execute(
-        "INSERT INTO listens (uri, ended, heard, counted) VALUES (?1, ?2, ?3, ?4)",
-        params![
-            listen.uri,
-            listen.ended,
-            listen.heard as i64,
-            listen.counted
-        ],
-    )?;
+fn write_listen(tx: &rusqlite::Transaction, listen: &Listen) -> rusqlite::Result<i64> {
+    // What the row it was saved in while it went on has, which the totals
+    // count already. The URI too, in case the row is gone and another
+    // listen took its number
+    let saved: Option<(i64, i64, bool)> = match listen.row {
+        Some(row) => tx
+            .query_row(
+                "SELECT rowid, heard, counted FROM listens WHERE rowid = ?1 AND uri = ?2",
+                params![row, listen.uri],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?,
+        None => None,
+    };
+    let row = if let Some((row, _, _)) = saved {
+        tx.execute(
+            "UPDATE listens SET ended = ?2, heard = ?3, counted = ?4 WHERE rowid = ?1",
+            params![row, listen.ended, listen.heard as i64, listen.counted],
+        )?;
+        row
+    } else {
+        tx.execute(
+            "INSERT INTO listens (uri, ended, heard, counted) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                listen.uri,
+                listen.ended,
+                listen.heard as i64,
+                listen.counted
+            ],
+        )?;
+        tx.last_insert_rowid()
+    };
+    let (heard_before, counted_before) =
+        saved.map_or((0, false), |(_, heard, counted)| (heard, counted));
     // The listens are written in different threads, and the last of two
     // close together can be written first
     tx.execute(
@@ -293,8 +342,8 @@ fn write_listen(tx: &rusqlite::Transaction, listen: &Listen) -> rusqlite::Result
              last_played = MAX(last_played, excluded.last_played)",
         params![
             listen.uri,
-            i64::from(listen.counted),
-            listen.heard as i64,
+            i64::from(listen.counted && !counted_before),
+            (listen.heard as i64 - heard_before).max(0),
             listen.ended
         ],
     )?;
@@ -302,7 +351,7 @@ fn write_listen(tx: &rusqlite::Transaction, listen: &Listen) -> rusqlite::Result
         "DELETE FROM listens WHERE ended < ?1",
         [listen.ended - KEPT],
     )?;
-    Ok(())
+    Ok(row)
 }
 
 // Forgets the listens and the totals of the tracks, but not the favorites,
@@ -845,6 +894,7 @@ mod tests {
             ended,
             heard,
             counted: false,
+            row: None,
         }
     }
 
@@ -1000,6 +1050,72 @@ mod tests {
         }
         let expected: Vec<String> = (1..=size).map(|i| i.to_string()).collect();
         assert_eq!(query_recently_played(&conn).unwrap(), expected);
+    }
+
+    #[test]
+    fn a_listen_saved_as_it_goes_on_is_one_listen() {
+        let mut conn = test_db();
+        let mut tracker = ListenTracker::default();
+        // Logged from 30 s, a play from 4 minutes
+        tracker.start("song".to_string(), 600);
+        tracker.advance(0, false);
+        play(&mut tracker, 0, 20, true);
+        // Too short to log, and what was heard is kept
+        assert_eq!(tracker.so_far(100), None);
+        play(&mut tracker, 20, 250, true);
+        let saved = tracker.so_far(100).unwrap();
+        assert_eq!((saved.heard, saved.counted, saved.row), (250, true, None));
+        tracker.saved_as(insert_listen(&mut conn, &saved).unwrap());
+
+        play(&mut tracker, 250, 400, true);
+        let ended = tracker.finish(200).unwrap();
+        assert!(ended.row.is_some());
+        insert_listen(&mut conn, &ended).unwrap();
+        let listens: Vec<(i64, i64, bool)> = conn
+            .prepare("SELECT ended, heard, counted FROM listens")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(listens, [(200, 400, true)]);
+        let totals: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT plays, heard, last_played FROM totals WHERE uri = 'song'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(totals, (1, 400, 200));
+
+        // Playing it again is another listen
+        play(&mut tracker, 0, 60, true);
+        let again = tracker.finish(300).unwrap();
+        assert_eq!(again.row, None);
+        insert_listen(&mut conn, &again).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM listens", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn a_saved_listen_whose_row_is_gone_is_written_again() {
+        let mut conn = test_db();
+        let row = insert_listen(&mut conn, &listen("a", 100, 60)).unwrap();
+        conn.execute("DELETE FROM listens", []).unwrap();
+        // Another track's listen takes the number of the row
+        let other = insert_listen(&mut conn, &listen("b", 150, 60)).unwrap();
+        assert_eq!(other, row);
+        let ended = Listen {
+            row: Some(row),
+            ..listen("a", 200, 90)
+        };
+        insert_listen(&mut conn, &ended).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM listens", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 
     fn played(uri: &str, ended: i64) -> Listen {
