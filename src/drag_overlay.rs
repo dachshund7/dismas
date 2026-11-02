@@ -134,10 +134,6 @@ impl Default for DragOverlay {
 }
 
 impl DragOverlay {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     // Shows the zones across the overlay from `left` to `right`, over the
     // widget that is blurred, and highlights the one under a point; both
     // are relative to the overlay

@@ -758,17 +758,6 @@ impl AudioPlayer {
         ));
     }
 
-    pub fn seek_start(&self) {
-        self.finished.set(false);
-        let position = self.state.position() + 1;
-        self.show_start(self.backend.seek(
-            position,
-            self.state.duration(),
-            position,
-            SeekDirection::Backwards,
-        ));
-    }
-
     // A track that hasn't played yet isn't moved, only the position it
     // will start at, which the backend doesn't report
     fn show_start(&self, start: Option<Duration>) {
@@ -910,10 +899,6 @@ impl AudioPlayer {
     fn finish_listen(&self) -> Option<Listen> {
         let listen = self.listens.borrow_mut().finish(play_stats::now())?;
         self.settings.boolean("keep-play-history").then_some(listen)
-    }
-
-    pub fn set_current_track(&self, track: Option<Track>) {
-        self.state.set_current_track(track);
     }
 
     // Shows the new tags of the current track, after they were read again

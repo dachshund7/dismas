@@ -72,10 +72,6 @@ impl Default for PlaylistsPage {
 }
 
 impl PlaylistsPage {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     // Shows the queue, then the saved playlists; `selected` is the name
     // of the selected one, empty for the queue
     pub fn set_playlists(&self, names: &[String], selected: &str) {

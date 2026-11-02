@@ -108,10 +108,6 @@ impl Default for TrackCover {
 }
 
 impl TrackCover {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn album_image(&self) -> CoverPicture {
         self.imp().album_image.get()
     }

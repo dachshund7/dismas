@@ -164,9 +164,3 @@ impl Default for CoverPicture {
         glib::Object::new()
     }
 }
-
-impl CoverPicture {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}

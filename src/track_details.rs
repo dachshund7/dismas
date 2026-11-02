@@ -68,10 +68,6 @@ impl Default for TrackDetails {
 }
 
 impl TrackDetails {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn artist_label(&self) -> Marquee {
         self.imp().track_artist_label.get()
     }

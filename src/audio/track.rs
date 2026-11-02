@@ -828,10 +828,6 @@ impl Track {
         self.imp().data.borrow().details().clone()
     }
 
-    pub fn cover_color(&self) -> Option<gdk::RGBA> {
-        self.imp().data.borrow().cover_palette().map(|p| p[0])
-    }
-
     pub fn cover_palette(&self) -> Option<Vec<gdk::RGBA>> {
         self.imp().data.borrow().cover_palette().cloned()
     }

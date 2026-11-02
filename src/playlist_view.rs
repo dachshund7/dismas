@@ -234,10 +234,6 @@ impl PlaylistView {
         }
     }
 
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     // The time left under the title opens its menu too, as part of the
     // title, without making the button as wide as it, which would cut it
     fn setup_title_menu(&self) {
@@ -294,10 +290,6 @@ impl PlaylistView {
 
     pub fn queue_actionbar(&self) -> gtk::ActionBar {
         self.imp().queue_actionbar.get()
-    }
-
-    pub fn queue_remove_button(&self) -> gtk::Button {
-        self.imp().queue_remove_button.get()
     }
 
     pub fn queue_select_all_button(&self) -> gtk::Button {

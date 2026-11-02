@@ -144,16 +144,8 @@ impl Default for PlaybackControl {
 }
 
 impl PlaybackControl {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn play_button(&self) -> gtk::Button {
         self.imp().play_button.get()
-    }
-
-    pub fn repeat_button(&self) -> gtk::Button {
-        self.imp().repeat_button.get()
     }
 
     pub fn volume_control(&self) -> VolumeControl {

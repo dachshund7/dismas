@@ -92,6 +92,10 @@ impl Query {
         &self.problems
     }
 
+    #[allow(
+        dead_code,
+        reason = "the smart playlists made by the user will read them"
+    )]
     pub fn directives(&self) -> &Directives {
         &self.directives
     }
@@ -118,6 +122,10 @@ impl Query {
 
     // The query written the way a saved rule keeps it, which reads back as
     // the same query, see `print`
+    #[allow(
+        dead_code,
+        reason = "the smart playlists made by the user will save their rules with it"
+    )]
     pub fn to_text(&self) -> String {
         print::query(&self.root, &self.directives)
     }

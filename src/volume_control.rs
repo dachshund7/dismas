@@ -123,10 +123,6 @@ impl Default for VolumeControl {
 }
 
 impl VolumeControl {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     fn setup_adjustment(&self) {
         let adj = gtk::Adjustment::builder()
             .lower(0.0)

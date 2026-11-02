@@ -127,6 +127,7 @@ impl Queue {
         }
     }
 
+    #[cfg(test)]
     pub fn set_current_track(&self, track: Option<Track>) {
         self.forget_played_next();
         if let Some(track) = track {
@@ -179,6 +180,7 @@ impl Queue {
         self.insert_tracks(&run.tracks, before.as_ref());
     }
 
+    #[cfg(test)]
     pub fn remove_track(&self, track: &Track) {
         self.remove_tracks(std::slice::from_ref(track));
     }
@@ -246,6 +248,7 @@ impl Queue {
     }
 
     // Moves a track before another one, or to the end
+    #[cfg(test)]
     pub fn move_track(&self, track: &Track, before: Option<&Track>) {
         self.move_tracks(std::slice::from_ref(track), before);
     }

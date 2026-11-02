@@ -433,10 +433,6 @@ fn normalize_peaks(peaks: &[(f64, f64)]) -> Vec<PeakPair> {
 }
 
 impl WaveformView {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     fn setup_gesture(&self) {
         let drag_gesture = gtk::GestureDrag::new();
         drag_gesture.set_name(Some("waveform-drag"));
