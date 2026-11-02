@@ -3,6 +3,7 @@
 
 use std::{
     collections::HashMap,
+    io::Read,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, Weak},
 };
@@ -351,6 +352,7 @@ fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
 fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
     debug!("Looking for external cover file: {file:?}");
 
+    // Opening a named pipe would wait for something to write to it
     let metadata = std::fs::metadata(file).ok()?;
     if !metadata.is_file() {
         return None;
@@ -359,8 +361,19 @@ fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
         warn!("Skipping cover file {file:?}, which is too large");
         return None;
     }
-    match std::fs::read(file) {
-        Ok(data) => Some(glib::Bytes::from_owned(data)),
+    // The size that procfs and sysfs files report isn't what they hold:
+    // /proc/self/pagemap reports 0 and holds hundreds of gigabytes, and a
+    // symbolic link among the covers can lead to one, so the read itself
+    // stops past the largest size
+    let mut data = Vec::new();
+    let read = std::fs::File::open(file)
+        .and_then(|opened| opened.take(MAX_COVER_FILE_SIZE + 1).read_to_end(&mut data));
+    match read {
+        Ok(_) if data.len() as u64 > MAX_COVER_FILE_SIZE => {
+            warn!("Skipping cover file {file:?}, which is too large");
+            None
+        }
+        Ok(_) => Some(glib::Bytes::from_owned(data)),
         Err(e) => {
             warn!("Unable to read cover file {file:?}: {e}");
             None
@@ -440,7 +453,7 @@ mod tests {
 
     use gtk::{gdk, gio, glib, prelude::*};
 
-    use super::{COVER_SIZE, CoverCache, write_cover_file};
+    use super::{COVER_SIZE, CoverCache, read_cover_file, write_cover_file};
     use crate::cover_image::{accent_color, oklch_chroma};
 
     #[test]
@@ -565,6 +578,35 @@ mod tests {
         let cover = CoverCache::load_cover(&tag, Some(&dir), 384).unwrap();
         let texture = cover.into_texture();
         assert_eq!((texture.width(), texture.height()), (8, 4));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn small_cover_files_are_read_whole() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-cover-files-XXXXXX")).unwrap();
+        let file = dir.join("cover.jpg");
+        std::fs::write(&file, b"a small cover").unwrap();
+
+        let data = read_cover_file(&file).unwrap();
+        assert_eq!(&*data, b"a small cover");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // A symbolic link among the covers can lead to a procfs file, which
+    // says it's empty and holds hundreds of gigabytes; reading it whole
+    // would run out of memory, so the read stops past the largest cover
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cover_files_are_read_no_further_than_the_largest_size() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-cover-files-XXXXXX")).unwrap();
+        let link = dir.join("cover.jpg");
+        std::os::unix::fs::symlink("/proc/self/pagemap", &link).unwrap();
+        // So the size it gives doesn't keep it from being read
+        let metadata = std::fs::metadata(&link).unwrap();
+        assert!(metadata.is_file());
+        assert_eq!(metadata.len(), 0);
+
+        assert!(read_cover_file(&link).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

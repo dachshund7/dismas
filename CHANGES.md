@@ -401,6 +401,9 @@ All notable changes to this project will be documented in this file.
 - A file that a CUE sheet split into hundreds of tracks, with a very large
   tag, could fill the memory at every start, as each of its tracks kept a
   copy of the whole tag
+- A cover file that was a symbolic link to one of the system's own files
+  that say they're empty but aren't, such as `/proc/self/pagemap`, could
+  fill the memory at every start
 
 ### Removed
 
