@@ -33,11 +33,12 @@ jobs:
         with:
           persist-credentials: false
 
-      # Pinned, it takes the toolchain from its input rather than its ref
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: rustfmt
+      # The runner has rustup, which brings its stable toolchain up to date,
+      # with rustfmt, without an action from elsewhere
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
+          rustup default stable
 
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
