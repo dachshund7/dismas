@@ -406,12 +406,15 @@ impl Window {
     // Puts the tracks of the playlist in the queue; the tracks of the
     // previous one were saved with each change. They keep playing while
     // the new ones load, which can take a while, rather than leaving
-    // nothing to show in the meantime
+    // nothing to show in the meantime. Once no other tracks are read, see
+    // `after_loads()`
     pub(super) fn select_playlist(&self, name: &str) {
-        if name == self.selected_playlist() {
-            return;
-        }
-        self.load_playlist(name);
+        let name = name.to_string();
+        self.after_loads(move |win| {
+            if name != win.selected_playlist() {
+                win.load_playlist(&name);
+            }
+        });
     }
 
     // Even the selected one, to read its tracks again
@@ -577,61 +580,70 @@ impl Window {
 
     // Makes a playlist with the tracks of the queue, in their order; it
     // isn't selected, so that what's playing goes on, and the
-    // queue can be cleared without emptying it. The toast can open it
+    // queue can be cleared without emptying it. The toast can open it.
+    // Once no tracks are read, as the queue doesn't have them all until then
     fn save_queue_as_playlist(&self, name: &str) {
-        // The queue in the player, while it's selected, or as last saved
-        let files = if self.selected_playlist().is_empty() {
-            Some(self.player().queue().files())
-        } else {
-            playlists::load("")
-        };
-        let result = files
-            .ok_or_else(|| glib::Error::new(gio::IOErrorEnum::Failed, "Unable to read the queue"))
-            .and_then(|files| playlists::create_with_tracks(name, &files));
-        match result {
-            Ok(()) => {
-                // Shuffled like the queue, to put back the same order
-                playlists::copy_unshuffled("", name);
-                self.update_playlists_page();
-                self.update_playlists_menu();
-                // Translators: `{playlist}` must be left unmodified; it is
-                // expanded to the name of a playlist
-                let message = i18n_k("Saved as “{playlist}”", &[("playlist", name)]);
-                let name = name.to_string();
-                self.add_toast_with_button(message, i18n("Open"), move |win| {
-                    win.open_saved_queue(&name);
-                });
+        let name = name.to_string();
+        self.after_loads(move |win| {
+            // The queue in the player, while it's selected, or as last saved
+            let files = if win.selected_playlist().is_empty() {
+                Some(win.player().queue().files())
+            } else {
+                playlists::load("")
+            };
+            let result = files
+                .ok_or_else(|| {
+                    glib::Error::new(gio::IOErrorEnum::Failed, "Unable to read the queue")
+                })
+                .and_then(|files| playlists::create_with_tracks(&name, &files));
+            match result {
+                Ok(()) => {
+                    // Shuffled like the queue, to put back the same order
+                    playlists::copy_unshuffled("", &name);
+                    win.update_playlists_page();
+                    win.update_playlists_menu();
+                    // Translators: `{playlist}` must be left unmodified; it
+                    // is expanded to the name of a playlist
+                    let message = i18n_k("Saved as “{playlist}”", &[("playlist", &name)]);
+                    win.add_toast_with_button(message, i18n("Open"), move |win| {
+                        win.open_saved_queue(&name);
+                    });
+                }
+                Err(e) => {
+                    log::warn!("Unable to save the queue as '{name}': {e}");
+                    win.add_toast(i18n("Unable to save the playlist"));
+                }
             }
-            Err(e) => {
-                log::warn!("Unable to save the queue as '{name}': {e}");
-                self.add_toast(i18n("Unable to save the playlist"));
-            }
-        }
+        });
     }
 
     // Selects the playlist the queue was saved as. While the queue is
     // selected with the same tracks, they're already in the player, so
-    // they keep playing; otherwise they're loaded from the playlist
+    // they keep playing; otherwise they're loaded from the playlist. Once no
+    // tracks are read, as the queue doesn't have them all until then
     fn open_saved_queue(&self, name: &str) {
-        // It could have been renamed or deleted while the toast was up
-        if !playlists::exists(name) {
-            self.add_toast(i18n("Unable to open the playlist"));
-            return;
-        }
+        let name = name.to_string();
+        self.after_loads(move |win| {
+            // It could have been renamed or deleted while the toast was up
+            if !playlists::exists(&name) {
+                win.add_toast(i18n("Unable to open the playlist"));
+                return;
+            }
 
-        let unchanged = self.selected_playlist().is_empty() && {
-            let queue = self.player().queue().files();
-            playlists::load(name).is_some_and(|files| {
-                files.len() == queue.len() && files.iter().zip(&queue).all(|(a, b)| a.equal(b))
-            })
-        };
-        if unchanged {
-            // The queue still has the same tracks, and keeps its point
-            ResumePoints::update(&self.imp().settings, |points| points.copy("", name));
-            self.set_selected_playlist(name);
-        } else {
-            self.select_playlist(name);
-        }
+            let unchanged = win.selected_playlist().is_empty() && {
+                let queue = win.player().queue().files();
+                playlists::load(&name).is_some_and(|files| {
+                    files.len() == queue.len() && files.iter().zip(&queue).all(|(a, b)| a.equal(b))
+                })
+            };
+            if unchanged {
+                // The queue still has the same tracks, and keeps its point
+                ResumePoints::update(&win.imp().settings, |points| points.copy("", &name));
+                win.set_selected_playlist(&name);
+            } else {
+                win.select_playlist(&name);
+            }
+        });
     }
 
     // The tracks in the queue stay as they are, even when the playlist is

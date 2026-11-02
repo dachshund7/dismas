@@ -23,7 +23,7 @@ mod zoom;
 
 use std::{
     cell::{Cell, RefCell},
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     rc::Rc,
     time::Instant,
 };
@@ -71,8 +71,9 @@ use crate::{
     work_sections::{WorkSectionModel, work_header_factory},
 };
 
-// Something that waits for the end of startup, see `after_startup()`
-type AfterStartup = Box<dyn FnOnce(&Window)>;
+// Something that waits: for the end of startup, see `after_startup()`, or
+// for the tracks being read for the queue, see `after_loads()`
+type Deferred = Box<dyn FnOnce(&Window)>;
 
 // What happens once tracks are added to the queue
 #[derive(Clone, Copy, PartialEq)]
@@ -95,9 +96,8 @@ enum QueueMode {
 #[derive(Default)]
 struct LoadOptions {
     // They take the place of the tracks of the selected playlist, as those
-    // of the playlist named. Only this load does that, as files can be
-    // dropped meanwhile, and their tracks go to the playlist that is
-    // selected when they're read
+    // of the playlist named. Files dropped meanwhile wait until they have,
+    // see `Window::after_loads()`, and go to the playlist switched to
     switch_to: Option<String>,
     // Playback is paused where it was, in the empty queue
     resume: Option<ResumePoint>,
@@ -239,7 +239,7 @@ mod imp {
         // Whether the queue might still be restored or opened at startup
         pub starting: Cell<bool>,
         // What waits for the end of startup, e.g. files from the command line
-        pub after_startup: RefCell<Vec<AfterStartup>>,
+        pub after_startup: RefCell<Vec<Deferred>>,
         // Whether to hide the focus again once the page is shown
         pub hide_focus_after_transition: Cell<bool>,
         // The playlist whose tracks are loading, to take the place of
@@ -253,6 +253,8 @@ mod imp {
         pub queue_time_idle: Cell<bool>,
         // The number of times tracks are being read for the queue
         pub loads: Cell<u32>,
+        // What waits for them to be read, in the order asked
+        pub after_loads: RefCell<VecDeque<Deferred>>,
         // What Play a Random … played last on each page, which it doesn't
         // play again right away: the album, by its id, the track, by its
         // URI, and the work, by its key
@@ -648,6 +650,7 @@ mod imp {
                 queue_time_after_current: Cell::new(0),
                 queue_time_idle: Cell::new(false),
                 loads: Cell::new(0),
+                after_loads: RefCell::default(),
                 last_random_album: RefCell::default(),
                 last_random_track: RefCell::default(),
                 last_random_work: RefCell::default(),

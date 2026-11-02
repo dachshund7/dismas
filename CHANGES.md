@@ -418,6 +418,16 @@ All notable changes to this project will be documented in this file.
   what had been heard of that track when it was under 30 seconds, and
   otherwise counted the rest of the track as another listen, which could
   make it two plays
+- Playing tracks in place of the queue, by dropping them on the drop zone
+  or with `dismas --play`, while another playlist was being switched to,
+  saved them in that playlist's file
+- Choosing a playlist from the menu of the pane's title while another one
+  was being switched to could end with the other one selected
+- Files opened from a file manager while the playlist of the last session
+  was being read went among its tracks, rather than being added to it once
+  it was read
+- Saving the queue as a playlist right after startup, while its tracks
+  were still being read, saved an empty playlist
 - The scan forgot the tracks of a folder it couldn't read, like one on a
   network share that stopped answering, and those of a drive unplugged
   while it read them, and read them and made their covers again once they

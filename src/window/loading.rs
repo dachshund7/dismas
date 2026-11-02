@@ -44,6 +44,33 @@ impl Window {
         }
     }
 
+    // Runs `f` once no tracks are being read for the queue, right away if
+    // none are, so that loads happen one at a time. A switch to another
+    // playlist, tracks played in place of the queue, or tracks added, while
+    // other tracks are read, would otherwise go among them, or take the
+    // place of tracks that aren't in the queue yet: tracks played while a
+    // playlist was read for a switch were saved in that playlist's file
+    pub(super) fn after_loads(&self, f: impl FnOnce(&Self) + 'static) {
+        let imp = self.imp();
+        if imp.loads.get() > 0 {
+            debug!("Waiting for the tracks being read for the queue");
+            imp.after_loads.borrow_mut().push_back(Box::new(f));
+        } else {
+            f(self);
+        }
+    }
+
+    // Once a load is done, runs what waited for it, in the order asked,
+    // until one of them reads tracks in turn, which the rest wait for
+    fn run_after_loads(&self) {
+        while self.imp().loads.get() == 0 {
+            let Some(f) = self.imp().after_loads.borrow_mut().pop_front() else {
+                return;
+            };
+            f(self);
+        }
+    }
+
     // Opens the playlist selected in the last session: a saved one always,
     // and the queue if the user wants it; otherwise, it starts empty
     pub fn restore_playlist_on_startup(&self) {
@@ -113,9 +140,9 @@ impl Window {
         );
     }
 
-    // The actions on the queue are off while tracks are read, which can
-    // happen more than once at a time, e.g. dropping files while the tracks
-    // of a playlist are read; loading is "atomic"
+    // The actions on the queue and on playlists are off while tracks are
+    // read; what's asked for meanwhile in other ways waits, see
+    // `after_loads()`
     fn set_loading(&self, loading: bool) {
         let imp = self.imp();
         let loads = imp.loads.get();
@@ -135,11 +162,21 @@ impl Window {
         for action in [
             "win.select-playlist",
             "win.play-smart-playlist",
+            "win.play-random",
             "win.new-playlist",
             "win.rename-playlist",
             "win.delete-playlist",
+            "win.save-queue",
         ] {
             self.action_set_enabled(action, !loading);
+        }
+        // The menu of the pane's title switches with an action of its own,
+        // which isn't on the class
+        if let Some(action) = self
+            .lookup_action("selected-playlist")
+            .and_downcast::<gio::SimpleAction>()
+        {
+            action.set_enabled(!loading);
         }
         imp.album_tracks.set_adding_enabled(!loading);
         imp.library_view.set_adding_enabled(!loading);
@@ -151,13 +188,17 @@ impl Window {
     }
 
     // Reads the tracks and adds them to the queue, as `mode` and `options`
-    // say
+    // say, once no other tracks are being read
     pub(super) fn load_into_queue(
         &self,
         queue: Vec<gio::File>,
         mode: QueueMode,
         options: LoadOptions,
     ) {
+        self.after_loads(move |win| win.start_load(queue, mode, options));
+    }
+
+    fn start_load(&self, queue: Vec<gio::File>, mode: QueueMode, options: LoadOptions) {
         let LoadOptions {
             switch_to,
             resume,
@@ -367,6 +408,7 @@ impl Window {
                 }
 
                 win.end_startup();
+                win.run_after_loads();
             }
         ));
     }
@@ -425,19 +467,23 @@ impl Window {
     }
 
     // The same, with a toast that says `announce`, if any, rather than how
-    // many tracks there are
+    // many tracks there are. Once no tracks are read, as the queue they take
+    // the place of, which the Undo puts back, would be missing those
     pub(super) fn play_announced_in_place_of_queue(
         &self,
         files: Vec<gio::File>,
         announce: Option<String>,
     ) {
-        let replaced = self.replaced_queue();
-        self.replace_queue_with(files, 0, Some(replaced), announce);
+        self.after_loads(move |win| {
+            let replaced = win.replaced_queue();
+            win.replace_queue_with(files, 0, Some(replaced), announce);
+        });
     }
 
     // Empties the queue for the tracks, selecting it if a saved playlist
     // was, and plays them from the one at `start`. With `replaced`, the
-    // toast that follows has an Undo that puts it back
+    // toast that follows has an Undo that puts it back. It's called once no
+    // tracks are read, see `after_loads()`
     pub(super) fn replace_queue_with(
         &self,
         files: Vec<gio::File>,
@@ -619,6 +665,16 @@ impl Window {
     }
 
     pub fn open_files(&self, files: &[gio::File]) {
+        // Files opened while the playlist of the last session is still read
+        // wait for it, and are then added to it, as in a running Dismas: if
+        // they took the place of the queue now, they'd go among its tracks
+        let imp = self.imp();
+        if imp.starting.get() && imp.loads.get() > 0 {
+            let files = files.to_vec();
+            self.after_startup(move |win| win.open_files(&files));
+            return;
+        }
+
         if files.is_empty() {
             self.add_toast(i18n("Unable to access files"));
             self.end_startup();
@@ -627,7 +683,7 @@ impl Window {
 
         // At startup, the selected playlist isn't loaded, and the files
         // take the place of the queue instead, which isn't shuffled anymore
-        if self.imp().starting.get() {
+        if imp.starting.get() {
             self.select_queue_to_play();
             playlists::drop_unshuffled("");
             self.sync_queue_shuffled();

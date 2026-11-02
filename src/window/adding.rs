@@ -54,20 +54,23 @@ impl Window {
                 let Some(files) = tracks.files(&win).await else {
                     return;
                 };
-                // Another playlist could have been switched to while the
-                // albums' tracks were read, and they'd go among its tracks
-                if win.imp().loads.get() > 0 || win.selected_playlist() != selected {
-                    win.add_toast(i18n("Unable to add to the playlist"));
-                    return;
-                }
-                win.load_into_queue(
-                    files,
-                    QueueMode::Add,
-                    LoadOptions {
-                        place: Place::Next,
-                        ..Default::default()
-                    },
-                );
+                // Another playlist could be switched to while the albums'
+                // tracks are read, or while the tracks they wait for are,
+                // and they'd go among its tracks
+                win.after_loads(move |win| {
+                    if win.selected_playlist() != selected {
+                        win.add_toast(i18n("Unable to add to the playlist"));
+                        return;
+                    }
+                    win.load_into_queue(
+                        files,
+                        QueueMode::Add,
+                        LoadOptions {
+                            place: Place::Next,
+                            ..Default::default()
+                        },
+                    );
+                });
             }
         ));
     }
@@ -124,17 +127,17 @@ impl Window {
                 let Some(files) = tracks.files(&win).await else {
                     return;
                 };
-                // The playlists could have been switched while the albums'
-                // tracks were read: the one named goes on getting them,
-                // through the queue if it's selected now, and the one
-                // that's selected instead doesn't
-                if name != win.selected_playlist() {
-                    win.append_to_playlist(&name, &files);
-                } else if win.imp().loads.get() > 0 {
-                    win.add_toast(i18n("Unable to add to the playlist"));
-                } else {
-                    win.queue_tracks(files, QueueMode::Add);
-                }
+                // The playlists could be switched while the albums' tracks
+                // are read, or while the tracks they wait for are: the one
+                // named goes on getting them, through the queue if it's
+                // selected then, and the one that's selected instead doesn't
+                win.after_loads(move |win| {
+                    if name == win.selected_playlist() {
+                        win.queue_tracks(files, QueueMode::Add);
+                    } else {
+                        win.append_to_playlist(&name, &files);
+                    }
+                });
             }
         ));
     }
@@ -236,10 +239,7 @@ impl Window {
             self.add_toast(i18n("Unable to open the playlist"));
             return;
         }
-        // Like the other ways to switch, while tracks are read
-        if self.imp().loads.get() == 0 {
-            self.select_playlist(name);
-        }
+        self.select_playlist(name);
     }
 
     // The items of a menu that add tracks, for the actions of

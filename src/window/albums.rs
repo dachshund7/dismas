@@ -227,16 +227,19 @@ impl Window {
     // album's Play button does. The toast with an Undo only shows when the
     // queue had tracks that these leave out: a click on another track of
     // the album that's playing loses nothing, and the album's tracks are
-    // mostly clicked for that
+    // mostly clicked for that. Once no tracks are read, see `after_loads()`
     fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
-        // With the queue selected, its tracks are the ones in the player,
-        // and the queue as it was is only read for an Undo that would show
-        let keeps_queue = self.selected_playlist().is_empty()
-            && !selected_playlist::loses_tracks(&self.player().queue().files(), &files);
-        let replaced = (!keeps_queue)
-            .then(|| self.replaced_queue())
-            .filter(|replaced| replaced.loses_tracks(&files));
-        self.replace_queue_with(files, start, replaced, None);
+        self.after_loads(move |win| {
+            // With the queue selected, its tracks are the ones in the
+            // player, and the queue as it was is only read for an Undo that
+            // would show
+            let keeps_queue = win.selected_playlist().is_empty()
+                && !selected_playlist::loses_tracks(&win.player().queue().files(), &files);
+            let replaced = (!keeps_queue)
+                .then(|| win.replaced_queue())
+                .filter(|replaced| replaced.loses_tracks(&files));
+            win.replace_queue_with(files, start, replaced, None);
+        });
     }
 
     // The menu of an album, at a point of its cell. On an album selected in
