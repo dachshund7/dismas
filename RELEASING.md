@@ -57,10 +57,17 @@ Checklist for a release.
   - [ ] New `<release>` element
   - [ ] *Optional*: new screenshots
 - [ ] Run the Release workflow by hand on the branch to release, and try the
-  Flatpak and the tarball from the run's artifacts
+  Flatpak and the tarball from the run's artifacts. CI doesn't build them
+  with the release's optimizations (LTO), so this is the only build like the
+  release's before the tag
 - [ ] `git commit -m 'Release Dismas $VERSION'`
-- [ ] `git tag -s $VERSION` (use the change log entry)
-- [ ] `git push origin HEAD && git push origin $VERSION`
-- [ ] Publish a release for the tag on GitHub; the Release workflow then
-  builds the Flatpak and the prebuilt tarball, and attaches them to the
-  release as `dismas.flatpak` and `dismas-$VERSION-x86_64.tar.xz`
+- [ ] `git tag -s $VERSION -m "Dismas $VERSION"`
+- [ ] `git push origin HEAD && git push origin $VERSION`; the tag makes the
+  Release workflow build the Flatpak and the prebuilt tarball, and put them
+  in a draft release as `dismas.flatpak` and `dismas-$VERSION-x86_64.tar.xz`,
+  with the version's section of the change log as its notes
+- [ ] Check the draft's files and notes, wait until the CI workflow has
+  passed on the release commit, and publish the draft. The releases are
+  immutable (Settings → General → Releases): once published, a release's
+  tag and files can't be changed, so a mistake found afterwards needs a new
+  version

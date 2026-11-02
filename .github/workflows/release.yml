@@ -4,28 +4,34 @@
 name: Release
 
 # A Flatpak of the regular profile, dismas.flatpak, and a prebuilt tarball
-# for distributions without Flatpak, dismas-<version>-x86_64.tar.xz,
-# attached to each release published on GitHub. Run by hand, it builds both
-# without attaching them anywhere, in the artifacts of the run, to try them
-# before a release
+# for distributions without Flatpak, dismas-<version>-x86_64.tar.xz.
+# Pushing a version's tag builds both and puts them in a draft release, with
+# the version's section of the change log as its notes, which is checked and
+# published by hand: a published release can be immutable, and files can't
+# be added to it then. Run by hand, it only builds them, in the artifacts of
+# the run, to try them before a release
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['20*']
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# As this workflow can write to the repository, its actions are pinned to
+# Two pushes of a tag build one after the other, rather than racing to make
+# its draft
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# As the draft job can write to the repository, the actions are pinned to
 # commits, which a tag moved to other code can't change; the comments name
-# the releases they are
+# the releases they are. The checkouts don't keep the token in .git, where
+# the code a build runs could read it
 
 jobs:
   flatpak:
     runs-on: ubuntu-latest
-    # Attaching the bundle to the release writes to the repository
-    permissions:
-      contents: write
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
       options: --privileged
@@ -45,13 +51,16 @@ jobs:
           df -h /__w
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The bundle is built from its sources alone, without the action's
       # cache of .flatpak-builder: that cache would be restored from the
       # runs of ci.yml on main, whose actions aren't pinned, and one whose
       # tag was moved to other code could have saved its own build there.
       # cache: false neither restores nor saves it, and restore-cache: false
-      # turns the restoring off as well, in case the action reads it alone
+      # turns the restoring off as well, in case the action reads it alone.
+      # The action uploads the bundle in the artifacts of the run
       - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
         with:
           manifest-path: io.github.dachshund7.Dismas.json
@@ -59,21 +68,11 @@ jobs:
           cache: false
           restore-cache: false
 
-      - name: Attach the bundle to the release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: dismas.flatpak
-          fail_on_unmatched_files: true
-
   # The binary links the system's libraries, so it's built on Fedora, as in
   # ci.yml; make-tarball.sh fails if it needs a newer glibc than the
   # distributions with GNOME 49's libraries have
   tarball:
     runs-on: ubuntu-latest
-    # Attaching the tarball to the release writes to the repository
-    permissions:
-      contents: write
     container: fedora:latest
     steps:
       # desktop-file-utils has update-desktop-database, which Meson looks for
@@ -89,21 +88,70 @@ jobs:
           desktop-file-utils binutils xz tar
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build the tarball
         run: build-aux/make-tarball.sh _build-tarball dist
 
       - name: Upload the tarball
-        if: github.event_name != 'release'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dismas-tarball
           path: dist/*.tar.xz
           if-no-files-found: error
 
-      - name: Attach the tarball to the release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+  # The only job that can write to the repository. The builds run the code
+  # of every crate, its build scripts and macros, so they get a token that
+  # only reads; this job runs none of the repository's code, only gh and
+  # GitHub's own actions, to put what they built in a draft release
+  draft:
+    if: github.event_name == 'push'
+    needs: [flatpak, tarball]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          files: dist/*.tar.xz
-          fail_on_unmatched_files: true
+          path: dist
+          merge-multiple: true
+
+      # The notes are the change log's section for the version (an rc's are
+      # its version's), read from the tagged commit through the API, which
+      # runs none of the repository's code
+      - name: Take the notes from the change log
+        run: |
+          gh api -H 'Accept: application/vnd.github.raw+json' \
+            "repos/$GH_REPO/contents/CHANGES.md?ref=$TAG" > changes.md
+          awk -v v="${TAG%%-*}" '
+            /^## \[/ { if (found) exit; found = index($0, "## [" v "]") == 1; next }
+            !found { next }
+            /^[[:space:]]*$/ { if (started) blank++; next }
+            { while (blank) { print ""; blank-- }; started = 1; print }
+          ' changes.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGES.md has no section for ${TAG%%-*}"
+            exit 1
+          fi
+
+      # A re-run puts the files in the draft it made before, and stops at a
+      # release that was published
+      - name: Make the draft release
+        run: |
+          shopt -s failglob
+          files=(dist/*.flatpak dist/*.tar.xz)
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::The release $TAG is published already"
+              exit 1
+            fi
+            gh release upload "$TAG" --clobber "${files[@]}"
+          else
+            gh release create "$TAG" --draft --verify-tag --notes-file notes.md \
+              --title "Dismas $TAG" "${files[@]}"
+          fi

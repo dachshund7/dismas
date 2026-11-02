@@ -19,7 +19,9 @@ concurrency:
 
 # As in release.yml, the actions are pinned to commits, which a tag moved
 # to other code can't change, as the jobs on main can save to its cache;
-# the comments name the releases they are. Update both workflows together
+# the comments name the releases they are. Update both workflows together.
+# The checkouts don't keep the token in .git, where the code a job builds
+# could read it
 
 jobs:
   # Formatting, spelling, POTFILES.in, the order of the resources and
@@ -28,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Pinned, it takes the toolchain from its input rather than its ref
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -57,6 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
@@ -83,6 +89,8 @@ jobs:
           desktop-file-utils appstream shared-mime-info
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
@@ -130,6 +138,8 @@ jobs:
           df -h /__w
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
         with:
