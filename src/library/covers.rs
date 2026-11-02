@@ -57,6 +57,36 @@ pub(super) fn update_covers(
     let mut unknown = Vec::new();
     // The folders are read once, as albums can share one
     let mut folder_keys = HashMap::new();
+    let mut folder_key = |folder: &Path| {
+        folder_keys
+            .entry(folder.to_path_buf())
+            .or_insert_with(|| cover_files_key(folder))
+            .clone()
+    };
+    // The folders of each album's tracks, as the tracks in another disc
+    // folder than the first track's show the cover files in theirs
+    let mut album_folders: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
+    {
+        let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+        let mut stmt = conn.prepare(&format!(
+            "SELECT album_id, path FROM tracks WHERE album_id IS NOT NULL{hidden_sql}"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                path_from_bytes(row.get::<_, Vec<u8>>(1)?),
+            ))
+        })?;
+        for row in rows {
+            let (id, track) = row?;
+            if let Some(folder) = cue_sheet::real_path(&track).parent() {
+                album_folders
+                    .entry(id)
+                    .or_default()
+                    .insert(folder.to_path_buf());
+            }
+        }
+    }
     {
         let (hidden_sql, hidden_params) = hidden_condition("t.file", hidden);
         let mut stmt = conn.prepare(&format!(
@@ -88,14 +118,13 @@ pub(super) fn update_covers(
                 .is_some_and(|p| std::fs::metadata(p).is_err());
             // A cover file next to the tracks can change without them: it's
             // added, removed or replaced
-            let files = cue_sheet::real_path(&first_track)
+            let first_files = cue_sheet::real_path(&first_track)
                 .parent()
-                .and_then(|folder| {
-                    folder_keys
-                        .entry(folder.to_path_buf())
-                        .or_insert_with(|| cover_files_key(folder))
-                        .clone()
-                });
+                .and_then(&mut folder_key);
+            let files = match album_folders.get(&id) {
+                Some(folders) => album_files_key(folders.iter().map(|f| folder_key(f)).collect()),
+                None => first_files.clone(),
+            };
             let cover_files = files.clone().unwrap_or_default();
             // The tracks of an album that's new to the library can have
             // reached the playlist before its cover file, as when a download
@@ -107,8 +136,9 @@ pub(super) fn update_covers(
                 files.is_some()
             };
             // An album without a thumbnail whose cover file couldn't be
-            // decoded is tried again, as it was before keys were kept
-            let retried = has_row && cover.is_none() && files.is_some();
+            // decoded is tried again, as it was before keys were kept; the
+            // thumbnail is made from the first track
+            let retried = has_row && cover.is_none() && first_files.is_some();
             if !has_row
                 || update == ThumbnailUpdate::Remake
                 || removed
@@ -357,6 +387,26 @@ fn cover_files_key(dir: &Path) -> Option<String> {
         any = true;
     }
     any.then(|| utils::hex(&hasher.finalize()))
+}
+
+// The key of the cover files of an album from the keys of the folders its
+// tracks are in, in order, as the tracks in another disc folder than the
+// first track's show the cover files in theirs; `None` when none has any.
+// A folder without any counts too, so that a cover moved from one disc
+// folder to another changes it. An album in one folder has its key
+fn album_files_key(keys: Vec<Option<String>>) -> Option<String> {
+    if let [key] = keys.as_slice() {
+        return key.clone();
+    }
+    if keys.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    for key in &keys {
+        hasher.update(key.as_deref().unwrap_or("-"));
+        hasher.update([0]);
+    }
+    Some(utils::hex(&hasher.finalize()))
 }
 
 // Makes the thumbnail of an album in `dir`, from the cover of its first

@@ -671,8 +671,24 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
     red.save(music.join("Plain/cover.png")).unwrap();
     red.save(music.join("Discs/folder.png")).unwrap();
     std::fs::write(music.join("Unreadable/cover.jpg"), b"not an image").unwrap();
-    assert_eq!(scan(), [first_disc, second_disc, plain, unreadable]);
+    assert_eq!(
+        scan(),
+        [first_disc.clone(), second_disc.clone(), plain, unreadable]
+    );
     // Once made, and while the one that can't be read is tried again
+    assert_eq!(scan(), Vec::<PathBuf>::new());
+
+    // The tracks of another disc folder than the first track's show the
+    // cover files in theirs, and the same file moved to the first one
+    // shows on the other tracks
+    red.save(music.join("Discs/CD2/cover.png")).unwrap();
+    assert_eq!(scan(), [first_disc.clone(), second_disc.clone()]);
+    std::fs::rename(
+        music.join("Discs/CD2/cover.png"),
+        music.join("Discs/CD1/cover.png"),
+    )
+    .unwrap();
+    assert_eq!(scan(), [first_disc, second_disc]);
     assert_eq!(scan(), Vec::<PathBuf>::new());
 
     std::fs::remove_dir_all(&music).unwrap();
