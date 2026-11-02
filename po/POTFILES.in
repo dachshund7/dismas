@@ -30,6 +30,9 @@ src/booklets.rs
 src/cover_picture.rs
 src/library.rs
 src/library_view.rs
+src/library_view/pickers.rs
+src/library_view/scan.rs
+src/library_view/selection.rs
 src/library_view/work_row.rs
 src/library_view/works.rs
 src/lyrics_view.rs
