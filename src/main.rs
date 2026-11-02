@@ -104,6 +104,18 @@ fn data_paths(exe: Option<&Path>, exists: impl Fn(&Path) -> bool) -> DataPaths {
     }
 }
 
+// The folders that GLib looks for schemas in, for GSETTINGS_SCHEMA_DIR: the
+// tarball's `schemas`, then those it already had. Not an empty one, which
+// splitting an empty variable gives, as GLib takes it for the current
+// folder, and would trust the schemas there over those of the system
+fn schema_dirs(
+    schemas: &Path,
+    others: &std::ffi::OsStr,
+) -> Result<std::ffi::OsString, env::JoinPathsError> {
+    let others = env::split_paths(others).filter(|dir| !dir.as_os_str().is_empty());
+    env::join_paths(std::iter::once(schemas.to_path_buf()).chain(others))
+}
+
 fn main() -> glib::ExitCode {
     // RUST_LOG, as in RUST_LOG=dismas=debug, chooses what's logged, so a
     // release build, like the Flatpak's, can give a debug log too; without
@@ -175,7 +187,7 @@ fn main() -> glib::ExitCode {
     // anywhere, and it comes before the schema of another install
     if let Some(schemas) = &paths.schemas {
         let others = env::var_os("GSETTINGS_SCHEMA_DIR").unwrap_or_default();
-        match env::join_paths(std::iter::once(schemas.clone()).chain(env::split_paths(&others))) {
+        match schema_dirs(schemas, &others) {
             // SAFETY: still single-threaded, as above
             Ok(dirs) => unsafe { env::set_var("GSETTINGS_SCHEMA_DIR", dirs) },
             Err(err) => error!("Unable to add the schemas in {schemas:?}: {err}"),
@@ -219,6 +231,18 @@ mod tests {
     fn exists_in(files: &[&str]) -> impl Fn(&Path) -> bool {
         let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
         move |path| files.iter().any(|file| file == path)
+    }
+
+    // GLib would trust a gschemas.compiled in the current folder for an
+    // empty entry, which an unset variable gave
+    #[test]
+    fn the_schema_folders_have_no_empty_entry() {
+        let dirs = |others: &str| {
+            schema_dirs(Path::new("/opt/d/schemas"), std::ffi::OsStr::new(others)).unwrap()
+        };
+        assert_eq!(dirs(""), "/opt/d/schemas");
+        assert_eq!(dirs("/a:/b"), "/opt/d/schemas:/a:/b");
+        assert_eq!(dirs(":/a::/b:"), "/opt/d/schemas:/a:/b");
     }
 
     #[test]

@@ -435,6 +435,9 @@ All notable changes to this project will be documented in this file.
 - Scrolling over the volume slider with a touchpad on Wayland moved it a
   step for each pixel, so that a light scroll sent the volume to 0 or to
   100%
+- Started from the prebuilt tarball, Dismas trusted the settings schemas
+  compiled in the folder it was started from over those of the system,
+  and so did the apps it opened
 
 ### Removed
 
