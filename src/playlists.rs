@@ -361,6 +361,31 @@ fn import_m3u_within(
 // the playlist and then in the music folders, where the end must have a
 // folder and a file, as a file name alone could be found anywhere. The
 // folders read are kept, as the tracks of a playlist share them
+// The longest path the system opens (Linux's PATH_MAX, with the NUL that
+// ends it)
+const MAX_PATH_LEN: usize = 4095;
+
+// How many of the parts at the end of an absolute path are tried, the file
+// and the folders above it: more than a real path has, while each one
+// tried costs a few looks at the disk, in the playlist's folder and in
+// each music folder, and a crafted line can name millions
+const MAX_TRIED_PARTS: usize = 32;
+
+// The end of `path` that's at most `max` bytes, from the first part that
+// starts in it
+fn path_end(path: &str, max: usize) -> &str {
+    if path.len() <= max {
+        return path;
+    }
+    let start = path.ceil_char_boundary(path.len() - max);
+    let end = &path[start..];
+    if path[..start].ends_with(['/', '\\']) {
+        end
+    } else {
+        end.find(['/', '\\']).map_or("", |i| &end[i..])
+    }
+}
+
 #[derive(Default)]
 struct Finder {
     listings: HashMap<PathBuf, Vec<(String, PathBuf)>>,
@@ -380,7 +405,12 @@ impl Finder {
             let windows = line.as_bytes().get(1) == Some(&b':') || line.starts_with("\\\\");
             (windows || line.starts_with('/'), line.to_string())
         };
-        let parts: Vec<&str> = path
+        // A longer path names no file, so only the end of an absolute one
+        // can be found
+        if !absolute && path.len() > MAX_PATH_LEN {
+            return None;
+        }
+        let parts: Vec<&str> = path_end(&path, MAX_PATH_LEN)
             .split(['/', '\\'])
             .filter(|part| !part.is_empty() && *part != ".")
             .collect();
@@ -390,6 +420,7 @@ impl Finder {
         if !absolute {
             return self.find_in(dir, &parts);
         }
+        let parts = &parts[parts.len().saturating_sub(MAX_TRIED_PARTS)..];
         (0..parts.len()).find_map(|start| {
             let end = &parts[start..];
             self.find_in(dir, end).or_else(|| {
@@ -963,5 +994,50 @@ mod tests {
         let missing = import(&elsewhere, &["D:\\Loose.flac"]);
         assert_ne!(missing, [music.join("Loose.flac")]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_path_of_millions_of_folders_is_looked_for_by_its_end() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Artist/Album")).unwrap();
+        let track = music.join("Artist/Album/01 One.flac");
+        std::fs::write(&track, b"").unwrap();
+        let import = |line: String| {
+            let playlist = dir.join("list.m3u");
+            std::fs::write(&playlist, line).unwrap();
+            let music_folders = [music.clone()];
+            utils::within_seconds(move || import_m3u(&playlist, &music_folders))
+                .unwrap()
+                .iter()
+                .map(|file| file.path().unwrap())
+                .collect::<Vec<_>>()
+        };
+
+        // Each folder of the path would be tried as the start of its end,
+        // in the playlist's folder and in the music folder, and the track
+        // at its end is still found
+        let folders = "/a".repeat(1_000_000);
+        assert_eq!(
+            import(format!("{folders}/Artist/Album/01 One.flac")),
+            [track]
+        );
+        // A relative path longer than the system opens names no file
+        let line = format!("{}/Artist/Album/01 One.flac", &folders[1..]);
+        assert_eq!(import(line.clone()), [dir.join(line)]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_end_of_a_long_path_starts_with_a_whole_part() {
+        assert_eq!(path_end("/ab/cd/ef", 9), "/ab/cd/ef");
+        // The cut falls after a separator
+        assert_eq!(path_end("/ab/cd/ef", 5), "cd/ef");
+        // Inside a part, which is left out
+        assert_eq!(path_end("/ab/cd/ef", 4), "/ef");
+        // Inside a character
+        assert_eq!(path_end("/é/x", 3), "/x");
+        assert_eq!(path_end("/abcdef", 3), "");
     }
 }

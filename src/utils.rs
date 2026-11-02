@@ -970,15 +970,15 @@ pub fn make_test_pipe(path: &std::path::Path) {
 }
 
 // Runs `f` in another thread, and fails if it hasn't returned within a
-// few seconds, so that an open that waits fails the test rather than
-// stopping the whole run
+// few seconds, so that an open that waits, or work that a crafted file
+// makes endless, fails the test rather than stopping the whole run
 #[cfg(test)]
 pub fn within_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || sender.send(f()));
     receiver
         .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("it waited on a named pipe")
+        .expect("it didn't return within 5 s, as when it waits on a named pipe")
 }
 
 // A WAV file of silence, 8000 bytes a second
