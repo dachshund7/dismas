@@ -85,6 +85,16 @@ Checklist for a release.
   Release workflow build the Flatpak and the prebuilt tarball, and put them
   in a draft release as `dismas.flatpak` and `dismas-$VERSION-x86_64.tar.xz`,
   with the version's section of the change log as its notes
+- [ ] Check the metainfo's links, which point at main. After a build, run
+  this in the repository folder:
+
+  ```sh
+  appstreamcli validate --explain _build/data/io.github.dachshund7.Dismas.metainfo.xml
+  ```
+
+  Unlike the build's test, which passes `--no-net`, it fetches each link, so
+  it finds a screenshot that wasn't committed or pushed. A missing file is
+  fixed by pushing it to main, without a new tag
 - [ ] Check the draft's files and notes, wait until the CI workflow has
   passed on the release commit and the last run of the Advisories workflow
   on main has passed too, and publish the draft. The releases are
