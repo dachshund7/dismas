@@ -61,15 +61,7 @@ pub(super) fn update_covers(
     // The folders are listed once, as albums can share one, and the folder
     // of an album has disc folders that show its cover files too
     let mut listings: HashMap<PathBuf, FolderCovers> = HashMap::new();
-    let mut folder_keys: HashMap<PathBuf, Option<String>> = HashMap::new();
-    let mut folder_key = |folder: &Path| {
-        if let Some(key) = folder_keys.get(folder) {
-            return key.clone();
-        }
-        let key = cover_files_key(folder, &mut listings);
-        folder_keys.insert(folder.to_path_buf(), key.clone());
-        key
-    };
+    let mut folder_files: HashMap<PathBuf, Vec<CoverFile>> = HashMap::new();
     let mut kept_covers = kept_covers(conn)?;
     for (id, album) in albums_of_tracks(conn, hidden)? {
         let (has_row, cover, kept_files) = match kept_covers.remove(&id) {
@@ -89,10 +81,23 @@ pub(super) fn update_covers(
             .is_some_and(|p| std::fs::metadata(p).is_err());
         // A cover file next to the tracks can change without them: it's
         // added, removed or replaced
-        let first_files = cue_sheet::real_path(&first_track)
-            .parent()
-            .and_then(&mut folder_key);
-        let files = album_files_key(album.folders.iter().map(|f| folder_key(f)).collect());
+        for folder in &album.folders {
+            if !folder_files.contains_key(folder) {
+                let files = cover_files_of(folder, &mut listings);
+                folder_files.insert(folder.clone(), files);
+            }
+        }
+        let first_folder = cue_sheet::real_path(&first_track).parent();
+        let first_files = first_folder
+            .and_then(|folder| folder_files.get(folder))
+            .map_or(&[][..], Vec::as_slice);
+        let other_files = album
+            .folders
+            .iter()
+            .filter(|folder| Some(folder.as_path()) != first_folder)
+            .filter_map(|folder| folder_files.get(folder))
+            .flatten();
+        let files = album_files_key(first_files, other_files);
         let cover_files = files.clone().unwrap_or_default();
         // The tracks of an album that's new to the library can have reached
         // the playlist before its cover file, as when a download is added
@@ -103,15 +108,16 @@ pub(super) fn update_covers(
             // An older version kept no key, and went by the times of the
             // cover files: one newer than the thumbnail changed while it
             // wasn't running, which is noticed once, as the key is kept then
-            (true, None) => cover
-                .as_deref()
-                .is_some_and(|thumbnail| cover_file_newer(&album.folders, Path::new(thumbnail))),
+            (true, None) => cover.as_deref().is_some_and(|thumbnail| {
+                let files = album.folders.iter().filter_map(|f| folder_files.get(f));
+                cover_file_newer(files.flatten(), Path::new(thumbnail))
+            }),
             (false, _) => files.is_some(),
         };
         // An album without a thumbnail whose cover file couldn't be decoded
         // is tried again, as it was before keys were kept; the thumbnail is
         // made from the first track
-        let retried = has_row && cover.is_none() && first_files.is_some();
+        let retried = has_row && cover.is_none() && !first_files.is_empty();
         if !has_row
             || update == ThumbnailUpdate::Remake
             || removed
@@ -397,6 +403,50 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     Ok(())
 }
 
+// A cover file, with what tells that it changed
+struct CoverFile {
+    path: PathBuf,
+    len: u64,
+    // Since the Unix epoch, zero when it isn't known
+    modified: Duration,
+}
+
+impl CoverFile {
+    fn hash(&self, hasher: &mut Sha256, name: &[u8]) {
+        hasher.update(name);
+        hasher.update([0]);
+        hasher.update(self.len.to_le_bytes());
+        hasher.update(self.modified.as_nanos().to_le_bytes());
+    }
+}
+
+// The cover files for a folder of tracks, in the order they're looked for,
+// see `CoverCache::cover_files_for()`; the folders are listed once in
+// `listings`
+fn cover_files_of(dir: &Path, listings: &mut HashMap<PathBuf, FolderCovers>) -> Vec<CoverFile> {
+    let list = |folder: &Path| {
+        listings
+            .entry(folder.to_path_buf())
+            .or_insert_with(|| folder_covers(folder))
+            .clone()
+    };
+    CoverCache::cover_files_listed(dir, list)
+        .filter_map(|path| {
+            let metadata = std::fs::metadata(&path).ok()?;
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .unwrap_or_default();
+            Some(CoverFile {
+                path,
+                len: metadata.len(),
+                modified,
+            })
+        })
+        .collect()
+}
+
 // What the cover files for a folder of tracks are, if it has any: a hash
 // of their names, sizes and modification times, which the scan keeps with
 // the album's thumbnail; the thumbnail is made from the first track of
@@ -406,67 +456,64 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
 // time it was written, and whatever the clock said then: comparing their
 // times with the thumbnail's missed a cover moved in from elsewhere, and
 // made a cover dated in the future again at every scan. The names are
-// those of the files, so that moving the music folder keeps the keys. The
-// folders are listed once in `listings`
-fn cover_files_key(dir: &Path, listings: &mut HashMap<PathBuf, FolderCovers>) -> Option<String> {
-    let list = |folder: &Path| {
-        listings
-            .entry(folder.to_path_buf())
-            .or_insert_with(|| folder_covers(folder))
-            .clone()
-    };
-    let mut hasher = Sha256::new();
-    let mut any = false;
-    for file in CoverCache::cover_files_listed(dir, list) {
-        let Ok(metadata) = std::fs::metadata(&file) else {
-            continue;
-        };
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .unwrap_or_default();
-        hasher.update(file.file_name().unwrap_or_default().as_encoded_bytes());
-        hasher.update([0]);
-        hasher.update(metadata.len().to_le_bytes());
-        hasher.update(modified.as_nanos().to_le_bytes());
-        any = true;
-    }
-    any.then(|| utils::hex(&hasher.finalize()))
-}
-
-// Whether a cover file for the folders of an album's tracks is newer than
-// its thumbnail, as older versions checked, before the key of the cover
-// files was kept; a thumbnail that's gone is made again anyway
-fn cover_file_newer(folders: &BTreeSet<PathBuf>, thumbnail: &Path) -> bool {
-    let Ok(made) = std::fs::metadata(thumbnail).and_then(|m| m.modified()) else {
-        return false;
-    };
-    folders
-        .iter()
-        .flat_map(|folder| CoverCache::cover_files_for(folder))
-        .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
-        .any(|time| time > made)
-}
-
-// The key of the cover files of an album from the keys of the folders its
-// tracks are in, in order, as the tracks in another disc folder than the
-// first track's show the cover files in theirs; `None` when none has any.
-// A folder without any counts too, so that a cover moved from one disc
-// folder to another changes it. An album in one folder has its key
-fn album_files_key(keys: Vec<Option<String>>) -> Option<String> {
-    if let [key] = keys.as_slice() {
-        return key.clone();
-    }
-    if keys.iter().all(Option::is_none) {
+// those of the files, so that moving the music folder keeps the keys
+fn cover_files_key(files: &[CoverFile]) -> Option<String> {
+    if files.is_empty() {
         return None;
     }
     let mut hasher = Sha256::new();
-    for key in &keys {
-        hasher.update(key.as_deref().unwrap_or("-"));
-        hasher.update([0]);
+    for file in files {
+        let name = file.path.file_name().unwrap_or_default();
+        file.hash(&mut hasher, name.as_encoded_bytes());
     }
     Some(utils::hex(&hasher.finalize()))
+}
+
+// The key of the cover files of an album's tracks: that of the files for
+// the first track's folder, with the other files that the tracks in its
+// other folders show, as those in another disc folder than the first
+// track's show the cover files in theirs; `None` when there are none. A
+// folder that shows no other files changes nothing, so that a folder
+// without images of its own, or a disc folder that only shows those of
+// the album's folder, as the first one does, can come or go without the
+// cover files counting as changed. The other files are named with their
+// folder, so that a cover moved from one disc folder to another changes
+// the key
+fn album_files_key<'a>(
+    first: &[CoverFile],
+    others: impl Iterator<Item = &'a CoverFile>,
+) -> Option<String> {
+    let mut others: Vec<&CoverFile> = others
+        .filter(|file| !first.iter().any(|f| f.path == file.path))
+        .collect();
+    if others.is_empty() {
+        return cover_files_key(first);
+    }
+    others.sort_by(|a, b| a.path.cmp(&b.path));
+    others.dedup_by(|a, b| a.path == b.path);
+    let mut hasher = Sha256::new();
+    hasher.update(cover_files_key(first).as_deref().unwrap_or("-"));
+    hasher.update([0]);
+    for file in others {
+        let folder = file.path.parent().and_then(Path::file_name);
+        let name = file.path.file_name().unwrap_or_default();
+        let mut named = folder.unwrap_or_default().as_encoded_bytes().to_vec();
+        named.push(b'/');
+        named.extend_from_slice(name.as_encoded_bytes());
+        file.hash(&mut hasher, &named);
+    }
+    Some(utils::hex(&hasher.finalize()))
+}
+
+// Whether a cover file of an album is newer than its thumbnail, as older
+// versions checked, before the key of the cover files was kept; a
+// thumbnail that's gone is made again anyway
+fn cover_file_newer<'a>(mut files: impl Iterator<Item = &'a CoverFile>, thumbnail: &Path) -> bool {
+    let Ok(made) = std::fs::metadata(thumbnail).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let made = made.duration_since(UNIX_EPOCH).unwrap_or_default();
+    files.any(|file| file.modified > made)
 }
 
 // Makes the thumbnail of an album in `dir`, from the cover of its first

@@ -691,6 +691,14 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
     assert_eq!(scan(), [first_disc, second_disc]);
     assert_eq!(scan(), Vec::<PathBuf>::new());
 
+    // A disc folder that only shows the cover files of the album's folder,
+    // as the first one does, can come and go without a change to them
+    std::fs::create_dir_all(music.join("Discs/CD3")).unwrap();
+    write_test_wav(&music.join("Discs/CD3/1.wav"), 1);
+    assert_eq!(scan(), Vec::<PathBuf>::new());
+    std::fs::remove_dir_all(music.join("Discs/CD2")).unwrap();
+    assert_eq!(scan(), Vec::<PathBuf>::new());
+
     std::fs::remove_dir_all(&music).unwrap();
     std::fs::remove_dir_all(&covers).unwrap();
 }
