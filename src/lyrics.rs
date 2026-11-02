@@ -311,16 +311,45 @@ fn sylt_lyrics(entries: Vec<(Duration, String)>) -> Option<Lyrics> {
     synced(lines)
 }
 
-// The line sung at a position, if any: the last one to start by then,
-// unless it has ended
-pub(crate) fn line_at(lines: &[Line], position: Duration) -> Option<usize> {
-    let line = lines
+// Where a position is in synchronized lyrics. No line is sung either
+// before the first line or in a pause, but the lines show from the top
+// before the first one, and stay where they are in a pause
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Place {
+    // Before the first line, as when the track starts, or in lyrics
+    // without lines
+    #[default]
+    Start,
+    // While a line is sung
+    Line(usize),
+    // After a line that has ended, the last one included
+    Pause,
+}
+
+impl Place {
+    // The line sung, if any
+    pub(crate) fn line(self) -> Option<usize> {
+        match self {
+            Self::Line(line) => Some(line),
+            Self::Start | Self::Pause => None,
+        }
+    }
+}
+
+// Where a position is: in the last line to start by then, unless it has
+// ended
+pub(crate) fn place_at(lines: &[Line], position: Duration) -> Place {
+    let Some(line) = lines
         .partition_point(|line| line.time <= position)
-        .checked_sub(1)?;
-    lines[line]
-        .end
-        .is_none_or(|end| position < end)
-        .then_some(line)
+        .checked_sub(1)
+    else {
+        return Place::Start;
+    };
+    if lines[line].end.is_none_or(|end| position < end) {
+        Place::Line(line)
+    } else {
+        Place::Pause
+    }
 }
 
 // When the line sung changes next after a position: the next line starts,
@@ -779,13 +808,23 @@ mod tests {
             line(20_000, Some(25_000), "Jungfrau mild,"),
             line(30_000, None, "Erhöre einer Jungfrau Flehen,"),
         ];
-        let at = |ms| line_at(&lines, Duration::from_millis(ms));
-        assert_eq!(at(5_000), None);
-        assert_eq!(at(10_000), Some(0));
-        assert_eq!(at(19_999), Some(0));
-        assert_eq!(at(20_000), Some(1));
-        assert_eq!(at(26_000), None);
-        assert_eq!(at(31_000), Some(2));
+        let at = |ms| place_at(&lines, Duration::from_millis(ms));
+        assert_eq!(at(0), Place::Start);
+        assert_eq!(at(5_000), Place::Start);
+        assert_eq!(at(10_000), Place::Line(0));
+        assert_eq!(at(19_999), Place::Line(0));
+        assert_eq!(at(20_000), Place::Line(1));
+        assert_eq!(at(26_000), Place::Pause);
+        assert_eq!(at(31_000), Place::Line(2));
+
+        // After the last line, once it has ended, and in lyrics without
+        // lines
+        let ended = [line(10_000, Some(15_000), "Ave Maria!")];
+        assert_eq!(
+            place_at(&ended, Duration::from_millis(16_000)),
+            Place::Pause
+        );
+        assert_eq!(place_at(&[], Duration::from_millis(5_000)), Place::Start);
 
         let next = |ms| next_change(&lines, Duration::from_millis(ms)).map(|d| d.as_millis());
         assert_eq!(next(5_000), Some(10_000));

@@ -41,6 +41,11 @@ mod imp {
         pub(crate) current_track: RefCell<Option<Track>>,
         #[property(get, minimum = 0.0, maximum = 1.0, default = 1.0)]
         pub(crate) volume: Cell<f64>,
+        // How many times a track was set to play, the same one again
+        // included, so that the lyrics can tell a new play of the track
+        // they show from the one they showed
+        #[property(get)]
+        pub(crate) starts: Cell<u64>,
     }
 
     #[glib::object_subclass]
@@ -54,6 +59,7 @@ mod imp {
                 position: Cell::new(Duration::ZERO),
                 current_track: RefCell::new(None),
                 volume: Cell::new(1.0),
+                starts: Cell::new(0),
             }
         }
     }
@@ -164,12 +170,15 @@ impl PlayerState {
         // The same track again, as when it repeats, only starts over: the
         // cover, the labels and the queue stay as they are
         if track.is_some() && self.track() == track {
+            self.count_start();
             self.set_position(Duration::ZERO);
             return;
         }
 
         self.imp().current_track.replace(track);
         self.imp().position.replace(Duration::ZERO);
+        // Once the track is in place, so that a view sees it's another one
+        self.count_start();
         self.notify_track();
         self.notify_title();
         self.notify_artist();
@@ -181,6 +190,12 @@ impl PlayerState {
         self.notify_duration();
         self.notify_cover();
         self.notify_position();
+    }
+
+    fn count_start(&self) {
+        let starts = &self.imp().starts;
+        starts.set(starts.get() + 1);
+        self.notify_starts();
     }
 
     // Shows the new tags of the current track, after it was updated
@@ -265,10 +280,12 @@ mod tests {
         state.set_current_track(Some(track.clone()));
         state.set_position(Duration::from_millis(42_500));
 
+        let starts = state.starts();
         let notified = record_notifies(&state);
         state.set_current_track(Some(track));
         assert_eq!(state.position(), 0);
-        assert_eq!(*notified.borrow(), ["position"]);
+        assert_eq!(state.starts(), starts + 1);
+        assert_eq!(*notified.borrow(), ["starts", "position"]);
     }
 
     #[test]
@@ -276,10 +293,13 @@ mod tests {
         let state = PlayerState::default();
         state.set_current_track(Some(Track::new(TrackData::default())));
 
+        let starts = state.starts();
         let notified = record_notifies(&state);
         state.set_current_track(Some(Track::new(TrackData::default())));
+        assert_eq!(state.starts(), starts + 1);
         let notified = notified.borrow();
         assert!(notified.iter().any(|name| name == "track"));
+        assert!(notified.iter().any(|name| name == "starts"));
         assert!(notified.iter().any(|name| name == "cover"));
     }
 }

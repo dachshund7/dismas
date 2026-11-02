@@ -22,7 +22,7 @@ use crate::{
     audio::{PlayerState, Track},
     i18n::pi18n,
     list_scroll::{glide_adjustment, within_scroll},
-    lyrics::{self, Line, Lyrics},
+    lyrics::{self, Line, Lyrics, Place},
     utils,
     zoom::{self, Zoom},
     zoom_row::ZoomRow,
@@ -69,15 +69,18 @@ mod imp {
         pub(crate) lines_box: TemplateChild<gtk::ListBox>,
 
         pub(crate) state: OnceCell<PlayerState>,
-        // The track whose lyrics show, or are being read
+        // The track whose lyrics show, or are being read, and which of its
+        // plays, see `PlayerState::starts`
         pub(crate) track: RefCell<Option<Track>>,
+        pub(crate) start: Cell<u64>,
         // The number of reads so far: the lyrics of a read only show if no
         // other read started after it, as the same track can be read again
         // before the read before is done, e.g. when its tags change
         pub(crate) reads: Cell<u64>,
-        // The lines of the synchronized lyrics that show, and the one sung
+        // The lines of the synchronized lyrics that show, and where the
+        // music is in them
         pub(crate) lines: RefCell<Vec<Line>>,
-        pub(crate) current: Cell<Option<usize>>,
+        pub(crate) current: Cell<Place>,
 
         // While the view is mapped
         pub(crate) handlers: RefCell<Vec<glib::SignalHandlerId>>,
@@ -248,6 +251,11 @@ impl LyricsView {
                     self,
                     move |_| view.follow_track()
                 )),
+                state.connect_starts_notify(clone!(
+                    #[weak(rename_to = view)]
+                    self,
+                    move |_| view.follow_start()
+                )),
                 state.connect_position_notify(clone!(
                     #[weak(rename_to = view)]
                     self,
@@ -285,6 +293,22 @@ impl LyricsView {
     fn follow_track(&self) {
         self.watch_lyrics_files();
         self.read();
+    }
+
+    // The same track played again, as when it repeats, starts its plain
+    // lyrics from the top too, like another track's; the lines glide back
+    // there with the music, see `set_current()`. Another track is left to
+    // `read()`, which its own notification calls
+    fn follow_start(&self) {
+        let imp = self.imp();
+        let Some(state) = imp.state.get() else {
+            return;
+        };
+        let start = state.starts();
+        if *imp.track.borrow() != state.track() || imp.start.replace(start) == start {
+            return;
+        }
+        self.text_to_top();
     }
 
     // Reads the lyrics again when a file of lyrics of the playing track is
@@ -339,10 +363,13 @@ impl LyricsView {
             return;
         };
         let track = state.track();
+        let start = state.starts();
         let reads = imp.reads.get() + 1;
         imp.reads.set(reads);
 
-        if *imp.track.borrow() != track {
+        // Another track, or the same one played again while the view was
+        // hidden, see `follow_start()` for while it shows
+        if *imp.track.borrow() != track || imp.start.get() != start {
             imp.window_title
                 .set_subtitle(&track.as_ref().map(Track::title).unwrap_or_default());
             // Without a transition, which would show the lyrics of the
@@ -350,6 +377,8 @@ impl LyricsView {
             imp.stack
                 .set_visible_child_full("reading", gtk::StackTransitionType::None);
             imp.track.replace(track.clone());
+            imp.start.set(start);
+            self.start_from_top();
         }
 
         let Some(track) = track else {
@@ -393,11 +422,7 @@ impl LyricsView {
                 // text selected
                 if buffer.text(&start, &end, false) != text {
                     buffer.set_text(&text);
-                    // A caret at the start reads from the top
-                    buffer.place_cursor(&buffer.start_iter());
-                    if let Some(adjustment) = imp.text_view.vadjustment() {
-                        adjustment.set_value(0.0);
-                    }
+                    self.text_to_top();
                 }
                 imp.stack.set_visible_child_name("plain");
             }
@@ -405,6 +430,33 @@ impl LyricsView {
                 self.clear_lines();
                 imp.stack.set_visible_child_name("none");
             }
+        }
+    }
+
+    // Another track's lyrics start from the top, wherever the user or the
+    // music left the ones before, even when they're the same lyrics, as
+    // when a song is in the queue twice. The pages are hidden until the
+    // lyrics are read, and keep the place for when they show. The lines
+    // before go now, or the positions of the new track, which come while
+    // its lyrics are read, would be followed in them, and scroll the list
+    // away from the top again
+    fn start_from_top(&self) {
+        let imp = self.imp();
+        self.clear_lines();
+        self.resume_following();
+        self.stop_glide();
+        let adjustment = imp.synced_scrolled.vadjustment();
+        adjustment.set_value(adjustment.lower());
+        self.text_to_top();
+    }
+
+    // A caret at the start reads the plain lyrics from the top
+    fn text_to_top(&self) {
+        let text_view = &*self.imp().text_view;
+        let buffer = text_view.buffer();
+        buffer.place_cursor(&buffer.start_iter());
+        if let Some(adjustment) = text_view.vadjustment() {
+            adjustment.set_value(adjustment.lower());
         }
     }
 
@@ -443,7 +495,7 @@ impl LyricsView {
         if let Some(source) = imp.next_change.take() {
             source.remove();
         }
-        imp.current.set(None);
+        imp.current.set(Place::Start);
         imp.lines.replace(Vec::new());
         imp.lines_box.remove_all();
     }
@@ -452,21 +504,23 @@ impl LyricsView {
     // while the track plays
     fn follow(&self, position: Duration) {
         let imp = self.imp();
-        let line = {
+        let place = {
             let lines = imp.lines.borrow();
             // A position a little before the line that shows keeps it, see
             // `BACK_TOLERANCE`; seeking and starting over go back further
-            let keep = imp.current.get().is_some_and(|current| {
-                let time = lines[current].time;
-                position < time && time - position <= BACK_TOLERANCE
-            });
+            let keep = imp
+                .current
+                .get()
+                .line()
+                .and_then(|current| lines.get(current))
+                .is_some_and(|line| position < line.time && line.time - position <= BACK_TOLERANCE);
             if keep {
                 imp.current.get()
             } else {
-                lyrics::line_at(&lines, position)
+                lyrics::place_at(&lines, position)
             }
         };
-        self.set_current(line);
+        self.set_current(place);
         self.schedule_next_change(position);
     }
 
@@ -504,45 +558,64 @@ impl LyricsView {
     }
 
     // The line sung is highlighted, and screen readers describe it as such,
-    // without announcing each line
-    fn set_current(&self, line: Option<usize>) {
+    // without announcing each line. Back before the first line, as when the
+    // track repeats or is sought to its start, the lines glide back to the
+    // top; in a pause, they stay where they are
+    fn set_current(&self, place: Place) {
         let imp = self.imp();
-        let before = imp.current.replace(line);
-        if before == line {
+        let before = imp.current.replace(place);
+        if before == place {
             return;
         }
-        if let Some(row) = before.and_then(|line| self.row(line)) {
+        if let Some(row) = before.line().and_then(|line| self.row(line)) {
             row.remove_css_class("current");
             row.reset_property(gtk::AccessibleProperty::Description);
         }
-        if let Some(row) = line.and_then(|line| self.row(line)) {
-            row.add_css_class("current");
-            row.update_property(&[gtk::accessible::Property::Description(&pi18n(
-                "a11y",
-                "Current line",
-            ))]);
-            if imp.follow_pause.borrow().is_none() {
-                self.center_current(true);
+        match place {
+            Place::Line(line) => {
+                let Some(row) = self.row(line) else {
+                    return;
+                };
+                row.add_css_class("current");
+                row.update_property(&[gtk::accessible::Property::Description(&pi18n(
+                    "a11y",
+                    "Current line",
+                ))]);
             }
+            Place::Start => {}
+            Place::Pause => return,
+        }
+        if imp.follow_pause.borrow().is_none() {
+            self.center_current(true);
         }
     }
 
-    // Scrolls the line sung to the middle, as far as the list scrolls,
-    // gliding to it like the queue to a track; libadwaita jumps instead
-    // when animations are off
+    // Scrolls the line sung to the middle, as far as the list scrolls, or
+    // the top before the first line, gliding to it like the queue to a
+    // track; libadwaita jumps instead when animations are off. In a pause,
+    // the lines stay where they are, and a glide that was on its way goes
+    // on, rather than stopping between two lines
     fn center_current(&self, glide: bool) {
         let imp = self.imp();
-        self.stop_glide();
-        let Some(row) = imp.current.get().and_then(|line| self.row(line)) else {
-            return;
-        };
-        let Some(bounds) = row.compute_bounds(&*imp.lines_box) else {
-            return;
-        };
         let adjustment = imp.synced_scrolled.vadjustment();
-        let middle = f64::from(bounds.y() + bounds.height() / 2.0);
-        let target = within_scroll(&adjustment, middle - adjustment.page_size() / 2.0);
-        if !glide {
+        let target = match imp.current.get() {
+            Place::Start => adjustment.lower(),
+            Place::Line(line) => {
+                let Some(bounds) = self
+                    .row(line)
+                    .and_then(|row| row.compute_bounds(&*imp.lines_box))
+                else {
+                    return;
+                };
+                let middle = f64::from(bounds.y() + bounds.height() / 2.0);
+                within_scroll(&adjustment, middle - adjustment.page_size() / 2.0)
+            }
+            Place::Pause => return,
+        };
+        self.stop_glide();
+        // Already there, as at the start of each track, there's nowhere to
+        // glide to
+        if !glide || adjustment.value() == target {
             adjustment.set_value(target);
             return;
         }
@@ -827,7 +900,13 @@ impl LyricsView {
             .root()
             .and_downcast::<gtk::Window>()
             .is_some_and(|window| window.gets_focus_visible());
-        let Some(row) = self.imp().current.get().and_then(|line| self.row(line)) else {
+        let Some(row) = self
+            .imp()
+            .current
+            .get()
+            .line()
+            .and_then(|line| self.row(line))
+        else {
             return;
         };
         if keys && !row.has_focus() {
@@ -840,14 +919,14 @@ impl LyricsView {
 
     fn activate_line(&self, line: i32) {
         let imp = self.imp();
-        let Some(time) = usize::try_from(line)
+        let Some((line, time)) = usize::try_from(line)
             .ok()
-            .and_then(|line| imp.lines.borrow().get(line).map(|line| line.time))
+            .and_then(|line| Some((line, imp.lines.borrow().get(line)?.time)))
         else {
             return;
         };
         self.resume_following();
-        self.set_current(usize::try_from(line).ok());
+        self.set_current(Place::Line(line));
         let millis = u64::try_from(time.as_millis()).unwrap_or(u64::MAX);
         self.emit_by_name::<()>("seek", &[&millis]);
     }
