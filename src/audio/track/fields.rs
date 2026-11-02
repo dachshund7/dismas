@@ -9,7 +9,7 @@
 //! are made here, from the same parts, so that the two searches find the
 //! same tracks.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use super::*;
 use crate::catalogue;
@@ -399,22 +399,32 @@ pub(super) fn catalogue_numbers(
     credits: &TrackCredits,
     title: Option<&str>,
 ) -> Vec<catalogue::CatalogueNumber> {
-    let mut numbers = Vec::new();
     let names = [
         credits.work.as_deref(),
         credits.work_title.as_deref(),
         title,
     ];
-    for number in names
+    let numbers = names
         .into_iter()
         .flatten()
         .flat_map(catalogue::catalogue_numbers)
-    {
-        if !numbers.contains(&number) {
-            numbers.push(number);
-        }
-    }
+        .collect();
+    first_occurrences(numbers)
+}
+
+// The numbers, each at its first place only. A crafted title can name
+// millions of numbers, which comparing each with all the ones before it
+// would take hours over, so the ones seen are kept in a set
+fn first_occurrences(numbers: Vec<catalogue::CatalogueNumber>) -> Vec<catalogue::CatalogueNumber> {
+    let first: Vec<bool> = {
+        let mut seen = BTreeSet::new();
+        numbers.iter().map(|number| seen.insert(number)).collect()
+    };
     numbers
+        .into_iter()
+        .zip(first)
+        .filter_map(|(number, first)| first.then_some(number))
+        .collect()
 }
 
 // The lines, each value folded and written once per field
@@ -560,5 +570,70 @@ mod tests {
         }
         .encode();
         assert_eq!(fields, "ti\tsong\n");
+    }
+
+    fn search_texts(numbers: &[catalogue::CatalogueNumber]) -> Vec<String> {
+        numbers
+            .iter()
+            .map(catalogue::CatalogueNumber::search_text)
+            .collect()
+    }
+
+    #[test]
+    fn a_catalogue_number_named_again_keeps_its_first_place() {
+        let credits = TrackCredits {
+            work: Some("Sonatas, K. 380, K. 141".to_string()),
+            work_title: Some("Sonatas: K. 141, K. 9, K. 141".to_string()),
+            ..TrackCredits::default()
+        };
+        let numbers = catalogue_numbers(&credits, Some("K. 9, K. 380, K. 27"));
+        assert_eq!(search_texts(&numbers), ["k 380", "k 141", "k 9", "k 27"]);
+    }
+
+    #[test]
+    fn a_title_that_names_many_catalogue_numbers_keeps_them_all_in_order() {
+        // As a crafted title can name millions
+        let title = (1..=20_000).map(|n| format!("d{n}")).join(" ");
+        let credits = TrackCredits {
+            work: Some("D. 20000, D. 7".to_string()),
+            ..TrackCredits::default()
+        };
+        let numbers = catalogue_numbers(&credits, Some(&title));
+        let expected: Vec<String> = [20_000, 7]
+            .into_iter()
+            .chain((1..20_000).filter(|n| *n != 7))
+            .map(|n| format!("d {n}"))
+            .collect();
+        assert_eq!(search_texts(&numbers), expected);
+    }
+
+    #[test]
+    fn catalogue_numbers_are_kept_once_as_comparing_each_with_those_before_did() {
+        let names = [
+            (0..1_000).map(|n| format!("BWV {}", n % 300)).join(", "),
+            (0..1_000)
+                .map(|n| format!("op. {} no. {}", n % 40, n % 7))
+                .join(", "),
+            (0..1_000)
+                .map(|n| format!("BWV {}, op. {}", n % 500, n % 60))
+                .join("; "),
+        ];
+        let credits = TrackCredits {
+            work: Some(names[0].clone()),
+            work_title: Some(names[1].clone()),
+            ..TrackCredits::default()
+        };
+        let numbers = catalogue_numbers(&credits, Some(&names[2]));
+
+        let mut expected: Vec<catalogue::CatalogueNumber> = Vec::new();
+        for number in names
+            .iter()
+            .flat_map(|name| catalogue::catalogue_numbers(name))
+        {
+            if !expected.contains(&number) {
+                expected.push(number);
+            }
+        }
+        assert_eq!(numbers, expected);
     }
 }
