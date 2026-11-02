@@ -65,14 +65,15 @@ released, set it when releasing, not after.
 Checklist for a release.
 
 - [ ] Set the project version in [`meson.build`](./meson.build)
-- [ ] Update the [change log](./CHANGES.md)
+- [ ] Update the [change log](./CHANGES.md), with the version's heading
+  dated the day of the tag
   - [ ] **Added**: New features, settings, UI, translations
   - [ ] **Changed**: UI updates, improvements, translation updates
   - [ ] **Fixed**: bug fixes, with reference
   - [ ] **Removed**: Removed features, settings, UI; **IMPORTANT**: anything
     inside this list requires a version bump
 - [ ] Update the [metainfo](./data/io.github.dachshund7.Dismas.metainfo.xml.in.in)
-  - [ ] New `<release>` element
+  - [ ] New `<release>` element, with the same date as the change log
   - [ ] *Optional*: new screenshots
 - [ ] Run the Release workflow by hand on the branch to release, and try the
   Flatpak and the tarball from the run's artifacts. CI doesn't build them
