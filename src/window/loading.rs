@@ -553,11 +553,20 @@ impl Window {
             })
             .collect();
 
-        // The cover of their album might have changed too, and the other
+        // The cover in their tags might have changed too, and the other
         // tracks of the album share it, so they are read again with them.
-        // An album without a cover is looked for again too, as the cache
-        // would otherwise give its tracks the lack of one it found before
+        // The tracks without a cover share the lack of one by folder, which
+        // can be a whole folder of single tracks, so they aren't: when the
+        // cover files of an album change, the scan lists all its tracks
         let covers: HashSet<String> = shown
+            .iter()
+            .filter(|(_, changed)| *changed)
+            .filter_map(|(track, _)| track.cover_uuid())
+            .collect();
+        // The cache keeps the lack of a cover too, which the tracks of the
+        // album still hold, so it's forgotten as well, so that the tracks
+        // read again look for their cover again
+        let forgotten: HashSet<String> = shown
             .iter()
             .filter(|(_, changed)| *changed)
             .filter_map(|(track, _)| track.album_cover_uuid())
@@ -568,7 +577,7 @@ impl Window {
                 track.missing()
                     || *changed
                     || track
-                        .album_cover_uuid()
+                        .cover_uuid()
                         .is_some_and(|uuid| covers.contains(&uuid))
             })
             .map(|(track, _)| track)
@@ -578,7 +587,7 @@ impl Window {
         }
         {
             let mut cache = CoverCache::global().lock().unwrap();
-            for uuid in &covers {
+            for uuid in &forgotten {
                 cache.forget(uuid);
             }
         }
