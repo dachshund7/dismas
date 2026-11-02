@@ -584,20 +584,21 @@ impl Window {
         // tracks of the album share it, so they are read again with them.
         // The tracks without a cover share the lack of one by folder, which
         // can be a whole folder of single tracks, so they aren't: when the
-        // cover files of an album change, the scan lists all its tracks
-        let covers: HashSet<String> = shown
-            .iter()
-            .filter(|(_, changed)| *changed)
-            .filter_map(|(track, _)| track.cover_uuid())
-            .collect();
+        // cover files of an album change, the scan lists all its tracks.
         // The cache keeps the lack of a cover too, which the tracks of the
         // album still hold, so it's forgotten as well, so that the tracks
         // read again look for their cover again
-        let forgotten: HashSet<String> = shown
-            .iter()
-            .filter(|(_, changed)| *changed)
-            .filter_map(|(track, _)| track.album_cover_uuid())
-            .collect();
+        let mut covers = HashSet::new();
+        let mut forgotten = HashSet::new();
+        for (track, _) in shown.iter().filter(|(_, changed)| *changed) {
+            let Some(uuid) = track.album_cover_uuid() else {
+                continue;
+            };
+            if track.cover_uuid().is_some() {
+                covers.insert(uuid.clone());
+            }
+            forgotten.insert(uuid);
+        }
         let tracks: Vec<Track> = shown
             .into_iter()
             .filter(|(track, changed)| {

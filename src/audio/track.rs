@@ -370,10 +370,7 @@ impl TrackData {
 
     // The id of the cover, if the track has one
     pub(crate) fn cover_uuid(&self) -> Option<&str> {
-        self.cover
-            .as_ref()
-            .filter(|cover| cover.art().is_some())
-            .map(AlbumCover::uuid)
+        self.cover_art().and(self.album_cover_uuid())
     }
 
     // The id of the cover the track shares with its album in the cache,
