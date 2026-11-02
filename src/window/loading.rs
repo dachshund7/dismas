@@ -536,13 +536,21 @@ impl Window {
     // tracks whose files weren't found are looked for again, as a scan
     // follows plugging in a drive
     pub(super) fn reload_changed_tracks(&self, uris: &[String]) {
+        // Each track shown is looked up, and there can be thousands of
+        // them, as of the tracks of a scan
+        let uris: HashSet<&str> = uris.iter().map(String::as_str).collect();
         let player = self.player();
-        let shown: Vec<Track> = player
+        // The tracks shown, with whether their file changed
+        let shown: Vec<(Track, bool)> = player
             .queue()
             .model()
             .iter::<Track>()
             .flatten()
             .chain(self.imp().album_tracks.tracks())
+            .map(|track| {
+                let changed = uris.contains(track.uri().as_str());
+                (track, changed)
+            })
             .collect();
 
         // The cover of their album might have changed too, and the other
@@ -551,18 +559,19 @@ impl Window {
         // would otherwise give its tracks the lack of one it found before
         let covers: HashSet<String> = shown
             .iter()
-            .filter(|track| uris.contains(&track.uri()))
-            .filter_map(Track::album_cover_uuid)
+            .filter(|(_, changed)| *changed)
+            .filter_map(|(track, _)| track.album_cover_uuid())
             .collect();
         let tracks: Vec<Track> = shown
             .into_iter()
-            .filter(|track| {
+            .filter(|(track, changed)| {
                 track.missing()
-                    || uris.contains(&track.uri())
+                    || *changed
                     || track
                         .album_cover_uuid()
                         .is_some_and(|uuid| covers.contains(&uuid))
             })
+            .map(|(track, _)| track)
             .collect();
         if tracks.is_empty() {
             return;
