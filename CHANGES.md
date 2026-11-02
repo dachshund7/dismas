@@ -315,6 +315,7 @@ All notable changes to this project will be documented in this file.
 - Scanning the music folders reads the tags of several files at a time,
   as the playlist already did, so a first scan, or the one after updating
   Dismas, takes less time
+- Update dependencies
 
 ### Fixed
 
