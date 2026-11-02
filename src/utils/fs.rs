@@ -218,18 +218,18 @@ impl FolderWalk<'_> {
     }
 }
 
-// The files and folders in a folder, without the ones whose paths `keep`
-// turns down. Symbolic links are followed once the folders without them
-// are read, so that one leading back into the folder adds nothing: each
-// round follows the links found the round before, in the order of their
-// paths, so that of two links to one folder, the same one is read at
-// each scan
 // Whether a folder that gave `error` while it was read can still have
 // files: unless it isn't there anymore, or isn't a folder
 pub(super) fn may_have_files(error: &glib::Error) -> bool {
     !error.matches(gio::IOErrorEnum::NotFound) && !error.matches(gio::IOErrorEnum::NotDirectory)
 }
 
+// The files and folders in a folder, without the ones whose paths `keep`
+// turns down. Symbolic links are followed once the folders without them
+// are read, so that one leading back into the folder adds nothing: each
+// round follows the links found the round before, in the order of their
+// paths, so that of two links to one folder, the same one is read at
+// each scan
 pub(crate) fn read_folder_tree(
     folder: &gio::File,
     recursive: bool,
