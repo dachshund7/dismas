@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026  John Hamilton
+# SPDX-License-Identifier: CC0-1.0
+
+name: Advisories
+
+# The crates in Cargo.lock against the RustSec advisory database, with
+# deny.toml. A new advisory can fail it without a change to the code, so
+# besides the changes to the lockfile and the settings, it checks main
+# every day
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.lock, deny.toml, .github/workflows/advisories.yml]
+  pull_request:
+    paths: [Cargo.lock, deny.toml, .github/workflows/advisories.yml]
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# As in ci.yml, the actions are pinned to commits, which a tag moved to
+# other code can't change, as the runs on main can save to its cache; the
+# comments name the releases they are. The checkout doesn't keep the token
+# in .git
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-deny
+
+      - name: Check the dependencies for advisories
+        run: cargo deny check advisories

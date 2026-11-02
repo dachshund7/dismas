@@ -19,9 +19,9 @@ concurrency:
 
 # As in release.yml, the actions are pinned to commits, which a tag moved
 # to other code can't change, as the jobs on main can save to its cache;
-# the comments name the releases they are. Update both workflows together.
-# The checkouts don't keep the token in .git, where the code a job builds
-# could read it
+# the comments name the releases they are. Update all the workflows
+# together. The checkouts don't keep the token in .git, where the code a
+# job builds could read it. The advisories check is in advisories.yml
 
 jobs:
   # Formatting, spelling, POTFILES.in, the order of the resources and
@@ -54,22 +54,6 @@ jobs:
 
       - name: Check licensing
         uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6.0.0
-
-  # The crates in Cargo.lock against the RustSec advisory database, with
-  # deny.toml; a new advisory can fail it without a change to the code
-  advisories:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: cargo-deny
-
-      - name: Check the dependencies for advisories
-        run: cargo deny check advisories
 
   # The build of the app, clippy, the unit tests, and the validation of the
   # desktop file, the metainfo and the settings schema. The app needs a

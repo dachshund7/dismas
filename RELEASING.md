@@ -67,7 +67,8 @@ Checklist for a release.
   in a draft release as `dismas.flatpak` and `dismas-$VERSION-x86_64.tar.xz`,
   with the version's section of the change log as its notes
 - [ ] Check the draft's files and notes, wait until the CI workflow has
-  passed on the release commit, and publish the draft. The releases are
+  passed on the release commit and the last run of the Advisories workflow
+  on main has passed too, and publish the draft. The releases are
   immutable (Settings → General → Releases): once published, a release's
   tag and files can't be changed, so a mistake found afterwards needs a new
   version
