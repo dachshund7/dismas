@@ -11,7 +11,10 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use super::*;
+use super::{
+    search::{MAX_SEARCHED_TEXT, text_start},
+    *,
+};
 use crate::catalogue;
 
 // The longest a track can be. A file can report a far longer one in its
@@ -445,7 +448,11 @@ impl Lines {
     }
 
     fn push_string(&mut self, field: FieldCode, value: &str) {
-        let value = normalize_search_text(value);
+        // Only the start of a long value, as for the search text: the
+        // library reads the fields of every track for each search with a
+        // field, and the queue keeps a copy for each of its entries, so a
+        // crafted tag of megabytes would be kept and read whole
+        let value = normalize_search_text(text_start(value, MAX_SEARCHED_TEXT));
         if value.is_empty() {
             return;
         }
@@ -481,6 +488,29 @@ mod tests {
             assert_eq!(FieldCode::from_code(field.code()), Some(field));
         }
         assert_eq!(FieldCode::ALL.iter().map(|f| f.code()).unique().count(), 37);
+    }
+
+    #[test]
+    fn the_fields_keep_the_start_of_long_values() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        // Two-byte characters, so that the limit falls inside one
+        tag.insert_text(ItemKey::TrackTitle, "é".repeat(1_000_000));
+        let credits = TrackCredits::from_tag(&tag, &ExtraComments::default());
+        let fields = FieldParts {
+            tag: &tag,
+            credits: &credits,
+            title: tag.title().as_deref(),
+            album: None,
+            format: None,
+            properties: None,
+        }
+        .encode();
+        let title = fields
+            .lines()
+            .find_map(|line| line.strip_prefix("ti\t"))
+            .unwrap();
+        assert_eq!(title, "e".repeat(MAX_SEARCHED_TEXT / 2));
+        assert!(fields.len() < 2 * MAX_SEARCHED_TEXT);
     }
 
     #[test]

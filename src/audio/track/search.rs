@@ -223,10 +223,10 @@ fn tag_search_text(tag: &Tag) -> String {
 // How much of each tag is searched: enough for the lyrics of a song, while
 // a crafted comment of megabytes, which the tracks of a CUE sheet would
 // each copy, isn't kept for every track
-const MAX_SEARCHED_TEXT: usize = 16 * 1024;
+pub(super) const MAX_SEARCHED_TEXT: usize = 16 * 1024;
 
 // The text up to `max` bytes, cut between characters
-fn text_start(text: &str, max: usize) -> &str {
+pub(super) fn text_start(text: &str, max: usize) -> &str {
     &text[..text.floor_char_boundary(max)]
 }
 
