@@ -5,7 +5,7 @@ use std::cell::Cell;
 
 use adw::subclass::prelude::*;
 use glib::clone;
-use gtk::{CompositeTemplate, glib, prelude::*};
+use gtk::{CompositeTemplate, gdk, glib, prelude::*};
 use log::debug;
 
 use crate::audio::VOLUME_STEP;
@@ -168,9 +168,18 @@ impl VolumeControl {
             self,
             #[upgrade_or]
             glib::Propagation::Proceed,
-            move |_, _, dy| {
+            move |controller, _, dy| {
                 debug!("Scroll delta: {dy}");
-                this.step(-dy);
+                // A notch of a wheel is a step, which a high-resolution wheel
+                // sends in fractions, and a touchpad scrolls by pixels, as
+                // for zooming: a step a pixel sent the volume to an end
+                let steps = match controller.unit() {
+                    gdk::ScrollUnit::Surface => dy / crate::zoom::SCROLL_PIXELS_PER_STEP,
+                    _ => dy,
+                };
+                if steps.is_finite() {
+                    this.step(-steps);
+                }
                 glib::Propagation::Stop
             }
         ));

@@ -64,8 +64,8 @@ impl ZoomSteps {
 }
 
 // How many pixels a touchpad scrolls for a step, which takes about a
-// third of its height on a laptop
-const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
+// third of its height on a laptop; also the volume's
+pub const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
 
 // How long the scrolling stops before what's left of a step is dropped, so
 // that it doesn't add to a scroll made later

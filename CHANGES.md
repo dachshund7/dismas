@@ -432,6 +432,9 @@ All notable changes to this project will be documented in this file.
   network share that stopped answering, and those of a drive unplugged
   while it read them, and read them and made their covers again once they
   were back
+- Scrolling over the volume slider with a touchpad on Wayland moved it a
+  step for each pixel, so that a light scroll sent the volume to 0 or to
+  100%
 
 ### Removed
 
