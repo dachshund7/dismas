@@ -534,7 +534,7 @@ impl Window {
             #[weak(rename_to = win)]
             self,
             move |_, uris, n_changed, requested| {
-                win.reload_changed_tracks(&uris);
+                win.reload_changed_tracks(uris);
                 if requested {
                     let msg = if n_changed == 0 {
                         i18n("No changes found in the music folders")

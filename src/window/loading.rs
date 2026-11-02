@@ -554,8 +554,15 @@ impl Window {
     // library finds new tags; the tracks are updated in place, so the
     // lists keep their order and the current track keeps playing. The
     // tracks whose files weren't found are looked for again, as a scan
-    // follows plugging in a drive
-    pub(super) fn reload_changed_tracks(&self, uris: &[String]) {
+    // follows plugging in a drive. It waits for the tracks being read for
+    // the queue, which aren't in it yet: they would be left out, and a
+    // later scan doesn't list them again, as when a download is added
+    // while its cover is written
+    pub(super) fn reload_changed_tracks(&self, uris: Vec<String>) {
+        self.after_loads(move |win| win.reload_tracks(&uris));
+    }
+
+    fn reload_tracks(&self, uris: &[String]) {
         // Each track shown is looked up, and there can be thousands of
         // them, as of the tracks of a scan
         let uris: HashSet<&str> = uris.iter().map(String::as_str).collect();
