@@ -42,7 +42,7 @@ mod controller;
 pub(crate) use controller::Controller;
 
 mod cover_cache;
-pub(crate) use cover_cache::CoverCache;
+pub(crate) use cover_cache::{CoverCache, FolderCovers, folder_covers};
 
 mod inhibit_controller;
 mod mpris_controller;

@@ -199,9 +199,18 @@ impl CoverCache {
     // Album/CD1, which often has no cover of its own. Failing those, the
     // only image in either folder, which can be named after the album
     pub(crate) fn cover_files_for(dir: &Path) -> impl Iterator<Item = PathBuf> {
+        Self::cover_files_listed(dir, folder_covers)
+    }
+
+    // The same, with the folders listed by `list`, which can keep the
+    // listing of an album's folder for each of its disc folders
+    pub(crate) fn cover_files_listed(
+        dir: &Path,
+        mut list: impl FnMut(&Path) -> FolderCovers,
+    ) -> impl Iterator<Item = PathBuf> {
         let album = crate::library::disc_album_folder(dir);
-        let (named, only) = folder_covers(dir);
-        let (album_named, album_only) = album.map(folder_covers).unwrap_or_default();
+        let (named, only) = list(dir);
+        let (album_named, album_only) = album.map(&mut list).unwrap_or_default();
         named
             .into_iter()
             .chain(album_named)
@@ -299,12 +308,15 @@ impl CoverCache {
     }
 }
 
+// What `folder_covers()` finds in a folder
+pub(crate) type FolderCovers = (Vec<PathBuf>, Option<PathBuf>);
+
 // The images in a folder that are named as covers, in the order they're
 // looked for, and the only image in it, if it has one image and it isn't
 // named so. The folder is read, as the case of their names varies, and
 // any image type is taken, since glycin goes by the contents; the common
 // types come first among files of the same name
-fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
+pub(crate) fn folder_covers(dir: &Path) -> FolderCovers {
     let mut named: Vec<(u8, u8, PathBuf)> = Vec::new();
     let mut others = Vec::new();
     // The type is guessed from the name, so once for each extension, as

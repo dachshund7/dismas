@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::collections::BTreeMap;
+
 use super::*;
+use crate::audio::{FolderCovers, folder_covers};
 
 pub(super) fn covers_dir() -> PathBuf {
     let mut dir = glib::user_cache_dir();
@@ -55,126 +58,88 @@ pub(super) fn update_covers(
     // The albums kept as they are whose cover files aren't known yet, as
     // an older version made their thumbnail, with the key to keep
     let mut unknown = Vec::new();
-    // The folders are read once, as albums can share one
-    let mut folder_keys = HashMap::new();
+    // The folders are listed once, as albums can share one, and the folder
+    // of an album has disc folders that show its cover files too
+    let mut listings: HashMap<PathBuf, FolderCovers> = HashMap::new();
+    let mut folder_keys: HashMap<PathBuf, Option<String>> = HashMap::new();
     let mut folder_key = |folder: &Path| {
-        folder_keys
-            .entry(folder.to_path_buf())
-            .or_insert_with(|| cover_files_key(folder))
-            .clone()
-    };
-    // The folders of each album's tracks, as the tracks in another disc
-    // folder than the first track's show the cover files in theirs
-    let mut album_folders: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
-    {
-        let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
-        let mut stmt = conn.prepare(&format!(
-            "SELECT album_id, path FROM tracks WHERE album_id IS NOT NULL{hidden_sql}"
-        ))?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                path_from_bytes(row.get::<_, Vec<u8>>(1)?),
-            ))
-        })?;
-        for row in rows {
-            let (id, track) = row?;
-            if let Some(folder) = cue_sheet::real_path(&track).parent() {
-                album_folders
-                    .entry(id)
-                    .or_default()
-                    .insert(folder.to_path_buf());
-            }
+        if let Some(key) = folder_keys.get(folder) {
+            return key.clone();
         }
-    }
-    {
-        let (hidden_sql, hidden_params) = hidden_condition("t.file", hidden);
-        let mut stmt = conn.prepare(&format!(
-            "SELECT t.album_id, MIN(t.path), c.album_id, c.path, c.cover_files
-             FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
-             WHERE t.album_id IS NOT NULL{hidden_sql}
-             GROUP BY t.album_id"
-        ))?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(hidden_params), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                path_from_bytes(row.get::<_, Vec<u8>>(1)?),
-                row.get::<_, Option<String>>(2)?.is_some(),
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })?;
-        for row in rows {
-            let (id, first_track, has_row, cover, kept_files) = row?;
-            // Thumbnails at another size than the grid shows them, or in
-            // the format of older versions, are made again, or smaller
-            let update = cover.as_deref().map_or(ThumbnailUpdate::Keep, |p| {
-                sizes.update(thumbnail_size(Path::new(p), dir, &id))
-            });
-            // Albums without cover art have no thumbnail, so we only check
-            // that the thumbnails we created are still there
-            let removed = cover
+        let key = cover_files_key(folder, &mut listings);
+        folder_keys.insert(folder.to_path_buf(), key.clone());
+        key
+    };
+    let mut kept_covers = kept_covers(conn)?;
+    for (id, album) in albums_of_tracks(conn, hidden)? {
+        let (has_row, cover, kept_files) = match kept_covers.remove(&id) {
+            Some(kept) => (true, kept.thumbnail, kept.cover_files),
+            None => (false, None, None),
+        };
+        let first_track = path_from_bytes(album.first_track);
+        // Thumbnails at another size than the grid shows them, or in the
+        // format of older versions, are made again, or smaller
+        let update = cover.as_deref().map_or(ThumbnailUpdate::Keep, |p| {
+            sizes.update(thumbnail_size(Path::new(p), dir, &id))
+        });
+        // Albums without cover art have no thumbnail, so we only check that
+        // the thumbnails we created are still there
+        let removed = cover
+            .as_deref()
+            .is_some_and(|p| std::fs::metadata(p).is_err());
+        // A cover file next to the tracks can change without them: it's
+        // added, removed or replaced
+        let first_files = cue_sheet::real_path(&first_track)
+            .parent()
+            .and_then(&mut folder_key);
+        let files = album_files_key(album.folders.iter().map(|f| folder_key(f)).collect());
+        let cover_files = files.clone().unwrap_or_default();
+        // The tracks of an album that's new to the library can have reached
+        // the playlist before its cover file, as when a download is added
+        // to it before its cover is written, so they're listed too, once,
+        // as the key is kept
+        let cover_files_changed = match (has_row, &kept_files) {
+            (true, Some(kept)) => *kept != cover_files,
+            // An older version kept no key, and went by the times of the
+            // cover files: one newer than the thumbnail changed while it
+            // wasn't running, which is noticed once, as the key is kept then
+            (true, None) => cover
                 .as_deref()
-                .is_some_and(|p| std::fs::metadata(p).is_err());
-            // A cover file next to the tracks can change without them: it's
-            // added, removed or replaced
-            let first_files = cue_sheet::real_path(&first_track)
-                .parent()
-                .and_then(&mut folder_key);
-            let files = match album_folders.get(&id) {
-                Some(folders) => album_files_key(folders.iter().map(|f| folder_key(f)).collect()),
-                None => first_files.clone(),
-            };
-            let cover_files = files.clone().unwrap_or_default();
-            // The tracks of an album that's new to the library can have
-            // reached the playlist before its cover file, as when a download
-            // is added to it before its cover is written, so they're listed
-            // too, once, as the key is kept
-            let cover_files_changed = match (has_row, &kept_files) {
-                (true, Some(kept)) => *kept != cover_files,
-                // An older version kept no key, and went by the times of
-                // the cover files: one newer than the thumbnail changed
-                // while it wasn't running, which is noticed once, as the
-                // key is kept then
-                (true, None) => cover.as_deref().is_some_and(|thumbnail| {
-                    let folders = album_folders.get(&id).into_iter().flatten();
-                    cover_file_newer(folders, Path::new(thumbnail))
-                }),
-                (false, _) => files.is_some(),
-            };
-            // An album without a thumbnail whose cover file couldn't be
-            // decoded is tried again, as it was before keys were kept; the
-            // thumbnail is made from the first track
-            let retried = has_row && cover.is_none() && first_files.is_some();
-            if !has_row
-                || update == ThumbnailUpdate::Remake
-                || removed
-                || cover_files_changed
-                || retried
-                || stale_albums.contains(&id)
-            {
-                // A track that's gone since the scan would leave its album
-                // without a cover for good
-                if cue_sheet::real_path(&first_track).is_file() {
-                    missing.push(CoverJob {
-                        id,
-                        first_track,
-                        larger: None,
-                        cover_files,
-                        cover_files_changed,
-                    });
-                }
-            } else if let (ThumbnailUpdate::Shrink(size), Some(cover)) = (update, cover) {
+                .is_some_and(|thumbnail| cover_file_newer(&album.folders, Path::new(thumbnail))),
+            (false, _) => files.is_some(),
+        };
+        // An album without a thumbnail whose cover file couldn't be decoded
+        // is tried again, as it was before keys were kept; the thumbnail is
+        // made from the first track
+        let retried = has_row && cover.is_none() && first_files.is_some();
+        if !has_row
+            || update == ThumbnailUpdate::Remake
+            || removed
+            || cover_files_changed
+            || retried
+            || stale_albums.contains(&id)
+        {
+            // A track that's gone since the scan would leave its album
+            // without a cover for good
+            if cue_sheet::real_path(&first_track).is_file() {
                 missing.push(CoverJob {
                     id,
                     first_track,
-                    larger: Some((PathBuf::from(cover), size)),
+                    larger: None,
                     cover_files,
-                    cover_files_changed: false,
+                    cover_files_changed,
                 });
-            } else if has_row && kept_files.is_none() {
-                unknown.push((id, cover_files));
             }
+        } else if let (ThumbnailUpdate::Shrink(size), Some(cover)) = (update, cover) {
+            missing.push(CoverJob {
+                id,
+                first_track,
+                larger: Some((PathBuf::from(cover), size)),
+                cover_files,
+                cover_files_changed: false,
+            });
+        } else if has_row && kept_files.is_none() {
+            unknown.push((id, cover_files));
         }
     }
 
@@ -260,6 +225,73 @@ pub(super) fn update_covers(
 
     remove_unused_covers(conn, dir)?;
     Ok(made_covers)
+}
+
+// An album of the library, as `update_covers` looks at it
+struct AlbumTracks {
+    // The path of its first track, as SQLite orders paths, by their bytes
+    first_track: Vec<u8>,
+    // The folders of its tracks, as the tracks in another disc folder than
+    // the first track's show the cover files in theirs
+    folders: BTreeSet<PathBuf>,
+}
+
+// The albums of the tracks that aren't in the `hidden` folders, in the
+// order of their ids. Every scan reads them all, even after one changed
+// file, so they're read in one pass, and only what's new is copied
+fn albums_of_tracks(
+    conn: &Connection,
+    hidden: &[PathBuf],
+) -> rusqlite::Result<BTreeMap<String, AlbumTracks>> {
+    let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT album_id, path FROM tracks WHERE album_id IS NOT NULL{hidden_sql}"
+    ))?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(hidden_params))?;
+    let mut albums: BTreeMap<String, AlbumTracks> = BTreeMap::new();
+    while let Some(row) = rows.next()? {
+        let id = row.get_ref(0)?.as_str()?;
+        let path = row.get_ref(1)?.as_blob()?;
+        let track = path_of_bytes(path);
+        let folder = cue_sheet::real_path(&track).parent();
+        if let Some(album) = albums.get_mut(id) {
+            if path < album.first_track.as_slice() {
+                album.first_track = path.to_vec();
+            }
+            if let Some(folder) = folder
+                && !album.folders.contains(folder)
+            {
+                album.folders.insert(folder.to_path_buf());
+            }
+        } else {
+            let album = AlbumTracks {
+                first_track: path.to_vec(),
+                folders: folder.map(Path::to_path_buf).into_iter().collect(),
+            };
+            albums.insert(id.to_string(), album);
+        }
+    }
+    Ok(albums)
+}
+
+// An album's row of the covers table
+struct KeptCover {
+    // Its thumbnail, if one was made
+    thumbnail: Option<String>,
+    // The key of the cover files it was made with, if it's known
+    cover_files: Option<String>,
+}
+
+fn kept_covers(conn: &Connection) -> rusqlite::Result<HashMap<String, KeptCover>> {
+    conn.prepare("SELECT album_id, path, cover_files FROM covers")?
+        .query_map([], |row| {
+            let kept = KeptCover {
+                thumbnail: row.get(1)?,
+                cover_files: row.get(2)?,
+            };
+            Ok((row.get(0)?, kept))
+        })?
+        .collect()
 }
 
 // The sizes the album grid's thumbnails are made at, in pixels
@@ -374,11 +406,18 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
 // time it was written, and whatever the clock said then: comparing their
 // times with the thumbnail's missed a cover moved in from elsewhere, and
 // made a cover dated in the future again at every scan. The names are
-// those of the files, so that moving the music folder keeps the keys
-fn cover_files_key(dir: &Path) -> Option<String> {
+// those of the files, so that moving the music folder keeps the keys. The
+// folders are listed once in `listings`
+fn cover_files_key(dir: &Path, listings: &mut HashMap<PathBuf, FolderCovers>) -> Option<String> {
+    let list = |folder: &Path| {
+        listings
+            .entry(folder.to_path_buf())
+            .or_insert_with(|| folder_covers(folder))
+            .clone()
+    };
     let mut hasher = Sha256::new();
     let mut any = false;
-    for file in CoverCache::cover_files_for(dir) {
+    for file in CoverCache::cover_files_listed(dir, list) {
         let Ok(metadata) = std::fs::metadata(&file) else {
             continue;
         };
@@ -399,11 +438,12 @@ fn cover_files_key(dir: &Path) -> Option<String> {
 // Whether a cover file for the folders of an album's tracks is newer than
 // its thumbnail, as older versions checked, before the key of the cover
 // files was kept; a thumbnail that's gone is made again anyway
-fn cover_file_newer<'a>(folders: impl Iterator<Item = &'a PathBuf>, thumbnail: &Path) -> bool {
+fn cover_file_newer(folders: &BTreeSet<PathBuf>, thumbnail: &Path) -> bool {
     let Ok(made) = std::fs::metadata(thumbnail).and_then(|m| m.modified()) else {
         return false;
     };
     folders
+        .iter()
         .flat_map(|folder| CoverCache::cover_files_for(folder))
         .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
         .any(|time| time > made)
