@@ -86,15 +86,19 @@ pub fn show(parent: &impl IsA<gtk::Widget>) {
 }
 
 // A group of rows, each the syntax as its title and what it does as its
-// subtitle, which screen readers say in that order
+// subtitle, which screen readers say in that order. Like those of the rows,
+// the title and the description of the group are markup, so the "<" of the
+// syntax, or a translation's "&", would leave them empty
 fn group(
     title: &str,
     description: Option<&str>,
     rows: &[(impl AsRef<str>, String)],
 ) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder().title(title).build();
+    let group = adw::PreferencesGroup::builder()
+        .title(glib::markup_escape_text(title))
+        .build();
     if let Some(description) = description {
-        group.set_description(Some(description));
+        group.set_description(Some(&glib::markup_escape_text(description)));
     }
     for (syntax, what) in rows {
         let row = adw::ActionRow::builder()
