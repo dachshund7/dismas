@@ -412,9 +412,10 @@ pub(super) fn catalogue_numbers(
     first_occurrences(numbers)
 }
 
-// The numbers, each at its first place only. A crafted title can name
-// millions of numbers, which comparing each with all the ones before it
-// would take hours over, so the ones seen are kept in a set
+// The numbers, each at its first place only. The ones seen are kept in a
+// set, rather than each compared with all the ones before it: a crafted
+// name can still give about a thousand numbers in the part of it that's
+// read (`catalogue::catalogue_numbers`)
 fn first_occurrences(numbers: Vec<catalogue::CatalogueNumber>) -> Vec<catalogue::CatalogueNumber> {
     let first: Vec<bool> = {
         let mut seen = BTreeSet::new();
@@ -592,16 +593,17 @@ mod tests {
 
     #[test]
     fn a_title_that_names_many_catalogue_numbers_keeps_them_all_in_order() {
-        // As a crafted title can name millions
-        let title = (1..=20_000).map(|n| format!("d{n}")).join(" ");
+        // As many as fit in the 4 KiB of a name that are read
+        let title = (1..=800).map(|n| format!("d{n}")).join(" ");
+        assert!(title.len() < 4096);
         let credits = TrackCredits {
-            work: Some("D. 20000, D. 7".to_string()),
+            work: Some("D. 800, D. 7".to_string()),
             ..TrackCredits::default()
         };
         let numbers = catalogue_numbers(&credits, Some(&title));
-        let expected: Vec<String> = [20_000, 7]
+        let expected: Vec<String> = [800, 7]
             .into_iter()
-            .chain((1..20_000).filter(|n| *n != 7))
+            .chain((1..800).filter(|n| *n != 7))
             .map(|n| format!("d {n}"))
             .collect();
         assert_eq!(search_texts(&numbers), expected);

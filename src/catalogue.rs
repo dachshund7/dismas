@@ -18,6 +18,11 @@ const CATALOGUES: [&str; 35] = [
 const ROMAN_CATALOGUES: [&str; 2] = ["hob", "jw"];
 // How a number in a set is introduced, as in "op. 2 no. 4"
 const NUMBER_IN_SET: [&str; 4] = ["no", "nr", "nº", "n°"];
+// How much of a name is read for its numbers. No real name comes near it,
+// while a crafted tag can be up to lofty's 16 MiB, and the words and the
+// numbers kept take about 28 bytes for each byte of a name, so three such
+// names of one track took about 1 GB
+const MAX_NAME_LEN: usize = 4096;
 
 // A catalogue number of a work: its catalogue, and the parts of the number
 // to put it in order by, e.g. 1006 and 1 for "BWV 1006.1/1006", or 384
@@ -62,11 +67,29 @@ pub fn catalogue_name(word: &str) -> Option<&'static str> {
         .map(|catalogue| if catalogue == "kv" { "k" } else { catalogue })
 }
 
+// What the words of a name are split at
+fn is_separator(c: char) -> bool {
+    c.is_whitespace() || ",;()[]\"“”„".contains(c)
+}
+
+// The part of a name that's read for its numbers, and whether it's cut
+// short: the name, or its start up to the last word that ends within
+// `MAX_NAME_LEN`, as cutting inside a word would make "BWV 1004" "BWV 10"
+fn read_part(name: &str) -> (&str, bool) {
+    if name.len() <= MAX_NAME_LEN {
+        return (name, false);
+    }
+    let start = &name[..name.floor_char_boundary(MAX_NAME_LEN)];
+    let end = start.rfind(is_separator).unwrap_or(0);
+    (&name[..end], true)
+}
+
 // The catalogue numbers in the name of a work, in the order they're in;
 // none in "Book I" or "Act II"
 pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
+    let (name, cut) = read_part(name);
     let words: Vec<&str> = name
-        .split(|c: char| c.is_whitespace() || ",;()[]\"“”„".contains(c))
+        .split(is_separator)
         .filter(|word| !word.is_empty())
         .collect();
 
@@ -93,6 +116,11 @@ pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
                 }
             }
         };
+        // A number that the words past the cut could go on with, as with
+        // "op. 2 no." before a cut, is left out rather than read short
+        if cut && after + 1 >= words.len() {
+            continue;
+        }
         let mut order = number_order(number);
         // A number in a set, as in "op. 2 no. 4", unless the name of a part
         // follows a colon, as in "op. 90, D. 899: No. 1"
@@ -158,7 +186,7 @@ fn roman_value(numeral: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CatalogueNumber, catalogue_numbers};
+    use super::{CatalogueNumber, MAX_NAME_LEN, catalogue_numbers};
 
     fn number(catalogue: &'static str, order: &[(u32, &str)]) -> CatalogueNumber {
         CatalogueNumber {
@@ -241,6 +269,30 @@ mod tests {
         ] {
             assert_eq!(catalogue_numbers(name), [], "{name}");
         }
+    }
+
+    #[test]
+    fn only_the_start_of_a_long_name_is_read() {
+        let padding = "word ".repeat(MAX_NAME_LEN / 5 + 1);
+        assert_eq!(catalogue_numbers(&format!("{padding}BWV 846")), []);
+        assert_eq!(
+            catalogue_numbers(&format!("BWV 846 {padding}BWV 847")),
+            [number("bwv", &[(846, "")])]
+        );
+        // A name of one long word has nothing to cut it at
+        assert_eq!(catalogue_numbers(&"x".repeat(MAX_NAME_LEN * 2)), []);
+    }
+
+    #[test]
+    fn a_number_across_the_end_of_what_is_read_is_not_read_short() {
+        // "BWV 10" before the end, "04" after it
+        let name = format!("{} BWV 1004", "x".repeat(MAX_NAME_LEN - 7));
+        assert_eq!(&name[MAX_NAME_LEN - 2..MAX_NAME_LEN], "10");
+        assert_eq!(catalogue_numbers(&name), []);
+        // "op. 2 no." before the end, the number in the set after it
+        let name = format!("{} op. 2 no. 4", "x".repeat(MAX_NAME_LEN - 11));
+        assert_eq!(&name[MAX_NAME_LEN - 4..MAX_NAME_LEN], "no. ");
+        assert_eq!(catalogue_numbers(&name), []);
     }
 
     #[test]
