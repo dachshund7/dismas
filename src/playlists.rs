@@ -23,7 +23,7 @@ const EXTENSION: &str = "m3u8";
 
 // Why a name can't be used for a new playlist
 #[derive(Debug, PartialEq, Eq)]
-pub enum NameError {
+pub(crate) enum NameError {
     Empty,
     // Characters that can't be in a file name, or a hidden file
     Invalid,
@@ -79,7 +79,7 @@ fn invalid_name_error(name: &str) -> glib::Error {
 }
 
 // The names of the saved playlists, in alphabetical order
-pub fn names() -> Vec<String> {
+pub(crate) fn names() -> Vec<String> {
     let mut names = names_in(&playlists_dir());
     names.sort_by_cached_key(|name| name.to_lowercase());
     names
@@ -99,13 +99,13 @@ fn names_in(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-pub fn exists(name: &str) -> bool {
+pub(crate) fn exists(name: &str) -> bool {
     !name.is_empty() && playlist_path(name).is_some_and(|path| path.is_file())
 }
 
 // Whether the name, without surrounding spaces, can be used for a new
 // playlist; it's also the name of the file
-pub fn check_name(name: &str) -> Result<(), NameError> {
+pub(crate) fn check_name(name: &str) -> Result<(), NameError> {
     let name = name.trim();
     if name.is_empty() {
         Err(NameError::Empty)
@@ -133,13 +133,13 @@ fn fits_file_name(name: &str) -> bool {
 }
 
 // Creates an empty playlist; the name has been checked with `check_name()`
-pub fn create(name: &str) -> Result<(), glib::Error> {
+pub(crate) fn create(name: &str) -> Result<(), glib::Error> {
     create_with_tracks(name, &[])
 }
 
 // An order left from a playlist of the same name, e.g. deleted outside
 // the app, doesn't make the new one shuffled
-pub fn create_with_tracks(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
+pub(crate) fn create_with_tracks(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
     let name = name.trim();
     drop_unshuffled(name);
     write(name, files)
@@ -147,7 +147,7 @@ pub fn create_with_tracks(name: &str, files: &[gio::File]) -> Result<(), glib::E
 
 // Renames a saved playlist, and the order it had before it was shuffled;
 // the new name has been checked with `check_name()`
-pub fn rename(name: &str, new_name: &str) -> std::io::Result<()> {
+pub(crate) fn rename(name: &str, new_name: &str) -> std::io::Result<()> {
     rename_in(&data_dir(), name, new_name.trim())
 }
 
@@ -171,7 +171,7 @@ fn rename_in(dir: &Path, name: &str, new_name: &str) -> std::io::Result<()> {
 
 // Moves a saved playlist to the trash, from where it can be restored; the
 // order it had before it was shuffled is gone
-pub fn trash(name: &str) -> Result<(), glib::Error> {
+pub(crate) fn trash(name: &str) -> Result<(), glib::Error> {
     let path = playlist_path(name).ok_or_else(|| invalid_name_error(name))?;
     gio::File::for_path(path).trash(gio::Cancellable::NONE)?;
     drop_unshuffled(name);
@@ -179,19 +179,19 @@ pub fn trash(name: &str) -> Result<(), glib::Error> {
 }
 
 // Whether the playlist was shuffled, and keeps the order it had before
-pub fn is_shuffled(name: &str) -> bool {
+pub(crate) fn is_shuffled(name: &str) -> bool {
     unshuffled_path(name).is_some_and(|path| path.is_file())
 }
 
 // Keeps the order of a playlist before it's shuffled; it's written before
 // the shuffled one, so that a crash in between can't lose it
-pub fn save_unshuffled(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
+pub(crate) fn save_unshuffled(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
     let path = unshuffled_path(name).ok_or_else(|| invalid_name_error(name))?;
     write_path(&path, files)
 }
 
 // The order the playlist had before it was shuffled, if it was
-pub fn load_unshuffled(name: &str) -> Option<Vec<gio::File>> {
+pub(crate) fn load_unshuffled(name: &str) -> Option<Vec<gio::File>> {
     let path = unshuffled_path(name)?;
     if path.is_file() {
         read_m3u(&path)
@@ -202,7 +202,7 @@ pub fn load_unshuffled(name: &str) -> Option<Vec<gio::File>> {
 
 // Forgets the order from before shuffling, once it's restored, or when the
 // tracks are replaced
-pub fn drop_unshuffled(name: &str) {
+pub(crate) fn drop_unshuffled(name: &str) {
     let Some(path) = unshuffled_path(name) else {
         return;
     };
@@ -212,7 +212,7 @@ pub fn drop_unshuffled(name: &str) {
 }
 
 // A playlist made with the tracks of another one is shuffled like it
-pub fn copy_unshuffled(name: &str, new_name: &str) {
+pub(crate) fn copy_unshuffled(name: &str, new_name: &str) {
     match load_unshuffled(name) {
         Some(files) => {
             if let Err(e) = save_unshuffled(new_name, &files) {
@@ -225,7 +225,7 @@ pub fn copy_unshuffled(name: &str, new_name: &str) {
 
 // Drops the orders of playlists that are gone, e.g. removed outside the
 // app; the queue is always there
-pub fn retain_unshuffled(names: &[String]) {
+pub(crate) fn retain_unshuffled(names: &[String]) {
     retain_unshuffled_in(&data_dir(), names);
 }
 
@@ -249,7 +249,7 @@ fn remove_if_exists(path: &Path) -> std::io::Result<()> {
 }
 
 // The tracks of a playlist; the queue has none until it's first saved
-pub fn load(name: &str) -> Option<Vec<gio::File>> {
+pub(crate) fn load(name: &str) -> Option<Vec<gio::File>> {
     load_in(&data_dir(), name)
 }
 
@@ -265,7 +265,7 @@ fn load_in(dir: &Path, name: &str) -> Option<Vec<gio::File>> {
 // are only in its file; the selected one is saved from the queue, which
 // would write over them. Its point to resume from and its order from
 // before shuffling stay right, as the tracks before them don't move
-pub fn append(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
+pub(crate) fn append(name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
     append_in(&data_dir(), name, files)
 }
 
@@ -283,7 +283,7 @@ fn append_in(dir: &Path, name: &str, files: &[gio::File]) -> Result<(), glib::Er
 
 // The tracks of an M3U playlist anywhere. Playlists written on Windows
 // are often in its legacy encoding, which is guessed as for CUE sheets
-pub fn read_m3u(path: &Path) -> Option<Vec<gio::File>> {
+pub(crate) fn read_m3u(path: &Path) -> Option<Vec<gio::File>> {
     match std::fs::read(path) {
         Ok(contents) => {
             let dir = path.parent().map(gio::File::for_path)?;
@@ -310,7 +310,7 @@ const MAX_PLAYLIST_ENTRIES: usize = 200_000;
 // as the playlist can come from another computer, or from Windows, see
 // `Finder`; the entries that aren't found are left as they are. A playlist
 // over the limits isn't read at all, rather than read in part
-pub fn import_m3u(path: &Path, music_folders: &[PathBuf]) -> Option<Vec<gio::File>> {
+pub(crate) fn import_m3u(path: &Path, music_folders: &[PathBuf]) -> Option<Vec<gio::File>> {
     import_m3u_within(path, music_folders, MAX_PLAYLIST_SIZE, MAX_PLAYLIST_ENTRIES)
 }
 
@@ -477,7 +477,7 @@ impl Finder {
 
 // A name for a new playlist, from the name of a file: without the
 // characters a name can't have, and numbered if it's taken
-pub fn free_name(name: &str) -> String {
+pub(crate) fn free_name(name: &str) -> String {
     free_name_among(name, exists)
 }
 
@@ -521,7 +521,7 @@ fn free_name_among(name: &str, taken: impl Fn(&str) -> bool) -> String {
 // tracks in the directory of the file, or under it, have paths relative
 // to it, so that the playlist works wherever the directory is copied.
 // Returns the number of tracks outside it, which have absolute paths
-pub fn export(name: &str, path: &Path) -> Result<usize, glib::Error> {
+pub(crate) fn export(name: &str, path: &Path) -> Result<usize, glib::Error> {
     let files = load(name).unwrap_or_default();
     let dir = path.parent().unwrap_or(Path::new("/"));
     let (text, n_outside) = format_m3u(&files, Some(dir));
@@ -529,7 +529,7 @@ pub fn export(name: &str, path: &Path) -> Result<usize, glib::Error> {
     Ok(n_outside)
 }
 
-pub fn save(name: &str, files: &[gio::File]) {
+pub(crate) fn save(name: &str, files: &[gio::File]) {
     match write(name, files) {
         Ok(()) => debug!("Playlist '{name}' saved"),
         Err(e) => warn!("Unable to save the playlist '{name}': {e}"),

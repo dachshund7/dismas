@@ -12,36 +12,36 @@ use crate::audio::{FieldCode, field_values, normalize_search_text};
 // What a query looks at in a track, borrowed from wherever the track keeps
 // it; `Query::needs()` says which parts a query needs
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Candidate<'a> {
+pub(crate) struct Candidate<'a> {
     // The text of the tags, folded, see `search_key()`
-    pub search_key: &'a str,
+    pub(crate) search_key: &'a str,
     // The fields, see `FieldParts`
-    pub fields: &'a str,
+    pub(crate) fields: &'a str,
     // The path that's shown, outside the sandbox
-    pub path: Option<&'a Path>,
-    pub favorite: bool,
+    pub(crate) path: Option<&'a Path>,
+    pub(crate) favorite: bool,
     // Whether its file is gone, in the queue
-    pub missing: bool,
+    pub(crate) missing: bool,
     // In seconds since the epoch: when the track was added to the library,
     // when it was last heard, and when it was marked a favorite
-    pub added: Option<i64>,
-    pub played: Option<i64>,
-    pub favorited: Option<i64>,
+    pub(crate) added: Option<i64>,
+    pub(crate) played: Option<i64>,
+    pub(crate) favorited: Option<i64>,
     // How many times it was played, 0 for a track never heard
-    pub plays: Option<i64>,
-    pub favorite_album: bool,
-    pub favorite_work: bool,
+    pub(crate) plays: Option<i64>,
+    pub(crate) favorite_album: bool,
+    pub(crate) favorite_work: bool,
 }
 
 // When the query is matched, for the relative dates
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Context {
+pub(crate) struct Context {
     // In seconds since the epoch
-    pub now: i64,
+    pub(crate) now: i64,
 }
 
 impl Context {
-    pub fn now() -> Self {
+    pub(crate) fn now() -> Self {
         Self {
             now: gtk::glib::real_time() / 1_000_000,
         }

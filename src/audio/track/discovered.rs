@@ -32,7 +32,7 @@ use serde::Serialize;
 use super::*;
 
 // The argument that starts Dismas as the child that reads a file
-pub const CHILD_ARG: &str = "--discover-file";
+pub(crate) const CHILD_ARG: &str = "--discover-file";
 
 // How long Discoverer waits for a file
 const DISCOVERER_SECONDS: u64 = 5;
@@ -53,7 +53,7 @@ const MAX_REPORT_SIZE: u64 = 64 * 1024 * 1024;
 // The program started as the child, Dismas itself, which `main` sets
 static HELPER: OnceLock<PathBuf> = OnceLock::new();
 
-pub fn set_helper(program: PathBuf) {
+pub(crate) fn set_helper(program: PathBuf) {
     let _ = HELPER.set(program);
 }
 
@@ -178,7 +178,7 @@ fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
 }
 
 // The child: reads a file, and writes what it found as JSON, or null
-pub fn child_main(args: &[OsString]) -> glib::ExitCode {
+pub(crate) fn child_main(args: &[OsString]) -> glib::ExitCode {
     // SAFETY: signal() puts back the default of SIGALRM, which ends the
     // process, in case Dismas was started with it ignored, and alarm()
     // only sets a timer, whose signal then ends the process

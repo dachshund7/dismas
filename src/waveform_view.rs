@@ -17,13 +17,13 @@ use gtk::{gdk, glib, graphene, prelude::*};
 use log::{debug, warn};
 
 #[derive(Debug, PartialEq)]
-pub struct PeakPair {
-    pub left: f64,
-    pub right: f64,
+pub(crate) struct PeakPair {
+    pub(crate) left: f64,
+    pub(crate) right: f64,
 }
 
 impl PeakPair {
-    pub fn new(left: f64, right: f64) -> Self {
+    pub(crate) fn new(left: f64, right: f64) -> Self {
         Self { left, right }
     }
 }
@@ -43,18 +43,18 @@ mod imp {
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::WaveformView)]
-    pub struct WaveformView {
+    pub(crate) struct WaveformView {
         #[property(get, set = Self::set_position, explicit_notify, minimum = 0.0, maximum = 1.0)]
-        pub position: Cell<f64>,
-        pub hover_position: Cell<Option<f64>>,
+        pub(crate) position: Cell<f64>,
+        pub(crate) hover_position: Cell<Option<f64>>,
         // left and right channel peaks, normalised between 0 and 1
-        pub peaks: RefCell<Option<Vec<PeakPair>>>,
+        pub(crate) peaks: RefCell<Option<Vec<PeakPair>>>,
         // The peaks to show once the current ones have gone down, while
         // they change; the change can be to no peaks
-        pub next_peaks: RefCell<Option<Option<Vec<PeakPair>>>>,
-        pub tick_id: RefCell<Option<gtk::TickCallbackId>>,
-        pub first_frame_time: Cell<Option<i64>>,
-        pub factor: Cell<Option<f64>>,
+        pub(crate) next_peaks: RefCell<Option<Option<Vec<PeakPair>>>>,
+        pub(crate) tick_id: RefCell<Option<gtk::TickCallbackId>>,
+        pub(crate) first_frame_time: Cell<Option<i64>>,
+        pub(crate) factor: Cell<Option<f64>>,
     }
 
     #[glib::object_subclass]
@@ -384,7 +384,7 @@ fn bar_state(edge: f64, cursor_pos: [f64; 2], is_rtl: bool) -> BarState {
 }
 
 glib::wrapper! {
-    pub struct WaveformView(ObjectSubclass<imp::WaveformView>)
+    pub(crate) struct WaveformView(ObjectSubclass<imp::WaveformView>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::AccessibleRange, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -543,7 +543,7 @@ impl WaveformView {
         self.emit_by_name::<()>("position-changed", &[&position]);
     }
 
-    pub fn set_peaks(&self, peaks: Option<Vec<(f64, f64)>>) {
+    pub(crate) fn set_peaks(&self, peaks: Option<Vec<(f64, f64)>>) {
         if let Some(tick_id) = self.imp().tick_id.replace(None) {
             tick_id.remove();
         }
@@ -631,7 +631,7 @@ impl WaveformView {
         self.queue_resize();
     }
 
-    pub fn connect_position_changed<F: Fn(&Self, f64) + 'static>(
+    pub(crate) fn connect_position_changed<F: Fn(&Self, f64) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {

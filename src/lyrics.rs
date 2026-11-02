@@ -53,7 +53,7 @@ const HEADER_TAGS: [&str; 12] = [
 
 // The lyrics of a track
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Lyrics {
+pub(crate) enum Lyrics {
     // Lines of text, without times
     Plain(String),
     // The lines in the order they're sung
@@ -64,10 +64,10 @@ pub enum Lyrics {
 // track, until when if a pause follows it, and its text, which can be on
 // more than one line, e.g. with its translation
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Line {
-    pub time: Duration,
-    pub end: Option<Duration>,
-    pub text: String,
+pub(crate) struct Line {
+    pub(crate) time: Duration,
+    pub(crate) end: Option<Duration>,
+    pub(crate) text: String,
 }
 
 // The lyrics of an audio file: the first synchronized ones of the files of
@@ -75,7 +75,10 @@ pub struct Line {
 // or else the first plain ones. A track of a CUE sheet plays a `part` of
 // its file, and gets the lines sung in it, see `in_part()`. The files are
 // read here, so this doesn't run on the main thread
-pub fn find(audio_file: &Path, part: Option<(Duration, Option<Duration>)>) -> Option<Lyrics> {
+pub(crate) fn find(
+    audio_file: &Path,
+    part: Option<(Duration, Option<Duration>)>,
+) -> Option<Lyrics> {
     let mut plain = None;
     for text in lyrics_file_texts(audio_file) {
         match parse(&text) {
@@ -136,7 +139,7 @@ fn in_part(lyrics: Lyrics, part: Option<(Duration, Option<Duration>)>) -> Option
 // Where the files of lyrics of an audio file are: next to it, with the
 // same name, e.g. "Die Forelle.lrc" and "Die Forelle.txt" for
 // "Die Forelle.flac"
-pub fn lyrics_file_paths(audio_file: &Path) -> [PathBuf; 2] {
+pub(crate) fn lyrics_file_paths(audio_file: &Path) -> [PathBuf; 2] {
     LYRICS_EXTENSIONS.map(|extension| audio_file.with_extension(extension))
 }
 
@@ -310,7 +313,7 @@ fn sylt_lyrics(entries: Vec<(Duration, String)>) -> Option<Lyrics> {
 
 // The line sung at a position, if any: the last one to start by then,
 // unless it has ended
-pub fn line_at(lines: &[Line], position: Duration) -> Option<usize> {
+pub(crate) fn line_at(lines: &[Line], position: Duration) -> Option<usize> {
     let line = lines
         .partition_point(|line| line.time <= position)
         .checked_sub(1)?;
@@ -322,7 +325,7 @@ pub fn line_at(lines: &[Line], position: Duration) -> Option<usize> {
 
 // When the line sung changes next after a position: the next line starts,
 // or the one sung ends
-pub fn next_change(lines: &[Line], position: Duration) -> Option<Duration> {
+pub(crate) fn next_change(lines: &[Line], position: Duration) -> Option<Duration> {
     let next = lines.partition_point(|line| line.time <= position);
     let start = lines.get(next).map(|line| line.time);
     let end = next
@@ -338,7 +341,7 @@ pub fn next_change(lines: &[Line], position: Duration) -> Option<Duration> {
 // The text of lyrics without the times of synchronized lyrics and without
 // their header lines, e.g. for searching, where "[01:12.50]" would match
 // a search for "12". Other text in brackets, like "[Chorus]", stays
-pub fn text_without_times(text: &str) -> Cow<'_, str> {
+pub(crate) fn text_without_times(text: &str) -> Cow<'_, str> {
     if !text.contains(['[', '<']) {
         return Cow::Borrowed(text);
     }

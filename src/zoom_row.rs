@@ -19,20 +19,20 @@ mod imp {
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[template(resource = "/io/github/dachshund7/Dismas/zoom-row.ui")]
     #[properties(wrapper_type = super::ZoomRow)]
-    pub struct ZoomRow {
+    pub(crate) struct ZoomRow {
         #[template_child]
-        pub zoom_out_button: TemplateChild<gtk::Button>,
+        pub(crate) zoom_out_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub reset_button: TemplateChild<gtk::Button>,
+        pub(crate) reset_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub zoom_in_button: TemplateChild<gtk::Button>,
+        pub(crate) zoom_in_button: TemplateChild<gtk::Button>,
 
         // The group of the view's zoom actions, e.g. "library"
         #[property(get, set = Self::set_action_prefix)]
-        pub action_prefix: RefCell<String>,
+        pub(crate) action_prefix: RefCell<String>,
         // The size the view is zoomed to, in percent of its normal size
         #[property(get, set = Self::set_percent)]
-        pub percent: Cell<u32>,
+        pub(crate) percent: Cell<u32>,
     }
 
     #[glib::object_subclass]
@@ -105,7 +105,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct ZoomRow(ObjectSubclass<imp::ZoomRow>)
+    pub(crate) struct ZoomRow(ObjectSubclass<imp::ZoomRow>)
         @extends gtk::Box, gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }

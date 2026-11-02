@@ -30,9 +30,9 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct PlayerBox {
+    pub(crate) struct PlayerBox {
         // How far the player is into zen mode, from 0 to 1
-        pub zen_progress: Cell<f64>,
+        pub(crate) zen_progress: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -275,7 +275,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct PlayerBox(ObjectSubclass<imp::PlayerBox>)
+    pub(crate) struct PlayerBox(ObjectSubclass<imp::PlayerBox>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -284,7 +284,7 @@ impl PlayerBox {
     // Fades out the controls, from 0 to 1, as the cover and the track details
     // move to the middle. Once faded out, they don't take clicks and taps,
     // which would press buttons that can't be seen
-    pub fn set_zen_progress(&self, progress: f64) {
+    pub(crate) fn set_zen_progress(&self, progress: f64) {
         self.imp().zen_progress.set(progress);
         let mut child = self.first_child();
         while let Some(widget) = child {
@@ -297,7 +297,7 @@ impl PlayerBox {
         self.queue_allocate();
     }
 
-    pub fn zen_progress(&self) -> f64 {
+    pub(crate) fn zen_progress(&self) -> f64 {
         self.imp().zen_progress.get()
     }
 }

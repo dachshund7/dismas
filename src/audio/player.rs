@@ -28,7 +28,7 @@ use crate::{
 };
 
 // One step of the volume, by the slider, the keyboard or the tray
-pub const VOLUME_STEP: f64 = 0.05;
+pub(crate) const VOLUME_STEP: f64 = 0.05;
 
 // How long a new volume waits to be saved, so that dragging the slider,
 // which changes it many times, saves it a few times
@@ -52,7 +52,7 @@ impl PendingVolume {
 }
 
 #[derive(Clone, Debug)]
-pub enum PlaybackAction {
+pub(crate) enum PlaybackAction {
     Play,
     Pause,
     Stop,
@@ -81,7 +81,7 @@ pub enum PlaybackAction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub enum PlaybackState {
+pub(crate) enum PlaybackState {
     #[default]
     Stopped,
     Playing,
@@ -90,7 +90,7 @@ pub enum PlaybackState {
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "DismasRepeatMode")]
-pub enum RepeatMode {
+pub(crate) enum RepeatMode {
     #[default]
     Consecutive,
     RepeatAll,
@@ -130,7 +130,7 @@ impl From<RepeatMode> for i32 {
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "DismasReplayGainMode")]
-pub enum ReplayGainMode {
+pub(crate) enum ReplayGainMode {
     #[enum_value(name = "album")]
     Album,
     #[enum_value(name = "track")]
@@ -169,7 +169,7 @@ impl From<ReplayGainMode> for i32 {
 }
 
 #[derive(Debug)]
-pub enum SeekDirection {
+pub(crate) enum SeekDirection {
     Forward,
     Backwards,
 }
@@ -211,7 +211,7 @@ fn after_failure(
     }
 }
 
-pub struct AudioPlayer {
+pub(crate) struct AudioPlayer {
     app_sender: Sender<ApplicationAction>,
     receiver: RefCell<Option<Receiver<PlaybackAction>>>,
     backend: GstBackend,
@@ -240,7 +240,7 @@ impl fmt::Debug for AudioPlayer {
 }
 
 impl AudioPlayer {
-    pub fn new(app_sender: Sender<ApplicationAction>) -> Rc<Self> {
+    pub(crate) fn new(app_sender: Sender<ApplicationAction>) -> Rc<Self> {
         let (sender, r) = async_channel::unbounded();
         let receiver = RefCell::new(Some(r));
 
@@ -516,14 +516,14 @@ impl AudioPlayer {
     }
 
     // Goes to the first track that can play, if there is one
-    pub fn skip_to_first(&self) {
+    pub(crate) fn skip_to_first(&self) {
         if let Some(first) = self.queue.playable_from(0) {
             self.skip_to(first);
         }
     }
 
     // The track and position to go on from in a later session
-    pub fn resume_point(&self) -> Option<(Track, u64)> {
+    pub(crate) fn resume_point(&self) -> Option<(Track, u64)> {
         if self.finished.get() {
             let first = self.queue.playable_from(0)?;
             return Some((self.queue.track_at(first)?, 0));
@@ -640,7 +640,7 @@ impl AudioPlayer {
         }
     }
 
-    pub fn toggle_play(&self) {
+    pub(crate) fn toggle_play(&self) {
         if self.queue.is_empty() {
             return;
         }
@@ -652,23 +652,23 @@ impl AudioPlayer {
         }
     }
 
-    pub fn play(&self) {
+    pub(crate) fn play(&self) {
         if !self.state.playing() {
             self.set_playback_state(PlaybackState::Playing);
         }
     }
 
-    pub fn pause(&self) {
+    pub(crate) fn pause(&self) {
         if self.state.playing() {
             self.set_playback_state(PlaybackState::Paused);
         }
     }
 
-    pub fn stop(&self) {
+    pub(crate) fn stop(&self) {
         self.set_playback_state(PlaybackState::Stopped);
     }
 
-    pub fn skip_previous(&self) {
+    pub(crate) fn skip_previous(&self) {
         if self.queue.is_empty() {
             return;
         }
@@ -696,7 +696,7 @@ impl AudioPlayer {
         }
     }
 
-    pub fn skip_next(&self) {
+    pub(crate) fn skip_next(&self) {
         // Nothing follows the last track, as the Next button is off there;
         // media keys get here too
         if self.state.track().is_some() && self.queue.peek_next_track().is_none() {
@@ -725,7 +725,7 @@ impl AudioPlayer {
         }
     }
 
-    pub fn skip_to(&self, pos: u32) {
+    pub(crate) fn skip_to(&self, pos: u32) {
         if pos >= self.queue.n_tracks() {
             return;
         }
@@ -766,15 +766,15 @@ impl AudioPlayer {
         }
     }
 
-    pub fn seek_backwards(&self) {
+    pub(crate) fn seek_backwards(&self) {
         self.seek(10, SeekDirection::Backwards);
     }
 
-    pub fn seek_forward(&self) {
+    pub(crate) fn seek_forward(&self) {
         self.seek(10, SeekDirection::Forward);
     }
 
-    pub fn seek_offset(&self, offset: i64) {
+    pub(crate) fn seek_offset(&self, offset: i64) {
         let direction = if offset < 0 {
             SeekDirection::Backwards
         } else {
@@ -786,7 +786,7 @@ impl AudioPlayer {
     // Seeks to a share of the track, between seconds too, as a click on the
     // waveform can be; there's none of a track whose length isn't known,
     // which a seek to its start would have taken the place of
-    pub fn seek_position_rel(&self, position: f64) {
+    pub(crate) fn seek_position_rel(&self, position: f64) {
         let duration = self.state.duration() as f64;
         if duration == 0.0 {
             return;
@@ -800,7 +800,7 @@ impl AudioPlayer {
     // Seeks to a time, which MPRIS and the lines of the lyrics ask for; in a
     // track whose length isn't known, as far as it goes, rather than to its
     // start
-    pub fn seek_position_abs(&self, position: Duration) {
+    pub(crate) fn seek_position_abs(&self, position: Duration) {
         let duration = self.state.duration();
         let pos = if duration > 0 {
             position.min(Duration::from_secs(duration))
@@ -813,7 +813,7 @@ impl AudioPlayer {
 
     // Shows the track paused at the position of the last session; the
     // backend only gets it ready when it plays
-    pub fn resume_at(&self, position: u64) {
+    pub(crate) fn resume_at(&self, position: u64) {
         let duration = self.state.duration();
         let position = if duration > 0 && position >= duration {
             // The queue finished in the last session, and starts over
@@ -833,19 +833,19 @@ impl AudioPlayer {
         self.announce_state(PlaybackState::Paused);
     }
 
-    pub fn queue(&self) -> &Queue {
+    pub(crate) fn queue(&self) -> &Queue {
         &self.queue
     }
 
-    pub fn state(&self) -> &PlayerState {
+    pub(crate) fn state(&self) -> &PlayerState {
         &self.state
     }
 
-    pub fn sleep_timer(&self) -> &SleepTimer {
+    pub(crate) fn sleep_timer(&self) -> &SleepTimer {
         &self.sleep_timer
     }
 
-    pub fn waveform_generator(&self) -> &WaveformGenerator {
+    pub(crate) fn waveform_generator(&self) -> &WaveformGenerator {
         &self.waveform_generator
     }
 
@@ -877,7 +877,7 @@ impl AudioPlayer {
     // was empty: when it ends, it takes the place of the one saved, so
     // that it's one listen, and a play once. One too short to log yet
     // keeps what was heard
-    pub fn save_listen(&self) {
+    pub(crate) fn save_listen(&self) {
         if !self.settings.boolean("keep-play-history") {
             return;
         }
@@ -891,7 +891,7 @@ impl AudioPlayer {
 
     // What was heard of the current track doesn't count, as when the
     // history is cleared; what is heard from now on does
-    pub fn forget_listen(&self) {
+    pub(crate) fn forget_listen(&self) {
         self.listens.borrow_mut().finish(play_stats::now());
     }
 
@@ -902,7 +902,7 @@ impl AudioPlayer {
     }
 
     // Shows the new tags of the current track, after they were read again
-    pub fn current_track_changed(&self) {
+    pub(crate) fn current_track_changed(&self) {
         let Some(track) = self.state.track() else {
             return;
         };
@@ -957,14 +957,14 @@ impl AudioPlayer {
     }
 
     // Saves the volume right away, when quitting
-    pub fn save_volume(&self) {
+    pub(crate) fn save_volume(&self) {
         if let Some(source) = self.pending_volume.source.take() {
             source.remove();
         }
         self.pending_volume.save(&self.settings);
     }
 
-    pub fn set_volume(&self, volume: f64) {
+    pub(crate) fn set_volume(&self, volume: f64) {
         self.backend.set_volume(volume);
     }
 
@@ -976,7 +976,7 @@ impl AudioPlayer {
         self.set_volume(volume);
     }
 
-    pub fn toggle_repeat_mode(&self) {
+    pub(crate) fn toggle_repeat_mode(&self) {
         let cur_mode = self.queue.repeat_mode();
         let new_mode = match cur_mode {
             RepeatMode::Consecutive => RepeatMode::RepeatAll,
@@ -1006,7 +1006,7 @@ impl AudioPlayer {
         }
     }
 
-    pub fn clear_queue(&self) {
+    pub(crate) fn clear_queue(&self) {
         self.finished.set(false);
         self.stop();
         self.clear_current_track();
@@ -1015,7 +1015,7 @@ impl AudioPlayer {
 
     // Moves tracks together before another one, or to the end of the
     // queue, keeping the order they had
-    pub fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
+    pub(crate) fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
         self.queue.move_tracks(tracks, before);
     }
 
@@ -1024,7 +1024,7 @@ impl AudioPlayer {
     // repeating the track would keep playing it after it's gone; that's one
     // load into the backend, rather than one for each removed track after
     // it. Returns the runs of tracks removed, to put them back
-    pub fn remove_tracks(&self, tracks: &[Track]) -> Vec<RemovedRun> {
+    pub(crate) fn remove_tracks(&self, tracks: &[Track]) -> Vec<RemovedRun> {
         let removed: HashSet<&Track> = tracks.iter().collect();
         if let Some(current_track) = self.state.track().filter(|t| removed.contains(t)) {
             current_track.set_playing(false);
@@ -1062,11 +1062,11 @@ impl AudioPlayer {
         TrackSource::of(track, album_order)
     }
 
-    pub fn set_replaygain(&self, replaygain: ReplayGainMode) {
+    pub(crate) fn set_replaygain(&self, replaygain: ReplayGainMode) {
         self.backend.set_replaygain(replaygain);
     }
 
-    pub fn replaygain_available(&self) -> bool {
+    pub(crate) fn replaygain_available(&self) -> bool {
         self.backend.replaygain_available()
     }
 }

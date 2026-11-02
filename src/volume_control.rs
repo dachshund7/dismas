@@ -19,10 +19,10 @@ mod imp {
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[properties(wrapper_type = super::VolumeControl)]
     #[template(resource = "/io/github/dachshund7/Dismas/volume-control.ui")]
-    pub struct VolumeControl {
+    pub(crate) struct VolumeControl {
         // Template widgets
         #[template_child]
-        pub volume_low_button: TemplateChild<gtk::Button>,
+        pub(crate) volume_low_button: TemplateChild<gtk::Button>,
         // The adjustment of the scale notifies changes to the volume
         #[template_child]
         #[property(
@@ -35,13 +35,13 @@ mod imp {
             default = 1.0,
             type = f64,
         )]
-        pub volume_scale: TemplateChild<gtk::Scale>,
+        pub(crate) volume_scale: TemplateChild<gtk::Scale>,
         #[template_child]
-        pub volume_high_image: TemplateChild<gtk::Image>,
+        pub(crate) volume_high_image: TemplateChild<gtk::Image>,
 
         #[property(get, set = Self::set_toggle_mute, explicit_notify)]
-        pub toggle_mute: Cell<bool>,
-        pub prev_volume: Cell<f64>,
+        pub(crate) toggle_mute: Cell<bool>,
+        pub(crate) prev_volume: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -111,7 +111,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct VolumeControl(ObjectSubclass<imp::VolumeControl>)
+    pub(crate) struct VolumeControl(ObjectSubclass<imp::VolumeControl>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -183,13 +183,13 @@ impl VolumeControl {
     }
 
     /// Changes the volume by a number of steps, negative to lower it.
-    pub fn step(&self, steps: f64) {
+    pub(crate) fn step(&self, steps: f64) {
         let adj = self.imp().volume_scale.adjustment();
         let value = adj.value() + steps * adj.step_increment();
         adj.set_value(value.clamp(adj.lower(), adj.upper()));
     }
 
-    pub fn connect_volume_changed<F: Fn(&Self, f64) + 'static>(
+    pub(crate) fn connect_volume_changed<F: Fn(&Self, f64) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {

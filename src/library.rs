@@ -22,7 +22,7 @@ use std::{
     time::{Duration, Instant, UNIX_EPOCH},
 };
 
-pub use album::{Album, AlbumSort, SelectionKey};
+pub(crate) use album::{Album, AlbumSort, SelectionKey};
 use async_channel::Sender;
 use gtk::{gio, gio::prelude::*, glib};
 use itertools::Itertools;
@@ -33,7 +33,7 @@ use lofty::{
 use log::{debug, warn};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
-pub use watch::FolderWatch;
+pub(crate) use watch::FolderWatch;
 
 use crate::{
     audio::{
@@ -107,7 +107,7 @@ const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         added INTEGER NOT NULL
     );";
 
-pub enum ScanEvent {
+pub(crate) enum ScanEvent {
     // The number of files read so far, out of the files that changed
     Progress(usize, usize),
     // The number of album covers made so far, out of those to make, after
@@ -117,53 +117,53 @@ pub enum ScanEvent {
 }
 
 #[derive(Debug, Default)]
-pub struct ScanResult {
+pub(crate) struct ScanResult {
     // The tracks that were already known and changed, so that the queue
     // can read their tags again
-    pub updated: Vec<PathBuf>,
+    pub(crate) updated: Vec<PathBuf>,
     // The number of tracks that are new, changed or gone
-    pub n_changed: usize,
+    pub(crate) n_changed: usize,
     // Whether covers of the albums were made again, which can keep their
     // names, as when a cover file next to the tracks changed
-    pub covers_changed: bool,
+    pub(crate) covers_changed: bool,
     // What to watch for changes, see `folders_to_watch()`
-    pub watch: WatchList,
+    pub(crate) watch: WatchList,
 }
 
 // What to watch for changes in the music folders, as of a scan
 #[derive(Debug, Default)]
-pub struct WatchList {
+pub(crate) struct WatchList {
     // The folders to watch for files that come, go or change
-    pub folders: Vec<PathBuf>,
+    pub(crate) folders: Vec<PathBuf>,
     // Whether a music folder that's there can't be watched, so that it's
     // read again when the albums are shown
-    pub unwatched: bool,
+    pub(crate) unwatched: bool,
     // The music folders that are there, and the folders that symbolic
     // links in them lead to, without symbolic links: a drive unmounted can
     // take one away, and a drive mounted in one adds to it. While one
     // isn't there, or a link leads nowhere, a drive mounted anywhere can
     // bring it back, as the folder a link leads to is only known once
     // it's there
-    pub available: Vec<PathBuf>,
-    pub unavailable: bool,
+    pub(crate) available: Vec<PathBuf>,
+    pub(crate) unavailable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct AlbumInfo {
-    pub id: String,
-    pub title: String,
-    pub artist: String,
+pub(crate) struct AlbumInfo {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) artist: String,
     // The key the artist is sorted by
-    pub artist_sort: String,
+    pub(crate) artist_sort: String,
     // The year its tracks were made, the earliest, see `TrackCredits::year()`
-    pub year: Option<String>,
+    pub(crate) year: Option<String>,
     // When the first track of the album was added, in seconds since the
     // epoch
-    pub added: Option<i64>,
-    pub cover: Option<String>,
+    pub(crate) added: Option<i64>,
+    pub(crate) cover: Option<String>,
     // The record label, and the number it gives the release
-    pub label: Option<String>,
-    pub catalog_number: Option<String>,
+    pub(crate) label: Option<String>,
+    pub(crate) catalog_number: Option<String>,
 }
 
 // The tags we keep for each track
@@ -229,14 +229,14 @@ struct WorkEntry {
 // when its access was taken back. The folders in it that are left out are
 // relative to it
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MusicFolder {
-    pub path: PathBuf,
-    pub host: Option<PathBuf>,
-    pub excluded: Vec<PathBuf>,
+pub(crate) struct MusicFolder {
+    pub(crate) path: PathBuf,
+    pub(crate) host: Option<PathBuf>,
+    pub(crate) excluded: Vec<PathBuf>,
 }
 
 impl MusicFolder {
-    pub fn new(path: PathBuf) -> Self {
+    pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
             host: None,
@@ -245,12 +245,12 @@ impl MusicFolder {
     }
 
     // The path to show
-    pub fn shown_path(&self) -> &Path {
+    pub(crate) fn shown_path(&self) -> &Path {
         self.host.as_deref().unwrap_or(&self.path)
     }
 
     // The paths of the folders left out, as they're read
-    pub fn excluded_paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
+    pub(crate) fn excluded_paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
         self.excluded
             .iter()
             .map(|relative| self.path.join(relative))
@@ -259,7 +259,7 @@ impl MusicFolder {
 
 // The XDG Music folder; without a user-dirs.dirs file, GLib doesn't know
 // about one, so we look for the usual "Music" folder in the home directory
-pub fn default_music_dir() -> PathBuf {
+pub(crate) fn default_music_dir() -> PathBuf {
     glib::user_special_dir(glib::UserDirectory::Music)
         .filter(|dir| *dir != glib::home_dir())
         .unwrap_or_else(|| glib::home_dir().join("Music"))
@@ -269,7 +269,7 @@ pub fn default_music_dir() -> PathBuf {
 // Music folder, with the folders they leave out. They're kept as URIs, as
 // the strings of the settings must be UTF-8; the ones without a local path
 // are left out
-pub fn music_folders(settings: &gio::Settings) -> Vec<MusicFolder> {
+pub(crate) fn music_folders(settings: &gio::Settings) -> Vec<MusicFolder> {
     folders_from_entries(
         settings.get::<Vec<(String, String)>>("music-folders"),
         settings.get::<Vec<String>>("excluded-folders"),
@@ -277,7 +277,7 @@ pub fn music_folders(settings: &gio::Settings) -> Vec<MusicFolder> {
 }
 
 // The paths of the music folders, to look for tracks in
-pub fn music_folder_paths() -> Vec<PathBuf> {
+pub(crate) fn music_folder_paths() -> Vec<PathBuf> {
     music_folders(&utils::settings_manager())
         .into_iter()
         .map(|folder| folder.path)
@@ -327,7 +327,7 @@ fn folders_from_entries(entries: Vec<(String, String)>, excluded: Vec<String>) -
     folders
 }
 
-pub fn store_music_folders(settings: &gio::Settings, folders: &[MusicFolder]) {
+pub(crate) fn store_music_folders(settings: &gio::Settings, folders: &[MusicFolder]) {
     let uri = |path: &Path| gio::File::for_path(path).uri().to_string();
     let entries: Vec<(String, String)> = folders
         .iter()
@@ -354,7 +354,7 @@ pub fn store_music_folders(settings: &gio::Settings, folders: &[MusicFolder]) {
 // which the sandbox doesn't have; the Music folder's own path is read
 // instead, spelled like the Music folder, so that its tracks have the
 // same paths either way. This blocks, as the portal's files can be slow
-pub fn resolve_folder(path: &Path) -> MusicFolder {
+pub(crate) fn resolve_folder(path: &Path) -> MusicFolder {
     let Some(host) = host_path(path) else {
         return MusicFolder::new(path.to_path_buf());
     };
@@ -392,7 +392,7 @@ fn host_path(path: &Path) -> Option<PathBuf> {
 // What tells folders apart, and whether one is in another: the path
 // outside the sandbox, or the path without symbolic links, as two paths
 // can lead to the same folder. This blocks
-pub fn folder_key(folder: &MusicFolder) -> PathBuf {
+pub(crate) fn folder_key(folder: &MusicFolder) -> PathBuf {
     folder.host.clone().unwrap_or_else(|| {
         std::fs::canonicalize(&folder.path).unwrap_or_else(|_| folder.path.clone())
     })
@@ -403,14 +403,14 @@ pub fn folder_key(folder: &MusicFolder) -> PathBuf {
 // as they can't play. The folders left out of them aren't read, and their
 // tracks are hidden until the scan forgets them
 #[derive(Debug, Default)]
-pub struct Roots {
-    pub available: Vec<PathBuf>,
-    pub unavailable: Vec<PathBuf>,
-    pub excluded: Vec<PathBuf>,
+pub(crate) struct Roots {
+    pub(crate) available: Vec<PathBuf>,
+    pub(crate) unavailable: Vec<PathBuf>,
+    pub(crate) excluded: Vec<PathBuf>,
 }
 
 // The music folders, without those in another one; this blocks
-pub fn roots(folders: &[MusicFolder]) -> Roots {
+pub(crate) fn roots(folders: &[MusicFolder]) -> Roots {
     let keyed = folders
         .iter()
         .map(|folder| (folder_key(folder), folder))
@@ -429,7 +429,7 @@ pub fn roots(folders: &[MusicFolder]) -> Roots {
 
 // The path of a folder relative to a music folder it's in, to leave it
 // out; this blocks
-pub fn relative_to(folder: &MusicFolder, music_folder: &MusicFolder) -> Option<PathBuf> {
+pub(crate) fn relative_to(folder: &MusicFolder, music_folder: &MusicFolder) -> Option<PathBuf> {
     folder_key(folder)
         .strip_prefix(folder_key(music_folder))
         .ok()
@@ -459,7 +459,7 @@ fn outermost<T>(keyed: Vec<(PathBuf, T)>) -> Vec<T> {
 
 // Whether a folder can be read: an empty one counts as gone, as it's often
 // where a drive is mounted, while it isn't
-pub fn is_available(path: &Path) -> bool {
+pub(crate) fn is_available(path: &Path) -> bool {
     std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_some())
 }
 
@@ -467,7 +467,7 @@ pub fn is_available(path: &Path) -> bool {
 // a drive, which keeps deleted files under their own names, and neither
 // are the recycle bins of Windows and of network drives, nor their
 // snapshots, which keep copies of the files, nor Synology's thumbnails
-pub fn is_library_entry(path: &Path) -> bool {
+pub(crate) fn is_library_entry(path: &Path) -> bool {
     const LEFT_OUT: [&[u8]; 6] = [
         b"$recycle.bin",
         b"recycler",
@@ -685,13 +685,13 @@ fn hidden_condition(column: &str, hidden: &[PathBuf]) -> (String, Vec<Vec<u8>>) 
 // by path: when it was added, and its album and work, for `added:`,
 // `is:favorite-album` and `is:favorite-work`
 #[derive(Clone, Debug, Default)]
-pub struct TrackEntry {
-    pub added: i64,
-    pub album_id: Option<String>,
-    pub work_key: Option<String>,
+pub(crate) struct TrackEntry {
+    pub(crate) added: i64,
+    pub(crate) album_id: Option<String>,
+    pub(crate) work_key: Option<String>,
 }
 
-pub fn track_entries() -> HashMap<PathBuf, TrackEntry> {
+pub(crate) fn track_entries() -> HashMap<PathBuf, TrackEntry> {
     query_or_default("read the tracks for a search", |conn| {
         let mut stmt = conn.prepare("SELECT path, added, album_id, work_key FROM tracks")?;
         stmt.query_map([], |row| {
@@ -709,7 +709,7 @@ pub fn track_entries() -> HashMap<PathBuf, TrackEntry> {
 // The albums, sorted by artist, then year and title; the grid sorts them
 // again in the order the user picked. The tracks in the `hidden` folders,
 // which aren't there, are left out
-pub fn albums(hidden: &[PathBuf]) -> Vec<AlbumInfo> {
+pub(crate) fn albums(hidden: &[PathBuf]) -> Vec<AlbumInfo> {
     query_or_default("load the albums", |conn| query_albums(conn, hidden))
 }
 
@@ -801,18 +801,18 @@ fn main_artists(
 // track. Two filters made from the same search and picks are equal, as the
 // time its relative dates go by is only taken when it's matched
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TrackFilter {
+pub(crate) struct TrackFilter {
     // The search, unless it matches every track, see `TrackFilter::query()`
-    pub query: Option<Arc<Query>>,
+    pub(crate) query: Option<Arc<Query>>,
     // What the search needs from the window, if anything
-    pub sources: Option<Arc<SearchSources>>,
-    pub composer: Option<String>,
-    pub performer: Option<String>,
-    pub works: Vec<String>,
+    pub(crate) sources: Option<Arc<SearchSources>>,
+    pub(crate) composer: Option<String>,
+    pub(crate) performer: Option<String>,
+    pub(crate) works: Vec<String>,
     // The tracks themselves, by their paths in the library; none matches an
     // empty list
-    pub tracks: Option<Arc<[PathBuf]>>,
-    pub favorites: Option<Favorites>,
+    pub(crate) tracks: Option<Arc<[PathBuf]>>,
+    pub(crate) favorites: Option<Favorites>,
 }
 
 // The favorites that the tracks have to be among. An empty list matches no
@@ -820,7 +820,7 @@ pub struct TrackFilter {
 // statement, and SQLite takes up to 32,766 of them, far more favorites
 // than anyone marks; past that, the search fails and finds nothing
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Favorites {
+pub(crate) enum Favorites {
     // The tracks of the favorite albums, by their ids
     Albums(Arc<[String]>),
     // The favorite tracks, by their paths in the library
@@ -829,10 +829,10 @@ pub enum Favorites {
 
 // What a search needs that the library doesn't keep
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SearchSources {
+pub(crate) struct SearchSources {
     // The music folders that came through the document portal, with their
     // paths outside the sandbox, which `path:` looks into
-    pub shown_folders: Vec<(PathBuf, PathBuf)>,
+    pub(crate) shown_folders: Vec<(PathBuf, PathBuf)>,
 }
 
 // What `dismas_match()` matches a track with, bound to each statement, so
@@ -1049,13 +1049,13 @@ fn add_functions(conn: &Connection) -> rusqlite::Result<()> {
 
 impl TrackFilter {
     // The search of a text, unless it matches every track
-    pub fn query(text: &str) -> Option<Arc<Query>> {
+    pub(crate) fn query(text: &str) -> Option<Arc<Query>> {
         Some(Query::parse(text, Mode::Search))
             .filter(|query| !query.matches_all())
             .map(Arc::new)
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.query.is_none()
             && self.composer.is_none()
             && self.performer.is_none()
@@ -1185,7 +1185,10 @@ fn filter_values(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<Param> {
 // queue, with the number of their tracks that it does and the number of all
 // their tracks; the tracks in the `hidden` folders are left out, as in
 // `albums()`
-pub fn search_albums(filter: &TrackFilter, hidden: &[PathBuf]) -> HashMap<String, (u32, u32)> {
+pub(crate) fn search_albums(
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+) -> HashMap<String, (u32, u32)> {
     query_or_default("search the albums", |conn| {
         query_search_albums(conn, filter, hidden)
     })
@@ -1228,7 +1231,7 @@ fn query_search_albums(
 
 // The albums of the grid, by their ids, with the paths of their tracks in
 // their order, without the tracks in the hidden folders
-pub fn album_track_paths(hidden: &[PathBuf]) -> Vec<(String, Vec<PathBuf>)> {
+pub(crate) fn album_track_paths(hidden: &[PathBuf]) -> Vec<(String, Vec<PathBuf>)> {
     query_or_default("load the tracks of the albums", |conn| {
         query_album_track_paths(conn, hidden)
     })
@@ -1236,7 +1239,7 @@ pub fn album_track_paths(hidden: &[PathBuf]) -> Vec<(String, Vec<PathBuf>)> {
 
 // The title of an album, as `albums()` gives it, without the tracks in the
 // `hidden` folders
-pub fn album_title(album_id: &str, hidden: &[PathBuf]) -> Option<String> {
+pub(crate) fn album_title(album_id: &str, hidden: &[PathBuf]) -> Option<String> {
     query_or_default("look up the title of an album", |conn| {
         use rusqlite::types::Value;
         let (hidden_sql, hidden_params) = hidden_condition("file", hidden);
@@ -1311,23 +1314,23 @@ impl TrackOrder {
 
 // A composer of the tracks of the albums of the grid
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ComposerInfo {
+pub(crate) struct ComposerInfo {
     // See `composer_key()`
-    pub key: String,
+    pub(crate) key: String,
     // The name its tracks give it the most, and the name it's sorted by
-    pub name: String,
-    pub sort: String,
+    pub(crate) name: String,
+    pub(crate) sort: String,
     // What the list shows: the sort name, as in "Bach, Johann Sebastian",
     // when the tags give one, and otherwise the name, as the sort name
     // worked out from it would turn a band's name around, or a name whose
     // family name is first already
-    pub label: String,
+    pub(crate) label: String,
     // Both names, normalized with `normalize_search_text()`, which
     // searching the list looks into
-    pub search: String,
+    pub(crate) search: String,
     // The number of albums, or works, with a track by the composer that
     // the filter matches, see `Counted`
-    pub count: u32,
+    pub(crate) count: u32,
 }
 
 // What the lists of composers and performers count: the albums with a
@@ -1335,7 +1338,7 @@ pub struct ComposerInfo {
 // the Works page, where the tracks that aren't part of a work count for
 // nothing, so that picking someone listed always finds some
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Counted {
+pub(crate) enum Counted {
     Albums,
     Works,
 }
@@ -1393,7 +1396,7 @@ fn read_entries(
 
 // Whether a track of the albums of the grid has a composer, without the
 // tracks in the `hidden` folders
-pub fn has_composers(hidden: &[PathBuf]) -> bool {
+pub(crate) fn has_composers(hidden: &[PathBuf]) -> bool {
     query_or_default("look for composers", |conn| {
         query_tracks_have(conn, "composers", hidden)
     })
@@ -1402,7 +1405,11 @@ pub fn has_composers(hidden: &[PathBuf]) -> bool {
 // The composers of the tracks of the albums of the grid that the filter
 // matches, by their sort names, without the tracks in the `hidden` folders,
 // with the number of the albums, or works, of those tracks
-pub fn composers(hidden: &[PathBuf], filter: &TrackFilter, counted: Counted) -> Vec<ComposerInfo> {
+pub(crate) fn composers(
+    hidden: &[PathBuf],
+    filter: &TrackFilter,
+    counted: Counted,
+) -> Vec<ComposerInfo> {
     query_or_default("list the composers", |conn| {
         query_composers(conn, hidden, filter, counted)
     })
@@ -1525,31 +1532,31 @@ fn entry_of<'a, V: Default>(map: &'a mut HashMap<String, V>, key: &str) -> &'a m
 // A conductor or performer of the tracks of the albums of the grid, see
 // `performer_entries()`
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PerformerInfo {
+pub(crate) struct PerformerInfo {
     // See `composer_key()`
-    pub key: String,
+    pub(crate) key: String,
     // Whether they conduct, are a group or play, by most of their albums,
     // see `query_performers()`
-    pub kind: PerformerKind,
+    pub(crate) kind: PerformerKind,
     // The name their tracks give them the most, and the name they're
     // sorted by
-    pub name: String,
-    pub sort: String,
+    pub(crate) name: String,
+    pub(crate) sort: String,
     // What they play or sing, the most common first, e.g. "piano" and
     // "harpsichord"
-    pub roles: Vec<String>,
+    pub(crate) roles: Vec<String>,
     // The names and the roles, normalized with `normalize_search_text()`,
     // which searching the list looks into, so that "piano" finds the
     // pianists
-    pub search: String,
+    pub(crate) search: String,
     // The number of albums, or works, with a track they perform on that
     // the filter matches, see `Counted`
-    pub count: u32,
+    pub(crate) count: u32,
 }
 
 // Whether a track of the albums of the grid has a conductor or performer,
 // without the tracks in the `hidden` folders
-pub fn has_performers(hidden: &[PathBuf]) -> bool {
+pub(crate) fn has_performers(hidden: &[PathBuf]) -> bool {
     query_or_default("look for performers", |conn| {
         query_tracks_have(conn, "performers", hidden)
     })
@@ -1559,7 +1566,7 @@ pub fn has_performers(hidden: &[PathBuf]) -> bool {
 // grid that the filter matches, in that order, each by their sort names,
 // without the tracks in the `hidden` folders, with the number of the
 // albums of those tracks
-pub fn performers(
+pub(crate) fn performers(
     hidden: &[PathBuf],
     filter: &TrackFilter,
     counted: Counted,
@@ -1684,33 +1691,33 @@ fn query_performers(
 
 // A work of the albums of the grid, see `WorkEntry`
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkInfo {
-    pub key: String,
+pub(crate) struct WorkInfo {
+    pub(crate) key: String,
     // The name its tracks give it the most, and its full title, if that's
     // not the name
-    pub name: String,
-    pub title: Option<String>,
+    pub(crate) name: String,
+    pub(crate) title: Option<String>,
     // The work it's part of, or the collection it's in
-    pub collection: Option<String>,
+    pub(crate) collection: Option<String>,
     // For an arrangement, the work it arranges, and what it is, if
     // MusicBrainz says
-    pub arrangement: Option<Arrangement>,
+    pub(crate) arrangement: Option<Arrangement>,
     // The keys of the arrangements of it that are listed under it, rather
     // than on their own, see `listed_under()`
-    pub arrangements: Vec<String>,
-    pub composers: Vec<WorkComposer>,
+    pub(crate) arrangements: Vec<String>,
+    pub(crate) composers: Vec<WorkComposer>,
     // The number of its recordings that the filter matches, those of its
     // arrangements included, see `recordings_of_works()`
-    pub recordings: u32,
+    pub(crate) recordings: u32,
     // Whether it's a favorite, or one of its recordings is; they're in the
     // play stats, as they can't be read again from the music
-    pub favorite: bool,
+    pub(crate) favorite: bool,
 }
 
 impl WorkInfo {
     // Its key and those of the arrangements listed under it, the key first,
     // which take its tracks from the albums, see `TrackFilter`
-    pub fn keys(&self) -> Vec<String> {
+    pub(crate) fn keys(&self) -> Vec<String> {
         self.all_keys().cloned().collect()
     }
 
@@ -1722,12 +1729,12 @@ impl WorkInfo {
     // of those of the favorite recordings, see
     // `play_stats::favorite_work_keys()`: by its own key, or by that of an
     // arrangement listed under it
-    pub fn is_among(&self, favorites: &HashSet<String>) -> bool {
+    pub(crate) fn is_among(&self, favorites: &HashSet<String>) -> bool {
         self.all_keys().any(|key| favorites.contains(key))
     }
 
     // The names of its composers, as a list
-    pub fn composer_names(&self) -> String {
+    pub(crate) fn composer_names(&self) -> String {
         self.composers
             .iter()
             .map(|composer| &composer.name)
@@ -1736,35 +1743,35 @@ impl WorkInfo {
 
     // The keys of its composers, which tell the works of other composers
     // apart, see `composer_key()`
-    pub fn composer_keys(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn composer_keys(&self) -> impl Iterator<Item = &str> {
         self.composers.iter().map(|composer| composer.key.as_str())
     }
 }
 
 // A composer of a work, see `composer_entries()`
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkComposer {
-    pub key: String,
-    pub name: String,
-    pub sort: String,
+pub(crate) struct WorkComposer {
+    pub(crate) key: String,
+    pub(crate) name: String,
+    pub(crate) sort: String,
 }
 
 // A recording of a work: its tracks on an album, see
 // `recordings_of_works()`
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkRecording {
-    pub album_id: String,
-    pub year: Option<String>,
+pub(crate) struct WorkRecording {
+    pub(crate) album_id: String,
+    pub(crate) year: Option<String>,
     // The conductors and performers of its tracks, as the credits line of
     // a track names them, see `performers_line()`
-    pub performers: String,
-    pub paths: Vec<PathBuf>,
+    pub(crate) performers: String,
+    pub(crate) paths: Vec<PathBuf>,
     // The key of the work of its first track, which it's found by, e.g. as
     // a favorite
-    pub work_key: String,
+    pub(crate) work_key: String,
     // What it is, if it's all of an arrangement listed under the work, see
     // `listed_under()`
-    pub arrangement: Option<Arrangement>,
+    pub(crate) arrangement: Option<Arrangement>,
 }
 
 // A track of an album with works, as the recordings of the works are
@@ -1808,7 +1815,7 @@ impl WorkRow {
 // Whether a track is in an album, without the tracks in the `hidden`
 // folders; with only the folders left out hidden, it says whether the
 // music folders that are missing or empty have albums
-pub fn has_albums(hidden: &[PathBuf]) -> bool {
+pub(crate) fn has_albums(hidden: &[PathBuf]) -> bool {
     query_or_default("look for albums", |conn| {
         query_tracks_have(conn, "album_id", hidden)
     })
@@ -1816,7 +1823,7 @@ pub fn has_albums(hidden: &[PathBuf]) -> bool {
 
 // Whether a track of the albums of the grid is part of a work, without the
 // tracks in the `hidden` folders
-pub fn has_works(hidden: &[PathBuf]) -> bool {
+pub(crate) fn has_works(hidden: &[PathBuf]) -> bool {
     query_or_default("look for works", |conn| {
         query_tracks_have(conn, "work_key", hidden)
     })
@@ -1828,7 +1835,7 @@ pub fn has_works(hidden: &[PathBuf]) -> bool {
 // without a composer are last. An arrangement of one of them is listed
 // under it rather than on its own, see `listed_under()`. The tracks in the
 // `hidden` folders are left out
-pub fn works(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkInfo> {
+pub(crate) fn works(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkInfo> {
     query_or_default("list the works", |conn| query_works(conn, filter, hidden))
 }
 
@@ -1843,41 +1850,44 @@ fn query_works(
 
 // A work the Works page lists, as Play a Random Work picks from them
 #[derive(Debug)]
-pub struct WorkCandidate {
-    pub info: WorkInfo,
+pub(crate) struct WorkCandidate {
+    pub(crate) info: WorkInfo,
     // The recordings of it that the filter matches, its own and those of
     // the arrangements listed under it
-    pub recordings: Vec<RecordingCandidate>,
+    pub(crate) recordings: Vec<RecordingCandidate>,
     // The tracks of all its recordings, those the filter doesn't match
     // too, which tell when it was heard last
-    pub paths: Vec<PathBuf>,
+    pub(crate) paths: Vec<PathBuf>,
 }
 
 // A recording of a work that Play a Random Work can play
 #[derive(Debug)]
-pub struct RecordingCandidate {
-    pub album_id: String,
+pub(crate) struct RecordingCandidate {
+    pub(crate) album_id: String,
     // The work of its first track, by which a favorite recording is kept,
     // see `play_stats::FavoriteRecording`
-    pub work_key: String,
+    pub(crate) work_key: String,
     // Its tracks, in the order of their album
-    pub paths: Vec<PathBuf>,
+    pub(crate) paths: Vec<PathBuf>,
     // Its length in whole seconds, from those of its tracks that are known,
     // as if the others were as long, or `None` when none is
-    pub length: Option<u64>,
+    pub(crate) length: Option<u64>,
     // Whether it's a single movement of the work, in one track or several,
     // such as an aria of an opera on a recital
-    pub single_movement: bool,
+    pub(crate) single_movement: bool,
     // What it is, if it's all of an arrangement listed under the work, as
     // in `WorkRecording`
-    pub arrangement: Option<Arrangement>,
+    pub(crate) arrangement: Option<Arrangement>,
 }
 
 // The works that `works()` lists for the filter, in its order, each with
 // the recordings of it that the filter matches, as `work_recordings()`
 // gives them with its keys; the tracks in the `hidden` folders are left
 // out
-pub fn work_recording_candidates(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<WorkCandidate> {
+pub(crate) fn work_recording_candidates(
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+) -> Vec<WorkCandidate> {
     query_or_default("load the recordings of the works", |conn| {
         query_work_recording_candidates(conn, filter, hidden)
     })
@@ -2191,11 +2201,11 @@ fn sort_works(works: Vec<WorkInfo>) -> Vec<WorkInfo> {
 pub(crate) struct WorkToOrder<'a> {
     // What tells the work apart, so that it counts once for the catalogue
     // of its composers however many times it's there
-    pub key: &'a str,
-    pub composers: &'a [WorkComposer],
-    pub name: &'a str,
+    pub(crate) key: &'a str,
+    pub(crate) composers: &'a [WorkComposer],
+    pub(crate) name: &'a str,
     // Its full title, whose catalogue numbers count when its name has none
-    pub title: Option<&'a str>,
+    pub(crate) title: Option<&'a str>,
 }
 
 // Where a work goes among others, see `work_orders()`
@@ -2281,7 +2291,7 @@ pub(crate) fn work_orders(works: &[WorkToOrder]) -> Vec<WorkOrder> {
 // The key of the work of a track, if it's part of one in the library,
 // without the tracks in the `hidden` folders; the Works page lists an
 // arrangement under the work it arranges, see `listed_under()`
-pub fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<String> {
+pub(crate) fn track_work(path: &Path, hidden: &[PathBuf]) -> Option<String> {
     query_or_default("look up the work of a track", |conn| {
         query_track_work(conn, path, hidden)
     })
@@ -2312,7 +2322,7 @@ fn query_track_work(
 // `WorkInfo::keys()`, with all their tracks, see `recordings_of_works()`,
 // by the year of their albums, those without one last, and then by the
 // albums' titles. The tracks in the `hidden` folders are left out
-pub fn work_recordings(
+pub(crate) fn work_recordings(
     keys: &[String],
     filter: &TrackFilter,
     hidden: &[PathBuf],
@@ -2711,7 +2721,10 @@ fn performer_keys(entries: Option<&str>) -> impl Iterator<Item = &str> {
 // The tracks the filter matches, as the Tracks page takes them from the
 // albums, each with its title, if its tags give one; the tracks in the
 // `hidden` folders are left out
-pub fn matching_tracks(filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<(PathBuf, Option<String>)> {
+pub(crate) fn matching_tracks(
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+) -> Vec<(PathBuf, Option<String>)> {
     query_or_default("load the tracks the search finds", |conn| {
         query_matching_tracks(conn, filter, hidden)
     })
@@ -2737,7 +2750,11 @@ fn query_matching_tracks(
 // The files of the tracks of an album, in order; with a filter, only the
 // tracks it matches, as in `search_albums()`. The tracks in the `hidden`
 // folders are left out, as in `albums()`
-pub fn album_tracks(album_id: &str, filter: &TrackFilter, hidden: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn album_tracks(
+    album_id: &str,
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+) -> Vec<PathBuf> {
     query_or_default(
         format_args!("load the tracks of album {album_id}"),
         |conn| query_album_tracks(conn, album_id, filter, hidden),
@@ -2749,7 +2766,7 @@ pub fn album_tracks(album_id: &str, filter: &TrackFilter, hidden: &[PathBuf]) ->
 
 // All the files of the tracks of an album, as `album_tracks()` gives them,
 // and whether they're on more than one disc
-pub fn album_tracks_and_discs(album_id: &str, hidden: &[PathBuf]) -> (Vec<PathBuf>, bool) {
+pub(crate) fn album_tracks_and_discs(album_id: &str, hidden: &[PathBuf]) -> (Vec<PathBuf>, bool) {
     let tracks = query_or_default(
         format_args!("load the tracks of album {album_id}"),
         |conn| query_album_tracks(conn, album_id, &TrackFilter::default(), hidden),
@@ -2793,14 +2810,14 @@ fn query_album_tracks(
 // the disc folder it's in, as in Album/CD 2, by which `TrackOrder` puts its
 // tracks in order; with neither, the first
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Disc {
+pub(crate) enum Disc {
     Number(u32),
     Folder(PathBuf),
 }
 
 impl Disc {
     // The disc of a track with the disc number `number`, in the folder `dir`
-    pub fn of(number: Option<u32>, dir: Option<&Path>) -> Self {
+    pub(crate) fn of(number: Option<u32>, dir: Option<&Path>) -> Self {
         match (number, dir) {
             (Some(number), _) => Self::Number(number),
             (None, Some(dir)) if dir.file_name().is_some_and(is_disc_folder) => {
@@ -2825,7 +2842,7 @@ fn on_several_discs(tracks: &[(Option<i64>, PathBuf)]) -> bool {
 
 // The album of a track, if it's part of the library and not in one of the
 // `hidden` folders
-pub fn track_album(path: &Path, hidden: &[PathBuf]) -> Option<String> {
+pub(crate) fn track_album(path: &Path, hidden: &[PathBuf]) -> Option<String> {
     query_or_default(format_args!("look up the album of {path:?}"), |conn| {
         query_track_album(conn, path, hidden)
     })
@@ -2853,7 +2870,11 @@ fn query_track_album(
 // Updates the database with the tracks in the music folders, and makes the
 // covers of the albums for the grid at the sizes `thumbnail_sizes` gives;
 // this blocks, so it should be called from a separate thread
-pub fn scan(folders: &[MusicFolder], thumbnail_sizes: ThumbnailSizes, sender: &Sender<ScanEvent>) {
+pub(crate) fn scan(
+    folders: &[MusicFolder],
+    thumbnail_sizes: ThumbnailSizes,
+    sender: &Sender<ScanEvent>,
+) {
     let now = Instant::now();
     let roots = roots(folders);
     debug!("Library: reading {roots:?}");
@@ -3458,18 +3479,18 @@ fn update_covers(
 
 // The sizes the album grid's thumbnails are made at, in pixels
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ThumbnailSizes {
+pub(crate) struct ThumbnailSizes {
     // As large as the grid shows the covers, on the monitor with the
     // largest scale
-    pub wanted: u32,
+    pub(crate) wanted: u32,
     // As large as the grid shows them at a scale of 2, the largest the
     // thumbnails are made for
-    pub scale_2: u32,
+    pub(crate) scale_2: u32,
 }
 
 // What a scan does with an album's thumbnail
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThumbnailUpdate {
+pub(crate) enum ThumbnailUpdate {
     Keep,
     // Made smaller, at this size, from the thumbnail itself
     Shrink(u32),
@@ -3486,7 +3507,7 @@ impl ThumbnailSizes {
     // wanted was made while the covers were zoomed in: reading a cover
     // smaller than its thumbnail scales it down each time, which takes
     // several times as long, so it's made smaller instead
-    pub fn update(self, made: Option<u32>) -> ThumbnailUpdate {
+    pub(crate) fn update(self, made: Option<u32>) -> ThumbnailUpdate {
         match made {
             Some(made) if made == self.wanted || made == self.scale_2 => ThumbnailUpdate::Keep,
             Some(made) if made > self.scale_2.max(self.wanted) => {
@@ -3705,7 +3726,7 @@ fn cue_track_tags(
 
 // MusicBrainz ids are UUIDs; the album id names the file of its cover, so
 // anything else in the tag, like a path, must not be used as one
-pub fn is_mbid(s: &str) -> bool {
+pub(crate) fn is_mbid(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
@@ -3713,7 +3734,7 @@ pub fn is_mbid(s: &str) -> bool {
 // or "Disque 3", in a few languages: a word for a disc, then its number,
 // of up to three digits, as box sets can have a hundred discs, but "Disco
 // 1980" isn't one, and then anything after a space or a separator
-pub fn is_disc_folder(name: &std::ffi::OsStr) -> bool {
+pub(crate) fn is_disc_folder(name: &std::ffi::OsStr) -> bool {
     const WORDS: [&str; 7] = ["cd", "disc", "disk", "disco", "disque", "schijf", "płyta"];
     const SEPARATORS: [char; 4] = [' ', '_', '-', '.'];
 
@@ -3734,7 +3755,7 @@ pub fn is_disc_folder(name: &std::ffi::OsStr) -> bool {
 // The folder of the album that `dir` is a disc folder of, as Album is for
 // Album/CD 1, where the album's cover and booklet are often left; `None`
 // when it isn't a disc folder
-pub fn disc_album_folder(dir: &Path) -> Option<&Path> {
+pub(crate) fn disc_album_folder(dir: &Path) -> Option<&Path> {
     dir.parent()
         .filter(|_| dir.file_name().is_some_and(is_disc_folder))
 }
@@ -3745,7 +3766,7 @@ pub fn disc_album_folder(dir: &Path) -> Option<&Path> {
 // for a track of a sheet, the file the library keeps, rather than the
 // audio file that the track menu selects, which would mean reading the
 // sheet; the two are next to each other
-pub fn album_folder_entry(path: &Path) -> &Path {
+pub(crate) fn album_folder_entry(path: &Path) -> &Path {
     let path = cue_sheet::real_path(path);
     match path.parent() {
         Some(dir) if disc_album_folder(dir).is_some() => dir,
@@ -3765,7 +3786,7 @@ pub(crate) fn album_folder(path: &Path) -> Option<&Path> {
 }
 
 // The album of a track without an album tag: the folder it's in, by name
-pub fn folder_album_title(path: &Path) -> Option<String> {
+pub(crate) fn folder_album_title(path: &Path) -> Option<String> {
     album_folder(path)?
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -4061,7 +4082,7 @@ fn composer_entries(names: &[String], sorts: &[String]) -> Option<String> {
 
 // What tells a composer apart: the name, ignoring case and accents, and
 // how it's spaced
-pub fn composer_key(name: &str) -> String {
+pub(crate) fn composer_key(name: &str) -> String {
     normalize_key_text(name)
         .split_whitespace()
         .collect::<Vec<_>>()

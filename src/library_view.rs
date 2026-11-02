@@ -90,7 +90,7 @@ const UNWATCHED_RESCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 // the other
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, glib::Enum)]
 #[enum_type(name = "DismasLibraryPage")]
-pub enum LibraryPage {
+pub(crate) enum LibraryPage {
     #[default]
     Albums,
     Tracks,
@@ -99,7 +99,7 @@ pub enum LibraryPage {
 
 impl LibraryPage {
     // The name of the window's page
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Albums => "albums",
             Self::Tracks => "tracks",
@@ -108,14 +108,14 @@ impl LibraryPage {
     }
 
     // The page with the name of a window's page, if it's one of these
-    pub fn named(name: &str) -> Option<Self> {
+    pub(crate) fn named(name: &str) -> Option<Self> {
         [Self::Albums, Self::Tracks, Self::Works]
             .into_iter()
             .find(|page| page.name() == name)
     }
 
     // Whether the page shows the grid of the albums
-    pub fn shows_grid(self) -> bool {
+    pub(crate) fn shows_grid(self) -> bool {
         self != Self::Works
     }
 
@@ -131,12 +131,12 @@ impl LibraryPage {
 // the filter matches, which play whole; on the Tracks page, the tracks the
 // filter matches; on the Works page, the works listed for the filter, and
 // the recordings of them that it matches
-pub struct RandomPool {
-    pub page: LibraryPage,
-    pub filter: TrackFilter,
+pub(crate) struct RandomPool {
+    pub(crate) page: LibraryPage,
+    pub(crate) filter: TrackFilter,
     // Whether the heart is on, which only the Works page leaves out of the
     // filter, as it shows only the favorite works
-    pub favorites_only: bool,
+    pub(crate) favorites_only: bool,
 }
 
 // The albums dragged from the grid, with the words of the search each was
@@ -144,14 +144,14 @@ pub struct RandomPool {
 // the selected ones; only Dismas takes them
 #[derive(Clone, Debug, glib::Boxed)]
 #[boxed_type(name = "DismasAlbumDrag")]
-pub struct AlbumDrag {
-    pub albums: Vec<(String, TrackFilter)>,
-    pub selection: bool,
+pub(crate) struct AlbumDrag {
+    pub(crate) albums: Vec<(String, TrackFilter)>,
+    pub(crate) selection: bool,
 }
 
 // The covers loaded most recently
 #[derive(Debug)]
-pub struct TextureCache {
+pub(crate) struct TextureCache {
     textures: HashMap<String, gdk::Texture>,
     order: VecDeque<String>,
     capacity: usize,
@@ -220,181 +220,181 @@ mod imp {
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[template(resource = "/io/github/dachshund7/Dismas/library-view.ui")]
     #[properties(wrapper_type = super::LibraryView)]
-    pub struct LibraryView {
+    pub(crate) struct LibraryView {
         #[template_child]
-        pub menu_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub sort_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) sort_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub select_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) select_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub favorites_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) favorites_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub search_entry: TemplateChild<gtk::SearchEntry>,
+        pub(crate) search_entry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
-        pub search_problem: TemplateChild<adw::Banner>,
+        pub(crate) search_problem: TemplateChild<adw::Banner>,
         #[template_child]
-        pub composer_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) composer_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub composer_popover: TemplateChild<gtk::Popover>,
+        pub(crate) composer_popover: TemplateChild<gtk::Popover>,
         #[template_child]
-        pub composer_search: TemplateChild<gtk::SearchEntry>,
+        pub(crate) composer_search: TemplateChild<gtk::SearchEntry>,
         #[template_child]
-        pub composer_list: TemplateChild<gtk::ListView>,
+        pub(crate) composer_list: TemplateChild<gtk::ListView>,
         #[template_child]
-        pub performer_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) performer_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub performer_popover: TemplateChild<gtk::Popover>,
+        pub(crate) performer_popover: TemplateChild<gtk::Popover>,
         #[template_child]
-        pub performer_search: TemplateChild<gtk::SearchEntry>,
+        pub(crate) performer_search: TemplateChild<gtk::SearchEntry>,
         #[template_child]
-        pub performer_list: TemplateChild<gtk::ListView>,
+        pub(crate) performer_list: TemplateChild<gtk::ListView>,
         #[template_child]
-        pub page_title: TemplateChild<adw::WindowTitle>,
+        pub(crate) page_title: TemplateChild<adw::WindowTitle>,
         #[template_child]
-        pub works_list: TemplateChild<gtk::ListView>,
+        pub(crate) works_list: TemplateChild<gtk::ListView>,
         #[template_child]
-        pub albums_stack: TemplateChild<gtk::Stack>,
+        pub(crate) albums_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub no_favorites_page: TemplateChild<adw::StatusPage>,
+        pub(crate) no_favorites_page: TemplateChild<adw::StatusPage>,
         #[template_child]
-        pub empty_page: TemplateChild<adw::StatusPage>,
+        pub(crate) empty_page: TemplateChild<adw::StatusPage>,
         #[template_child]
-        pub empty_button: TemplateChild<gtk::Button>,
+        pub(crate) empty_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub scan_progress: TemplateChild<gtk::ProgressBar>,
+        pub(crate) scan_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
-        pub update_progress: TemplateChild<gtk::ProgressBar>,
+        pub(crate) update_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
-        pub grid_view: TemplateChild<gtk::GridView>,
+        pub(crate) grid_view: TemplateChild<gtk::GridView>,
         #[template_child]
-        pub grid_clamp: TemplateChild<adw::ClampScrollable>,
+        pub(crate) grid_clamp: TemplateChild<adw::ClampScrollable>,
         #[template_child]
-        pub select_all_button: TemplateChild<gtk::Button>,
+        pub(crate) select_all_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub selected_label: TemplateChild<gtk::Label>,
+        pub(crate) selected_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub play_albums_button: TemplateChild<gtk::Button>,
+        pub(crate) play_albums_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub add_albums_button: TemplateChild<adw::SplitButton>,
+        pub(crate) add_albums_button: TemplateChild<adw::SplitButton>,
 
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
-        pub selection_mode: Cell<bool>,
+        pub(crate) selection_mode: Cell<bool>,
         // The page shown; the works are only shown while a track is part
         // of one
         #[property(get, set = Self::set_page, explicit_notify, builder(LibraryPage::default()))]
-        pub page: Cell<LibraryPage>,
+        pub(crate) page: Cell<LibraryPage>,
         #[property(get)]
-        pub has_works: Cell<bool>,
+        pub(crate) has_works: Cell<bool>,
         // The section of the main menu with Play a Random …, whose one item
         // names what the page shows
-        pub random_menu: gio::Menu,
+        pub(crate) random_menu: gio::Menu,
         // The step the covers of the grid and of the works are zoomed to,
         // which the cells follow
         #[property(get)]
-        pub cover_zoom: Cell<i32>,
+        pub(crate) cover_zoom: Cell<i32>,
         // The works the search finds, and the filter and the generation of
         // the library they were read for, `None` until they're read. The
         // generation goes up each time the library is read again, as the
         // tracks or the hidden folders can have changed
-        pub works: RefCell<Option<gio::ListStore>>,
-        pub works_filter: RefCell<Option<(TrackFilter, u32)>>,
-        pub works_generation: Cell<u32>,
+        pub(crate) works: RefCell<Option<gio::ListStore>>,
+        pub(crate) works_filter: RefCell<Option<(TrackFilter, u32)>>,
+        pub(crate) works_generation: Cell<u32>,
         // The work of the list that's open, showing the covers of its
         // recordings, and the rows the list shows its works in, by their keys,
         // to open and close them. The generation goes up each time the
         // covers of a work are read, so that those of one opened before
         // are dropped
-        pub expanded_work: RefCell<Option<super::works::ExpandedWork>>,
-        pub work_rows: RefCell<HashMap<String, glib::WeakRef<work_row::WorkRow>>>,
-        pub covers_generation: Cell<u32>,
+        pub(crate) expanded_work: RefCell<Option<super::works::ExpandedWork>>,
+        pub(crate) work_rows: RefCell<HashMap<String, glib::WeakRef<work_row::WorkRow>>>,
+        pub(crate) covers_generation: Cell<u32>,
         // A work to go to once the works are read, and the number of works
         // gone to, so that a new search's list isn't scrolled to its top
         // once one was
-        pub pending_work: RefCell<Option<super::works::PendingWork>>,
-        pub works_revealed: Cell<u32>,
+        pub(crate) pending_work: RefCell<Option<super::works::PendingWork>>,
+        pub(crate) works_revealed: Cell<u32>,
         // The selected albums, or on the Works page the covers of the open
         // work's recordings, see `Album::selection_key()`; a new search
         // clears them, so they're all among the albums it shows
-        pub selected: RefCell<HashSet<SelectionKey>>,
+        pub(crate) selected: RefCell<HashSet<SelectionKey>>,
         // The ids of the albums marked as favorites
-        pub favorite_albums: RefCell<BTreeSet<String>>,
+        pub(crate) favorite_albums: RefCell<BTreeSet<String>>,
         // The paths of the favorite tracks, read when the heart first needs
         // them, see `favorite_tracks()`
-        pub favorite_tracks: RefCell<Option<Arc<[PathBuf]>>>,
+        pub(crate) favorite_tracks: RefCell<Option<Arc<[PathBuf]>>>,
         // Whether the focus of the window is followed, see
         // `setup_lost_focus()`
-        pub follows_focus: Cell<bool>,
+        pub(crate) follows_focus: Cell<bool>,
         // The last album selected or unselected with a click, where
         // Shift+click starts selecting from
-        pub selection_anchor: glib::WeakRef<Album>,
+        pub(crate) selection_anchor: glib::WeakRef<Album>,
         // Tracks are being added to the queue
-        pub loading: Cell<bool>,
+        pub(crate) loading: Cell<bool>,
         // The drag source of the album being dragged, to cancel the drag
-        pub drag_source: RefCell<Option<gtk::DragSource>>,
+        pub(crate) drag_source: RefCell<Option<gtk::DragSource>>,
 
-        pub model: RefCell<Option<gio::ListStore>>,
-        pub filter: RefCell<Option<gtk::CustomFilter>>,
-        pub sorter: RefCell<Option<gtk::CustomSorter>>,
-        pub settings: OnceCell<gio::Settings>,
+        pub(crate) model: RefCell<Option<gio::ListStore>>,
+        pub(crate) filter: RefCell<Option<gtk::CustomFilter>>,
+        pub(crate) sorter: RefCell<Option<gtk::CustomSorter>>,
+        pub(crate) settings: OnceCell<gio::Settings>,
         // The albums matching the search, if there is one, with the
         // number of their tracks that match it and the number of all of them
-        pub search_matches: RefCell<Option<HashMap<String, (u32, u32)>>>,
+        pub(crate) search_matches: RefCell<Option<HashMap<String, (u32, u32)>>>,
         // The words of the search, and the composer and the performer, that
         // the matches are for
-        pub search_filter: RefCell<TrackFilter>,
+        pub(crate) search_filter: RefCell<TrackFilter>,
         // The composer and the performer whose albums the grid shows,
         // picked from the lists next to the search
-        pub composer: RefCell<Option<library::ComposerInfo>>,
-        pub performer: RefCell<Option<library::PerformerInfo>>,
-        pub textures: RefCell<TextureCache>,
-        pub pending_covers: RefCell<super::PendingCovers>,
+        pub(crate) composer: RefCell<Option<library::ComposerInfo>>,
+        pub(crate) performer: RefCell<Option<library::PerformerInfo>>,
+        pub(crate) textures: RefCell<TextureCache>,
+        pub(crate) pending_covers: RefCell<super::PendingCovers>,
         // Bumped when the size the covers are read at changes, so that the
         // covers still to be read at the size before aren't read, and those
         // being read aren't kept; the reading threads look at it too
-        pub cover_generation: Arc<AtomicU32>,
+        pub(crate) cover_generation: Arc<AtomicU32>,
         // The size the last scan made the covers at, 0 before the first
-        pub thumbnail_size: Cell<u32>,
+        pub(crate) thumbnail_size: Cell<u32>,
         // The buttons that zoom the covers, in the main menu
-        pub zoom_row: ZoomRow,
+        pub(crate) zoom_row: ZoomRow,
         // The `library` actions, of which zooming is only on short of the
         // ends it goes to
-        pub actions: gio::SimpleActionGroup,
+        pub(crate) actions: gio::SimpleActionGroup,
         // The cells of the grid that are mapped, which are about the ones
         // on screen
-        pub mapped_cells: Cell<u32>,
+        pub(crate) mapped_cells: Cell<u32>,
         // The music folders are being read
         #[property(get)]
-        pub scanning: Cell<bool>,
+        pub(crate) scanning: Cell<bool>,
         // The folders changed while they were being read, so they're read
         // again once it's done; two scans would write at once
-        pub rescan_pending: Cell<bool>,
+        pub(crate) rescan_pending: Cell<bool>,
         // Watches the folders of the library, to read them again when
         // their files change
-        pub watch: OnceCell<Rc<library::FolderWatch>>,
+        pub(crate) watch: OnceCell<Rc<library::FolderWatch>>,
         // A music folder that's there can't be watched, so it's read again
         // when the albums are shown, if the last scan finished a while ago
-        pub unwatched: Cell<bool>,
-        pub last_scan_finished: Cell<Option<Instant>>,
+        pub(crate) unwatched: Cell<bool>,
+        pub(crate) last_scan_finished: Cell<Option<Instant>>,
         // Bumped for each reload of the albums
-        pub reload_generation: Cell<u32>,
+        pub(crate) reload_generation: Cell<u32>,
         // The music folders that aren't there, as of the last reload, whose
         // albums are hidden
-        pub hidden_folders: RefCell<Vec<PathBuf>>,
+        pub(crate) hidden_folders: RefCell<Vec<PathBuf>>,
         // No album is shown, and the music folders that are missing or
         // empty have albums, as when their drive isn't plugged in
-        pub albums_unavailable: Cell<bool>,
+        pub(crate) albums_unavailable: Cell<bool>,
         // The albums the grid shows, as they were read
-        pub shown_albums: RefCell<Vec<library::AlbumInfo>>,
+        pub(crate) shown_albums: RefCell<Vec<library::AlbumInfo>>,
         // A scan made covers again since the albums were last shown, which
         // can keep their paths, and whether it changed tracks, which a
         // search can find or not find now
-        pub covers_changed: Cell<bool>,
-        pub tracks_changed: Cell<bool>,
+        pub(crate) covers_changed: Cell<bool>,
+        pub(crate) tracks_changed: Cell<bool>,
         // What the albums are sorted by, read from the settings once for
         // all the comparisons of a sort
-        pub sort_order: Cell<Option<(AlbumSort, bool)>>,
+        pub(crate) sort_order: Cell<Option<(AlbumSort, bool)>>,
     }
 
     #[glib::object_subclass]
@@ -540,7 +540,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct LibraryView(ObjectSubclass<imp::LibraryView>)
+    pub(crate) struct LibraryView(ObjectSubclass<imp::LibraryView>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -552,7 +552,9 @@ impl Default for LibraryView {
 }
 
 impl LibraryView {
-    pub fn connect_album_activated<F: Fn(&Self, &Album, &TrackFilter, &PickNames) + 'static>(
+    pub(crate) fn connect_album_activated<
+        F: Fn(&Self, &Album, &TrackFilter, &PickNames) + 'static,
+    >(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -568,7 +570,7 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_work_menu_requested<
+    pub(crate) fn connect_work_menu_requested<
         F: Fn(&Self, &library::WorkInfo, &gtk::Widget, f64, f64) + 'static,
     >(
         &self,
@@ -587,7 +589,7 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_album_menu_requested<F: Fn(&Self, &AlbumCell, f64, f64) + 'static>(
+    pub(crate) fn connect_album_menu_requested<F: Fn(&Self, &AlbumCell, f64, f64) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -600,7 +602,7 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_add_albums<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_add_albums<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "add-albums",
             false,
@@ -608,7 +610,10 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_play_albums<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_play_albums<F: Fn(&Self) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
         self.connect_closure(
             "play-albums",
             false,
@@ -616,7 +621,10 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_albums_drag_begin<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_albums_drag_begin<F: Fn(&Self) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
         self.connect_closure(
             "albums-drag-begin",
             false,
@@ -624,7 +632,10 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_albums_drag_end<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_albums_drag_end<F: Fn(&Self) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
         self.connect_closure(
             "albums-drag-end",
             false,
@@ -632,7 +643,7 @@ impl LibraryView {
         )
     }
 
-    pub fn connect_scan_finished<F: Fn(&Self, Vec<String>, u32, bool) + 'static>(
+    pub(crate) fn connect_scan_finished<F: Fn(&Self, Vec<String>, u32, bool) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -1048,7 +1059,7 @@ impl LibraryView {
     }
 
     // Cancels dragging albums, and says if they were being dragged
-    pub fn cancel_drag(&self) -> bool {
+    pub(crate) fn cancel_drag(&self) -> bool {
         let source = self.imp().drag_source.borrow().clone();
         source.is_some_and(|source| utils::cancel_drag(&source))
     }
@@ -1232,7 +1243,7 @@ impl LibraryView {
 
     // Zooms the covers of the grid and of the works a step, or back to
     // their normal size; false when they're at that end already
-    pub fn zoom_covers(&self, zoom: Zoom) -> bool {
+    pub(crate) fn zoom_covers(&self, zoom: Zoom) -> bool {
         COVER_ZOOM.zoom(self.app_settings(), zoom)
     }
 
@@ -1358,12 +1369,12 @@ impl LibraryView {
 
     // The music folders that aren't there or are left out, whose tracks
     // are hidden
-    pub fn hidden_folders(&self) -> Vec<PathBuf> {
+    pub(crate) fn hidden_folders(&self) -> Vec<PathBuf> {
         self.imp().hidden_folders.borrow().clone()
     }
 
     // Whether the page shows the works, rather than the albums
-    pub fn shows_works(&self) -> bool {
+    pub(crate) fn shows_works(&self) -> bool {
         self.imp().page.get() == LibraryPage::Works
     }
 
@@ -1709,7 +1720,7 @@ impl LibraryView {
 
     // Whether only the albums of a composer or a performer, or only the
     // favorites, are shown
-    pub fn has_picks(&self) -> bool {
+    pub(crate) fn has_picks(&self) -> bool {
         self.has_composer_or_performer() || self.imp().favorites_button.is_active()
     }
 
@@ -1720,7 +1731,7 @@ impl LibraryView {
 
     // Shows the albums of all the composers and performers again, and not
     // only the favorites
-    pub fn clear_picks(&self) {
+    pub(crate) fn clear_picks(&self) {
         let imp = self.imp();
         imp.composer.replace(None);
         imp.performer.replace(None);
@@ -1860,7 +1871,7 @@ impl LibraryView {
     // with the player's heart: the albums the heart shows on the Tracks
     // page change. An album's tracks open in the pane stay as they were,
     // as they do for a new search
-    pub fn favorite_tracks_changed(&self) {
+    pub(crate) fn favorite_tracks_changed(&self) {
         self.imp().favorite_tracks.replace(None);
         // A search for the favorites finds them, or leaves them out
         let searched = TrackFilter::query(&self.imp().search_entry.text())
@@ -1957,7 +1968,7 @@ impl LibraryView {
     // the composer and the performer picked; on the Albums page, nothing,
     // as they're taken whole. The covers of the Works page take the tracks
     // of their recordings, see `taken_by()`, and the grid isn't there
-    pub fn taken(&self) -> (TrackFilter, PickNames) {
+    pub(crate) fn taken(&self) -> (TrackFilter, PickNames) {
         match self.imp().page.get() {
             LibraryPage::Albums | LibraryPage::Works => Default::default(),
             LibraryPage::Tracks => (self.search_filter(), self.search_pick_names()),
@@ -1968,7 +1979,7 @@ impl LibraryView {
     // the performer picked, and the heart ask for on the page shown, as
     // the grid and the works are searched with it, rather than what the
     // page shows, which is still the other page's just after a page switch
-    pub fn random_pool(&self) -> RandomPool {
+    pub(crate) fn random_pool(&self) -> RandomPool {
         RandomPool {
             page: self.page(),
             filter: self.wanted_filter(),
@@ -1991,7 +2002,7 @@ impl LibraryView {
     // What's taken from the album of a cell: among the covers of the
     // recordings of a work, its recording's tracks, and otherwise as for
     // the grid, see `taken()`
-    pub fn taken_by(&self, cell: &AlbumCell) -> (TrackFilter, PickNames) {
+    pub(crate) fn taken_by(&self, cell: &AlbumCell) -> (TrackFilter, PickNames) {
         match cell.work() {
             Some(work) => works::taken_from_recording(work.paths, work.name),
             None => self.taken(),
@@ -2028,7 +2039,7 @@ impl LibraryView {
     }
 
     // The album with an id, if it's in the grid
-    pub fn album(&self, album_id: &str) -> Option<Album> {
+    pub(crate) fn album(&self, album_id: &str) -> Option<Album> {
         self.imp()
             .model
             .borrow()
@@ -2039,7 +2050,7 @@ impl LibraryView {
     }
 
     // Whether an album is marked as a favorite
-    pub fn is_favorite_album(&self, album_id: &str) -> bool {
+    pub(crate) fn is_favorite_album(&self, album_id: &str) -> bool {
         self.imp().favorite_albums.borrow().contains(album_id)
     }
 
@@ -2047,7 +2058,7 @@ impl LibraryView {
     // covers, and for those marked, the first track, which finds an album
     // again once a change to its tags gives it another id. That's looked up
     // in the library in another thread, so that marking doesn't wait for it
-    pub fn favorite_albums_changed(&self, ids: &[String], favorite: bool) {
+    pub(crate) fn favorite_albums_changed(&self, ids: &[String], favorite: bool) {
         {
             let mut favorites = self.imp().favorite_albums.borrow_mut();
             for id in ids {
@@ -2104,7 +2115,7 @@ impl LibraryView {
     }
 
     // Scrolls the grid to an album, clearing the search if it hides it
-    pub fn reveal_album(&self, album_id: &str) -> Option<Album> {
+    pub(crate) fn reveal_album(&self, album_id: &str) -> Option<Album> {
         let imp = self.imp();
         let album = self.album(album_id)?;
 
@@ -2135,7 +2146,7 @@ impl LibraryView {
     // Scrolls the grid to an album, which takes the focus, and opens it, as
     // a click on its cover does; the grid was just shown, from the covers of
     // a work, see `utils::focus_when_laid_out`
-    pub fn open_album(&self, album_id: &str) {
+    pub(crate) fn open_album(&self, album_id: &str) {
         let Some(album) = self.reveal_album(album_id) else {
             return;
         };
@@ -2147,7 +2158,7 @@ impl LibraryView {
     // With no album to search, the button of the empty page takes the
     // focus instead, so that Enter goes on to choose the music folders;
     // typing still goes to the search, through the window
-    pub fn focus_search(&self) {
+    pub(crate) fn focus_search(&self) {
         let imp = self.imp();
         if imp.albums_stack.visible_child_name().as_deref() == Some("empty") {
             imp.empty_button.grab_focus();
@@ -2156,7 +2167,7 @@ impl LibraryView {
         }
     }
 
-    pub fn search_entry(&self) -> gtk::SearchEntry {
+    pub(crate) fn search_entry(&self) -> gtk::SearchEntry {
         self.imp().search_entry.get()
     }
 
@@ -2221,7 +2232,7 @@ impl LibraryView {
 
     // Selects all the albums shown by the search, or the covers of the open
     // work; on the Works page, there's nothing to select until one is open
-    pub fn select_all(&self) {
+    pub(crate) fn select_all(&self) {
         let albums = self.selectable_albums();
         if self.shows_works() && albums.is_empty() {
             return;
@@ -2250,7 +2261,7 @@ impl LibraryView {
     // The selected albums, in the order of the grid or of the covers, with
     // what their tracks have to match to be taken; the covers of the open
     // work each take their recording's
-    pub fn selected_albums(&self) -> Vec<(String, TrackFilter)> {
+    pub(crate) fn selected_albums(&self) -> Vec<(String, TrackFilter)> {
         if self.shows_works() {
             return self.selected_recordings();
         }
@@ -2264,7 +2275,7 @@ impl LibraryView {
 
     // The selected albums, leaving selection mode, as the buttons of its
     // bar do once they've taken them
-    pub fn take_selected_albums(&self) -> Vec<(String, TrackFilter)> {
+    pub(crate) fn take_selected_albums(&self) -> Vec<(String, TrackFilter)> {
         let albums = self.selected_albums();
         self.set_selection_mode(false);
         albums
@@ -2272,17 +2283,17 @@ impl LibraryView {
 
     // The menu next to the button that adds the albums, with the other ways
     // to add them
-    pub fn set_add_menu(&self, menu: &gio::MenuModel) {
+    pub(crate) fn set_add_menu(&self, menu: &gio::MenuModel) {
         self.imp().add_albums_button.set_menu_model(Some(menu));
     }
 
     // The label of the button that adds the albums to the selected playlist
-    pub fn set_add_label(&self, label: &str) {
+    pub(crate) fn set_add_label(&self, label: &str) {
         crate::utils::set_playlist_button_label(&self.imp().add_albums_button, label);
     }
 
     // Albums can't be added while tracks are being added to the queue
-    pub fn set_adding_enabled(&self, enabled: bool) {
+    pub(crate) fn set_adding_enabled(&self, enabled: bool) {
         self.imp().loading.set(!enabled);
         self.update_selection();
     }
@@ -2369,7 +2380,7 @@ impl LibraryView {
     // the one before it, if it takes longer. Those of the music folders
     // that aren't there are hidden, as they can't play, and so are those of
     // the folders left out, until the scan forgets them
-    pub fn reload(&self) {
+    pub(crate) fn reload(&self) {
         let imp = self.imp();
         let generation = imp.reload_generation.get().wrapping_add(1);
         imp.reload_generation.set(generation);
@@ -2641,7 +2652,7 @@ impl LibraryView {
     // A music folder that can't be watched is read again when the albums
     // are shown, unless it's being read already, or was read in the last
     // few minutes
-    pub fn scan_unwatched(&self) {
+    pub(crate) fn scan_unwatched(&self) {
         let imp = self.imp();
         let recent = imp
             .last_scan_finished
@@ -2657,7 +2668,7 @@ impl LibraryView {
     // for it, to tell them what it found. During a scan, another one follows
     // it, as the folders might have changed since it started; the user can't
     // ask for one then, as the action is off
-    pub fn start_scan(&self, requested: bool) {
+    pub(crate) fn start_scan(&self, requested: bool) {
         let imp = self.imp();
         if imp.scanning.get() {
             imp.rescan_pending.set(true);
@@ -2817,10 +2828,10 @@ struct Picker<T> {
 // any, or of the work whose tracks are taken from an album, which the bar
 // over an album's tracks says
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PickNames {
-    pub composer: Option<String>,
-    pub performer: Option<String>,
-    pub work: Option<String>,
+pub(crate) struct PickNames {
+    pub(crate) composer: Option<String>,
+    pub(crate) performer: Option<String>,
+    pub(crate) work: Option<String>,
 }
 
 // The line of a row of the lists of composers, performers and works: a

@@ -21,11 +21,11 @@ mod imp {
     use super::*;
 
     #[derive(Default)]
-    pub struct WorkSectionModel {
-        pub model: RefCell<Option<gio::ListModel>>,
+    pub(crate) struct WorkSectionModel {
+        pub(crate) model: RefCell<Option<gio::ListModel>>,
         // Whether an item is in the same section as the one before it, in
         // place of `same_section()`
-        pub same_section: RefCell<Option<SameSection>>,
+        pub(crate) same_section: RefCell<Option<SameSection>>,
     }
 
     #[glib::object_subclass]
@@ -94,16 +94,16 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct WorkSectionModel(ObjectSubclass<imp::WorkSectionModel>)
+    pub(crate) struct WorkSectionModel(ObjectSubclass<imp::WorkSectionModel>)
         @implements gio::ListModel, gtk::SectionModel;
 }
 
 // Whether an item is in the same section as the item before it
-pub type SameSection = Rc<dyn Fn(&glib::Object, &glib::Object) -> bool>;
+pub(crate) type SameSection = Rc<dyn Fn(&glib::Object, &glib::Object) -> bool>;
 
 // Sections of the items of type `T`, by whether one is in the same section
 // as the one before it
-pub fn same_section_of<T: IsA<glib::Object>>(
+pub(crate) fn same_section_of<T: IsA<glib::Object>>(
     same: impl Fn(&T, &T) -> bool + 'static,
 ) -> SameSection {
     Rc::new(
@@ -115,7 +115,7 @@ pub fn same_section_of<T: IsA<glib::Object>>(
 }
 
 impl WorkSectionModel {
-    pub fn new(model: &impl IsA<gio::ListModel>) -> Self {
+    pub(crate) fn new(model: &impl IsA<gio::ListModel>) -> Self {
         let res: Self = glib::Object::new();
         let model = model.upcast_ref::<gio::ListModel>();
 
@@ -141,7 +141,7 @@ impl WorkSectionModel {
 
     // Puts the items in sections by `same`, rather than the tracks by
     // their works
-    pub fn with_same_section(model: &impl IsA<gio::ListModel>, same: SameSection) -> Self {
+    pub(crate) fn with_same_section(model: &impl IsA<gio::ListModel>, same: SameSection) -> Self {
         let res = Self::new(model);
         res.imp().same_section.replace(Some(same));
         res
@@ -161,7 +161,7 @@ fn same_section(model: &gio::ListModel, position: u32) -> bool {
 // Whether a track is in the same section as the one before it: a movement
 // that continues the work of the one before it, or two tracks that are not
 // movements, so that consecutive ones end up in a single section
-pub fn shares_section(previous: &Track, track: &Track) -> bool {
+pub(crate) fn shares_section(previous: &Track, track: &Track) -> bool {
     continues_work(previous, track) || (!previous.is_movement() && !track.is_movement())
 }
 
@@ -175,7 +175,7 @@ pub fn shares_section(previous: &Track, track: &Track) -> bool {
 // the first movement's own, as MusicBrainz sometimes credits a work to
 // someone else, e.g. Bach's BWV 981 to Marcello, whose concerto it
 // arranges
-pub fn continues_work(previous: &Track, track: &Track) -> bool {
+pub(crate) fn continues_work(previous: &Track, track: &Track) -> bool {
     track.same_work_as(previous) && track.follows_on_album(previous)
 }
 
@@ -192,7 +192,7 @@ pub fn continues_work(previous: &Track, track: &Track) -> bool {
 // its header. `disc_line` gives the line that names the disc a section
 // starts, if it starts one, from its first track and its position, above
 // the work's name; only an album's tracks have one
-pub fn work_header_factory(
+pub(crate) fn work_header_factory(
     on_work_clicked: impl Fn(u32, u32, bool) + 'static,
     on_work_menu: impl Fn(&gtk::Widget, f64, f64, &Track) + 'static,
     drop_before_work: Option<(impl Fn() -> bool + 'static, impl Fn(&Track, u32) + 'static)>,

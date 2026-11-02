@@ -12,7 +12,7 @@ use super::AlbumInfo;
 
 // What the album grid is sorted by, as in the "album-sort" setting
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AlbumSort {
+pub(crate) enum AlbumSort {
     Artist,
     Title,
     Year,
@@ -20,7 +20,7 @@ pub enum AlbumSort {
 }
 
 impl AlbumSort {
-    pub fn from_nick(nick: &str) -> Self {
+    pub(crate) fn from_nick(nick: &str) -> Self {
         match nick {
             "title" => Self::Title,
             "year" => Self::Year,
@@ -31,7 +31,7 @@ impl AlbumSort {
 
     // The newest albums are the ones people look for first, while names
     // read best from A to Z
-    pub fn default_descending(self) -> bool {
+    pub(crate) fn default_descending(self) -> bool {
         matches!(self, Self::Year | Self::Added)
     }
 }
@@ -41,9 +41,9 @@ impl AlbumSort {
 // of the recording's first track, as an album can have two recordings of a
 // work, each with a cover of its own
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SelectionKey {
-    pub album: String,
-    pub recording: Option<String>,
+pub(crate) struct SelectionKey {
+    pub(crate) album: String,
+    pub(crate) recording: Option<String>,
 }
 
 // Compares two values in the given direction, with the missing ones last
@@ -63,43 +63,43 @@ mod imp {
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::Album)]
-    pub struct Album {
+    pub(crate) struct Album {
         #[property(get)]
-        pub id: OnceCell<String>,
+        pub(crate) id: OnceCell<String>,
         #[property(get)]
-        pub title: RefCell<String>,
+        pub(crate) title: RefCell<String>,
         #[property(get)]
-        pub artist: RefCell<String>,
+        pub(crate) artist: RefCell<String>,
         #[property(get)]
-        pub year: RefCell<Option<String>>,
+        pub(crate) year: RefCell<Option<String>>,
         #[property(get)]
-        pub cover_path: OnceCell<Option<String>>,
+        pub(crate) cover_path: OnceCell<Option<String>>,
         // For a copy that shows a recording of a work, the URI of its first
         // track, see `Album::recording_copy()`
-        pub recording: OnceCell<String>,
+        pub(crate) recording: OnceCell<String>,
         // The record label, and the number it gives the release
         #[property(get)]
-        pub label: RefCell<Option<String>>,
+        pub(crate) label: RefCell<Option<String>>,
         #[property(get)]
-        pub catalog_number: RefCell<Option<String>>,
+        pub(crate) catalog_number: RefCell<Option<String>>,
         // Whether the album is selected in the grid
         #[property(get, set)]
-        pub selected: Cell<bool>,
+        pub(crate) selected: Cell<bool>,
         // While a search of the grid matches only some of the tracks, the
         // number that do, and the number of all of them; otherwise 0
         #[property(get, set)]
-        pub matching_tracks: Cell<u32>,
+        pub(crate) matching_tracks: Cell<u32>,
         #[property(get, set)]
-        pub track_count: Cell<u32>,
+        pub(crate) track_count: Cell<u32>,
         // Whether the album is marked as a favorite, which the grid shows
         // with a heart on its cover
         #[property(get, set)]
-        pub favorite: Cell<bool>,
+        pub(crate) favorite: Cell<bool>,
 
         // The keys the grid is sorted by, in the order of the locale
-        pub artist_key: OnceCell<glib::CollationKey>,
-        pub title_key: OnceCell<glib::CollationKey>,
-        pub added: Cell<Option<i64>>,
+        pub(crate) artist_key: OnceCell<glib::CollationKey>,
+        pub(crate) title_key: OnceCell<glib::CollationKey>,
+        pub(crate) added: Cell<Option<i64>>,
     }
 
     #[glib::object_subclass]
@@ -113,11 +113,11 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Album(ObjectSubclass<imp::Album>);
+    pub(crate) struct Album(ObjectSubclass<imp::Album>);
 }
 
 impl Album {
-    pub fn new(info: AlbumInfo) -> Self {
+    pub(crate) fn new(info: AlbumInfo) -> Self {
         let album: Self = glib::Object::new();
         let imp = album.imp();
         let _ = imp.id.set(info.id);
@@ -140,7 +140,7 @@ impl Album {
     // A copy of the album for the cover of a recording of a work on it,
     // which is selected on its own, as the album can have two, and shows
     // the album's heart. It isn't sorted, so it has no sort keys
-    pub fn recording_copy(&self, uri: &str) -> Self {
+    pub(crate) fn recording_copy(&self, uri: &str) -> Self {
         let copy: Self = glib::Object::new();
         let (from, to) = (self.imp(), copy.imp());
         let _ = to.id.set(self.id());
@@ -159,7 +159,7 @@ impl Album {
     }
 
     // What tells it apart among the selected albums
-    pub fn selection_key(&self) -> SelectionKey {
+    pub(crate) fn selection_key(&self) -> SelectionKey {
         SelectionKey {
             album: self.id(),
             recording: self.imp().recording.get().cloned(),
@@ -168,17 +168,17 @@ impl Album {
 
     // The id and the cover, borrowed: the grid's search and the covers read
     // ahead look at many albums at a time
-    pub fn id_str(&self) -> &str {
+    pub(crate) fn id_str(&self) -> &str {
         self.imp().id.get().map_or("", String::as_str)
     }
 
-    pub fn cover_path_str(&self) -> Option<&str> {
+    pub(crate) fn cover_path_str(&self) -> Option<&str> {
         self.imp().cover_path.get().and_then(Option::as_deref)
     }
 
     // The order of two albums in the grid; the albums that tie are always
     // sorted from A to Z, and the oldest first
-    pub fn compare(&self, other: &Self, sort: AlbumSort, descending: bool) -> Ordering {
+    pub(crate) fn compare(&self, other: &Self, sort: AlbumSort, descending: bool) -> Ordering {
         let (a, b) = (self.imp(), other.imp());
         let artist =
             |descending| cmp_present_first(a.artist_key.get(), b.artist_key.get(), descending);

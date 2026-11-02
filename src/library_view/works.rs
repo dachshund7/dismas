@@ -19,7 +19,7 @@ pub(super) const WORK_COVER_SIZES: [(i32, i32); 4] = [(60, 80), (80, 107), (120,
 
 // The work of the list that's open, and the covers of its recordings
 #[derive(Debug)]
-pub struct ExpandedWork {
+pub(crate) struct ExpandedWork {
     key: String,
     name: String,
     covers: Vec<WorkCover>,
@@ -29,7 +29,7 @@ pub struct ExpandedWork {
 // the cover to point out, and whether the search was cleared for it
 // already, as it hid the work
 #[derive(Debug)]
-pub struct PendingWork {
+pub(crate) struct PendingWork {
     key: String,
     cover: Option<CoverRef>,
     cleared: bool,
@@ -39,9 +39,9 @@ pub struct PendingWork {
 // of an album, or without the track, or when it's in none, the first one
 // of the album
 #[derive(Clone, Debug)]
-pub struct CoverRef {
-    pub album: String,
-    pub track: Option<PathBuf>,
+pub(crate) struct CoverRef {
+    pub(crate) album: String,
+    pub(crate) track: Option<PathBuf>,
 }
 
 // The cover of a recording of a work: a copy of its album, selected on its
@@ -253,7 +253,7 @@ impl LibraryView {
     }
 
     // Whether a work shows the covers of its albums
-    pub fn is_work_open(&self, key: &str) -> bool {
+    pub(crate) fn is_work_open(&self, key: &str) -> bool {
         self.imp()
             .expanded_work
             .borrow()
@@ -263,7 +263,7 @@ impl LibraryView {
 
     // Opens a work to show the covers of its albums, closing the one that
     // was open, or closes it if it's open
-    pub fn toggle_work(&self, work: &library::WorkInfo) {
+    pub(crate) fn toggle_work(&self, work: &library::WorkInfo) {
         if self.is_work_open(&work.key) {
             self.close_work(true);
         } else {
@@ -759,7 +759,7 @@ impl LibraryView {
 
     // Reads the works again, after a work or a recording was marked as a
     // favorite or unmarked
-    pub fn refresh_favorites(&self) {
+    pub(crate) fn refresh_favorites(&self) {
         let generation = &self.imp().works_generation;
         generation.set(generation.get().wrapping_add(1));
         self.update_works();
@@ -843,7 +843,7 @@ impl LibraryView {
     // clicked. That's once the works shown are read for the search as it
     // is, and the library, which can take a moment when the page was just
     // shown
-    pub fn reveal_work(&self, key: &str, album: Option<&str>, track: Option<&Path>) {
+    pub(crate) fn reveal_work(&self, key: &str, album: Option<&str>, track: Option<&Path>) {
         self.imp().pending_work.replace(Some(PendingWork {
             key: key.to_string(),
             cover: album.map(|album| CoverRef {

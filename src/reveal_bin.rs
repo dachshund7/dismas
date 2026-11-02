@@ -16,12 +16,12 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct RevealBin {
-        pub child: RefCell<Option<gtk::Widget>>,
+    pub(crate) struct RevealBin {
+        pub(crate) child: RefCell<Option<gtk::Widget>>,
         // The share of the child that shows, from 0 when it's closed to 1
-        pub progress: Cell<f64>,
-        pub revealed: Cell<bool>,
-        pub animation: RefCell<Option<adw::TimedAnimation>>,
+        pub(crate) progress: Cell<f64>,
+        pub(crate) revealed: Cell<bool>,
+        pub(crate) animation: RefCell<Option<adw::TimedAnimation>>,
     }
 
     #[glib::object_subclass]
@@ -90,13 +90,13 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct RevealBin(ObjectSubclass<imp::RevealBin>)
+    pub(crate) struct RevealBin(ObjectSubclass<imp::RevealBin>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl RevealBin {
-    pub fn new(child: &impl IsA<gtk::Widget>) -> Self {
+    pub(crate) fn new(child: &impl IsA<gtk::Widget>) -> Self {
         let bin: Self = glib::Object::new();
         child.set_parent(&bin);
         child.set_child_visible(false);
@@ -104,22 +104,22 @@ impl RevealBin {
         bin
     }
 
-    pub fn child(&self) -> Option<gtk::Widget> {
+    pub(crate) fn child(&self) -> Option<gtk::Widget> {
         self.imp().child.borrow().clone()
     }
 
-    pub fn is_revealed(&self) -> bool {
+    pub(crate) fn is_revealed(&self) -> bool {
         self.imp().revealed.get()
     }
 
     // The share of the child that shows, 1 once it's open
-    pub fn progress(&self) -> f64 {
+    pub(crate) fn progress(&self) -> f64 {
         self.imp().progress.get()
     }
 
     // Opens or closes the bin, sliding it as its child moves to its new
     // place, or at once
-    pub fn set_revealed(&self, revealed: bool, animate: bool) {
+    pub(crate) fn set_revealed(&self, revealed: bool, animate: bool) {
         let imp = self.imp();
         imp.revealed.set(revealed);
         if let Some(animation) = imp.animation.take() {

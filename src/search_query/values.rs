@@ -13,12 +13,12 @@ use crate::{audio::normalize_search_text, catalogue};
 // Numbers between two bounds, both included; a missing one is open
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NumberRange {
-    pub lo: Option<i64>,
-    pub hi: Option<i64>,
+    pub(crate) lo: Option<i64>,
+    pub(crate) hi: Option<i64>,
 }
 
 impl NumberRange {
-    pub fn contains(self, n: i64) -> bool {
+    pub(crate) fn contains(self, n: i64) -> bool {
         self.lo.is_none_or(|lo| n >= lo) && self.hi.is_none_or(|hi| n <= hi)
     }
 }
@@ -144,7 +144,7 @@ pub(crate) enum DateUnit {
 impl DatePoint {
     // In seconds since the epoch, at `now`; months and years are counted on
     // the calendar, in local time
-    pub fn at(self, now: i64) -> i64 {
+    pub(crate) fn at(self, now: i64) -> i64 {
         match self {
             Self::At(time) => time,
             Self::Ago { count, unit } => {
@@ -170,13 +170,13 @@ impl DatePoint {
 // Times from one, included, until another, left out; a missing one is open
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DateRange {
-    pub from: Option<DatePoint>,
-    pub until: Option<DatePoint>,
+    pub(crate) from: Option<DatePoint>,
+    pub(crate) until: Option<DatePoint>,
 }
 
 impl DateRange {
     // The range with its relative dates worked out at `now`
-    pub fn at(self, now: i64) -> Self {
+    pub(crate) fn at(self, now: i64) -> Self {
         let at = |point: Option<DatePoint>| point.map(|point| DatePoint::At(point.at(now)));
         Self {
             from: at(self.from),
@@ -185,7 +185,7 @@ impl DateRange {
     }
 
     // Whether the range and the times from `start` until `end` overlap
-    pub fn overlaps(self, start: i64, end: i64, now: i64) -> bool {
+    pub(crate) fn overlaps(self, start: i64, end: i64, now: i64) -> bool {
         self.from.is_none_or(|from| end > from.at(now))
             && self.until.is_none_or(|until| start < until.at(now))
     }
@@ -392,7 +392,7 @@ pub(super) fn catalogue(op: Op, value: &str, at_end: bool) -> Result<Test, Probl
 impl CatalogueTest {
     // Whether it finds a catalogue number as the fields keep it, see
     // `CatalogueNumber::search_text()`
-    pub fn matches(&self, kept: &str) -> bool {
+    pub(crate) fn matches(&self, kept: &str) -> bool {
         let Some((catalogue, number)) = kept.split_once(' ') else {
             return false;
         };
@@ -452,7 +452,7 @@ pub(super) fn path(op: Op, value: &str) -> Result<Test, ProblemKind> {
 
 impl PathTest {
     // Whether a path, folded, matches
-    pub fn matches(&self, path: &str) -> bool {
+    pub(crate) fn matches(&self, path: &str) -> bool {
         if self.anchored {
             return path.starts_with(&self.text);
         }

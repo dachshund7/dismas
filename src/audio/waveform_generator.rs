@@ -14,7 +14,7 @@ use crate::{
 };
 
 // The folder of the cached waveforms
-pub fn cache_dir() -> std::path::PathBuf {
+pub(crate) fn cache_dir() -> std::path::PathBuf {
     glib::user_cache_dir().join("dismas").join("waveforms")
 }
 
@@ -86,12 +86,12 @@ mod imp {
 
     #[derive(Debug, glib::Properties)]
     #[properties(wrapper_type = super::WaveformGenerator)]
-    pub struct WaveformGenerator {
-        pub track: RefCell<Option<Track>>,
+    pub(crate) struct WaveformGenerator {
+        pub(crate) track: RefCell<Option<Track>>,
         #[property(name = "has-peaks", get = |imp: &Self| imp.peaks.borrow().is_some(), type = bool)]
-        pub peaks: RefCell<Option<Vec<(f64, f64)>>>,
-        pub pipeline: RefCell<Option<(gst::Element, gst::bus::BusWatchGuard)>>,
-        pub settings: gio::Settings,
+        pub(crate) peaks: RefCell<Option<Vec<(f64, f64)>>>,
+        pub(crate) pipeline: RefCell<Option<(gst::Element, gst::bus::BusWatchGuard)>>,
+        pub(crate) settings: gio::Settings,
     }
 
     #[glib::object_subclass]
@@ -133,7 +133,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct WaveformGenerator(ObjectSubclass<imp::WaveformGenerator>);
+    pub(crate) struct WaveformGenerator(ObjectSubclass<imp::WaveformGenerator>);
 }
 
 impl Default for WaveformGenerator {
@@ -161,11 +161,11 @@ impl Controller for WaveformGenerator {
 }
 
 impl WaveformGenerator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         WaveformGenerator::default()
     }
 
-    pub fn peaks(&self) -> Option<Vec<(f64, f64)>> {
+    pub(crate) fn peaks(&self) -> Option<Vec<(f64, f64)>> {
         (*self.imp().peaks.borrow()).as_ref().cloned()
     }
 

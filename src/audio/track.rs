@@ -47,7 +47,7 @@ use crate::{
 };
 
 mod credits;
-pub mod discovered;
+pub(crate) mod discovered;
 mod fields;
 mod file_name;
 mod loader;
@@ -57,21 +57,23 @@ mod tags;
 mod work_hierarchy;
 
 use credits::is_composer;
-pub use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
+pub(crate) use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
 use fields::sane_duration;
-pub use fields::{AudioProperties, FieldCode, FieldParts, Flag, field_values};
-pub use file_name::title_from_file_name;
+pub(crate) use fields::{AudioProperties, FieldCode, FieldParts, Flag, field_values};
+pub(crate) use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
-pub use loader::load_tracks;
+pub(crate) use loader::load_tracks;
 use lofty_gaps::Fills;
-pub use search::{normalize_key_text, normalize_search_text, search_key, track_search_text};
-pub use tags::{ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_title};
+pub(crate) use search::{normalize_key_text, normalize_search_text, search_key, track_search_text};
+pub(crate) use tags::{
+    ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_title,
+};
 use tags::{track_album, track_artist};
-pub use work_hierarchy::Arrangement;
+pub(crate) use work_hierarchy::Arrangement;
 use work_hierarchy::{MovementName, WorkHierarchy, WorkLabels};
 
 #[derive(Debug, Clone)]
-pub struct TrackData {
+pub(crate) struct TrackData {
     artist: Option<String>,
     title: Option<String>,
     // The title shown when the tags have none
@@ -99,7 +101,7 @@ pub struct TrackData {
 
 // Why a track of a playlist has none of its file's tags
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Missing {
+pub(crate) enum Missing {
     // The file isn't there, e.g. on a drive that isn't plugged in
     NotFound,
     // The file is there, but no track could be read from it, e.g. it can't
@@ -108,22 +110,22 @@ pub enum Missing {
 }
 
 #[derive(Debug, Clone)]
-pub struct CueAudio {
-    pub file: gio::File,
-    pub start: Duration,
+pub(crate) struct CueAudio {
+    pub(crate) file: gio::File,
+    pub(crate) start: Duration,
     // Until the end of the file if `None`
-    pub end: Option<Duration>,
+    pub(crate) end: Option<Duration>,
     // The gains of the stream of the file are about all of it
-    pub gains: Gains,
+    pub(crate) gains: Gains,
 }
 
 // The ReplayGain of a track, in dB, and its peaks
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct Gains {
-    pub track_gain: Option<f64>,
-    pub track_peak: Option<f64>,
-    pub album_gain: Option<f64>,
-    pub album_peak: Option<f64>,
+pub(crate) struct Gains {
+    pub(crate) track_gain: Option<f64>,
+    pub(crate) track_peak: Option<f64>,
+    pub(crate) album_gain: Option<f64>,
+    pub(crate) album_peak: Option<f64>,
 }
 
 impl Gains {
@@ -145,32 +147,32 @@ impl Gains {
 
 // The format and the properties of the file of a track
 #[derive(Debug, Clone, Default)]
-pub struct FileDetails {
-    pub format: Option<Cow<'static, str>>,
+pub(crate) struct FileDetails {
+    pub(crate) format: Option<Cow<'static, str>>,
     // The path outside the sandbox, if the file came through the document
     // portal
-    pub path: Option<PathBuf>,
-    pub size: Option<u64>,
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) size: Option<u64>,
     // In kbps
-    pub bitrate: Option<u32>,
+    pub(crate) bitrate: Option<u32>,
     // In Hz
-    pub sample_rate: Option<u32>,
-    pub bit_depth: Option<u8>,
-    pub channels: Option<u8>,
-    pub replay_gain: ReplayGain,
+    pub(crate) sample_rate: Option<u32>,
+    pub(crate) bit_depth: Option<u8>,
+    pub(crate) channels: Option<u8>,
+    pub(crate) replay_gain: ReplayGain,
     // Whether the file has a video stream, which is never shown
-    pub video: bool,
+    pub(crate) video: bool,
 }
 
 // The gains as written in the tags, e.g. "-6.20 dB"
 #[derive(Debug, Clone, Default)]
-pub struct ReplayGain {
-    pub track: Option<String>,
-    pub album: Option<String>,
+pub(crate) struct ReplayGain {
+    pub(crate) track: Option<String>,
+    pub(crate) album: Option<String>,
     // The gains of an Opus file whose tags only give them as its format
     // does, as R128 gains, which GStreamer doesn't pass on to rgvolume, so
     // the player gives them to it, see `TrackData::gains()`
-    pub r128: Option<Gains>,
+    pub(crate) r128: Option<Gains>,
 }
 
 impl ReplayGain {
@@ -229,30 +231,30 @@ fn format_name(file_type: FileType) -> Option<&'static str> {
 }
 
 impl TrackData {
-    pub fn artist(&self) -> Option<&str> {
+    pub(crate) fn artist(&self) -> Option<&str> {
         self.artist.as_deref()
     }
 
-    pub fn title(&self) -> Option<&str> {
+    pub(crate) fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
 
     // The title from the tags, or else the one from the file name
-    pub fn shown_title(&self) -> &str {
+    pub(crate) fn shown_title(&self) -> &str {
         self.title.as_deref().unwrap_or(&self.fallback_title)
     }
 
-    pub fn album(&self) -> Option<&str> {
+    pub(crate) fn album(&self) -> Option<&str> {
         self.album.as_deref()
     }
 
     // The album from the tags, or else the name of the track's folder
-    pub fn shown_album(&self) -> &str {
+    pub(crate) fn shown_album(&self) -> &str {
         self.album.as_deref().unwrap_or(&self.fallback_album)
     }
 
     // The album shown in place of the one the tags lack
-    pub fn fallback_album(&self) -> Option<&str> {
+    pub(crate) fn fallback_album(&self) -> Option<&str> {
         self.album.is_none().then_some(self.fallback_album.as_str())
     }
 
@@ -292,16 +294,16 @@ impl TrackData {
         }
     }
 
-    pub fn tag_text(&self) -> &str {
+    pub(crate) fn tag_text(&self) -> &str {
         &self.tag_text
     }
 
-    pub fn credits(&self) -> &TrackCredits {
+    pub(crate) fn credits(&self) -> &TrackCredits {
         &self.credits
     }
 
     #[cfg(test)]
-    pub fn fields(&self) -> &str {
+    pub(crate) fn fields(&self) -> &str {
         &self.fields
     }
 
@@ -322,7 +324,7 @@ impl TrackData {
     // comes first, as the performers can be a long list. Nothing is
     // translated, so they can be pasted into a search or a message as
     // they are
-    pub fn copied_details(&self) -> String {
+    pub(crate) fn copied_details(&self) -> String {
         let title = self.shown_title();
         let artist = self.artist();
         // Classical releases are often tagged with the composer as the
@@ -347,7 +349,7 @@ impl TrackData {
     // names that Copy adds to it, the performers after a composer or the
     // composers of classical music. The artist stays first, as scrobblers
     // can take only the first one
-    pub fn credited_artists(&self) -> Vec<&str> {
+    pub(crate) fn credited_artists(&self) -> Vec<&str> {
         let artist = self.artist();
         let others = match self.credits.performer_names_of_composer(artist) {
             Some(performers) => performers,
@@ -362,23 +364,23 @@ impl TrackData {
         artist.into_iter().chain(others).collect()
     }
 
-    pub fn uuid(&self) -> Option<&str> {
+    pub(crate) fn uuid(&self) -> Option<&str> {
         self.uuid.as_deref()
     }
 
     // The id of the cover, if the track has one
-    pub fn cover_uuid(&self) -> Option<&str> {
+    pub(crate) fn cover_uuid(&self) -> Option<&str> {
         self.cover
             .as_ref()
             .filter(|cover| cover.art().is_some())
             .map(AlbumCover::uuid)
     }
 
-    pub fn duration(&self) -> u64 {
+    pub(crate) fn duration(&self) -> u64 {
         self.duration
     }
 
-    pub fn details(&self) -> &FileDetails {
+    pub(crate) fn details(&self) -> &FileDetails {
         &self.details
     }
 
@@ -386,23 +388,23 @@ impl TrackData {
         self.cover.as_ref()?.art()
     }
 
-    pub fn cover_texture(&self) -> Option<&gdk::Texture> {
+    pub(crate) fn cover_texture(&self) -> Option<&gdk::Texture> {
         self.cover_art().map(CoverArt::texture)
     }
 
-    pub fn row_cover_texture(&self) -> Option<&gdk::Texture> {
+    pub(crate) fn row_cover_texture(&self) -> Option<&gdk::Texture> {
         self.cover_art().map(CoverArt::row_texture)
     }
 
-    pub fn cover_palette(&self) -> Option<&Vec<gdk::RGBA>> {
+    pub(crate) fn cover_palette(&self) -> Option<&Vec<gdk::RGBA>> {
         self.cover_art().map(CoverArt::palette)
     }
 
-    pub fn cover_accent(&self) -> Option<gdk::RGBA> {
+    pub(crate) fn cover_accent(&self) -> Option<gdk::RGBA> {
         self.cover_art().and_then(CoverArt::accent)
     }
 
-    pub fn cover_cache(&self) -> Option<&PathBuf> {
+    pub(crate) fn cover_cache(&self) -> Option<&PathBuf> {
         self.cover_art()?.cache()
     }
 
@@ -411,7 +413,7 @@ impl TrackData {
     // keeps its place in the playlist, which would lose it the next time
     // it's saved, and playback skips it. The tracks of CUE sheets are named
     // like the sheet names tracks without a title
-    pub fn missing(file: gio::File, reason: Missing) -> Self {
+    pub(crate) fn missing(file: gio::File, reason: Missing) -> Self {
         let path = file.path().unwrap_or_default();
         let (fallback_title, fallback_album) =
             if let Some((sheet, number)) = cue_sheet::missing_location_parts(&path) {
@@ -446,45 +448,45 @@ impl TrackData {
         }
     }
 
-    pub fn is_missing(&self) -> bool {
+    pub(crate) fn is_missing(&self) -> bool {
         self.missing.is_some()
     }
 
-    pub fn missing_reason(&self) -> Option<Missing> {
+    pub(crate) fn missing_reason(&self) -> Option<Missing> {
         self.missing
     }
 
-    pub fn uri(&self) -> String {
+    pub(crate) fn uri(&self) -> String {
         self.file.uri().to_string()
     }
 
-    pub fn file(&self) -> gio::File {
+    pub(crate) fn file(&self) -> gio::File {
         self.file.clone()
     }
 
     // The file that plays, which is not the track's own for the tracks of
     // CUE sheets
-    pub fn audio_file(&self) -> gio::File {
+    pub(crate) fn audio_file(&self) -> gio::File {
         self.audio
             .as_ref()
             .map_or_else(|| self.file.clone(), |audio| audio.file.clone())
     }
 
     // Where the track starts and ends in its audio file
-    pub fn segment(&self) -> (Duration, Option<Duration>) {
+    pub(crate) fn segment(&self) -> (Duration, Option<Duration>) {
         self.part().unwrap_or((Duration::ZERO, None))
     }
 
     // The same for a track of a CUE sheet, which is a part of its audio
     // file; none for a track that is a whole file
-    pub fn part(&self) -> Option<(Duration, Option<Duration>)> {
+    pub(crate) fn part(&self) -> Option<(Duration, Option<Duration>)> {
         self.audio.as_ref().map(|audio| (audio.start, audio.end))
     }
 
     // The ReplayGain of a track of a CUE sheet, or of an Opus file whose
     // tags only give R128 gains; the stream of another file has its own,
     // which GStreamer gives rgvolume
-    pub fn gains(&self) -> Option<Gains> {
+    pub(crate) fn gains(&self) -> Option<Gains> {
         self.audio
             .as_ref()
             .map(|audio| audio.gains)
@@ -519,7 +521,7 @@ mod imp {
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::Track)]
-    pub struct Track {
+    pub(crate) struct Track {
         #[property(name = "uri", get = Self::uri, type = String)]
         #[property(name = "artist", get = Self::artist, type = String)]
         #[property(name = "title", get = Self::title, type = String)]
@@ -550,15 +552,15 @@ mod imp {
         #[property(name = "row-cover", get = Self::row_cover, nullable, type = Option<gdk::Texture>)]
         // The file wasn't found when the playlist loaded
         #[property(name = "missing", get = Self::missing, type = bool)]
-        pub data: RefCell<TrackData>,
+        pub(crate) data: RefCell<TrackData>,
         #[property(get, set = Self::set_playing, explicit_notify)]
-        pub playing: Cell<bool>,
+        pub(crate) playing: Cell<bool>,
         #[property(get, set = Self::set_selected, explicit_notify)]
-        pub selected: Cell<bool>,
+        pub(crate) selected: Cell<bool>,
         // Briefly, to show where the track is in a list
         #[property(get, set = Self::set_flashing, explicit_notify)]
-        pub flashing: Cell<bool>,
-        pub search_key: RefCell<Option<String>>,
+        pub(crate) flashing: Cell<bool>,
+        pub(crate) search_key: RefCell<Option<String>>,
     }
 
     #[glib::object_subclass]
@@ -739,11 +741,11 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Track(ObjectSubclass<imp::Track>);
+    pub(crate) struct Track(ObjectSubclass<imp::Track>);
 }
 
 impl Track {
-    pub fn new(data: TrackData) -> Self {
+    pub(crate) fn new(data: TrackData) -> Self {
         let track: Self = glib::Object::new();
         track.imp().data.replace(data);
         track
@@ -752,7 +754,7 @@ impl Track {
     // Replaces the tags with the ones read again from the file, after it
     // changed; the track stays the same object, so it keeps its place in
     // the queue
-    pub fn update(&self, data: TrackData) {
+    pub(crate) fn update(&self, data: TrackData) {
         let imp = self.imp();
         imp.data.replace(data);
         imp.search_key.take();
@@ -773,42 +775,42 @@ impl Track {
     }
 
     // Why the track has none of its file's tags, if it's a placeholder
-    pub fn missing_reason(&self) -> Option<Missing> {
+    pub(crate) fn missing_reason(&self) -> Option<Missing> {
         self.imp().data.borrow().missing_reason()
     }
 
     // Makes the track one whose file wasn't found, like those of a
     // playlist that opens without their files, once its file turns out to
     // be gone, e.g. when it fails to play
-    pub fn mark_missing(&self) {
+    pub(crate) fn mark_missing(&self) {
         self.update(TrackData::missing(self.file(), Missing::NotFound));
     }
 
     // The title, artist and album in the tags, without the ones shown in
     // their place
-    pub fn tag_title(&self) -> Option<String> {
+    pub(crate) fn tag_title(&self) -> Option<String> {
         self.imp().data.borrow().title().map(ToString::to_string)
     }
 
-    pub fn tag_artist(&self) -> Option<String> {
+    pub(crate) fn tag_artist(&self) -> Option<String> {
         self.imp().data.borrow().artist().map(ToString::to_string)
     }
 
-    pub fn tag_album(&self) -> Option<String> {
+    pub(crate) fn tag_album(&self) -> Option<String> {
         self.imp().data.borrow().album().map(ToString::to_string)
     }
 
-    pub fn credit_details(&self) -> TrackCredits {
+    pub(crate) fn credit_details(&self) -> TrackCredits {
         self.imp().data.borrow().credits().clone()
     }
 
-    pub fn copied_details(&self) -> String {
+    pub(crate) fn copied_details(&self) -> String {
         self.imp().data.borrow().copied_details()
     }
 
     // The artists for MPRIS and the tray, or the artist shown if there are
     // none, as the controls would show no one
-    pub fn credited_artists(&self) -> Vec<String> {
+    pub(crate) fn credited_artists(&self) -> Vec<String> {
         let names = self
             .imp()
             .data
@@ -824,19 +826,19 @@ impl Track {
         }
     }
 
-    pub fn file_details(&self) -> FileDetails {
+    pub(crate) fn file_details(&self) -> FileDetails {
         self.imp().data.borrow().details().clone()
     }
 
-    pub fn cover_palette(&self) -> Option<Vec<gdk::RGBA>> {
+    pub(crate) fn cover_palette(&self) -> Option<Vec<gdk::RGBA>> {
         self.imp().data.borrow().cover_palette().cloned()
     }
 
-    pub fn cover_accent(&self) -> Option<gdk::RGBA> {
+    pub(crate) fn cover_accent(&self) -> Option<gdk::RGBA> {
         self.imp().data.borrow().cover_accent()
     }
 
-    pub fn cover_uuid(&self) -> Option<String> {
+    pub(crate) fn cover_uuid(&self) -> Option<String> {
         self.imp()
             .data
             .borrow()
@@ -844,7 +846,7 @@ impl Track {
             .map(ToString::to_string)
     }
 
-    pub fn cover_cache_file(&self) -> Option<gio::File> {
+    pub(crate) fn cover_cache_file(&self) -> Option<gio::File> {
         self.imp()
             .data
             .borrow()
@@ -852,38 +854,38 @@ impl Track {
             .map(gio::File::for_path)
     }
 
-    pub fn uuid(&self) -> Option<String> {
+    pub(crate) fn uuid(&self) -> Option<String> {
         self.imp().data.borrow().uuid().map(ToString::to_string)
     }
 
     // The work the movement belongs to, if the track is a movement
-    pub fn movement_work(&self) -> Option<String> {
+    pub(crate) fn movement_work(&self) -> Option<String> {
         self.imp().movement_work()
     }
 
     // Whether the track is part of a work, or the whole of one
-    pub fn has_work(&self) -> bool {
+    pub(crate) fn has_work(&self) -> bool {
         self.imp().data.borrow().credits().work.is_some()
     }
 
     // Whether the track is a movement of a work
-    pub fn is_movement(&self) -> bool {
+    pub(crate) fn is_movement(&self) -> bool {
         self.imp().data.borrow().credits().is_movement()
     }
 
     // Whether the track is a movement whose levels in the work are shown
     // on a line of their own, see `TrackCredits::shown_levels()`
-    pub fn has_movement_levels(&self) -> bool {
+    pub(crate) fn has_movement_levels(&self) -> bool {
         self.imp().data.borrow().credits().shown_levels().is_some()
     }
 
     // The composers, or the artist if the track has no composer
-    pub fn composer(&self) -> String {
+    pub(crate) fn composer(&self) -> String {
         self.imp().composer()
     }
 
     // The year the track was made, see `TrackCredits::year()`
-    pub fn year(&self) -> Option<String> {
+    pub(crate) fn year(&self) -> Option<String> {
         self.imp().data.borrow().credits().year()
     }
 
@@ -891,7 +893,7 @@ impl Track {
     // composers, from the same release (see `TrackData::work_composers()`
     // and `TrackData::same_release()`). Rows of the queue are compared
     // with the ones next to them as they're shown, so nothing is copied
-    pub fn same_work_as(&self, other: &Track) -> bool {
+    pub(crate) fn same_work_as(&self, other: &Track) -> bool {
         let (a, b) = (self.imp().data.borrow(), other.imp().data.borrow());
         a.credits().is_movement()
             && b.credits().is_movement()
@@ -902,7 +904,7 @@ impl Track {
 
     // Whether the track comes after another from the same release, later
     // on the album, as the tracks of an album played in order do
-    pub fn continues_album(&self, previous: &Track) -> bool {
+    pub(crate) fn continues_album(&self, previous: &Track) -> bool {
         let same_release = self
             .imp()
             .data
@@ -913,7 +915,7 @@ impl Track {
 
     // Whether the track comes after another on their album, by disc and
     // track number, or else whether it's another track
-    pub fn follows_on_album(&self, other: &Track) -> bool {
+    pub(crate) fn follows_on_album(&self, other: &Track) -> bool {
         let position = |track: &Track| {
             let data = track.imp().data.borrow();
             let credits = data.credits();
@@ -932,7 +934,7 @@ impl Track {
 
     // The disc of its album the track is on, by its number or its disc
     // folder: the audio file's, which a CUE sheet is next to
-    pub fn disc(&self) -> Disc {
+    pub(crate) fn disc(&self) -> Disc {
         let data = self.imp().data.borrow();
         // Without the path, which the number goes before
         if let Some(number) = data.credits().disc_number {
@@ -943,11 +945,11 @@ impl Track {
     }
 
     // The work the track's work arranges, if it's an arrangement
-    pub fn work_arrangement(&self) -> Option<Arrangement> {
+    pub(crate) fn work_arrangement(&self) -> Option<Arrangement> {
         self.imp().data.borrow().credits().work_arrangement.clone()
     }
 
-    pub fn disc_subtitle(&self) -> Option<String> {
+    pub(crate) fn disc_subtitle(&self) -> Option<String> {
         self.imp().data.borrow().credits().disc_subtitle.clone()
     }
 
@@ -1006,7 +1008,7 @@ impl Track {
     // The artist that shuffling keeps from coming twice in a row: the
     // composers of a movement, as its work shows them, and otherwise the
     // artist in the tags
-    pub fn shuffle_artist(&self) -> Option<String> {
+    pub(crate) fn shuffle_artist(&self) -> Option<String> {
         let data = self.imp().data.borrow();
         let composers = &data.credits().composers;
         if data.credits().is_movement() && !composers.is_empty() {
@@ -1020,7 +1022,7 @@ impl Track {
     // `context`, with the URIs of the favorite tracks if the search needs
     // them. Searching tests every track of the queue at each keystroke, so
     // the text isn't copied
-    pub fn matches_query(
+    pub(crate) fn matches_query(
         &self,
         query: &Query,
         context: &Context,
@@ -1071,7 +1073,7 @@ impl Track {
     }
 
     #[cfg(test)]
-    pub fn search_key(&self) -> String {
+    pub(crate) fn search_key(&self) -> String {
         self.with_search_key(ToString::to_string)
     }
 
@@ -1093,31 +1095,31 @@ impl Track {
         f(key)
     }
 
-    pub fn file(&self) -> gio::File {
+    pub(crate) fn file(&self) -> gio::File {
         self.imp().data.borrow().file()
     }
 
-    pub fn audio_file(&self) -> gio::File {
+    pub(crate) fn audio_file(&self) -> gio::File {
         self.imp().data.borrow().audio_file()
     }
 
-    pub fn audio_uri(&self) -> String {
+    pub(crate) fn audio_uri(&self) -> String {
         self.audio_file().uri().to_string()
     }
 
-    pub fn segment(&self) -> (Duration, Option<Duration>) {
+    pub(crate) fn segment(&self) -> (Duration, Option<Duration>) {
         self.imp().data.borrow().segment()
     }
 
-    pub fn part(&self) -> Option<(Duration, Option<Duration>)> {
+    pub(crate) fn part(&self) -> Option<(Duration, Option<Duration>)> {
         self.imp().data.borrow().part()
     }
 
-    pub fn gains(&self) -> Option<Gains> {
+    pub(crate) fn gains(&self) -> Option<Gains> {
         self.imp().data.borrow().gains()
     }
 
-    pub fn has_video(&self) -> bool {
+    pub(crate) fn has_video(&self) -> bool {
         self.imp().data.borrow().details().video
     }
 }

@@ -186,7 +186,7 @@ impl Window {
         }
     }
 
-    pub fn set_track_time(&self, elapsed: Option<u64>, remaining: Option<u64>) {
+    pub(crate) fn set_track_time(&self, elapsed: Option<u64>, remaining: Option<u64>) {
         if let Some(elapsed) = elapsed {
             self.imp()
                 .elapsed_label
@@ -227,7 +227,7 @@ impl Window {
         }
     }
 
-    pub fn set_track_position(&self, position: f64) {
+    pub(crate) fn set_track_position(&self, position: f64) {
         self.imp().waveform_view.set_position(position);
         self.imp().seek_scale.set_value(position);
     }

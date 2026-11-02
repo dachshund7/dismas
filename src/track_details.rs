@@ -11,18 +11,18 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/track-details.ui")]
-    pub struct TrackDetails {
+    pub(crate) struct TrackDetails {
         // Template widgets
         #[template_child]
-        pub track_title_label: TemplateChild<Marquee>,
+        pub(crate) track_title_label: TemplateChild<Marquee>,
         #[template_child]
-        pub track_movement_label: TemplateChild<Marquee>,
+        pub(crate) track_movement_label: TemplateChild<Marquee>,
         #[template_child]
-        pub track_artist_label: TemplateChild<Marquee>,
+        pub(crate) track_artist_label: TemplateChild<Marquee>,
         #[template_child]
-        pub track_album_label: TemplateChild<Marquee>,
+        pub(crate) track_album_label: TemplateChild<Marquee>,
         #[template_child]
-        pub track_credits_label: TemplateChild<Marquee>,
+        pub(crate) track_credits_label: TemplateChild<Marquee>,
     }
 
     #[glib::object_subclass]
@@ -56,7 +56,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct TrackDetails(ObjectSubclass<imp::TrackDetails>)
+    pub(crate) struct TrackDetails(ObjectSubclass<imp::TrackDetails>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -68,23 +68,23 @@ impl Default for TrackDetails {
 }
 
 impl TrackDetails {
-    pub fn artist_label(&self) -> Marquee {
+    pub(crate) fn artist_label(&self) -> Marquee {
         self.imp().track_artist_label.get()
     }
 
-    pub fn title_label(&self) -> Marquee {
+    pub(crate) fn title_label(&self) -> Marquee {
         self.imp().track_title_label.get()
     }
 
-    pub fn album_label(&self) -> Marquee {
+    pub(crate) fn album_label(&self) -> Marquee {
         self.imp().track_album_label.get()
     }
 
-    pub fn movement_label(&self) -> Marquee {
+    pub(crate) fn movement_label(&self) -> Marquee {
         self.imp().track_movement_label.get()
     }
 
-    pub fn credits_label(&self) -> Marquee {
+    pub(crate) fn credits_label(&self) -> Marquee {
         self.imp().track_credits_label.get()
     }
 }

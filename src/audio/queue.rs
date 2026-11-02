@@ -26,22 +26,22 @@ mod imp {
 
     #[derive(Debug, glib::Properties)]
     #[properties(wrapper_type = super::Queue)]
-    pub struct Queue {
-        pub store: gio::ListStore,
+    pub(crate) struct Queue {
+        pub(crate) store: gio::ListStore,
         #[property(get, builder(RepeatMode::default()))]
-        pub repeat_mode: Cell<RepeatMode>,
+        pub(crate) repeat_mode: Cell<RepeatMode>,
         #[property(name = "current", get = Self::current, nullable, type = Option<Track>)]
-        pub current_pos: Cell<Option<u32>>,
+        pub(crate) current_pos: Cell<Option<u32>>,
         #[property(name = "n-tracks", get = Self::n_tracks, type = u32)]
         n_tracks: std::marker::PhantomData<u32>,
         // The tracks Play Next put in, which the next ones go after while
         // they follow the current track
-        pub played_next: RefCell<Vec<glib::WeakRef<Track>>>,
+        pub(crate) played_next: RefCell<Vec<glib::WeakRef<Track>>>,
         // Goes up each time the queue is emptied for other tracks, as when
         // switching playlists, so that tracks removed before can't be put
         // back among those of another playlist
         #[property(get)]
-        pub generation: Cell<u64>,
+        pub(crate) generation: Cell<u64>,
     }
 
     #[glib::object_subclass]
@@ -76,7 +76,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Queue(ObjectSubclass<imp::Queue>);
+    pub(crate) struct Queue(ObjectSubclass<imp::Queue>);
 }
 
 impl Default for Queue {
@@ -86,32 +86,32 @@ impl Default for Queue {
 }
 
 impl Queue {
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.imp().store.n_items() == 0
     }
 
-    pub fn model(&self) -> &gio::ListModel {
+    pub(crate) fn model(&self) -> &gio::ListModel {
         self.imp().store.upcast_ref()
     }
 
     // The tracks, in the order of the queue
-    pub fn tracks(&self) -> Vec<Track> {
+    pub(crate) fn tracks(&self) -> Vec<Track> {
         self.imp().store.iter::<Track>().flatten().collect()
     }
 
     // The files of the tracks, in the order of the queue, which is the one
     // that is saved
-    pub fn files(&self) -> Vec<gio::File> {
+    pub(crate) fn files(&self) -> Vec<gio::File> {
         self.tracks().iter().map(Track::file).collect()
     }
 
-    pub fn track_at(&self, pos: u32) -> Option<Track> {
+    pub(crate) fn track_at(&self, pos: u32) -> Option<Track> {
         self.imp().store.item(pos).and_downcast()
     }
 
     // The position of a track in the queue, if it's in it; the same file
     // added twice is two tracks
-    pub fn position(&self, track: &Track) -> Option<u32> {
+    pub(crate) fn position(&self, track: &Track) -> Option<u32> {
         self.imp()
             .store
             .iter::<Track>()
@@ -121,14 +121,14 @@ impl Queue {
 
     // Shows the new tags of a track that was updated: its row and the
     // section of its work are made again
-    pub fn track_changed(&self, track: &Track) {
+    pub(crate) fn track_changed(&self, track: &Track) {
         if let Some(pos) = self.position(track) {
             self.imp().store.splice(pos, 1, std::slice::from_ref(track));
         }
     }
 
     #[cfg(test)]
-    pub fn set_current_track(&self, track: Option<Track>) {
+    pub(crate) fn set_current_track(&self, track: Option<Track>) {
         self.forget_played_next();
         if let Some(track) = track {
             if let Some(pos) = self.position(&track) {
@@ -141,11 +141,11 @@ impl Queue {
         }
     }
 
-    pub fn current_track_index(&self) -> Option<u32> {
+    pub(crate) fn current_track_index(&self) -> Option<u32> {
         self.imp().current_pos.get()
     }
 
-    pub fn add_tracks(&self, tracks: &[impl IsA<glib::Object>]) {
+    pub(crate) fn add_tracks(&self, tracks: &[impl IsA<glib::Object>]) {
         self.imp()
             .store
             .splice(self.imp().store.n_items(), 0, tracks);
@@ -154,7 +154,7 @@ impl Queue {
 
     // Inserts tracks before another one, or at the end if it's not there
     // anymore; the current track stays
-    pub fn insert_tracks(&self, tracks: &[Track], before: Option<&Track>) {
+    pub(crate) fn insert_tracks(&self, tracks: &[Track], before: Option<&Track>) {
         let Some(pos) = before.and_then(|before| self.position(before)) else {
             self.add_tracks(tracks);
             return;
@@ -170,7 +170,7 @@ impl Queue {
     // so that tracks added since at the end stay after them. Tracks that
     // were the whole queue go before those added since. At the end when
     // neither of their tracks is there anymore
-    pub fn put_back(&self, run: &RemovedRun) {
+    pub(crate) fn put_back(&self, run: &RemovedRun) {
         let before = match (&run.before, &run.after) {
             (Some(before), _) if self.position(before).is_some() => Some(before.clone()),
             (_, Some(after)) => self.track_after(after),
@@ -181,7 +181,7 @@ impl Queue {
     }
 
     #[cfg(test)]
-    pub fn remove_track(&self, track: &Track) {
+    pub(crate) fn remove_track(&self, track: &Track) {
         self.remove_tracks(std::slice::from_ref(track));
     }
 
@@ -193,7 +193,7 @@ impl Queue {
     // is found again first, for the handlers of the number of tracks.
     // Returns the runs of tracks removed, in the order of the queue, to put
     // them back
-    pub fn remove_tracks(&self, tracks: &[Track]) -> Vec<RemovedRun> {
+    pub(crate) fn remove_tracks(&self, tracks: &[Track]) -> Vec<RemovedRun> {
         let removed: HashSet<&Track> = tracks.iter().collect();
         let mut old = self.tracks();
         let Some(start) = old.iter().position(|t| removed.contains(t)) else {
@@ -221,7 +221,7 @@ impl Queue {
     // Where playback goes when the current track is removed with others:
     // the first track after it that can play and stays, round to the start
     // when the queue repeats all of it, and even when it repeats the track
-    pub fn following_except(&self, removed: &HashSet<&Track>) -> Option<u32> {
+    pub(crate) fn following_except(&self, removed: &HashSet<&Track>) -> Option<u32> {
         let n_tracks = self.imp().store.n_items();
         let current = self.current_track_index()?;
         let stays = |pos: u32| {
@@ -238,7 +238,7 @@ impl Queue {
     }
 
     // The first track that can play and isn't removed
-    pub fn first_except(&self, removed: &HashSet<&Track>) -> Option<u32> {
+    pub(crate) fn first_except(&self, removed: &HashSet<&Track>) -> Option<u32> {
         (0..self.imp().store.n_items()).find(|&pos| {
             self.playable(pos)
                 && self
@@ -249,14 +249,14 @@ impl Queue {
 
     // Moves a track before another one, or to the end
     #[cfg(test)]
-    pub fn move_track(&self, track: &Track, before: Option<&Track>) {
+    pub(crate) fn move_track(&self, track: &Track, before: Option<&Track>) {
         self.move_tracks(std::slice::from_ref(track), before);
     }
 
     // Moves tracks together before another one, or to the end, keeping
     // the order they had; if the other one is moved as well, they go
     // before the next track that isn't
-    pub fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
+    pub(crate) fn move_tracks(&self, tracks: &[Track], before: Option<&Track>) {
         let store = &self.imp().store;
         let old = self.tracks();
         let moved: Vec<Track> = old.iter().filter(|t| tracks.contains(t)).cloned().collect();
@@ -295,7 +295,7 @@ impl Queue {
     // from the stats of their URIs; see `shuffled_order()`. The track to
     // keep comes first, with the other movements of its work around it, and
     // all the others after it, those that came before it too
-    pub fn shuffle(
+    pub(crate) fn shuffle(
         &self,
         keep: Option<&Track>,
         stats: &HashMap<String, TrackStats>,
@@ -324,7 +324,7 @@ impl Queue {
     // current track stays current, wherever it goes. Says whether the order
     // changed. The tracks Play Next put in are forgotten, as they're no
     // longer after the current track
-    pub fn sort(&self, key: SortKey) -> bool {
+    pub(crate) fn sort(&self, key: SortKey) -> bool {
         let tracks = self.tracks();
         // Only the first track of each unit is sorted by, so the movements
         // that continue a work, and every track for Reverse, need nothing
@@ -358,7 +358,7 @@ impl Queue {
 
     // Puts the tracks back in the order of the URIs saved before they were
     // shuffled, in a single change; see `restored_order()`
-    pub fn restore_order(&self, saved: &[String]) {
+    pub(crate) fn restore_order(&self, saved: &[String]) {
         let tracks = self.tracks();
         let uris: Vec<String> = tracks.iter().map(Track::uri).collect();
         self.put_in_order(&tracks, &restored_order(&uris, saved));
@@ -367,7 +367,7 @@ impl Queue {
     // Puts the tracks back in an order they had, in a single change, as
     // `restore_order()` does, but by the tracks themselves rather than
     // their URIs, so that copies of a file go back to their own places
-    pub fn restore_tracks(&self, saved: &[Track]) {
+    pub(crate) fn restore_tracks(&self, saved: &[Track]) {
         let tracks = self.tracks();
         self.put_in_order(&tracks, &restored_order(&tracks, saved));
     }
@@ -392,7 +392,7 @@ impl Queue {
     // isn't cut, and after the tracks Play Next put right after those,
     // so that they play in the order they were chosen; the tracks moved
     // there don't count
-    pub fn play_next_before(&self, moving: &[Track]) -> Option<Track> {
+    pub(crate) fn play_next_before(&self, moving: &[Track]) -> Option<Track> {
         let moving: HashSet<&Track> = moving.iter().collect();
         let tracks: Vec<Track> = self
             .tracks()
@@ -420,7 +420,7 @@ impl Queue {
 
     // Tracks Play Next put in; the ones put in next go after them, while
     // nothing else comes in between
-    pub fn mark_played_next(&self, tracks: &[Track]) {
+    pub(crate) fn mark_played_next(&self, tracks: &[Track]) {
         let mut played_next = self.imp().played_next.borrow_mut();
         let marked: HashSet<&Track> = tracks.iter().collect();
         played_next.retain(|t| t.upgrade().is_some_and(|t| !marked.contains(&t)));
@@ -434,12 +434,12 @@ impl Queue {
     }
 
     // The selected tracks, in the order of the queue
-    pub fn selected_tracks(&self) -> Vec<Track> {
+    pub(crate) fn selected_tracks(&self) -> Vec<Track> {
         self.tracks().into_iter().filter(Track::selected).collect()
     }
 
     // The track after this one in the queue
-    pub fn track_after(&self, track: &Track) -> Option<Track> {
+    pub(crate) fn track_after(&self, track: &Track) -> Option<Track> {
         self.track_at(self.position(track)? + 1)
     }
 
@@ -453,7 +453,7 @@ impl Queue {
 
     // The covers go with the tracks, unless other tracks of their albums
     // are still around, like the tracks that replace these
-    pub fn clear(&self) {
+    pub(crate) fn clear(&self) {
         self.forget_played_next();
         self.imp().current_pos.replace(None);
         self.imp().store.remove_all();
@@ -463,7 +463,7 @@ impl Queue {
         self.notify_generation();
     }
 
-    pub fn skip_track(&self, pos: u32) -> Option<Track> {
+    pub(crate) fn skip_track(&self, pos: u32) -> Option<Track> {
         self.forget_played_next();
         self.imp().current_pos.replace(Some(pos));
         self.notify_current();
@@ -472,7 +472,7 @@ impl Queue {
 
     // The track before the current one that can play, skipping those whose
     // files weren't found
-    pub fn previous_track(&self) -> Option<Track> {
+    pub(crate) fn previous_track(&self) -> Option<Track> {
         let current_pos = self.imp().current_pos.get()?;
         let prev = (0..current_pos).rev().find(|&pos| self.playable(pos))?;
         self.forget_played_next();
@@ -483,7 +483,7 @@ impl Queue {
 
     // The track at a position, if it can play: it's there, and isn't a
     // placeholder for a file that gave no track
-    pub fn playable_track(&self, pos: u32) -> Option<Track> {
+    pub(crate) fn playable_track(&self, pos: u32) -> Option<Track> {
         self.track_at(pos).filter(|track| !track.missing())
     }
 
@@ -492,16 +492,16 @@ impl Queue {
     }
 
     // The first track from a position on that can play
-    pub fn playable_from(&self, pos: u32) -> Option<u32> {
+    pub(crate) fn playable_from(&self, pos: u32) -> Option<u32> {
         (pos..self.imp().store.n_items()).find(|&pos| self.playable(pos))
     }
 
-    pub fn next_track(&self) -> Option<Track> {
+    pub(crate) fn next_track(&self) -> Option<Track> {
         self.advance(self.imp().repeat_mode.get())
     }
 
     // The track that `next_track` would go to, without going there
-    pub fn peek_next_track(&self) -> Option<Track> {
+    pub(crate) fn peek_next_track(&self) -> Option<Track> {
         self.track_at(self.next_pos(self.imp().repeat_mode.get())?)
     }
 
@@ -534,7 +534,7 @@ impl Queue {
         }
     }
 
-    pub fn set_repeat_mode(&self, repeat_mode: RepeatMode) {
+    pub(crate) fn set_repeat_mode(&self, repeat_mode: RepeatMode) {
         let old_mode = self.imp().repeat_mode.replace(repeat_mode);
         if old_mode != repeat_mode {
             self.notify_repeat_mode();
@@ -542,24 +542,24 @@ impl Queue {
     }
 
     // Whether no track before the current one can play
-    pub fn is_first_track(&self) -> bool {
+    pub(crate) fn is_first_track(&self) -> bool {
         self.current_track_index()
             .is_some_and(|current| !(0..current).any(|pos| self.playable(pos)))
     }
 
     // Whether no track after the current one can play
-    pub fn is_last_track(&self) -> bool {
+    pub(crate) fn is_last_track(&self) -> bool {
         self.current_track_index()
             .is_some_and(|current| self.playable_from(current + 1).is_none())
     }
 
-    pub fn unselect_all_tracks(&self) {
+    pub(crate) fn unselect_all_tracks(&self) {
         for track in self.imp().store.iter::<Track>().flatten() {
             track.set_selected(false);
         }
     }
 
-    pub fn n_selected_tracks(&self) -> u32 {
+    pub(crate) fn n_selected_tracks(&self) -> u32 {
         self.imp()
             .store
             .iter::<Track>()
@@ -574,15 +574,15 @@ impl Queue {
 // if they stayed, to put them back between: unlike a position, those
 // still hold once other tracks were added, moved or removed
 #[derive(Debug)]
-pub struct RemovedRun {
-    pub tracks: Vec<Track>,
-    pub after: Option<Track>,
-    pub before: Option<Track>,
+pub(crate) struct RemovedRun {
+    pub(crate) tracks: Vec<Track>,
+    pub(crate) after: Option<Track>,
+    pub(crate) before: Option<Track>,
 }
 
 impl RemovedRun {
     // The whole queue, emptied
-    pub fn all(tracks: Vec<Track>) -> Self {
+    pub(crate) fn all(tracks: Vec<Track>) -> Self {
         Self {
             tracks,
             after: None,

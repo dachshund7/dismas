@@ -3,7 +3,7 @@
 
 use crate::audio::{PlaybackState, RepeatMode, Track};
 
-pub trait Controller {
+pub(crate) trait Controller {
     fn set_playback_state(&self, state: PlaybackState);
 
     fn set_track(&self, track: &Track);

@@ -10,7 +10,7 @@ use super::*;
 
 // A page of the pane that opens over another
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanePage {
+pub(crate) enum PanePage {
     Album,
     Lyrics,
 }
@@ -35,7 +35,7 @@ impl PanePage {
 
 // Where going back from a page of the pane goes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Back {
+pub(crate) enum Back {
     // The queue, and whether the pane was showing before the page opened,
     // as the pane closes again if it wasn't
     Queue { pane_visible: bool },
@@ -45,7 +45,7 @@ pub enum Back {
 // The pages under the one that shows, the queue first; empty while the
 // queue shows
 #[derive(Debug, Default)]
-pub struct PaneHistory(Vec<Back>);
+pub(crate) struct PaneHistory(Vec<Back>);
 
 impl PaneHistory {
     // `page` opens over `from`, the page that shows, which is the queue if

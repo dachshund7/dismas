@@ -18,7 +18,7 @@ pub(super) fn fallback_album(path: &Path) -> String {
 // out: "Song - Live" could just as well be "Artist - Song", so the rest is
 // kept as it is. This can read the folder of the file, so it must not be
 // called on the main thread
-pub fn title_from_file_name(path: &Path) -> String {
+pub(crate) fn title_from_file_name(path: &Path) -> String {
     let stem = path
         .file_stem()
         .map(|stem| stem.to_string_lossy())

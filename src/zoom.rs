@@ -14,7 +14,7 @@ use gtk::{gdk, gio, glib, prelude::*};
 
 // How a view is zoomed
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Zoom {
+pub(crate) enum Zoom {
     In,
     Out,
     Reset,
@@ -24,7 +24,7 @@ impl Zoom {
     // The step a view goes to from `step`, among those from `min` to
     // `max`, or nothing at the end it's going to; Reset goes back to the
     // normal size, 0
-    pub fn step_from(self, step: i32, min: i32, max: i32) -> Option<i32> {
+    pub(crate) fn step_from(self, step: i32, min: i32, max: i32) -> Option<i32> {
         let to = match self {
             Zoom::In => step + 1,
             Zoom::Out => step - 1,
@@ -36,28 +36,28 @@ impl Zoom {
 
 // The steps a view is zoomed to: the setting that keeps the step, and
 // the smallest and the largest
-pub struct ZoomSteps {
-    pub key: &'static str,
-    pub min: i32,
-    pub max: i32,
+pub(crate) struct ZoomSteps {
+    pub(crate) key: &'static str,
+    pub(crate) min: i32,
+    pub(crate) max: i32,
 }
 
 impl ZoomSteps {
     // The step the view is at
-    pub fn step(&self, settings: &gio::Settings) -> i32 {
+    pub(crate) fn step(&self, settings: &gio::Settings) -> i32 {
         settings.int(self.key).clamp(self.min, self.max)
     }
 
     // Zooms the view a step, or back to its normal size; false when it's
     // at that end already
-    pub fn zoom(&self, settings: &gio::Settings, zoom: Zoom) -> bool {
+    pub(crate) fn zoom(&self, settings: &gio::Settings, zoom: Zoom) -> bool {
         zoom.step_from(settings.int(self.key), self.min, self.max)
             .is_some_and(|step| settings.set_int(self.key, step).is_ok())
     }
 
     // What a table with a value for each step, from the smallest, has at
     // `step`
-    pub fn at<T: Copy>(&self, table: &[T], step: i32) -> T {
+    pub(crate) fn at<T: Copy>(&self, table: &[T], step: i32) -> T {
         let index = usize::try_from(step - self.min).unwrap_or(0);
         table[index.min(table.len() - 1)]
     }
@@ -65,7 +65,7 @@ impl ZoomSteps {
 
 // How many pixels a touchpad scrolls for a step, which takes about a
 // third of its height on a laptop; also the volume's
-pub const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
+pub(crate) const SCROLL_PIXELS_PER_STEP: f64 = 50.0;
 
 // How long the scrolling stops before what's left of a step is dropped, so
 // that it doesn't add to a scroll made later
@@ -91,7 +91,7 @@ impl ScrollSteps {
     // The steps that the scroll at `time` makes: positive to zoom in,
     // negative to zoom out. Turning back drops what had been scrolled the
     // other way, and so does a pause
-    pub fn add(&mut self, dy: f64, unit: gdk::ScrollUnit, time: u32) -> i32 {
+    pub(crate) fn add(&mut self, dy: f64, unit: gdk::ScrollUnit, time: u32) -> i32 {
         let delta = match unit {
             gdk::ScrollUnit::Surface => dy / SCROLL_PIXELS_PER_STEP,
             _ => dy,
@@ -134,7 +134,7 @@ impl Default for PinchSteps {
 
 impl PinchSteps {
     // The step the pinch makes as its scale changes, if it makes one
-    pub fn update(&mut self, scale: f64) -> Option<Zoom> {
+    pub(crate) fn update(&mut self, scale: f64) -> Option<Zoom> {
         let ratio = scale / self.base;
         let zoom = if ratio >= PINCH_STEP {
             Zoom::In
@@ -151,7 +151,7 @@ impl PinchSteps {
 // Zooms the widget's view with Ctrl and the mouse wheel or a touchpad,
 // and with a pinch. The scrolling is in the capture phase, so that the
 // view doesn't scroll as well
-pub fn add_zoom_input(widget: &impl IsA<gtk::Widget>, zoom: impl Fn(Zoom) + 'static) {
+pub(crate) fn add_zoom_input(widget: &impl IsA<gtk::Widget>, zoom: impl Fn(Zoom) + 'static) {
     let zoom = Rc::new(zoom);
     let steps = RefCell::new(ScrollSteps::default());
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);

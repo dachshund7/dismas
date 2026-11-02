@@ -29,7 +29,7 @@ mod values;
 
 use std::ops::Range;
 
-pub use eval::{Candidate, Context};
+pub(crate) use eval::{Candidate, Context};
 // The times a date in the tags covers, which the library compares the
 // recording dates of a work's tracks by
 pub(crate) use values::tagged_span;
@@ -46,13 +46,13 @@ use crate::{
     dead_code,
     reason = "the smart playlists made by the user will save it"
 )]
-pub const SYNTAX_VERSION: u32 = 1;
+pub(crate) const SYNTAX_VERSION: u32 = 1;
 
 // How deep parentheses can go
 const MAX_DEPTH: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
+pub(crate) enum Mode {
     // A search box: whatever doesn't parse is searched as text
     Search,
     // A rule to save: every problem is reported, see `Problem::is_error()`
@@ -61,7 +61,7 @@ pub enum Mode {
 
 // A parsed search
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Query {
+pub(crate) struct Query {
     root: Node,
     // What the root looks at, worked out once, as each track matched asks
     needs: Needs,
@@ -71,24 +71,24 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn parse(text: &str, mode: Mode) -> Self {
+    pub(crate) fn parse(text: &str, mode: Mode) -> Self {
         parser::parse(text, mode)
     }
 
     // Whether it matches every track, as an empty search does, so that it
     // doesn't filter anything
-    pub fn matches_all(&self) -> bool {
+    pub(crate) fn matches_all(&self) -> bool {
         self.root == Node::All && !self.has_errors()
     }
 
     // Whether it can't match a track, as while it has an error
-    pub fn has_errors(&self) -> bool {
+    pub(crate) fn has_errors(&self) -> bool {
         self.problems
             .iter()
             .any(|problem| problem.is_error(self.mode))
     }
 
-    pub fn problems(&self) -> &[Problem] {
+    pub(crate) fn problems(&self) -> &[Problem] {
         &self.problems
     }
 
@@ -96,19 +96,19 @@ impl Query {
         dead_code,
         reason = "the smart playlists made by the user will read them"
     )]
-    pub fn directives(&self) -> &Directives {
+    pub(crate) fn directives(&self) -> &Directives {
         &self.directives
     }
 
     // What the query looks at, so that only that is read for each track
-    pub fn needs(&self) -> Needs {
+    pub(crate) fn needs(&self) -> Needs {
         self.needs
     }
 
     // The query with its relative dates worked out at the time of
     // `context`, so that matching many tracks doesn't work them out for
     // each; `matches()` gives the same answers with it at that time
-    pub fn at(&self, context: &Context) -> Self {
+    pub(crate) fn at(&self, context: &Context) -> Self {
         let mut query = self.clone();
         query.root.resolve_dates(context.now);
         query
@@ -116,7 +116,7 @@ impl Query {
 
     // Whether a track matches, at the time `context` gives for the relative
     // dates
-    pub fn matches(&self, candidate: &Candidate, context: &Context) -> bool {
+    pub(crate) fn matches(&self, candidate: &Candidate, context: &Context) -> bool {
         !self.has_errors() && eval::matches(&self.root, candidate, context)
     }
 
@@ -126,36 +126,36 @@ impl Query {
         dead_code,
         reason = "the smart playlists made by the user will save their rules with it"
     )]
-    pub fn to_text(&self) -> String {
+    pub(crate) fn to_text(&self) -> String {
         print::query(&self.root, &self.directives)
     }
 }
 
 // What a query looks at
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Needs {
+pub(crate) struct Needs {
     // The text of the tags, for plain words
-    pub search_key: bool,
+    pub(crate) search_key: bool,
     // The fields, see `FieldCode`
-    pub fields: bool,
-    pub path: bool,
-    pub favorites: bool,
+    pub(crate) fields: bool,
+    pub(crate) path: bool,
+    pub(crate) favorites: bool,
     // The play stats, for `plays:` and `played:`
-    pub stats: bool,
+    pub(crate) stats: bool,
     // When the track was added to the library
-    pub added: bool,
-    pub favorite_albums: bool,
-    pub favorite_works: bool,
+    pub(crate) added: bool,
+    pub(crate) favorite_albums: bool,
+    pub(crate) favorite_works: bool,
 }
 
 impl Needs {
     // Whether it needs what the library keeps of a track, see `TrackEntry`
-    pub fn library_entry(&self) -> bool {
+    pub(crate) fn library_entry(&self) -> bool {
         self.added || self.favorite_albums || self.favorite_works
     }
 
     // Whether marking a favorite can change what it matches
-    pub fn any_favorites(&self) -> bool {
+    pub(crate) fn any_favorites(&self) -> bool {
         self.favorites || self.favorite_albums || self.favorite_works
     }
 }
@@ -300,7 +300,7 @@ pub(crate) enum Kind {
 // The fields a search can look into; their names stay in English, so that
 // searches and rules are the same in every language
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Field {
+pub(crate) enum Field {
     Title,
     Artist,
     AlbumArtist,
@@ -347,7 +347,7 @@ pub enum Field {
 }
 
 impl Field {
-    pub const ALL: [Self; 42] = [
+    pub(crate) const ALL: [Self; 42] = [
         Self::Title,
         Self::Artist,
         Self::AlbumArtist,
@@ -392,7 +392,7 @@ impl Field {
         Self::Favorited,
     ];
 
-    pub const fn name(self) -> &'static str {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Title => "title",
             Self::Artist => "artist",
@@ -440,7 +440,7 @@ impl Field {
     }
 
     // A field by its name, ignoring ASCII case
-    pub fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|field| field.name().eq_ignore_ascii_case(name))
@@ -555,7 +555,7 @@ impl Field {
     }
 
     // What the field looks into, for the help on the syntax
-    pub fn description(self) -> String {
+    pub(crate) fn description(self) -> String {
         match self {
             Self::Title => i18n("The title"),
             Self::Artist => i18n("The artist"),
@@ -609,7 +609,7 @@ impl Field {
 
 // What `is:` can test
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum IsFlag {
+pub(crate) enum IsFlag {
     Favorite,
     // In a favorite album
     FavoriteAlbum,
@@ -622,7 +622,7 @@ pub enum IsFlag {
 }
 
 impl IsFlag {
-    pub const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::Favorite,
         Self::FavoriteAlbum,
         Self::FavoriteWork,
@@ -634,7 +634,7 @@ impl IsFlag {
         Self::Missing,
     ];
 
-    pub const fn name(self) -> &'static str {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Favorite => "favorite",
             Self::FavoriteAlbum => "favorite-album",
@@ -644,13 +644,13 @@ impl IsFlag {
         }
     }
 
-    pub fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|flag| flag.name().eq_ignore_ascii_case(name))
     }
 
-    pub fn description(self) -> String {
+    pub(crate) fn description(self) -> String {
         match self {
             Self::Favorite => i18n("Tracks marked with the heart"),
             Self::FavoriteAlbum => i18n("Tracks of albums marked with the heart"),
@@ -670,22 +670,22 @@ impl IsFlag {
 // How smart playlists will choose and order their tracks, written in the
 // rule; a search ignores them
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Directives {
-    pub sort: Vec<SortKey>,
+pub(crate) struct Directives {
+    pub(crate) sort: Vec<SortKey>,
     // The order to choose tracks in for the limit, if it isn't `sort`
-    pub pick: Vec<SortKey>,
-    pub limit: Option<Limit>,
-    pub by: Option<Unit>,
+    pub(crate) pick: Vec<SortKey>,
+    pub(crate) limit: Option<Limit>,
+    pub(crate) by: Option<Unit>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SortKey {
-    pub by: SortBy,
-    pub descending: bool,
+pub(crate) struct SortKey {
+    pub(crate) by: SortBy,
+    pub(crate) descending: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SortBy {
+pub(crate) enum SortBy {
     // The queue's sorts, see `audio::SortKey`
     Album,
     Artist,
@@ -737,7 +737,7 @@ impl SortBy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Limit {
+pub(crate) enum Limit {
     // Units, see `Unit`
     Count(u32),
     // In seconds
@@ -746,7 +746,7 @@ pub enum Limit {
 
 // What `pick`, `limit` and `sort` move as one
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Unit {
+pub(crate) enum Unit {
     // A recording's movements of a work, kept together and in order, and
     // each other track on its own
     Work,
@@ -795,14 +795,14 @@ impl Directive {
 
 // Something wrong with a search, or worth knowing, at a place in its text
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Problem {
+pub(crate) struct Problem {
     // In bytes of the text
-    pub span: Range<usize>,
-    pub kind: ProblemKind,
+    pub(crate) span: Range<usize>,
+    pub(crate) kind: ProblemKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProblemKind {
+pub(crate) enum ProblemKind {
     // Errors in a search and in a rule
     NotANumber(Field),
     NotADate(Field),
@@ -833,7 +833,7 @@ pub enum ProblemKind {
 impl Problem {
     // Whether the query can't be used: a search with an error matches
     // nothing, and a rule with one can't be saved
-    pub fn is_error(&self, mode: Mode) -> bool {
+    pub(crate) fn is_error(&self, mode: Mode) -> bool {
         use ProblemKind as K;
         match &self.kind {
             K::NotANumber(_)
@@ -860,7 +860,7 @@ impl Problem {
 
     // What to tell the user. The names of fields and the syntax stay in
     // English, as they're typed
-    pub fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         use ProblemKind as K;
         let field_name = |field: &Field| format!("{}:", field.name());
         match &self.kind {

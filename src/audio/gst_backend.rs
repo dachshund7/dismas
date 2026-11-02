@@ -45,25 +45,25 @@ const HAND_OVER_AFTER_LOAD: Duration = Duration::from_millis(500);
 // What plays for a track: its file, or the part of a file that a CUE sheet
 // gives it
 #[derive(Debug, Clone, PartialEq)]
-pub struct TrackSource {
+pub(crate) struct TrackSource {
     // The URI of the track, which tells apart the tracks of one file
-    pub id: String,
+    pub(crate) id: String,
     // The URI of the file that plays
-    pub uri: String,
-    pub start: gst::ClockTime,
+    pub(crate) uri: String,
+    pub(crate) start: gst::ClockTime,
     // Until the end of the file if `None`
-    pub end: Option<gst::ClockTime>,
+    pub(crate) end: Option<gst::ClockTime>,
     // For a part of a file, as the stream has the gains of all of it
-    pub gains: Option<Gains>,
+    pub(crate) gains: Option<Gains>,
     // Whether the file has a video stream, which GstPlay turns off
-    pub video: bool,
+    pub(crate) video: bool,
     // Whether the track plays as part of its album, see `ReplayGainMode::Auto`
-    pub album_order: bool,
+    pub(crate) album_order: bool,
 }
 
 impl TrackSource {
     // `album_order` comes from the queue, see `AudioPlayer::source_of`
-    pub fn of(track: &Track, album_order: bool) -> Self {
+    pub(crate) fn of(track: &Track, album_order: bool) -> Self {
         let (start, end) = track.segment();
         Self {
             id: track.uri(),
@@ -156,7 +156,7 @@ impl Drop for StateLock {
 }
 
 #[derive(Debug)]
-pub struct GstBackend {
+pub(crate) struct GstBackend {
     sender: Sender<PlaybackAction>,
     gst_player: gst_play::Play,
     replaygain: Option<GstReplayGain>,
@@ -173,7 +173,7 @@ pub struct GstBackend {
 }
 
 #[derive(Debug)]
-pub struct GstReplayGain {
+pub(crate) struct GstReplayGain {
     rg_filter_bin: gst::Element,
     rg_volume: gst::Element,
 }
@@ -485,7 +485,7 @@ fn add_end_probe(pad: &gst::Pad, gapless: Arc<Mutex<Gapless>>) {
 }
 
 impl GstReplayGain {
-    pub fn new() -> Result<GstReplayGain, Box<dyn std::error::Error>> {
+    pub(crate) fn new() -> Result<GstReplayGain, Box<dyn std::error::Error>> {
         let rg_volume = gst::ElementFactory::make_with_name("rgvolume", Some("rg volume"))?;
         let rg_limiter = gst::ElementFactory::make_with_name("rglimiter", Some("rg limiter"))?;
 
@@ -546,7 +546,7 @@ impl GstReplayGain {
 }
 
 impl GstBackend {
-    pub fn new(sender: Sender<PlaybackAction>) -> Self {
+    pub(crate) fn new(sender: Sender<PlaybackAction>) -> Self {
         let gst_player = gst_play::Play::default();
 
         gst_player.set_video_track_enabled(false);
@@ -773,7 +773,7 @@ impl GstBackend {
         ));
     }
 
-    pub fn set_track(&self, source: Option<TrackSource>) {
+    pub(crate) fn set_track(&self, source: Option<TrackSource>) {
         self.start_position
             .set(source.as_ref().map(|_| gst::ClockTime::ZERO));
         self.play_requested.set(false);
@@ -803,17 +803,17 @@ impl GstBackend {
     }
 
     // The track that playbin gets once this one is about to finish
-    pub fn set_next(&self, source: Option<TrackSource>) {
+    pub(crate) fn set_next(&self, source: Option<TrackSource>) {
         self.gapless().next = source;
     }
 
-    pub fn generation(&self) -> u64 {
+    pub(crate) fn generation(&self) -> u64 {
         self.gapless().generation
     }
 
     // The player follows the track that was handed over, or that the
     // pipeline went on to in the same file
-    pub fn confirm_switch(&self, source: TrackSource) {
+    pub(crate) fn confirm_switch(&self, source: TrackSource) {
         let mut gapless = self.gapless();
         gapless.handed = None;
         gapless.started = false;
@@ -824,7 +824,7 @@ impl GstBackend {
     // The seeks return the position the track will start at, if it hasn't
     // played yet, which the player shows itself, as GstPlay only reports
     // positions once the track is ready
-    pub fn seek(
+    pub(crate) fn seek(
         &self,
         position: u64,
         duration: u64,
@@ -835,11 +835,11 @@ impl GstBackend {
         self.seek_to(clock_time(Duration::from_secs(destination)))
     }
 
-    pub fn seek_position(&self, position: Duration) -> Option<Duration> {
+    pub(crate) fn seek_position(&self, position: Duration) -> Option<Duration> {
         self.seek_to(clock_time(position))
     }
 
-    pub fn seek_start(&self) -> Option<Duration> {
+    pub(crate) fn seek_start(&self) -> Option<Duration> {
         self.seek_to(gst::ClockTime::ZERO)
     }
 
@@ -867,11 +867,11 @@ impl GstBackend {
     // The track starts at the position once it plays, unless it's moved
     // or changed before. Getting it ready now, paused, would leave its
     // position stuck once it plays (see `pause()`)
-    pub fn resume_at(&self, position: Duration) {
+    pub(crate) fn resume_at(&self, position: Duration) {
         self.start_position.set(Some(clock_time(position)));
     }
 
-    pub fn play(&self) {
+    pub(crate) fn play(&self) {
         let (start, loading) = {
             let gapless = self.gapless();
             let start = gapless
@@ -904,7 +904,7 @@ impl GstBackend {
     }
 
     // Plays the track that was loaded, if it was asked to play meanwhile
-    pub fn loaded(&self) {
+    pub(crate) fn loaded(&self) {
         if self.gapless().pending_loads == 0 && self.play_requested.take() {
             self.play();
         }
@@ -916,7 +916,7 @@ impl GstBackend {
     // where it started, so GstPlay would report no positions until it
     // stops. Such a track stays unloaded instead, or is loaded again if it
     // was starting, and starts where it would have once it plays
-    pub fn pause(&self) {
+    pub(crate) fn pause(&self) {
         self.play_requested.set(false);
         // Not asked to play since it was loaded
         if self.start_position.get().is_some() {
@@ -941,7 +941,7 @@ impl GstBackend {
 
     // Loading the track again stops it too, and replaces a track that was
     // handed over, which playbin would keep instead
-    pub fn stop(&self) {
+    pub(crate) fn stop(&self) {
         let current = self.gapless().current.clone();
         if current.is_some() {
             self.set_track(current);
@@ -951,7 +951,7 @@ impl GstBackend {
         }
     }
 
-    pub fn set_volume(&self, volume: f64) {
+    pub(crate) fn set_volume(&self, volume: f64) {
         let linear_volume = gst_audio::StreamVolume::convert_volume(
             gst_audio::StreamVolumeFormat::Cubic,
             gst_audio::StreamVolumeFormat::Linear,
@@ -961,7 +961,7 @@ impl GstBackend {
         self.gst_player.set_volume(linear_volume);
     }
 
-    pub fn set_replaygain(&self, replaygain: ReplayGainMode) {
+    pub(crate) fn set_replaygain(&self, replaygain: ReplayGainMode) {
         let mut gapless = self.gapless.lock().unwrap();
         gapless.auto_gain = replaygain == ReplayGainMode::Auto;
         let filter = match (&self.replaygain, replaygain) {
@@ -985,13 +985,13 @@ impl GstBackend {
     }
 
     // The pre-amp of ReplayGain, in dB
-    pub fn set_preamp(&self, db: f64) {
+    pub(crate) fn set_preamp(&self, db: f64) {
         if let Some(replaygain) = &self.replaygain {
             replaygain.set_preamp(db);
         }
     }
 
-    pub fn replaygain_available(&self) -> bool {
+    pub(crate) fn replaygain_available(&self) -> bool {
         self.replaygain.is_some()
     }
 }

@@ -31,7 +31,7 @@ use crate::{
 
 // The tokens are XDG activation tokens, which bring the window to the
 // front on Wayland
-pub enum ApplicationAction {
+pub(crate) enum ApplicationAction {
     Present(Option<String>),
     // Closes the window if it has the focus, and presents it otherwise
     ToggleWindow(Option<String>),
@@ -46,13 +46,13 @@ mod imp {
     use super::*;
 
     #[derive(Debug)]
-    pub struct Application {
-        pub player: Rc<AudioPlayer>,
-        pub receiver: RefCell<Option<Receiver<ApplicationAction>>>,
-        pub background_hold: RefCell<Option<gio::ApplicationHoldGuard>>,
-        pub settings: gio::Settings,
-        pub resume_point_pending: Cell<bool>,
-        pub resume_point_saved: Cell<Instant>,
+    pub(crate) struct Application {
+        pub(crate) player: Rc<AudioPlayer>,
+        pub(crate) receiver: RefCell<Option<Receiver<ApplicationAction>>>,
+        pub(crate) background_hold: RefCell<Option<gio::ApplicationHoldGuard>>,
+        pub(crate) settings: gio::Settings,
+        pub(crate) resume_point_pending: Cell<bool>,
+        pub(crate) resume_point_saved: Cell<Instant>,
     }
 
     #[glib::object_subclass]
@@ -240,7 +240,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Application(ObjectSubclass<imp::Application>)
+    pub(crate) struct Application(ObjectSubclass<imp::Application>)
         @extends gio::Application, gtk::Application, adw::Application,
         @implements gio::ActionGroup, gio::ActionMap;
 }
@@ -316,11 +316,11 @@ fn on_other_desktop(_surface: &gdk::Surface) -> bool {
 }
 
 impl Application {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn player(&self) -> Rc<AudioPlayer> {
+    pub(crate) fn player(&self) -> Rc<AudioPlayer> {
         self.imp().player.clone()
     }
 

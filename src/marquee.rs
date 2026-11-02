@@ -17,7 +17,7 @@ mod imp {
 
     #[derive(Default, glib::Properties)]
     #[properties(wrapper_type = super::Marquee)]
-    pub struct Marquee {
+    pub(crate) struct Marquee {
         child: gtk::Label,
 
         pub(super) rotation_progress: Cell<f32>,
@@ -302,7 +302,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Marquee(ObjectSubclass<imp::Marquee>)
+    pub(crate) struct Marquee(ObjectSubclass<imp::Marquee>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }

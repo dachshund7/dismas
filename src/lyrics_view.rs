@@ -52,45 +52,45 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/lyrics-view.ui")]
-    pub struct LyricsView {
+    pub(crate) struct LyricsView {
         #[template_child]
-        pub back_button: TemplateChild<gtk::Button>,
+        pub(crate) back_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub window_title: TemplateChild<adw::WindowTitle>,
+        pub(crate) window_title: TemplateChild<adw::WindowTitle>,
         #[template_child]
-        pub zoom_row: TemplateChild<ZoomRow>,
+        pub(crate) zoom_row: TemplateChild<ZoomRow>,
         #[template_child]
-        pub stack: TemplateChild<gtk::Stack>,
+        pub(crate) stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub text_view: TemplateChild<gtk::TextView>,
+        pub(crate) text_view: TemplateChild<gtk::TextView>,
         #[template_child]
-        pub synced_scrolled: TemplateChild<gtk::ScrolledWindow>,
+        pub(crate) synced_scrolled: TemplateChild<gtk::ScrolledWindow>,
         #[template_child]
-        pub lines_box: TemplateChild<gtk::ListBox>,
+        pub(crate) lines_box: TemplateChild<gtk::ListBox>,
 
-        pub state: OnceCell<PlayerState>,
+        pub(crate) state: OnceCell<PlayerState>,
         // The track whose lyrics show, or are being read
-        pub track: RefCell<Option<Track>>,
+        pub(crate) track: RefCell<Option<Track>>,
         // The number of reads so far: the lyrics of a read only show if no
         // other read started after it, as the same track can be read again
         // before the read before is done, e.g. when its tags change
-        pub reads: Cell<u64>,
+        pub(crate) reads: Cell<u64>,
         // The lines of the synchronized lyrics that show, and the one sung
-        pub lines: RefCell<Vec<Line>>,
-        pub current: Cell<Option<usize>>,
+        pub(crate) lines: RefCell<Vec<Line>>,
+        pub(crate) current: Cell<Option<usize>>,
 
         // While the view is mapped
-        pub handlers: RefCell<Vec<glib::SignalHandlerId>>,
-        pub file_monitors: RefCell<Vec<gio::FileMonitor>>,
+        pub(crate) handlers: RefCell<Vec<glib::SignalHandlerId>>,
+        pub(crate) file_monitors: RefCell<Vec<gio::FileMonitor>>,
         // When the line sung changes next, while the track plays, between
         // the positions the player reports
-        pub next_change: RefCell<Option<glib::SourceId>>,
+        pub(crate) next_change: RefCell<Option<glib::SourceId>>,
         // While the lines stay where the user scrolled them
-        pub follow_pause: RefCell<Option<glib::SourceId>>,
-        pub glide: RefCell<Option<adw::TimedAnimation>>,
+        pub(crate) follow_pause: RefCell<Option<glib::SourceId>>,
+        pub(crate) glide: RefCell<Option<adw::TimedAnimation>>,
         // Where the text's zoom is kept, which is kept, as its signals stop
         // once it's dropped
-        pub settings: OnceCell<gio::Settings>,
+        pub(crate) settings: OnceCell<gio::Settings>,
     }
 
     #[glib::object_subclass]
@@ -182,7 +182,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct LyricsView(ObjectSubclass<imp::LyricsView>)
+    pub(crate) struct LyricsView(ObjectSubclass<imp::LyricsView>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -195,14 +195,14 @@ impl Default for LyricsView {
 
 impl LyricsView {
     // The state of the player, whose track's lyrics show; set once
-    pub fn set_state(&self, state: &PlayerState) {
+    pub(crate) fn set_state(&self, state: &PlayerState) {
         let _ = self.imp().state.set(state.clone());
         if self.is_mapped() {
             self.start_following();
         }
     }
 
-    pub fn connect_back<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_back<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "back",
             false,
@@ -210,7 +210,10 @@ impl LyricsView {
         )
     }
 
-    pub fn connect_seek<F: Fn(&Self, Duration) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_seek<F: Fn(&Self, Duration) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
         self.connect_closure(
             "seek",
             false,
@@ -224,7 +227,7 @@ impl LyricsView {
     // The tags of a track were read again; if it's the one whose lyrics
     // show, its lyrics are too. Once the view is shown again, they're read
     // anyway
-    pub fn track_changed(&self, track: &Track) {
+    pub(crate) fn track_changed(&self, track: &Track) {
         if self.is_mapped() && self.imp().track.borrow().as_ref() == Some(track) {
             self.read();
         }
@@ -587,7 +590,7 @@ impl LyricsView {
 
     // Makes the text of the lyrics a step larger or smaller, or its normal
     // size; false when it's at that end already
-    pub fn zoom(&self, zoom: Zoom) -> bool {
+    pub(crate) fn zoom(&self, zoom: Zoom) -> bool {
         LYRICS_ZOOM.zoom(self.settings(), zoom)
     }
 

@@ -48,7 +48,7 @@ const MAX_COVER_FILE_SIZE: u64 = 32 * 1024 * 1024;
 const COVER_SEARCH_TIME: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug)]
-pub struct CoverArt {
+pub(crate) struct CoverArt {
     texture: gdk::Texture,
     row_texture: gdk::Texture,
     palette: Vec<gdk::RGBA>,
@@ -57,24 +57,24 @@ pub struct CoverArt {
 }
 
 impl CoverArt {
-    pub fn texture(&self) -> &gdk::Texture {
+    pub(crate) fn texture(&self) -> &gdk::Texture {
         self.texture.as_ref()
     }
 
-    pub fn row_texture(&self) -> &gdk::Texture {
+    pub(crate) fn row_texture(&self) -> &gdk::Texture {
         self.row_texture.as_ref()
     }
 
-    pub fn palette(&self) -> &Vec<gdk::RGBA> {
+    pub(crate) fn palette(&self) -> &Vec<gdk::RGBA> {
         self.palette.as_ref()
     }
 
     // The color the accent color is made from, if the cover isn't grey
-    pub fn accent(&self) -> Option<gdk::RGBA> {
+    pub(crate) fn accent(&self) -> Option<gdk::RGBA> {
         self.accent
     }
 
-    pub fn cache(&self) -> Option<&PathBuf> {
+    pub(crate) fn cache(&self) -> Option<&PathBuf> {
         self.cache.as_ref()
     }
 }
@@ -86,18 +86,18 @@ type CoverSlot = Arc<OnceLock<Option<CoverArt>>>;
 // The cover of a track, shared with the other tracks of its album, which
 // keep it in memory: it goes once none of them is left
 #[derive(Clone, Debug)]
-pub struct AlbumCover {
+pub(crate) struct AlbumCover {
     slot: CoverSlot,
     uuid: String,
 }
 
 impl AlbumCover {
     // The cover art, if the album has any
-    pub fn art(&self) -> Option<&CoverArt> {
+    pub(crate) fn art(&self) -> Option<&CoverArt> {
         self.slot.get()?.as_ref()
     }
 
-    pub fn uuid(&self) -> &str {
+    pub(crate) fn uuid(&self) -> &str {
         &self.uuid
     }
 }
@@ -106,7 +106,7 @@ impl AlbumCover {
 // separate threads, so the cache is behind a mutex; it's only locked to
 // find the slot of a cover, not while loading it
 #[derive(Debug)]
-pub struct CoverCache {
+pub(crate) struct CoverCache {
     // The albums without a cover are kept as well, so that we don't look
     // for it again for each of their tracks. The tracks hold the slots, so
     // the covers of the albums that are only browsed don't stay in memory
@@ -114,7 +114,7 @@ pub struct CoverCache {
 }
 
 impl CoverCache {
-    pub fn global() -> &'static Mutex<CoverCache> {
+    pub(crate) fn global() -> &'static Mutex<CoverCache> {
         static CACHE: OnceLock<Mutex<CoverCache>> = OnceLock::new();
 
         CACHE.get_or_init(|| {
@@ -132,7 +132,7 @@ impl CoverCache {
     // Loads the cover of an album again the next time one of its tracks
     // asks for it, e.g. after its files changed; the tracks that have the
     // old cover keep it until they're read again
-    pub fn forget(&mut self, uuid: &str) {
+    pub(crate) fn forget(&mut self, uuid: &str) {
         self.entries.remove(uuid);
     }
 
@@ -151,7 +151,7 @@ impl CoverCache {
     // The cover of a track, scaled down to fit in `max_size`: the first of
     // the pictures in its tags and the cover files in its folder that
     // decodes, so that a broken or unsupported one doesn't hide the next
-    pub fn load_cover(
+    pub(crate) fn load_cover(
         tag: &lofty::tag::Tag,
         dir: Option<&Path>,
         max_size: u32,
@@ -198,7 +198,7 @@ impl CoverCache {
     // then in the folder of the album when it's in a disc folder, as in
     // Album/CD1, which often has no cover of its own. Failing those, the
     // only image in either folder, which can be named after the album
-    pub fn cover_files_for(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    pub(crate) fn cover_files_for(dir: &Path) -> impl Iterator<Item = PathBuf> {
         let album = crate::library::disc_album_folder(dir);
         let (named, only) = folder_covers(dir);
         let (album_named, album_only) = album.map(folder_covers).unwrap_or_default();
@@ -211,7 +211,7 @@ impl CoverCache {
 
     // The cover files of a folder alone
     #[cfg(test)]
-    pub fn cover_files(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    pub(crate) fn cover_files(dir: &Path) -> impl Iterator<Item = PathBuf> {
         let (named, only) = folder_covers(dir);
         named.into_iter().chain(only)
     }
@@ -219,7 +219,7 @@ impl CoverCache {
     // The cover of the album of a track, loaded the first time one of its
     // tracks asks for it; this blocks, so it must not be called on the main
     // thread
-    pub fn cover_art(path: &Path, tag: &lofty::tag::Tag) -> AlbumCover {
+    pub(crate) fn cover_art(path: &Path, tag: &lofty::tag::Tag) -> AlbumCover {
         let mut album_artist = None;
         let mut album = None;
 
@@ -290,7 +290,7 @@ impl CoverCache {
     // Loads the cover art of a file again, at full resolution; this does not
     // use the cache, and it blocks, so it must not be called on the main
     // thread
-    pub fn load_full_cover(path: &Path) -> Option<gdk::Texture> {
+    pub(crate) fn load_full_cover(path: &Path) -> Option<gdk::Texture> {
         let tags = crate::audio::read_file_tags(path, crate::audio::ReadOptions::ALL)?;
         // A file without tags can still have a cover file next to it
         let image = Self::load_cover(&tags.tag, path.parent(), FULL_COVER_SIZE)?;
@@ -399,7 +399,7 @@ fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
 }
 
 // The folder of the covers saved for MPRIS
-pub fn cache_dir() -> PathBuf {
+pub(crate) fn cache_dir() -> PathBuf {
     glib::user_cache_dir().join("dismas").join("covers")
 }
 

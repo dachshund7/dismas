@@ -31,11 +31,11 @@ use crate::{
 // What a search of the queue needs that its tracks don't have, read when a
 // search needs it, see `Needs`
 #[derive(Debug, Default)]
-pub struct QueueSources {
+pub(crate) struct QueueSources {
     // From plays.db, by URI
-    pub stats: SearchStats,
+    pub(crate) stats: SearchStats,
     // From the library, by path
-    pub tracks: HashMap<PathBuf, TrackEntry>,
+    pub(crate) tracks: HashMap<PathBuf, TrackEntry>,
     // What they were read for, and plays.db's `writes()` then
     needs: Needs,
     writes: u64,
@@ -76,20 +76,20 @@ mod imp {
 
     #[derive(Default, glib::Properties)]
     #[properties(wrapper_type = super::SearchFilter)]
-    pub struct SearchFilter {
+    pub(crate) struct SearchFilter {
         #[property(get, set = Self::set_search, explicit_notify, nullable)]
-        pub search: RefCell<Option<String>>,
+        pub(crate) search: RefCell<Option<String>>,
         // The search, unless it matches every track, as an empty one does;
         // without one, the search doesn't filter the queue
         #[property(name = "filtering", get = Self::filtering, type = bool)]
-        pub query: RefCell<Option<Query>>,
+        pub(crate) query: RefCell<Option<Query>>,
         // When the search was typed, which its relative dates were worked
         // out at, see `Query::at()`
-        pub context: Cell<Option<Context>>,
+        pub(crate) context: Cell<Option<Context>>,
         // What the search needs from the library and plays.db, read when
         // it's typed, and again when a favorite is marked
         // (`favorites_changed()`)
-        pub sources: RefCell<Option<QueueSources>>,
+        pub(crate) sources: RefCell<Option<QueueSources>>,
     }
 
     #[glib::object_subclass]
@@ -164,7 +164,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct SearchFilter(ObjectSubclass<imp::SearchFilter>)
+    pub(crate) struct SearchFilter(ObjectSubclass<imp::SearchFilter>)
         @extends gtk::Filter;
 }
 
@@ -175,13 +175,13 @@ impl Default for SearchFilter {
 }
 
 impl SearchFilter {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         glib::Object::new()
     }
 
     // A track, an album or a work was marked a favorite, or unmarked; a
     // search for the favorites finds it, or leaves it out, at once
-    pub fn favorites_changed(&self) {
+    pub(crate) fn favorites_changed(&self) {
         let imp = self.imp();
         let needs = imp.query.borrow().as_ref().map(Query::needs);
         if !needs.as_ref().is_some_and(Needs::any_favorites) {
@@ -206,7 +206,7 @@ const PROBLEM_DELAY: Duration = Duration::from_millis(500);
 // through `show` (`None` hides it, at once), and is announced once. The
 // entry's description, `description`, is what screen readers say it's for,
 // and its tooltip says what can be typed
-pub fn setup_query_entry(
+pub(crate) fn setup_query_entry(
     entry: &gtk::SearchEntry,
     description: String,
     show: impl Fn(Option<&str>) + 'static,

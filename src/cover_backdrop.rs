@@ -19,13 +19,13 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct CoverBackdrop {
-        pub texture: RefCell<Option<gdk::Texture>>,
+    pub(crate) struct CoverBackdrop {
+        pub(crate) texture: RefCell<Option<gdk::Texture>>,
         // The cover from before, which the new one fades in over
-        pub previous: RefCell<Option<gdk::Texture>>,
+        pub(crate) previous: RefCell<Option<gdk::Texture>>,
         // How far the new cover has faded in, from 0 to 1
-        pub fade: Cell<f64>,
-        pub animation: RefCell<Option<adw::TimedAnimation>>,
+        pub(crate) fade: Cell<f64>,
+        pub(crate) animation: RefCell<Option<adw::TimedAnimation>>,
     }
 
     #[glib::object_subclass]
@@ -77,7 +77,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct CoverBackdrop(ObjectSubclass<imp::CoverBackdrop>)
+    pub(crate) struct CoverBackdrop(ObjectSubclass<imp::CoverBackdrop>)
         @extends gtk::Widget, adw::Bin,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -86,7 +86,7 @@ impl CoverBackdrop {
     // Fades the new cover in over the one before; without a cover, the one
     // before goes at once, as the player is no longer in fullscreen, or
     // the track has none
-    pub fn set_texture(&self, texture: Option<&gdk::Texture>) {
+    pub(crate) fn set_texture(&self, texture: Option<&gdk::Texture>) {
         let imp = self.imp();
         if imp.texture.borrow().as_ref() == texture {
             return;

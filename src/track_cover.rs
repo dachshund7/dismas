@@ -11,12 +11,12 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/track-cover.ui")]
-    pub struct TrackCover {
+    pub(crate) struct TrackCover {
         // Template widgets
         #[template_child]
-        pub cover_stack: TemplateChild<gtk::Stack>,
+        pub(crate) cover_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub album_image: TemplateChild<CoverPicture>,
+        pub(crate) album_image: TemplateChild<CoverPicture>,
     }
 
     #[glib::object_subclass]
@@ -96,7 +96,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct TrackCover(ObjectSubclass<imp::TrackCover>)
+    pub(crate) struct TrackCover(ObjectSubclass<imp::TrackCover>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -108,11 +108,11 @@ impl Default for TrackCover {
 }
 
 impl TrackCover {
-    pub fn album_image(&self) -> CoverPicture {
+    pub(crate) fn album_image(&self) -> CoverPicture {
         self.imp().album_image.get()
     }
 
-    pub fn show_cover_image(&self, has_image: bool) {
+    pub(crate) fn show_cover_image(&self, has_image: bool) {
         let cover_stack = self.imp().cover_stack.get();
         if has_image {
             cover_stack.set_visible_child_name("cover-image");

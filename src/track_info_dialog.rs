@@ -17,21 +17,21 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/track-info-dialog.ui")]
-    pub struct TrackInfoDialog {
+    pub(crate) struct TrackInfoDialog {
         #[template_child]
-        pub work_group: TemplateChild<adw::PreferencesGroup>,
+        pub(crate) work_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub performance_group: TemplateChild<adw::PreferencesGroup>,
+        pub(crate) performance_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub production_group: TemplateChild<adw::PreferencesGroup>,
+        pub(crate) production_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub release_group: TemplateChild<adw::PreferencesGroup>,
+        pub(crate) release_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub musicbrainz_group: TemplateChild<adw::PreferencesGroup>,
+        pub(crate) musicbrainz_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub file_group: TemplateChild<adw::PreferencesGroup>,
+        pub(crate) file_group: TemplateChild<adw::PreferencesGroup>,
 
-        pub track: glib::WeakRef<Track>,
+        pub(crate) track: glib::WeakRef<Track>,
     }
 
     #[glib::object_subclass]
@@ -62,20 +62,20 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct TrackInfoDialog(ObjectSubclass<imp::TrackInfoDialog>)
+    pub(crate) struct TrackInfoDialog(ObjectSubclass<imp::TrackInfoDialog>)
         @extends gtk::Widget, adw::Dialog,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl TrackInfoDialog {
-    pub fn new(track: &Track) -> Self {
+    pub(crate) fn new(track: &Track) -> Self {
         let dialog: Self = glib::Object::new();
         dialog.set_track(track);
         dialog
     }
 
     // Whether the dialog shows the information of the given track
-    pub fn shows(&self, track: &Track) -> bool {
+    pub(crate) fn shows(&self, track: &Track) -> bool {
         self.imp().track.upgrade().as_ref() == Some(track)
     }
 

@@ -13,9 +13,9 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct SquareBin {
-        pub min_size: Cell<i32>,
-        pub max_size: Cell<i32>,
+    pub(crate) struct SquareBin {
+        pub(crate) min_size: Cell<i32>,
+        pub(crate) max_size: Cell<i32>,
     }
 
     #[glib::object_subclass]
@@ -68,13 +68,13 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct SquareBin(ObjectSubclass<imp::SquareBin>)
+    pub(crate) struct SquareBin(ObjectSubclass<imp::SquareBin>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl SquareBin {
-    pub fn new(child: &impl IsA<gtk::Widget>, min_size: i32, max_size: i32) -> Self {
+    pub(crate) fn new(child: &impl IsA<gtk::Widget>, min_size: i32, max_size: i32) -> Self {
         let bin: Self = glib::Object::new();
         bin.imp().min_size.set(min_size);
         bin.imp().max_size.set(max_size);
@@ -83,7 +83,7 @@ impl SquareBin {
     }
 
     // As when the album grid is zoomed
-    pub fn set_size_range(&self, min_size: i32, max_size: i32) {
+    pub(crate) fn set_size_range(&self, min_size: i32, max_size: i32) {
         let imp = self.imp();
         let old = (
             imp.min_size.replace(min_size),

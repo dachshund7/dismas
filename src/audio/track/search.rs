@@ -13,7 +13,7 @@ use crate::lyrics;
 // the accent, on any keyboard. Runs of whitespace become one space, which
 // the search syntax tells phrases and the values of fields apart by. Most
 // tags are ASCII, which only needs lowercasing
-pub fn normalize_search_text(s: &str) -> String {
+pub(crate) fn normalize_search_text(s: &str) -> String {
     let mut folded = String::with_capacity(s.len());
     if s.is_ascii() {
         // Whitespace as `char::is_whitespace()` has it, which counts the
@@ -39,7 +39,7 @@ pub fn normalize_search_text(s: &str) -> String {
 // The fold of the keys that tell composers, performers and works apart,
 // which plays.db keeps the favorite works by: case and accents only, as
 // before the search folded quotes and dashes, so that the keys don't change
-pub fn normalize_key_text(s: &str) -> String {
+pub(crate) fn normalize_key_text(s: &str) -> String {
     let mut folded = String::with_capacity(s.len());
     fold_into(s, &mut folded, false);
     folded
@@ -95,7 +95,7 @@ fn fold_into(s: &str, folded: &mut String, search: bool) {
 // named after when it has no album tag. What the queue shows in place of
 // what's missing, like "Unknown artist" or "Track 3", isn't searched, as
 // the library can't keep it in the language of the moment
-pub fn search_key(
+pub(crate) fn search_key(
     artists: Option<&str>,
     title: Option<&str>,
     tag_text: &str,
@@ -114,7 +114,7 @@ pub fn search_key(
 // The text of the tags of a track that searching looks into: the text of
 // its tags, and the names of the works the "Work Hierarchy" plugin gives,
 // which lofty leaves out of `tag`
-pub fn track_search_text(tag: &Tag, credits: &TrackCredits) -> String {
+pub(crate) fn track_search_text(tag: &Tag, credits: &TrackCredits) -> String {
     let mut text = tag_search_text(tag);
     let works = credits.work_names.join(" ");
     if !works.is_empty() {

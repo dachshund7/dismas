@@ -59,45 +59,45 @@ const MAX_SHEET_VALUE: usize = 1024;
 const MAX_SHEET_TAG_TEXT: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct CueSheet {
-    pub performer: Option<String>,
-    pub title: Option<String>,
-    pub songwriter: Option<String>,
+pub(crate) struct CueSheet {
+    pub(crate) performer: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) songwriter: Option<String>,
     // The UPC/EAN barcode of the disc
-    pub catalog: Option<String>,
-    pub genre: Option<String>,
-    pub date: Option<String>,
-    pub composer: Option<String>,
-    pub disc_number: Option<String>,
-    pub disc_total: Option<String>,
-    pub album_gain: Option<String>,
-    pub album_peak: Option<String>,
+    pub(crate) catalog: Option<String>,
+    pub(crate) genre: Option<String>,
+    pub(crate) date: Option<String>,
+    pub(crate) composer: Option<String>,
+    pub(crate) disc_number: Option<String>,
+    pub(crate) disc_total: Option<String>,
+    pub(crate) album_gain: Option<String>,
+    pub(crate) album_peak: Option<String>,
     // The files, as the sheet names them
-    pub files: Vec<String>,
+    pub(crate) files: Vec<String>,
     // The audio tracks, in order, each with a number of its own
-    pub tracks: Vec<CueTrack>,
+    pub(crate) tracks: Vec<CueTrack>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct CueTrack {
-    pub number: u32,
+pub(crate) struct CueTrack {
+    pub(crate) number: u32,
     // In `CueSheet::files`; `None` if no file came before the track
-    pub file: Option<usize>,
-    pub title: Option<String>,
-    pub performer: Option<String>,
-    pub songwriter: Option<String>,
-    pub isrc: Option<String>,
-    pub gain: Option<String>,
-    pub peak: Option<String>,
-    pub start: Duration,
+    pub(crate) file: Option<usize>,
+    pub(crate) title: Option<String>,
+    pub(crate) performer: Option<String>,
+    pub(crate) songwriter: Option<String>,
+    pub(crate) isrc: Option<String>,
+    pub(crate) gain: Option<String>,
+    pub(crate) peak: Option<String>,
+    pub(crate) start: Duration,
     // Until the end of the file if `None`
-    pub end: Option<Duration>,
+    pub(crate) end: Option<Duration>,
 }
 
 impl CueTrack {
     // How long the track plays of an audio file `duration` long, which is
     // zero if it isn't known: up to the next track, or to the end of the file
-    pub fn length(&self, duration: Duration) -> Duration {
+    pub(crate) fn length(&self, duration: Duration) -> Duration {
         let end = match self.end {
             Some(end) if duration.is_zero() || end < duration => end,
             _ => duration,
@@ -181,7 +181,7 @@ fn parse_time(s: &str) -> Option<Duration> {
 }
 
 // The audio tracks of a sheet, if it has any
-pub fn parse(text: &str) -> Option<CueSheet> {
+pub(crate) fn parse(text: &str) -> Option<CueSheet> {
     let mut sheet = CueSheet::default();
     let mut tracks: Vec<SheetTrack> = Vec::new();
     let mut file = None;
@@ -285,7 +285,7 @@ pub fn parse(text: &str) -> Option<CueSheet> {
 // Sheets are often in the legacy encoding of the system they were written
 // on, e.g. Windows-1251 or Shift JIS, which is guessed from the text. Text
 // in UTF-8 is the bytes themselves
-pub fn decode(bytes: &[u8]) -> Cow<'_, str> {
+pub(crate) fn decode(bytes: &[u8]) -> Cow<'_, str> {
     if let Some((encoding, bom_length)) = encoding_rs::Encoding::for_bom(bytes) {
         return encoding.decode_without_bom_handling(&bytes[bom_length..]).0;
     }
@@ -300,7 +300,7 @@ pub fn decode(bytes: &[u8]) -> Cow<'_, str> {
         .0
 }
 
-pub fn is_cue_path(path: &Path) -> bool {
+pub(crate) fn is_cue_path(path: &Path) -> bool {
     path.extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("cue"))
 }
@@ -313,19 +313,19 @@ fn read_sheet(path: &Path) -> Option<CueSheet> {
 }
 
 // The path of a track of a sheet
-pub fn track_location(sheet: &Path, number: u32) -> PathBuf {
+pub(crate) fn track_location(sheet: &Path, number: u32) -> PathBuf {
     sheet.join(format!("track{number:02}"))
 }
 
 // The sheet and the number of a track of a sheet, if the path is one
-pub fn parse_location(path: &Path) -> Option<(&Path, u32)> {
+pub(crate) fn parse_location(path: &Path) -> Option<(&Path, u32)> {
     track_parts(path).filter(|(sheet, _)| sheet.is_file())
 }
 
 // The sheet and the number a path would have as the track of a sheet that
 // isn't there: a ".cue" file, or an audio file with a sheet in its tags,
 // rather than a folder, which has a name without an extension
-pub fn missing_location_parts(path: &Path) -> Option<(&Path, u32)> {
+pub(crate) fn missing_location_parts(path: &Path) -> Option<(&Path, u32)> {
     track_parts(path).filter(|(sheet, _)| sheet.extension().is_some())
 }
 
@@ -339,17 +339,17 @@ fn track_parts(path: &Path) -> Option<(&Path, u32)> {
 }
 
 // The file of a track: its sheet for a track of a sheet
-pub fn real_path(path: &Path) -> &Path {
+pub(crate) fn real_path(path: &Path) -> &Path {
     parse_location(path).map_or(path, |(sheet, _)| sheet)
 }
 
 // Whether a track is still there, as a file or as a track of a sheet
-pub fn location_exists(path: &Path) -> bool {
+pub(crate) fn location_exists(path: &Path) -> bool {
     path.is_file() || parse_location(path).is_some()
 }
 
 // The audio file of a track
-pub fn audio_path(path: &Path) -> Option<PathBuf> {
+pub(crate) fn audio_path(path: &Path) -> Option<PathBuf> {
     let Some((sheet, number)) = parse_location(path) else {
         return Some(path.to_path_buf());
     };
@@ -419,10 +419,10 @@ fn resolve_file(
 
 // A sheet, with the audio files of the tracks it splits them into
 #[derive(Debug)]
-pub struct SplitSheet {
+pub(crate) struct SplitSheet {
     // A ".cue" file, or the audio file with the sheet in its tags
-    pub path: PathBuf,
-    pub sheet: CueSheet,
+    pub(crate) path: PathBuf,
+    pub(crate) sheet: CueSheet,
     // The tracks of the files it splits, by their index in the sheet, with
     // their audio file
     tracks: Vec<(usize, PathBuf)>,
@@ -430,7 +430,7 @@ pub struct SplitSheet {
 
 impl SplitSheet {
     // A ".cue" file
-    pub fn read(path: &Path) -> Option<Self> {
+    pub(crate) fn read(path: &Path) -> Option<Self> {
         let sheet = read_sheet(path)?;
         let single_file = sheet.files.len() == 1;
         // Only the files that tracks are in: a crafted sheet can name a
@@ -452,7 +452,7 @@ impl SplitSheet {
 
     // The sheet in the tags of an audio file, which names the file as it
     // was before it was compressed or renamed
-    pub fn embedded(path: &Path, text: &str) -> Option<Self> {
+    pub(crate) fn embedded(path: &Path, text: &str) -> Option<Self> {
         let sheet = parse(text)?;
         Self::split(path, sheet, |file| {
             (file.unwrap_or(0) == 0).then(|| path.to_path_buf())
@@ -492,22 +492,22 @@ impl SplitSheet {
     }
 
     // The tracks of the files the sheet splits, with their audio file
-    pub fn tracks(&self) -> impl Iterator<Item = (&CueTrack, &Path)> {
+    pub(crate) fn tracks(&self) -> impl Iterator<Item = (&CueTrack, &Path)> {
         self.tracks
             .iter()
             .map(|(i, audio)| (&self.sheet.tracks[*i], audio.as_path()))
     }
 
-    pub fn track(&self, number: u32) -> Option<(&CueTrack, &Path)> {
+    pub(crate) fn track(&self, number: u32) -> Option<(&CueTrack, &Path)> {
         self.tracks().find(|(track, _)| track.number == number)
     }
 
-    pub fn splits(&self, audio: &Path) -> bool {
+    pub(crate) fn splits(&self, audio: &Path) -> bool {
         self.tracks.iter().any(|(_, file)| file == audio)
     }
 
     // The audio files it splits, in order
-    pub fn audio_files(&self) -> Vec<&Path> {
+    pub(crate) fn audio_files(&self) -> Vec<&Path> {
         let mut files: Vec<&Path> = Vec::new();
         for (_, audio) in self.tracks() {
             if !files.contains(&audio) {
@@ -517,7 +517,7 @@ impl SplitSheet {
         files
     }
 
-    pub fn location(&self, track: &CueTrack) -> PathBuf {
+    pub(crate) fn location(&self, track: &CueTrack) -> PathBuf {
         track_location(&self.path, track.number)
     }
 }
@@ -534,7 +534,7 @@ fn cmp_names(a: &Path, b: &Path) -> Ordering {
 }
 
 // The ".cue" files in a folder that split audio files, in order
-pub fn folder_sheets(dir: &Path) -> Vec<Arc<SplitSheet>> {
+pub(crate) fn folder_sheets(dir: &Path) -> Vec<Arc<SplitSheet>> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -553,13 +553,13 @@ pub fn folder_sheets(dir: &Path) -> Vec<Arc<SplitSheet>> {
 // The ".cue" files among some files, and which one splits each audio file:
 // the first one in the list that splits it
 #[derive(Debug, Default)]
-pub struct Claims {
-    pub sheets: HashMap<PathBuf, Arc<SplitSheet>>,
-    pub audio: HashMap<PathBuf, PathBuf>,
+pub(crate) struct Claims {
+    pub(crate) sheets: HashMap<PathBuf, Arc<SplitSheet>>,
+    pub(crate) audio: HashMap<PathBuf, PathBuf>,
 }
 
 impl Claims {
-    pub fn new<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Self {
+    pub(crate) fn new<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Self {
         let mut claims = Self::default();
         for path in paths {
             if !is_cue_path(path) || claims.sheets.contains_key(path) {
@@ -583,12 +583,12 @@ impl Claims {
     }
 
     // The sheet that splits an audio file, if it's one of them
-    pub fn sheet_of(&self, audio: &Path) -> Option<&Path> {
+    pub(crate) fn sheet_of(&self, audio: &Path) -> Option<&Path> {
         self.audio.get(audio).map(PathBuf::as_path)
     }
 
     // The tracks of a sheet among them, for the files it splits first
-    pub fn tracks_of(&self, sheet: &Path) -> Vec<(&CueTrack, &Path)> {
+    pub(crate) fn tracks_of(&self, sheet: &Path) -> Vec<(&CueTrack, &Path)> {
         let Some(split) = self.sheets.get(sheet) else {
             return Vec::new();
         };
@@ -676,7 +676,7 @@ fn album_items(file_tag: &Tag, tracks: usize) -> Vec<&TagItem> {
 // The tags of an album that a sheet splits from an audio file: the file's,
 // with the album's from the sheet over them. The tag is a Vorbis comment,
 // which takes any item, whatever the file has
-pub fn album_tag(file_tag: Option<&Tag>, sheet: &CueSheet) -> Tag {
+pub(crate) fn album_tag(file_tag: Option<&Tag>, sheet: &CueSheet) -> Tag {
     let mut tag = Tag::new(TagType::VorbisComments);
     if let Some(file_tag) = file_tag {
         for item in album_items(file_tag, sheet.tracks.len()) {
@@ -715,7 +715,7 @@ pub fn album_tag(file_tag: Option<&Tag>, sheet: &CueSheet) -> Tag {
 
 // The tags of a track of a sheet, from those of its album, without the
 // pictures, which the cover was read from
-pub fn track_tag(album_tag: &Tag, sheet: &CueSheet, track: &CueTrack) -> Tag {
+pub(crate) fn track_tag(album_tag: &Tag, sheet: &CueSheet, track: &CueTrack) -> Tag {
     let mut tag = Tag::new(TagType::VorbisComments);
     for item in album_tag.items() {
         tag.push_unchecked(item.clone());

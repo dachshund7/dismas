@@ -25,15 +25,15 @@ const FAVORITE_PLAYS: u32 = 10;
 
 // What the shuffle knows of a track
 #[derive(Clone, Debug, Default)]
-pub struct Entry {
+pub(crate) struct Entry {
     // Whether the track is a movement that continues the work of the
     // track before it, as in the headers of the queue (`continues_work()`)
-    pub continues_work: bool,
+    pub(crate) continues_work: bool,
     // The artist that shouldn't come twice in a row: for a movement, the
     // composers. Tracks without one are never the same artist as another
-    pub artist: Option<String>,
+    pub(crate) artist: Option<String>,
     // None for a track never heard
-    pub stats: Option<TrackStats>,
+    pub(crate) stats: Option<TrackStats>,
 }
 
 // A track, or the movements of a work that are next to each other, which
@@ -50,7 +50,7 @@ struct Unit {
 // The positions of the tracks in their shuffled order. The track to keep
 // comes first, with the other movements of its work around it; the tracks
 // that came before it are shuffled too
-pub fn shuffled_order(
+pub(crate) fn shuffled_order(
     entries: &[Entry],
     keep: Option<usize>,
     now: i64,
@@ -119,7 +119,7 @@ fn units(entries: &[Entry], now: i64) -> Vec<Unit> {
 // of a work, or the tracks of an album: they were heard when the last of
 // them heard was, and played as often as the one played the most. The
 // stats are those of the tracks that were heard
-pub fn weight(stats: impl Iterator<Item = TrackStats> + Clone, now: i64) -> f64 {
+pub(crate) fn weight(stats: impl Iterator<Item = TrackStats> + Clone, now: i64) -> f64 {
     let last_heard = stats.clone().map(|stats| stats.last_heard).max();
     let plays = stats.map(|stats| stats.plays).max().unwrap_or(0);
     let age = last_heard.map(|last_heard| now.saturating_sub(last_heard));
@@ -129,7 +129,7 @@ pub fn weight(stats: impl Iterator<Item = TrackStats> + Clone, now: i64) -> f64 
 // The position of one of the weights, picked at random, each the more
 // likely the more weight it has: the one whose key would come first in
 // `shuffled_order()`
-pub fn weighted_pick(weights: &[f64], rng: &mut (impl Rng + ?Sized)) -> Option<usize> {
+pub(crate) fn weighted_pick(weights: &[f64], rng: &mut (impl Rng + ?Sized)) -> Option<usize> {
     weights
         .iter()
         .map(|weight| weighted_key(*weight, rng))

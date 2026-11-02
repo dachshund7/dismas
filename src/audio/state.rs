@@ -20,13 +20,13 @@ mod imp {
 
     #[derive(Debug, glib::Properties)]
     #[properties(wrapper_type = super::PlayerState)]
-    pub struct PlayerState {
+    pub(crate) struct PlayerState {
         #[property(name = "playing", get = Self::playing, type = bool)]
-        pub playback_state: Cell<PlaybackState>,
+        pub(crate) playback_state: Cell<PlaybackState>,
         // Where the track is; the property is in whole seconds, as the
         // labels and the controllers show it, see `position_time()`
         #[property(name = "position", get = Self::position, type = u64)]
-        pub position: Cell<Duration>,
+        pub(crate) position: Cell<Duration>,
         // These are proxies for Track properties
         #[property(name = "track", get, nullable)]
         #[property(name = "title", get = Self::title, nullable, type = Option<String>)]
@@ -38,9 +38,9 @@ mod imp {
         #[property(name = "movement", get = Self::movement, nullable, type = Option<String>)]
         #[property(name = "duration", get = Self::duration, type = u64)]
         #[property(name = "cover", get = Self::cover, nullable, type = Option<gdk::Texture>)]
-        pub current_track: RefCell<Option<Track>>,
+        pub(crate) current_track: RefCell<Option<Track>>,
         #[property(get, minimum = 0.0, maximum = 1.0, default = 1.0)]
-        pub volume: Cell<f64>,
+        pub(crate) volume: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -146,11 +146,11 @@ mod imp {
 // state of the audio player: track metadata, playback
 // position and duration, etc.
 glib::wrapper! {
-    pub struct PlayerState(ObjectSubclass<imp::PlayerState>);
+    pub(crate) struct PlayerState(ObjectSubclass<imp::PlayerState>);
 }
 
 impl PlayerState {
-    pub fn set_playback_state(&self, playback_state: PlaybackState) -> bool {
+    pub(crate) fn set_playback_state(&self, playback_state: PlaybackState) -> bool {
         let old_state = self.imp().playback_state.replace(playback_state);
         if old_state != playback_state {
             self.notify_playing();
@@ -160,7 +160,7 @@ impl PlayerState {
         false
     }
 
-    pub fn set_current_track(&self, track: Option<Track>) {
+    pub(crate) fn set_current_track(&self, track: Option<Track>) {
         // The same track again, as when it repeats, only starts over: the
         // cover, the labels and the queue stay as they are
         if track.is_some() && self.track() == track {
@@ -184,7 +184,7 @@ impl PlayerState {
     }
 
     // Shows the new tags of the current track, after it was updated
-    pub fn track_changed(&self) {
+    pub(crate) fn track_changed(&self) {
         self.notify_title();
         self.notify_artist();
         self.notify_album();
@@ -196,11 +196,11 @@ impl PlayerState {
         self.notify_cover();
     }
 
-    pub fn emit_track_failed(&self, track: &Track) {
+    pub(crate) fn emit_track_failed(&self, track: &Track) {
         self.emit_by_name::<()>("track-failed", &[track]);
     }
 
-    pub fn connect_track_failed<F: Fn(&Self, &Track) + 'static>(
+    pub(crate) fn connect_track_failed<F: Fn(&Self, &Track) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -214,17 +214,17 @@ impl PlayerState {
     // Notifies at each position the backend reports, about four times a
     // second, even within the same second, as the lyrics follow the time
     // between the seconds
-    pub fn set_position(&self, position: Duration) {
+    pub(crate) fn set_position(&self, position: Duration) {
         self.imp().position.replace(position);
         self.notify_position();
     }
 
     // The position to the millisecond
-    pub fn position_time(&self) -> Duration {
+    pub(crate) fn position_time(&self) -> Duration {
         self.imp().position.get()
     }
 
-    pub fn set_volume(&self, volume: f64) {
+    pub(crate) fn set_volume(&self, volume: f64) {
         let old_volume = self.imp().volume.replace(volume);
         // We only care about two digits of precision, to avoid
         // notification cycles when we update the volume with a

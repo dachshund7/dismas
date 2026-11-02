@@ -82,13 +82,13 @@ fn time(seconds: u64) -> Time {
 }
 
 #[derive(Debug)]
-pub struct MprisController {
+pub(crate) struct MprisController {
     shared: Rc<Shared>,
     next_track_id: Cell<u64>,
 }
 
 impl MprisController {
-    pub fn new(sender: Sender<PlaybackAction>) -> Self {
+    pub(crate) fn new(sender: Sender<PlaybackAction>) -> Self {
         let builder = Player::builder(APPLICATION_ID)
             .identity("Dismas")
             .desktop_entry(APPLICATION_ID)

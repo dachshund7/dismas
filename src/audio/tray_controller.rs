@@ -287,12 +287,15 @@ impl Shared {
 
 // A StatusNotifierItem, shown by the trays of KDE, most panels and bars,
 // and GNOME with the AppIndicator extension
-pub struct TrayController {
+pub(crate) struct TrayController {
     shared: Rc<Shared>,
 }
 
 impl TrayController {
-    pub fn new(sender: Sender<PlaybackAction>, app_sender: Sender<ApplicationAction>) -> Self {
+    pub(crate) fn new(
+        sender: Sender<PlaybackAction>,
+        app_sender: Sender<ApplicationAction>,
+    ) -> Self {
         let shared = Rc::new(Shared {
             sender,
             app_sender,

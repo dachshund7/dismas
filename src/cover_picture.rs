@@ -10,7 +10,7 @@ use crate::i18n::i18n;
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "DismasCoverSize")]
-pub enum CoverSize {
+pub(crate) enum CoverSize {
     #[default]
     Large = 0,
     Small = 1,
@@ -28,10 +28,10 @@ impl AsRef<str> for CoverSize {
 // The large cover is as wide as the waveform and the playback controls
 // under it, which don't scale with the font either; the player grows it
 // and the waveform together when it has room to spare
-pub const LARGE_SIZE: i32 = 256;
+pub(crate) const LARGE_SIZE: i32 = 256;
 // The large cover in windows too short for it, the size of the cover
 // upstream: three quarters of the controls
-pub const MEDIUM_SIZE: i32 = 192;
+pub(crate) const MEDIUM_SIZE: i32 = 192;
 
 mod imp {
     use super::*;
@@ -40,11 +40,11 @@ mod imp {
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::CoverPicture)]
-    pub struct CoverPicture {
+    pub(crate) struct CoverPicture {
         #[property(get, set = Self::set_cover, explicit_notify, nullable)]
-        pub cover: RefCell<Option<gdk::Texture>>,
+        pub(crate) cover: RefCell<Option<gdk::Texture>>,
         #[property(get, set = Self::set_cover_size, explicit_notify, builder(CoverSize::default()))]
-        pub cover_size: Cell<CoverSize>,
+        pub(crate) cover_size: Cell<CoverSize>,
     }
 
     #[glib::object_subclass]
@@ -154,7 +154,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct CoverPicture(ObjectSubclass<imp::CoverPicture>)
+    pub(crate) struct CoverPicture(ObjectSubclass<imp::CoverPicture>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }

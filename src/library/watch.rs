@@ -23,7 +23,7 @@ const SETTLE_TIME: Duration = Duration::from_secs(2);
 // calls `changed` once nothing changed for `SETTLE_TIME`, for a scan to
 // read them again. Each folder has a monitor of its own, as GLib's don't
 // look into the folders in a folder
-pub struct FolderWatch {
+pub(crate) struct FolderWatch {
     monitors: RefCell<HashMap<PathBuf, gio::FileMonitor>>,
     // The music folders, see `WatchList`
     available: RefCell<Vec<PathBuf>>,
@@ -35,7 +35,7 @@ pub struct FolderWatch {
 }
 
 impl FolderWatch {
-    pub fn new(changed: impl Fn() + 'static) -> Rc<Self> {
+    pub(crate) fn new(changed: impl Fn() + 'static) -> Rc<Self> {
         let watch = Rc::new(Self {
             monitors: RefCell::default(),
             available: RefCell::default(),
@@ -67,7 +67,7 @@ impl FolderWatch {
     // Watches the folders of the list, and no others; returns whether it
     // watched folders already and some of these are new, as files could
     // have come into them before they were watched
-    pub fn set_folders(self: &Rc<Self>, list: WatchList) -> bool {
+    pub(crate) fn set_folders(self: &Rc<Self>, list: WatchList) -> bool {
         self.available.replace(list.available);
         self.unavailable.set(list.unavailable);
 

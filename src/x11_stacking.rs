@@ -13,7 +13,7 @@ use x11rb::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Visibility {
+pub(crate) enum Visibility {
     // Unmapped by the window manager: minimized, or on a desktop that
     // isn't shown
     Hidden,
@@ -89,7 +89,7 @@ impl Atoms {
 
 // None when the X server can't be reached, or the window manager doesn't
 // publish the order of its windows
-pub fn visibility(window: Window) -> Option<Visibility> {
+pub(crate) fn visibility(window: Window) -> Option<Visibility> {
     let (conn, screen) = x11rb::connect(None).ok()?;
     let root = conn.setup().roots.get(screen)?.root;
     let atoms = Atoms::new(&conn)?;

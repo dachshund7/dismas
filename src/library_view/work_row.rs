@@ -13,13 +13,13 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct WorkRow {
-        pub line: gtk::Box,
-        pub name: gtk::Label,
-        pub heart: gtk::Image,
-        pub count: gtk::Label,
+    pub(crate) struct WorkRow {
+        pub(crate) line: gtk::Box,
+        pub(crate) name: gtk::Label,
+        pub(crate) heart: gtk::Image,
+        pub(crate) count: gtk::Label,
         // Made when the work first opens
-        pub covers: RefCell<Option<RevealBin>>,
+        pub(crate) covers: RefCell<Option<RevealBin>>,
     }
 
     #[glib::object_subclass]
@@ -48,13 +48,13 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct WorkRow(ObjectSubclass<imp::WorkRow>)
+    pub(crate) struct WorkRow(ObjectSubclass<imp::WorkRow>)
         @extends gtk::Box, gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
 impl WorkRow {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         // Set, so that the line's expanding doesn't spread to the list
         let row: Self = glib::Object::builder()
             .property("orientation", gtk::Orientation::Vertical)
@@ -83,7 +83,7 @@ impl WorkRow {
     }
 
     // The line with the name of the work, above its covers
-    pub fn line(&self) -> &gtk::Box {
+    pub(crate) fn line(&self) -> &gtk::Box {
         &self.imp().line
     }
 
@@ -91,7 +91,7 @@ impl WorkRow {
     // collection it's in, the number of its recordings, and a heart before
     // it for a favorite. A work that changed is shown again in the row bound
     // to it, as the list binds the row again only for another item
-    pub fn show(&self, work: &library::WorkInfo) {
+    pub(crate) fn show(&self, work: &library::WorkInfo) {
         let imp = self.imp();
         // What an arrangement is, e.g. "for two pianos, Busoni", tells it
         // from the work it arranges, whose title it often has
@@ -107,12 +107,12 @@ impl WorkRow {
     }
 
     // The covers of the albums of the work, once it has opened
-    pub fn covers(&self) -> Option<RevealBin> {
+    pub(crate) fn covers(&self) -> Option<RevealBin> {
         self.imp().covers.borrow().clone()
     }
 
     // The covers, made by `make` and put under the line the first time
-    pub fn covers_or_insert(&self, make: impl FnOnce() -> RevealBin) -> RevealBin {
+    pub(crate) fn covers_or_insert(&self, make: impl FnOnce() -> RevealBin) -> RevealBin {
         if let Some(bin) = self.covers() {
             return bin;
         }
@@ -125,7 +125,7 @@ impl WorkRow {
     // A cover among the covers: the flow box's child that holds its cell,
     // which takes the focus. It's the one of the recording of the track on
     // the album, or else the album's first, see `CoverRef`
-    pub fn cover_of(&self, cover: &CoverRef) -> Option<gtk::Widget> {
+    pub(crate) fn cover_of(&self, cover: &CoverRef) -> Option<gtk::Widget> {
         let flowbox = self.covers()?.child().and_downcast::<gtk::FlowBox>()?;
         let of_album: Vec<(gtk::Widget, AlbumCell)> =
             std::iter::successors(flowbox.first_child(), WidgetExt::next_sibling)
@@ -150,14 +150,14 @@ impl WorkRow {
 
     // Asks for the menu of the work from the keyboard, in the middle of the
     // line, as a long press would
-    pub fn request_menu(&self) {
+    pub(crate) fn request_menu(&self) {
         let line = self.line();
         let x = f64::from(line.width()) / 2.0;
         let y = f64::from(line.height()) / 2.0;
         self.emit_by_name::<()>("menu-requested", &[&x, &y]);
     }
 
-    pub fn connect_menu_requested<F: Fn(&Self, f64, f64) + 'static>(
+    pub(crate) fn connect_menu_requested<F: Fn(&Self, f64, f64) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {

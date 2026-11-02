@@ -27,10 +27,10 @@ mod imp {
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[properties(wrapper_type = super::QueueRow)]
     #[template(resource = "/io/github/dachshund7/Dismas/queue-row.ui")]
-    pub struct QueueRow {
+    pub(crate) struct QueueRow {
         // Template widgets
         #[template_child]
-        pub track_cover_stack: TemplateChild<gtk::Stack>,
+        pub(crate) track_cover_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         #[property(
             name = "track-cover",
@@ -39,7 +39,7 @@ mod imp {
             nullable,
             type = Option<gdk::Texture>,
         )]
-        pub track_cover_image: TemplateChild<CoverPicture>,
+        pub(crate) track_cover_image: TemplateChild<CoverPicture>,
         #[template_child]
         #[property(
             name = "track-title",
@@ -47,7 +47,7 @@ mod imp {
             set = Self::set_track_title,
             type = String,
         )]
-        pub track_title_label: TemplateChild<gtk::Label>,
+        pub(crate) track_title_label: TemplateChild<gtk::Label>,
         #[template_child]
         #[property(
             name = "track-artist",
@@ -55,7 +55,7 @@ mod imp {
             set = Self::set_track_artist,
             type = String,
         )]
-        pub track_artist_label: TemplateChild<gtk::Label>,
+        pub(crate) track_artist_label: TemplateChild<gtk::Label>,
         #[template_child]
         #[property(
             name = "track-credits",
@@ -63,41 +63,41 @@ mod imp {
             set = Self::set_track_credits,
             type = String,
         )]
-        pub track_credits_label: TemplateChild<gtk::Label>,
+        pub(crate) track_credits_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub track_playing_image: TemplateChild<gtk::Image>,
+        pub(crate) track_playing_image: TemplateChild<gtk::Image>,
         #[template_child]
-        pub drag_handle: TemplateChild<gtk::Image>,
+        pub(crate) drag_handle: TemplateChild<gtk::Image>,
 
         #[property(get, set, nullable)]
-        pub track: RefCell<Option<Track>>,
+        pub(crate) track: RefCell<Option<Track>>,
         #[property(get, set = Self::set_playing, explicit_notify)]
-        pub playing: Cell<bool>,
+        pub(crate) playing: Cell<bool>,
         // Whether the player is paused, for the icon of the current track
         #[property(get, set = Self::set_paused, explicit_notify)]
-        pub paused: Cell<bool>,
+        pub(crate) paused: Cell<bool>,
         #[property(get, set = Self::set_selection_mode, explicit_notify)]
-        pub selection_mode: Cell<bool>,
+        pub(crate) selection_mode: Cell<bool>,
         // Follows the track; in selection mode, selected rows are
         // highlighted
         #[property(get, set = Self::set_selected, explicit_notify)]
-        pub selected: Cell<bool>,
+        pub(crate) selected: Cell<bool>,
         // Follows the track, which flashes to show where it is
         #[property(get, set = Self::set_flashing, explicit_notify)]
-        pub flashing: Cell<bool>,
+        pub(crate) flashing: Cell<bool>,
         // Follows the track, whose file wasn't found
         #[property(get, set = Self::set_missing, explicit_notify)]
-        pub missing: Cell<bool>,
+        pub(crate) missing: Cell<bool>,
         // Whether the track can be dragged by its handle to another place
         // in the list
         #[property(get, set = Self::set_reorderable, explicit_notify)]
-        pub reorderable: Cell<bool>,
+        pub(crate) reorderable: Cell<bool>,
         // Where the handle was pressed, for the drag icon
-        pub drag_start: Cell<(f64, f64)>,
+        pub(crate) drag_start: Cell<(f64, f64)>,
         // The handle's, to cancel a drag
-        pub drag_source: OnceCell<gtk::DragSource>,
+        pub(crate) drag_source: OnceCell<gtk::DragSource>,
         // The list item showing the row, for its position in the list
-        pub list_item: glib::WeakRef<gtk::ListItem>,
+        pub(crate) list_item: glib::WeakRef<gtk::ListItem>,
     }
 
     #[glib::object_subclass]
@@ -250,7 +250,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct QueueRow(ObjectSubclass<imp::QueueRow>)
+    pub(crate) struct QueueRow(ObjectSubclass<imp::QueueRow>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -263,7 +263,7 @@ impl Default for QueueRow {
 
 impl QueueRow {
     // Shows the track of the list item, like in the queue
-    pub fn bind_list_item(&self, list_item: &gtk::ListItem) {
+    pub(crate) fn bind_list_item(&self, list_item: &gtk::ListItem) {
         self.imp().list_item.set(Some(list_item));
         list_item
             .bind_property("item", self, "track")
@@ -304,7 +304,7 @@ impl QueueRow {
         }
     }
 
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -545,7 +545,7 @@ impl QueueRow {
     // between the movement and the header with the name of the work, but
     // tracks that are not part of the work go above the header; tracks go
     // there by being dropped below the row before the header instead
-    pub fn drop_position(&self, y: f64) -> Option<bool> {
+    pub(crate) fn drop_position(&self, y: f64) -> Option<bool> {
         if !self.reorderable() {
             return None;
         }
@@ -560,7 +560,7 @@ impl QueueRow {
     // was. The dragged track slides back to its place, but the windowing
     // system can go on with the drag until the button is released, so the
     // rows refuse its drop
-    pub fn cancel_drag(&self) -> bool {
+    pub(crate) fn cancel_drag(&self) -> bool {
         let Some(source) = self.imp().drag_source.get() else {
             return false;
         };
@@ -573,12 +573,12 @@ impl QueueRow {
     }
 
     // Hides the line of a drop that won't happen
-    pub fn hide_drop_position(&self) {
+    pub(crate) fn hide_drop_position(&self) {
         self.show_drop_position(None);
     }
 
     // Shows the line where files dragged over the pane would go
-    pub fn show_drop_line(&self, above: bool) {
+    pub(crate) fn show_drop_line(&self, above: bool) {
         self.show_drop_position(Some(above));
     }
 
@@ -602,12 +602,12 @@ impl QueueRow {
     }
 
     // Where the row is in its list
-    pub fn position(&self) -> Option<u32> {
+    pub(crate) fn position(&self) -> Option<u32> {
         self.imp().list_item.upgrade().map(|item| item.position())
     }
 
     // The header with the name of the work the row starts, if it's laid out
-    pub fn work_header(&self) -> Option<gtk::Widget> {
+    pub(crate) fn work_header(&self) -> Option<gtk::Widget> {
         if !self.starts_work() {
             return None;
         }
@@ -654,7 +654,7 @@ impl QueueRow {
         }
     }
 
-    pub fn connect_move_requested<F: Fn(&Self, &Track, bool) + 'static>(
+    pub(crate) fn connect_move_requested<F: Fn(&Self, &Track, bool) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -667,7 +667,7 @@ impl QueueRow {
         )
     }
 
-    pub fn connect_range_select_requested<F: Fn(&Self) + 'static>(
+    pub(crate) fn connect_range_select_requested<F: Fn(&Self) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -678,7 +678,10 @@ impl QueueRow {
         )
     }
 
-    pub fn connect_select_requested<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_select_requested<F: Fn(&Self) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
         self.connect_closure(
             "select-requested",
             false,
@@ -688,13 +691,13 @@ impl QueueRow {
 
     // Asks for the menu of the row from the keyboard, in the middle of the
     // row, as a long press would
-    pub fn request_menu(&self) {
+    pub(crate) fn request_menu(&self) {
         let x = f64::from(self.width()) / 2.0;
         let y = f64::from(self.height()) / 2.0;
         self.emit_by_name::<()>("menu-requested", &[&x, &y]);
     }
 
-    pub fn connect_menu_requested<F: Fn(&Self, f64, f64) + 'static>(
+    pub(crate) fn connect_menu_requested<F: Fn(&Self, f64, f64) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -809,12 +812,12 @@ const SIZE_WAIT_FRAMES: u32 = 60;
 // How long gliding to a track takes, however far it is: the list gets up
 // to speed quickly, most of the way goes by in the first half, and the
 // second half settles on the track (`ease`)
-pub const GLIDE_DURATION: std::time::Duration = std::time::Duration::from_millis(350);
+pub(crate) const GLIDE_DURATION: std::time::Duration = std::time::Duration::from_millis(350);
 
 // Glides the scrolled place of a list to a value, quickly, then settling,
 // as `flash_track` glides to a track; libadwaita jumps instead when
 // animations are off. The glide can be stopped with the animation
-pub fn glide_adjustment(
+pub(crate) fn glide_adjustment(
     widget: &impl IsA<gtk::Widget>,
     adjustment: &gtk::Adjustment,
     target: f64,
@@ -838,7 +841,7 @@ pub fn glide_adjustment(
 // the row from then on. Without animations, as GTK's settings can ask, the
 // list jumps to the track. The list was usually just shown, and can only
 // scroll once it has its size, so this waits for a frame where it has it
-pub fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCallbackId {
+pub(crate) fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCallbackId {
     let waited = Cell::new(0);
     // When the glide started, in the frame clock's microseconds, and the
     // share of the way that was left at the last frame
@@ -972,7 +975,7 @@ fn arrive(view: &gtk::ListView, track: &Track) {
 
 // How long a track or an album gone to flashes: its CSS animation (style.css,
 // `track-flash`), twice 0.6 s
-pub const FLASH_DURATION: std::time::Duration = std::time::Duration::from_millis(1200);
+pub(crate) const FLASH_DURATION: std::time::Duration = std::time::Duration::from_millis(1200);
 
 // Makes the row of a track flash, like its CSS animation
 fn flash(track: &Track) {
@@ -993,7 +996,7 @@ fn flash(track: &Track) {
 // is filled, e.g. switching playlists, its rows aren't laid out, and
 // scrolling to one right away would make it the top row, so this waits
 // for frames where they are
-pub fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCallbackId {
+pub(crate) fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCallbackId {
     let frames = Cell::new(0);
     let waited = Cell::new(0);
     let centering = Cell::new(false);
@@ -1062,7 +1065,7 @@ fn wait_for_size(waited: &Cell<u32>) -> glib::ControlFlow {
 }
 
 // Where a track is in a list, which can be filtered by a search
-pub fn track_position(view: &gtk::ListView, track: &Track) -> Option<u32> {
+pub(crate) fn track_position(view: &gtk::ListView, track: &Track) -> Option<u32> {
     let model = view.model()?;
     (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
 }
@@ -1159,7 +1162,7 @@ fn estimated_value(view: &gtk::ListView, adjustment: &gtk::Adjustment, pos: u32)
 }
 
 // A value of a scrolled list's adjustment, as far as the list scrolls
-pub fn within_scroll(adjustment: &gtk::Adjustment, value: f64) -> f64 {
+pub(crate) fn within_scroll(adjustment: &gtk::Adjustment, value: f64) -> f64 {
     let last = adjustment.upper() - adjustment.page_size();
     value.min(last).max(adjustment.lower())
 }

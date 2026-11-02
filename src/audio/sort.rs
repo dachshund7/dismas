@@ -23,7 +23,7 @@ use super::shuffle::work_units;
 // What the tracks of a playlist can be sorted by, as the targets of the
 // action that sorts them
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SortKey {
+pub(crate) enum SortKey {
     Album,
     Artist,
     Composer,
@@ -34,7 +34,7 @@ pub enum SortKey {
 }
 
 impl SortKey {
-    pub fn from_nick(nick: &str) -> Option<Self> {
+    pub(crate) fn from_nick(nick: &str) -> Option<Self> {
         match nick {
             "album" => Some(Self::Album),
             "artist" => Some(Self::Artist),
@@ -53,39 +53,39 @@ impl SortKey {
 pub(super) struct Entry {
     // Whether the track is a movement that continues the work of the
     // track before it, as in the headers of the queue (`continues_work()`)
-    pub continues_work: bool,
+    pub(crate) continues_work: bool,
 
     // The album, as the tags have it and as it's shown, which is the name
     // of its folder for a track without one
-    pub album: Option<String>,
-    pub shown_album: String,
-    pub album_artist: Option<String>,
+    pub(crate) album: Option<String>,
+    pub(crate) shown_album: String,
+    pub(crate) album_artist: Option<String>,
     // The MusicBrainz id of the release
-    pub release: Option<String>,
+    pub(crate) release: Option<String>,
     // The folder of the album, where disc folders count as their parent,
     // see `library::album_folder()`
-    pub folder: Option<PathBuf>,
-    pub disc: Option<u32>,
-    pub track: Option<u32>,
+    pub(crate) folder: Option<PathBuf>,
+    pub(crate) disc: Option<u32>,
+    pub(crate) track: Option<u32>,
     // Where the track is: a path under its sheet for a track of a CUE sheet
-    pub path: PathBuf,
+    pub(crate) path: PathBuf,
 
-    pub artist: Option<String>,
-    pub artist_sort: Option<String>,
+    pub(crate) artist: Option<String>,
+    pub(crate) artist_sort: Option<String>,
 
     // The composers of the work, or of the track, see
     // `library::credited_work_composers()`
-    pub composers: Vec<WorkComposer>,
+    pub(crate) composers: Vec<WorkComposer>,
     // What tells the work apart, see `library::WorkToOrder`
-    pub work_key: String,
+    pub(crate) work_key: String,
     // The name of the work, or else the title, and the work's full title
-    pub work_name: String,
-    pub work_title: Option<String>,
+    pub(crate) work_name: String,
+    pub(crate) work_title: Option<String>,
 
     // The work of a movement, or else the title, as the queue shows it
-    pub heading: String,
+    pub(crate) heading: String,
     // See `TrackCredits::year()`
-    pub year: Option<String>,
+    pub(crate) year: Option<String>,
 }
 
 // The positions of the tracks in their sorted order. Past

@@ -11,7 +11,7 @@ use crate::{audio::Track, config::APPLICATION_ID, zoom_row::ZoomRow};
 
 // The path of a file outside the sandbox, for the files that came through
 // the document portal
-pub const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
+pub(crate) const ATTRIBUTE_HOST_PATH: &str = "xattr::document-portal.host-path";
 
 // The drag that Esc cancelled. The windowing system can go on with it until
 // the button is released (on X11, it does), so its drop is refused
@@ -22,7 +22,7 @@ thread_local! {
 // Fills the heart of a toggle button while it's on, and gives it the
 // tooltip that says what a click does then, if there are `tooltips`: to
 // add, and to remove
-pub fn setup_heart_button(button: &gtk::ToggleButton, tooltips: Option<(String, String)>) {
+pub(crate) fn setup_heart_button(button: &gtk::ToggleButton, tooltips: Option<(String, String)>) {
     button.connect_active_notify(move |button| {
         let on = button.is_active();
         button.set_icon_name(if on {
@@ -37,7 +37,7 @@ pub fn setup_heart_button(button: &gtk::ToggleButton, tooltips: Option<(String, 
 }
 
 // Cancels the drag of a source, if it's dragging, and says if it was
-pub fn cancel_drag(source: &gtk::DragSource) -> bool {
+pub(crate) fn cancel_drag(source: &gtk::DragSource) -> bool {
     let Some(drag) = source.drag() else {
         return false;
     };
@@ -47,7 +47,7 @@ pub fn cancel_drag(source: &gtk::DragSource) -> bool {
 }
 
 // Whether a drop is the one of a drag that was cancelled
-pub fn is_drag_cancelled(drop: Option<&gdk::Drop>) -> bool {
+pub(crate) fn is_drag_cancelled(drop: Option<&gdk::Drop>) -> bool {
     let Some(drag) = drop.and_then(gdk::Drop::drag) else {
         return false;
     };
@@ -55,7 +55,7 @@ pub fn is_drag_cancelled(drop: Option<&gdk::Drop>) -> bool {
 }
 
 // The main menu, for the menu buttons of each page
-pub fn primary_menu() -> gio::MenuModel {
+pub(crate) fn primary_menu() -> gio::MenuModel {
     gtk::Builder::from_resource("/io/github/dachshund7/Dismas/primary-menu.ui")
         .object("primary_menu")
         .expect("The main menu is in the resources")
@@ -67,7 +67,7 @@ pub fn primary_menu() -> gio::MenuModel {
 // GTK opens the primary menu of the visible page with F10, but doesn't
 // close it with F10 again, as the menu has the keyboard; its popover takes
 // care of that
-pub fn setup_primary_menu_button(
+pub(crate) fn setup_primary_menu_button(
     button: &gtk::MenuButton,
     zoom: Option<&ZoomRow>,
     page_items: Option<&gio::MenuModel>,
@@ -120,7 +120,7 @@ pub fn setup_primary_menu_button(
 // list in a widget, like the window. The focus is on a widget in the row,
 // or on the list's item, or a flow box's, whose child is the row or a
 // widget around it, like the SlideBin of the queue's rows
-pub fn focused_child<W: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Option<W> {
+pub(crate) fn focused_child<W: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Option<W> {
     let focus = widget.root()?.focus()?;
     if !focus.is_ancestor(widget) {
         return None;
@@ -150,7 +150,7 @@ pub fn focused_child<W: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Opt
 // is in, which is still floating then, and a reference to it would sink
 // it, so that the list would lose it when the reference is dropped, which
 // crashed GTK
-pub fn list_item_of(widget: &impl IsA<gtk::Widget>) -> Option<gtk::Widget> {
+pub(crate) fn list_item_of(widget: &impl IsA<gtk::Widget>) -> Option<gtk::Widget> {
     if !widget.is_mapped() {
         return None;
     }
@@ -176,7 +176,7 @@ const SWIPE_BACK_VELOCITY: f64 = 500.0;
 // the touch: a flick up or down is the list's, which cancels it, and the
 // rows' long presses and taps stay theirs. The collapsed split view hides
 // the pane with a swipe to the left, so the two don't meet
-pub fn setup_swipe_back(widget: &impl IsA<gtk::Widget>, back: impl Fn() + 'static) {
+pub(crate) fn setup_swipe_back(widget: &impl IsA<gtk::Widget>, back: impl Fn() + 'static) {
     let swipe = gtk::GestureSwipe::new();
     swipe.set_touch_only(true);
     swipe.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -197,7 +197,7 @@ pub fn setup_swipe_back(widget: &impl IsA<gtk::Widget>, back: impl Fn() + 'stati
 // (`gtk_list_item_base_update`), which undoes the state a row sets for a
 // selection of its own. So while `selecting(row)` says it's in selection
 // mode, `update(row)` sets it again once the list is done with the item
-pub fn keep_selected_state<W: IsA<gtk::Widget>>(
+pub(crate) fn keep_selected_state<W: IsA<gtk::Widget>>(
     list_item: &gtk::ListItem,
     row: &W,
     selecting: fn(&W) -> bool,
@@ -222,7 +222,7 @@ pub fn keep_selected_state<W: IsA<gtk::Widget>>(
 // The Menu key and Shift+F10 open the menu of the row or the cell of a
 // list or a grid that has the focus, as a right click on it does. Keys go
 // from the focus up, so the shortcut is on the list rather than the rows
-pub fn setup_menu_key<W: IsA<gtk::Widget>>(
+pub(crate) fn setup_menu_key<W: IsA<gtk::Widget>>(
     list: &impl IsA<gtk::Widget>,
     open: impl Fn(&W) + 'static,
 ) {
@@ -245,7 +245,10 @@ pub fn setup_menu_key<W: IsA<gtk::Widget>>(
 // A right click opens a menu at its point, and so does a long press on a
 // touchscreen, but not a mouse held down. Both claim the sequence as it's
 // pressed, so the scrolled window around doesn't take it
-pub fn setup_context_menu(widget: &impl IsA<gtk::Widget>, open: impl Fn(f64, f64) + 'static) {
+pub(crate) fn setup_context_menu(
+    widget: &impl IsA<gtk::Widget>,
+    open: impl Fn(f64, f64) + 'static,
+) {
     let open = std::rc::Rc::new(open);
     let click = gtk::GestureClick::builder()
         .button(gdk::BUTTON_SECONDARY)
@@ -270,7 +273,7 @@ pub fn setup_context_menu(widget: &impl IsA<gtk::Widget>, open: impl Fn(f64, f64
 
 // Sets the label of a button that names the selected playlist, which can
 // have a long name
-pub fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
+pub(crate) fn set_playlist_button_label(button: &adw::SplitButton, label: &str) {
     button.set_label(label);
     // The full label, when it doesn't fit
     button.set_tooltip_text(Some(label));
@@ -293,7 +296,7 @@ const TOP_FRAMES: u32 = 10;
 // GTK can put the first item back at the top, below its header, as after
 // sorting a long queue, so the top is set again until it stays there for
 // two frames in a row
-pub fn scroll_to_top_when_laid_out(
+pub(crate) fn scroll_to_top_when_laid_out(
     list: &gtk::ListView,
     still_wanted: impl Fn() -> bool + 'static,
 ) {
@@ -332,7 +335,7 @@ pub fn scroll_to_top_when_laid_out(
 // moving the focus. These drop the links that don't lead to the window's
 // focus, `focus`, as GTK does when the focus moves: from `widget` down,
 // and from `widget` up to the window
-pub fn forget_focus_below(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
+pub(crate) fn forget_focus_below(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
     let mut parent = widget.clone();
     while let Some(child) = parent.focus_child() {
         if focus.is_some_and(|focus| *focus == child || focus.is_ancestor(&child)) {
@@ -343,7 +346,7 @@ pub fn forget_focus_below(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
     }
 }
 
-pub fn forget_focus_above(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
+pub(crate) fn forget_focus_above(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
     let mut child = widget.clone();
     while let Some(parent) = child.parent() {
         if parent.focus_child().as_ref() == Some(&child)
@@ -360,7 +363,7 @@ pub fn forget_focus_above(widget: &gtk::Widget, focus: Option<&gtk::Widget>) {
 // focus there if the list has it already (`gtk_list_base_scroll_to`), and
 // otherwise keeps the item for when the list takes it, and a list that was
 // just shown, as with another page, lays out its items at the next frame
-pub fn focus_when_laid_out(list: &impl IsA<gtk::Widget>) {
+pub(crate) fn focus_when_laid_out(list: &impl IsA<gtk::Widget>) {
     when_laid_out(list, |list| {
         list.grab_focus();
     });
@@ -369,7 +372,7 @@ pub fn focus_when_laid_out(list: &impl IsA<gtk::Widget>) {
 // Runs `f` at the frame after the next one, once the widget is laid out:
 // a list lays out the items that changed, and a widget that was just shown
 // its children, at the next frame
-pub fn when_laid_out<W: IsA<gtk::Widget>>(widget: &W, f: impl FnOnce(&W) + 'static) {
+pub(crate) fn when_laid_out<W: IsA<gtk::Widget>>(widget: &W, f: impl FnOnce(&W) + 'static) {
     let laid_out = Cell::new(false);
     let f = Cell::new(Some(f));
     widget.add_tick_callback(move |widget, _| {
@@ -388,7 +391,7 @@ pub fn when_laid_out<W: IsA<gtk::Widget>>(widget: &W, f: impl FnOnce(&W) + 'stat
 // the number of old items removed there, and the number of new ones put in
 // their place. A list keeps its place by its items, so replacing only
 // those keeps it where it was
-pub fn changed_range(
+pub(crate) fn changed_range(
     old_len: usize,
     new_len: usize,
     same: impl Fn(usize, usize) -> bool,
@@ -406,7 +409,7 @@ pub fn changed_range(
 // makes GTK look for the window under the pointer, which grabs the X
 // server, for each row bound, and lists bind many rows a frame while they
 // scroll, which stalls the whole display
-pub fn set_row_tooltip(
+pub(crate) fn set_row_tooltip(
     row: &impl IsA<gtk::Widget>,
     item: &gtk::ListItem,
     text: impl Fn(&glib::Object) -> Option<String> + 'static,
@@ -431,7 +434,7 @@ pub fn set_row_tooltip(
 // with the name of a long playlist, which GTK shows on a single line, as
 // wide as the screen. Connected once; it shows whatever tooltip the widget
 // has at the time
-pub fn wrap_tooltip(widget: &impl IsA<gtk::Widget>) {
+pub(crate) fn wrap_tooltip(widget: &impl IsA<gtk::Widget>) {
     widget.connect_query_tooltip(|widget, _, _, _, tooltip| {
         let Some(text) = widget.tooltip_text() else {
             return false;
@@ -450,7 +453,7 @@ pub fn wrap_tooltip(widget: &impl IsA<gtk::Widget>) {
 
 // Puts the cursor in a search entry when its clear icon is clicked. GTK
 // clears the text but leaves the focus where it was, e.g. on the player
-pub fn focus_on_clear(entry: &gtk::SearchEntry) {
+pub(crate) fn focus_on_clear(entry: &gtk::SearchEntry) {
     let click = gtk::GestureClick::new();
     click.set_propagation_phase(gtk::PropagationPhase::Capture);
     click.connect_pressed(|gesture, _, x, y| {
@@ -469,7 +472,7 @@ pub fn focus_on_clear(entry: &gtk::SearchEntry) {
 
 // A playlist name to put in a sentence, cut short with "…" if it's long,
 // e.g. in a title, where it would make several lines
-pub fn short_playlist_name(name: &str) -> String {
+pub(crate) fn short_playlist_name(name: &str) -> String {
     const MAX_CHARS: usize = 30;
     if name.chars().count() <= MAX_CHARS {
         return name.to_string();
@@ -480,18 +483,18 @@ pub fn short_playlist_name(name: &str) -> String {
 
 // A playlist name in a menu, shortened, as a menu is as wide as its
 // longest item; underscores in names would be taken for mnemonics
-pub fn playlist_menu_label(name: &str) -> String {
+pub(crate) fn playlist_menu_label(name: &str) -> String {
     short_playlist_name(name).replace('_', "__")
 }
 
 // The position of a track in a list of tracks
-pub fn track_position(model: &gio::ListModel, track: &Track) -> Option<u32> {
+pub(crate) fn track_position(model: &gio::ListModel, track: &Track) -> Option<u32> {
     (0..model.n_items()).find(|&i| model.item(i).and_downcast_ref::<Track>() == Some(track))
 }
 
 // Selects the tracks of a list from `from` to `to`, both included, in the
 // order of the list; returns false if either is not in it
-pub fn select_track_range(model: &gio::ListModel, from: &Track, to: &Track) -> bool {
+pub(crate) fn select_track_range(model: &gio::ListModel, from: &Track, to: &Track) -> bool {
     let (Some(from), Some(to)) = (track_position(model, from), track_position(model, to)) else {
         return false;
     };
@@ -506,7 +509,7 @@ pub fn select_track_range(model: &gio::ListModel, from: &Track, to: &Track) -> b
 
 // Selects the tracks of a list from position `start` up to `end`, or
 // unselects them if they are all selected already; returns the last one
-pub fn toggle_track_section(model: &gio::ListModel, start: u32, end: u32) -> Option<Track> {
+pub(crate) fn toggle_track_section(model: &gio::ListModel, start: u32, end: u32) -> Option<Track> {
     let mut tracks: Vec<Track> = (start..end.min(model.n_items()))
         .filter_map(|i| model.item(i).and_downcast::<Track>())
         .collect();
@@ -517,14 +520,14 @@ pub fn toggle_track_section(model: &gio::ListModel, start: u32, end: u32) -> Opt
     tracks.pop()
 }
 
-pub fn settings_manager() -> gio::Settings {
+pub(crate) fn settings_manager() -> gio::Settings {
     // We ship a single schema for both default and development profiles
     let app_id = APPLICATION_ID.trim_end_matches(".Devel");
     gio::Settings::new(app_id)
 }
 
 // Formats seconds as m:ss, or h:mm:ss from an hour
-pub fn format_duration(seconds: u64) -> String {
+pub(crate) fn format_duration(seconds: u64) -> String {
     let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
     if hours > 0 {
         format!("{hours}:{minutes:02}:{seconds:02}")
@@ -536,25 +539,25 @@ pub fn format_duration(seconds: u64) -> String {
 // The time left, with a minus sign. An explicit LRM character keeps the
 // minus sign in front of the time in RTL locales, instead of getting flipped
 // at the end of the text
-pub fn format_remaining_time(seconds: u64) -> String {
+pub(crate) fn format_remaining_time(seconds: u64) -> String {
     format!("\u{200e}\u{2212}{}", format_duration(seconds))
 }
 
 // A toast whose title is plain text: the titles of toasts are markup by
 // default, and they can have the names of playlists and folders, which can
 // have "&"
-pub fn plain_toast(title: &str) -> adw::Toast {
+pub(crate) fn plain_toast(title: &str) -> adw::Toast {
     adw::Toast::builder().title(title).use_markup(false).build()
 }
 
 // A hash in lowercase hex, as it names caches and albums, and has to stay
 // the same across versions of the hashing crates
-pub fn hex(hash: &[u8]) -> String {
+pub(crate) fn hex(hash: &[u8]) -> String {
     hash.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // Marks a file of a cache as used, so that `remove_old_files()` keeps it
-pub fn touch(path: &std::path::Path) {
+pub(crate) fn touch(path: &std::path::Path) {
     let result = std::fs::File::options()
         .append(true)
         .open(path)
@@ -568,7 +571,7 @@ pub fn touch(path: &std::path::Path) {
 // `age`. The caches of waveforms and covers would otherwise only grow, with
 // a file for every track and album ever played; one that's needed again is
 // made again
-pub fn remove_old_files(dir: &std::path::Path, age: std::time::Duration) {
+pub(crate) fn remove_old_files(dir: &std::path::Path, age: std::time::Duration) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -594,7 +597,7 @@ pub fn remove_old_files(dir: &std::path::Path, age: std::time::Duration) {
 // Runs `f`, which reads a file that anyone could have crafted, and returns
 // `fallback()` if it panics. The tag reader can panic on a malformed file,
 // and without this one file would stop a whole load or scan, every time
-pub fn guarded<T>(
+pub(crate) fn guarded<T>(
     what: impl std::fmt::Display,
     f: impl FnOnce() -> T,
     fallback: impl FnOnce() -> T,
@@ -611,7 +614,7 @@ pub fn guarded<T>(
 // queue loader, or a scan, for good. Checking the path first isn't enough,
 // as a symbolic link can be swapped for a pipe in between, so the file is
 // opened without waiting, and the file opened is checked
-pub fn open_regular_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open_regular_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     // So that a device is never opened, as far as the path tells
     if !std::fs::metadata(path)?.is_file() {
         return Err(not_a_regular_file());
@@ -651,14 +654,14 @@ fn not_a_regular_file() -> std::io::Error {
 // How many files are read at a time where reading them mostly waits, as
 // decoding a cover waits for its sandboxed loader: a few at a time go
 // faster, even on fewer cores
-pub const READING_THREADS: usize = 4;
+pub(crate) const READING_THREADS: usize = 4;
 
 // Runs `work` on each of the `items` in up to `threads` threads, and hands
 // each result to `each` on this thread as it comes, with the position of
 // its item, in no particular order. It returns once every item is done, or
 // with the first error of `each`, once the threads have finished the items
 // they were on
-pub fn in_threads<T: Sync, R: Send, E>(
+pub(crate) fn in_threads<T: Sync, R: Send, E>(
     items: &[T],
     threads: usize,
     work: impl Fn(&T) -> R + Sync,
@@ -695,7 +698,7 @@ pub fn in_threads<T: Sync, R: Send, E>(
 
 // Whether a file is an audio track, guessing from its name only, which is
 // much faster than looking at its contents when scanning a whole library
-pub fn is_audio_path(path: &std::path::Path) -> bool {
+pub(crate) fn is_audio_path(path: &std::path::Path) -> bool {
     let (mime_type, _) = gio::content_type_guess(Some(path), None);
     is_audio_type(&mime_type)
 }
@@ -703,7 +706,7 @@ pub fn is_audio_path(path: &std::path::Path) -> bool {
 // Playlists have audio types too. WebM files have a video type, but are
 // nearly always downloaded music in the music folders, with a video or
 // not, and only their sound is played
-pub fn is_audio_type(mime_type: &str) -> bool {
+pub(crate) fn is_audio_type(mime_type: &str) -> bool {
     const PLAYLISTS: [&str; 4] = [
         "audio/x-mpegurl",
         "audio/mpegurl",
@@ -716,20 +719,20 @@ pub fn is_audio_type(mime_type: &str) -> bool {
 
 // What a walk through a folder found
 #[derive(Default)]
-pub struct FolderTree {
+pub(crate) struct FolderTree {
     // In the order a file manager shows them
-    pub files: Vec<gio::File>,
+    pub(crate) files: Vec<gio::File>,
     // The folders read, the first one included, in no order
-    pub folders: Vec<gio::File>,
+    pub(crate) folders: Vec<gio::File>,
     // The symbolic links to folders that were followed
-    pub links: Vec<gio::File>,
+    pub(crate) links: Vec<gio::File>,
     // Whether a symbolic link leads nowhere, as one to a drive that isn't
     // mounted does
-    pub broken_links: bool,
+    pub(crate) broken_links: bool,
     // The folders that couldn't be read whole, e.g. on a network share that
     // stopped answering: the files in them that weren't found can still be
     // there. Not those that are gone, or aren't folders anymore
-    pub unread: Vec<std::path::PathBuf>,
+    pub(crate) unread: Vec<std::path::PathBuf>,
 }
 
 // Following symbolic links, the type is that of what they lead to
@@ -839,7 +842,7 @@ fn may_have_files(error: &glib::Error) -> bool {
     !error.matches(gio::IOErrorEnum::NotFound) && !error.matches(gio::IOErrorEnum::NotDirectory)
 }
 
-pub fn read_folder_tree(
+pub(crate) fn read_folder_tree(
     folder: &gio::File,
     recursive: bool,
     keep: &dyn Fn(&std::path::Path) -> bool,
@@ -911,12 +914,12 @@ fn file_sort_name(file: &gio::File) -> String {
     )
 }
 
-pub fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
+pub(crate) fn cmp_file_names(filename_a: &str, filename_b: &str) -> Ordering {
     file_name_key(filename_a).cmp(&file_name_key(filename_b))
 }
 
 // A path to show, with the home folder as "~"
-pub fn home_path(path: &std::path::Path) -> String {
+pub(crate) fn home_path(path: &std::path::Path) -> String {
     match path.strip_prefix(glib::home_dir()) {
         Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
         Ok(rest) => format!("~/{}", rest.display()),
@@ -926,14 +929,14 @@ pub fn home_path(path: &std::path::Path) -> String {
 
 // Whether Dismas runs in the Flatpak sandbox, which Flatpak marks with
 // this file
-pub fn in_flatpak() -> bool {
+pub(crate) fn in_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").is_file()
 }
 
 // The key a name sorts by: the names starting with "." or "#" go last, and
 // the others in the order of file names in the locale, with numbers in
 // their order, e.g. "Disc 2" before "Disc 10"
-pub fn file_name_key(name: &str) -> (bool, glib::FilenameCollationKey) {
+pub(crate) fn file_name_key(name: &str) -> (bool, glib::FilenameCollationKey) {
     (
         name.starts_with(['.', '#']),
         glib::FilenameCollationKey::from(name),
@@ -941,13 +944,13 @@ pub fn file_name_key(name: &str) -> (bool, glib::FilenameCollationKey) {
 }
 
 #[cfg(test)]
-pub fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::File> {
+pub(crate) fn load_files_from_folder(folder: &gio::File, recursive: bool) -> Vec<gio::File> {
     load_files_from_folder_filtered(folder, recursive, &|_| true)
 }
 
 // The files of a folder, without the files and folders whose paths `keep`
 // turns down
-pub fn load_files_from_folder_filtered(
+pub(crate) fn load_files_from_folder_filtered(
     folder: &gio::File,
     recursive: bool,
     keep: &dyn Fn(&std::path::Path) -> bool,
@@ -969,7 +972,7 @@ pub fn load_files_from_folder_filtered(
 // Header bars have a window handle inside, which moves the window when
 // dragged; turning off its drag gesture keeps its clicks, like the window
 // menu. Turning it on puts it back in the bubble phase, where GTK leaves it
-pub fn set_window_drag(widget: &gtk::Widget, enabled: bool) {
+pub(crate) fn set_window_drag(widget: &gtk::Widget, enabled: bool) {
     if widget.is::<gtk::WindowHandle>() {
         let phase = if enabled {
             gtk::PropagationPhase::Bubble
@@ -993,7 +996,7 @@ pub fn set_window_drag(widget: &gtk::Widget, enabled: bool) {
 
 // Makes a named pipe, which opening as usual would wait on
 #[cfg(test)]
-pub fn make_test_pipe(path: &std::path::Path) {
+pub(crate) fn make_test_pipe(path: &std::path::Path) {
     use std::os::unix::ffi::OsStrExt;
     let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
     // SAFETY: the path is a C string that lives through the call
@@ -1004,7 +1007,7 @@ pub fn make_test_pipe(path: &std::path::Path) {
 // few seconds, so that an open that waits, or work that a crafted file
 // makes endless, fails the test rather than stopping the whole run
 #[cfg(test)]
-pub fn within_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+pub(crate) fn within_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || sender.send(f()));
     receiver
@@ -1014,7 +1017,7 @@ pub fn within_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static)
 
 // A WAV file of silence, 8000 bytes a second
 #[cfg(test)]
-pub fn write_test_wav(path: &std::path::Path, seconds: u32) {
+pub(crate) fn write_test_wav(path: &std::path::Path, seconds: u32) {
     let data_size = 8000 * seconds;
     let mut bytes = Vec::new();
     bytes.extend(b"RIFF");
@@ -1044,7 +1047,11 @@ pub fn write_test_wav(path: &std::path::Path, seconds: u32) {
     clippy::disallowed_types,
     reason = "tests need files with tags to read"
 )]
-pub fn write_test_id3v2(path: &std::path::Path, tag: &lofty::id3::v2::Id3v2Tag, id3v23: bool) {
+pub(crate) fn write_test_id3v2(
+    path: &std::path::Path,
+    tag: &lofty::id3::v2::Id3v2Tag,
+    id3v23: bool,
+) {
     use lofty::{config::WriteOptions, tag::TagExt};
     let options = WriteOptions::default().use_id3v23(id3v23);
     tag.save_to_path(path, options).unwrap();

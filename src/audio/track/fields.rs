@@ -36,7 +36,7 @@ pub(super) fn sane_duration(duration: Duration) -> u64 {
 // What each line of the fields holds. The codes are kept in the library,
 // so changing one needs a new version of its schema
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FieldCode {
+pub(crate) enum FieldCode {
     Title,
     Artist,
     AlbumArtist,
@@ -135,7 +135,7 @@ impl FieldCode {
         Self::Channels,
     ];
 
-    pub const fn code(self) -> &'static str {
+    pub(crate) const fn code(self) -> &'static str {
         match self {
             Self::Title => "ti",
             Self::Artist => "ar",
@@ -178,14 +178,14 @@ impl FieldCode {
     }
 
     #[cfg(test)]
-    pub fn from_code(code: &str) -> Option<Self> {
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|field| field.code() == code)
     }
 }
 
 // The flags of a track, the values of its `FieldCode::Is` lines
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Flag {
+pub(crate) enum Flag {
     // Part of a larger work
     Movement,
     // An arrangement of another work
@@ -199,7 +199,7 @@ pub enum Flag {
 }
 
 impl Flag {
-    pub const fn name(self) -> &'static str {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Movement => "movement",
             Self::Arrangement => "arrangement",
@@ -212,19 +212,19 @@ impl Flag {
 
 // What a track's file says about its sound, for the fields
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct AudioProperties {
+pub(crate) struct AudioProperties {
     // In whole seconds, 0 if it's unknown
-    pub length: u64,
-    pub sample_rate: Option<u32>,
-    pub bit_depth: Option<u8>,
+    pub(crate) length: u64,
+    pub(crate) sample_rate: Option<u32>,
+    pub(crate) bit_depth: Option<u8>,
     // In kbps
-    pub bitrate: Option<u32>,
-    pub channels: Option<u8>,
+    pub(crate) bitrate: Option<u32>,
+    pub(crate) channels: Option<u8>,
 }
 
 impl AudioProperties {
     // As `FileDetails` takes them, without the values that mean unknown
-    pub fn of(properties: &lofty::properties::FileProperties) -> Self {
+    pub(crate) fn of(properties: &lofty::properties::FileProperties) -> Self {
         Self {
             length: sane_duration(properties.duration()),
             sample_rate: properties.sample_rate().filter(|r| *r > 0),
@@ -235,7 +235,7 @@ impl AudioProperties {
     }
 
     // For a part of the file, as a track of a CUE sheet plays
-    pub fn with_length(self, length: Duration) -> Self {
+    pub(crate) fn with_length(self, length: Duration) -> Self {
         Self {
             length: sane_duration(length),
             ..self
@@ -244,21 +244,21 @@ impl AudioProperties {
 }
 
 // What the fields of a track are made from
-pub struct FieldParts<'a> {
-    pub tag: &'a Tag,
-    pub credits: &'a TrackCredits,
+pub(crate) struct FieldParts<'a> {
+    pub(crate) tag: &'a Tag,
+    pub(crate) credits: &'a TrackCredits,
     // The title that searches look into, see `TrackData::searched_title()`
-    pub title: Option<&'a str>,
+    pub(crate) title: Option<&'a str>,
     // The album, or else the name of its folder, see `folder_album_title()`
-    pub album: Option<&'a str>,
-    pub format: Option<&'a str>,
+    pub(crate) album: Option<&'a str>,
+    pub(crate) format: Option<&'a str>,
     // `None` if the file's properties weren't read
-    pub properties: Option<AudioProperties>,
+    pub(crate) properties: Option<AudioProperties>,
 }
 
 impl FieldParts<'_> {
     // The lines of the fields
-    pub fn encode(&self) -> String {
+    pub(crate) fn encode(&self) -> String {
         let mut lines = Lines::default();
         let credits = self.credits;
         let tag = self.tag;
@@ -382,7 +382,7 @@ impl FieldParts<'_> {
 
 // The values of the fields `codes` in a track's fields, as `encode()`
 // writes them
-pub fn field_values<'a>(
+pub(crate) fn field_values<'a>(
     fields: &'a str,
     codes: &'a [FieldCode],
 ) -> impl Iterator<Item = &'a str> + 'a {

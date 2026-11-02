@@ -14,11 +14,11 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/playlists-page.ui")]
-    pub struct PlaylistsPage {
+    pub(crate) struct PlaylistsPage {
         #[template_child]
-        pub menu_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub playlists_list: TemplateChild<gtk::ListBox>,
+        pub(crate) playlists_list: TemplateChild<gtk::ListBox>,
     }
 
     #[glib::object_subclass]
@@ -60,7 +60,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct PlaylistsPage(ObjectSubclass<imp::PlaylistsPage>)
+    pub(crate) struct PlaylistsPage(ObjectSubclass<imp::PlaylistsPage>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -74,7 +74,7 @@ impl Default for PlaylistsPage {
 impl PlaylistsPage {
     // Shows the queue, then the saved playlists; `selected` is the name
     // of the selected one, empty for the queue
-    pub fn set_playlists(&self, names: &[String], selected: &str) {
+    pub(crate) fn set_playlists(&self, names: &[String], selected: &str) {
         let list = self.imp().playlists_list.get();
         list.remove_all();
 

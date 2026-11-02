@@ -18,14 +18,14 @@ use super::*;
 // leaves out of the tags of the `TaggedFile`, as it has no `ItemKey` for
 // them
 #[derive(Debug, Default)]
-pub struct ExtraComments {
+pub(crate) struct ExtraComments {
     // The JSON written by the "Work Hierarchy" plugin of MusicBrainz Picard
     pub(super) work_hierarchy: Option<String>,
     // When the track was recorded, which the same plugin writes from
     // MusicBrainz, e.g. "1937-11-08/1938-03-08"
     pub(super) recording_date: Option<String>,
     // A CUE sheet that splits the file into tracks
-    pub cue_sheet: Option<String>,
+    pub(crate) cue_sheet: Option<String>,
     // The gains of an Opus file, as its format gives them (RFC 7845), in
     // place of ReplayGain tags, e.g. "-1536"; see `ReplayGain::r128`
     pub(super) r128_track_gain: Option<String>,
@@ -33,7 +33,7 @@ pub struct ExtraComments {
     // The synchronized lyrics of an ID3v2 SYLT frame: the time of each
     // entry and its text, as the frame has them, which can be a line or a
     // word. Only read when asked, see `ReadOptions::lyrics`
-    pub synced_lyrics: Option<Vec<(Duration, String)>>,
+    pub(crate) synced_lyrics: Option<Vec<(Duration, String)>>,
 }
 
 // The name of the tag of the "Work Hierarchy" plugin; MusicBrainz Picard
@@ -83,7 +83,7 @@ impl ExtraComments {
     // The items of a file with a "Work Hierarchy" tag, for the tests of
     // other modules
     #[cfg(test)]
-    pub fn with_work_hierarchy(json: &str) -> Self {
+    pub(crate) fn with_work_hierarchy(json: &str) -> Self {
         ExtraComments {
             work_hierarchy: Some(json.to_string()),
             ..Default::default()
@@ -93,7 +93,7 @@ impl ExtraComments {
     // The items of a file with a recording date, for the tests of other
     // modules
     #[cfg(test)]
-    pub fn with_recording_date(date: &str) -> Self {
+    pub(crate) fn with_recording_date(date: &str) -> Self {
         ExtraComments {
             recording_date: Some(date.to_string()),
             ..Default::default()
@@ -201,23 +201,23 @@ impl LeftOut {
 
 // What to read of a file besides its tags
 #[derive(Debug, Clone, Copy)]
-pub struct ReadOptions {
-    pub covers: bool,
-    pub properties: bool,
+pub(crate) struct ReadOptions {
+    pub(crate) covers: bool,
+    pub(crate) properties: bool,
     // The synchronized lyrics of ID3v2 tags, which only the lyrics of the
     // playing track need
-    pub lyrics: bool,
+    pub(crate) lyrics: bool,
 }
 
 impl ReadOptions {
-    pub const ALL: Self = Self {
+    pub(crate) const ALL: Self = Self {
         covers: true,
         properties: true,
         lyrics: false,
     };
     // Without the covers and the properties, to time reading them
     #[cfg(test)]
-    pub const TAGS: Self = Self {
+    pub(crate) const TAGS: Self = Self {
         covers: false,
         properties: false,
         lyrics: false,
@@ -225,13 +225,13 @@ impl ReadOptions {
     // What the library keeps: the tags and the properties, which the search
     // looks into, e.g. the length; not the covers, which it reads only for
     // the albums whose cover it makes
-    pub const SCAN: Self = Self {
+    pub(crate) const SCAN: Self = Self {
         covers: false,
         properties: true,
         lyrics: false,
     };
     // The tags with the synchronized lyrics
-    pub const LYRICS: Self = Self {
+    pub(crate) const LYRICS: Self = Self {
         covers: false,
         properties: false,
         lyrics: true,
@@ -246,17 +246,17 @@ impl ReadOptions {
 }
 
 // What the tracks of a file take from it, whatever its format
-pub struct FileTags {
+pub(crate) struct FileTags {
     // The tags of the file, the same in the queue, the album grid and the
     // covers: its primary tag, or else its other tags together, as one can
     // fill in for another, or else an empty tag
-    pub tag: Tag,
+    pub(crate) tag: Tag,
     // The items lofty leaves out of the tag
-    pub extra: ExtraComments,
-    pub properties: FileProperties,
-    pub format: Option<Cow<'static, str>>,
+    pub(crate) extra: ExtraComments,
+    pub(crate) properties: FileProperties,
+    pub(crate) format: Option<Cow<'static, str>>,
     // Whether the file has a video stream too, which only GStreamer tells
-    pub video: bool,
+    pub(crate) video: bool,
 }
 
 impl FileTags {
@@ -304,7 +304,7 @@ impl FileTags {
 // Opens a file and reads its tags, and the items in `ExtraComments` if it
 // has them; the options can leave out the covers and the properties. A
 // file that lofty can't read, GStreamer may
-pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
+pub(crate) fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
     // Opened as `Probe::open` does, with the type the extension gives,
     // which the contents can change, but not if it's a named pipe, which
     // would wait for something to write to it
@@ -426,7 +426,7 @@ pub(super) fn track_artist(tag: &Tag) -> Option<String> {
 }
 
 // The title in a tag, unless it's blank
-pub fn track_title(tag: &Tag) -> Option<String> {
+pub(crate) fn track_title(tag: &Tag) -> Option<String> {
     tag.title()
         .filter(|title| !title.trim().is_empty())
         .map(|title| title.to_string())
@@ -443,7 +443,7 @@ pub(super) fn track_album(tag: &Tag) -> Option<String> {
 // downloaded from YouTube separate their artists with commas, and use
 // full-width ones for the commas within a name, e.g. "Orquesta del Teatro
 // Real， Madrid", which look like large gaps
-pub fn plain_commas(name: &str) -> String {
+pub(crate) fn plain_commas(name: &str) -> String {
     name.replace('，', ",")
 }
 

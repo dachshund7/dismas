@@ -18,13 +18,13 @@ mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct PushBin {
-        pub split_view: glib::WeakRef<adw::OverlaySplitView>,
-        pub handlers: RefCell<Vec<glib::SignalHandlerId>>,
-        pub tick_id: RefCell<Option<gtk::TickCallbackId>>,
+    pub(crate) struct PushBin {
+        pub(crate) split_view: glib::WeakRef<adw::OverlaySplitView>,
+        pub(crate) handlers: RefCell<Vec<glib::SignalHandlerId>>,
+        pub(crate) tick_id: RefCell<Option<gtk::TickCallbackId>>,
         // How far the child was last drawn from its place
-        pub offset: Cell<f32>,
-        pub settled_frames: Cell<u32>,
+        pub(crate) offset: Cell<f32>,
+        pub(crate) settled_frames: Cell<u32>,
     }
 
     #[glib::object_subclass]
@@ -110,7 +110,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct PushBin(ObjectSubclass<imp::PushBin>)
+    pub(crate) struct PushBin(ObjectSubclass<imp::PushBin>)
         @extends gtk::Widget, adw::Bin,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }

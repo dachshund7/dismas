@@ -23,29 +23,29 @@ pub(super) enum Token {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Spanned {
-    pub token: Token,
+    pub(crate) token: Token,
     // In bytes of the text
-    pub span: Range<usize>,
+    pub(crate) span: Range<usize>,
 }
 
 // A run of text up to a space or a parenthesis, in which quotes can keep
 // spaces and parentheses
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Word {
-    pub pieces: Vec<Piece>,
+    pub(crate) pieces: Vec<Piece>,
     // Whether its last quote isn't closed, as while it's being typed
-    pub unclosed: bool,
+    pub(crate) unclosed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Piece {
-    pub text: String,
-    pub quoted: bool,
+    pub(crate) text: String,
+    pub(crate) quoted: bool,
 }
 
 impl Word {
     // The text, without the quotes
-    pub fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         self.pieces
             .iter()
             .map(|piece| piece.text.as_str())
@@ -54,7 +54,7 @@ impl Word {
 
     // The text after the first `at` bytes of its first piece, which must be
     // unquoted, keeping the pieces after it
-    pub fn after(&self, at: usize) -> Word {
+    pub(crate) fn after(&self, at: usize) -> Word {
         let mut pieces = Vec::new();
         if let Some(first) = self.pieces.first() {
             let rest = &first.text[at.min(first.text.len())..];
@@ -73,14 +73,14 @@ impl Word {
     }
 
     // The text the unquoted start of the word begins with
-    pub fn unquoted_start(&self) -> &str {
+    pub(crate) fn unquoted_start(&self) -> &str {
         match self.pieces.first() {
             Some(piece) if !piece.quoted => &piece.text,
             _ => "",
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.pieces.is_empty()
     }
 }

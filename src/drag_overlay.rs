@@ -15,7 +15,7 @@ mod imp {
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::DragOverlay)]
-    pub struct DragOverlay {
+    pub(crate) struct DragOverlay {
         #[property(
             name = "child",
             get = |imp: &Self| imp.overlay.child(),
@@ -23,16 +23,16 @@ mod imp {
             nullable,
             type = Option<gtk::Widget>,
         )]
-        pub overlay: gtk::Overlay,
-        pub revealer: gtk::Revealer,
-        pub zones: gtk::Box,
+        pub(crate) overlay: gtk::Overlay,
+        pub(crate) revealer: gtk::Revealer,
+        pub(crate) zones: gtk::Box,
         #[property(
             name = "title",
             get = |imp: &Self| imp.status.title(),
             set = |imp: &Self, title: glib::GString| imp.status.set_title(&title),
             type = glib::GString,
         )]
-        pub status: adw::StatusPage,
+        pub(crate) status: adw::StatusPage,
         // Below the one to add tracks, which is the larger, as dropping
         // there does no harm
         #[property(
@@ -41,9 +41,9 @@ mod imp {
             set = |imp: &Self, title: glib::GString| imp.play_status.set_title(&title),
             type = glib::GString,
         )]
-        pub play_status: adw::StatusPage,
+        pub(crate) play_status: adw::StatusPage,
         // The widget blurred under the zones
-        pub blurred: RefCell<Option<gtk::Widget>>,
+        pub(crate) blurred: RefCell<Option<gtk::Widget>>,
     }
 
     #[glib::object_subclass]
@@ -122,7 +122,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct DragOverlay(ObjectSubclass<imp::DragOverlay>)
+    pub(crate) struct DragOverlay(ObjectSubclass<imp::DragOverlay>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -137,7 +137,7 @@ impl DragOverlay {
     // Shows the zones across the overlay from `left` to `right`, over the
     // widget that is blurred, and highlights the one under a point; both
     // are relative to the overlay
-    pub fn show_zones(&self, left: f32, right: f32, blurred: &gtk::Widget, x: f64, y: f64) {
+    pub(crate) fn show_zones(&self, left: f32, right: f32, blurred: &gtk::Widget, x: f64, y: f64) {
         let imp = self.imp();
         let margin_start = left.round() as i32;
         let margin_end = (self.width() - right.round() as i32).max(0);
@@ -152,7 +152,7 @@ impl DragOverlay {
         imp.highlight_zone(Some(self.in_play_zone(x, y)));
     }
 
-    pub fn hide_zones(&self) {
+    pub(crate) fn hide_zones(&self) {
         let imp = self.imp();
         imp.revealer.set_reveal_child(false);
         imp.set_blurred(None);
@@ -162,7 +162,7 @@ impl DragOverlay {
     // Whether a point, relative to the overlay, is in the zone that plays
     // the tracks; before the zones are first shown, they have no bounds
     // yet, and the tracks are added
-    pub fn in_play_zone(&self, x: f64, y: f64) -> bool {
+    pub(crate) fn in_play_zone(&self, x: f64, y: f64) -> bool {
         self.imp()
             .play_status
             .compute_bounds(self)

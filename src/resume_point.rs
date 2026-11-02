@@ -15,24 +15,24 @@ use log::warn;
 const KEY: &str = "resume-points";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ResumePoint {
-    pub uri: String,
+pub(crate) struct ResumePoint {
+    pub(crate) uri: String,
     // In the order of the playlist
-    pub index: u32,
+    pub(crate) index: u32,
     // In seconds
-    pub position: u32,
+    pub(crate) position: u32,
 }
 
 impl ResumePoint {
     // The point of the playlist, empty for the queue
-    pub fn load(settings: &gio::Settings, playlist: &str) -> Option<Self> {
+    pub(crate) fn load(settings: &gio::Settings, playlist: &str) -> Option<Self> {
         ResumePoints::load(settings).get(playlist).cloned()
     }
 
     // The position of the track among the URIs of the playlist: the one at
     // its index, unless the playlist changed since, e.g. tracks that can't
     // be read anymore; then the first one with its URI
-    pub fn find_track(&self, uris: &[String]) -> Option<u32> {
+    pub(crate) fn find_track(&self, uris: &[String]) -> Option<u32> {
         if uris.get(self.index as usize) == Some(&self.uri) {
             return Some(self.index);
         }
@@ -44,10 +44,10 @@ impl ResumePoint {
 
 // The points by playlist name, empty for the queue
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ResumePoints(HashMap<String, ResumePoint>);
+pub(crate) struct ResumePoints(HashMap<String, ResumePoint>);
 
 impl ResumePoints {
-    pub fn load(settings: &gio::Settings) -> Self {
+    pub(crate) fn load(settings: &gio::Settings) -> Self {
         let points = settings.get::<HashMap<String, (String, u32, u32)>>(KEY);
         Self(
             points
@@ -65,7 +65,7 @@ impl ResumePoints {
     }
 
     // Stored every 30 s while playing, so unchanged points aren't written
-    pub fn store(&self, settings: &gio::Settings) {
+    pub(crate) fn store(&self, settings: &gio::Settings) {
         if *self == Self::load(settings) {
             return;
         }
@@ -80,33 +80,33 @@ impl ResumePoints {
     }
 
     // Loads the points, changes them, and stores them if they changed
-    pub fn update(settings: &gio::Settings, change: impl FnOnce(&mut Self)) {
+    pub(crate) fn update(settings: &gio::Settings, change: impl FnOnce(&mut Self)) {
         let mut points = Self::load(settings);
         change(&mut points);
         points.store(settings);
     }
 
-    pub fn get(&self, playlist: &str) -> Option<&ResumePoint> {
+    pub(crate) fn get(&self, playlist: &str) -> Option<&ResumePoint> {
         self.0.get(playlist).filter(|p| !p.uri.is_empty())
     }
 
-    pub fn set(&mut self, playlist: &str, point: ResumePoint) {
+    pub(crate) fn set(&mut self, playlist: &str, point: ResumePoint) {
         self.0.insert(playlist.to_string(), point);
     }
 
-    pub fn remove(&mut self, playlist: &str) {
+    pub(crate) fn remove(&mut self, playlist: &str) {
         self.0.remove(playlist);
     }
 
     // The point follows the playlist to its new name
-    pub fn rename(&mut self, playlist: &str, new_name: &str) {
+    pub(crate) fn rename(&mut self, playlist: &str, new_name: &str) {
         if let Some(point) = self.0.remove(playlist) {
             self.0.insert(new_name.to_string(), point);
         }
     }
 
     // A playlist made with the same tracks starts where the other one is
-    pub fn copy(&mut self, playlist: &str, new_name: &str) {
+    pub(crate) fn copy(&mut self, playlist: &str, new_name: &str) {
         if let Some(point) = self.0.get(playlist).cloned() {
             self.0.insert(new_name.to_string(), point);
         }
@@ -114,7 +114,7 @@ impl ResumePoints {
 
     // Drops the points of playlists that are gone, e.g. removed outside
     // the app; the queue is always there
-    pub fn retain_playlists(&mut self, names: &[String]) {
+    pub(crate) fn retain_playlists(&mut self, names: &[String]) {
         self.0
             .retain(|playlist, _| playlist.is_empty() || names.contains(playlist));
     }

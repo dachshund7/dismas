@@ -27,54 +27,54 @@ use crate::{
 // The recording of a work whose tracks a cell takes from its album, among
 // the covers of the recordings of a work, with the work's name
 #[derive(Clone, Debug)]
-pub struct CellWork {
+pub(crate) struct CellWork {
     // The key of the work whose covers it's among, which finds its row
-    pub key: String,
-    pub name: String,
+    pub(crate) key: String,
+    pub(crate) name: String,
     // The recording, which can be marked as a favorite, and its tracks
-    pub recording: FavoriteRecording,
-    pub paths: Arc<[PathBuf]>,
+    pub(crate) recording: FavoriteRecording,
+    pub(crate) paths: Arc<[PathBuf]>,
 }
 
 // The smallest and largest sizes of a cover at a step of the zoom, 0 for
 // the normal size
-pub type CoverSizes = fn(i32) -> (i32, i32);
+pub(crate) type CoverSizes = fn(i32) -> (i32, i32);
 
 mod imp {
     use super::*;
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::AlbumCell)]
-    pub struct AlbumCell {
+    pub(crate) struct AlbumCell {
         #[property(get, set = Self::set_selected, explicit_notify)]
-        pub selected: Cell<bool>,
+        pub(crate) selected: Cell<bool>,
         #[property(get, set = Self::set_selection_mode, explicit_notify)]
-        pub selection_mode: Cell<bool>,
+        pub(crate) selection_mode: Cell<bool>,
         // How many of the album's tracks are taken from it, and how many it
         // has; 0 for none when they're all taken
         #[property(get, set = Self::set_matching)]
-        pub matching: Cell<u32>,
+        pub(crate) matching: Cell<u32>,
         #[property(get, set = Self::set_total)]
-        pub total: Cell<u32>,
+        pub(crate) total: Cell<u32>,
         // Whether the heart shows: in the grid, for a favorite album, and
         // among the covers of a work's recordings, for a favorite recording
         #[property(get, set = Self::set_favorite)]
-        pub favorite: Cell<bool>,
+        pub(crate) favorite: Cell<bool>,
         // The step the covers are zoomed to, 0 for the normal size
         #[property(get, set = Self::set_zoom)]
-        pub zoom: Cell<i32>,
+        pub(crate) zoom: Cell<i32>,
         // The sizes the cover grows between at each step
-        pub cover_sizes: Cell<Option<super::CoverSizes>>,
-        pub square: OnceCell<SquareBin>,
-        pub picture: gtk::Picture,
-        pub badge: gtk::Label,
-        pub heart: gtk::Image,
-        pub work: RefCell<Option<CellWork>>,
+        pub(crate) cover_sizes: Cell<Option<super::CoverSizes>>,
+        pub(crate) square: OnceCell<SquareBin>,
+        pub(crate) picture: gtk::Picture,
+        pub(crate) badge: gtk::Label,
+        pub(crate) heart: gtk::Image,
+        pub(crate) work: RefCell<Option<CellWork>>,
         // The album the cell shows, and the item of the grid it's in
-        pub album: RefCell<Option<Album>>,
-        pub list_item: glib::WeakRef<gtk::ListItem>,
-        pub title: gtk::Label,
-        pub artist: gtk::Label,
+        pub(crate) album: RefCell<Option<Album>>,
+        pub(crate) list_item: glib::WeakRef<gtk::ListItem>,
+        pub(crate) title: gtk::Label,
+        pub(crate) artist: gtk::Label,
     }
 
     #[glib::object_subclass]
@@ -134,7 +134,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct AlbumCell(ObjectSubclass<imp::AlbumCell>)
+    pub(crate) struct AlbumCell(ObjectSubclass<imp::AlbumCell>)
         @extends gtk::Box, gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
@@ -142,7 +142,7 @@ glib::wrapper! {
 impl AlbumCell {
     // The cover grows with the width it's given, between the sizes that
     // `cover_sizes` gives for the step the covers are zoomed to
-    pub fn new(cover_sizes: CoverSizes) -> Self {
+    pub(crate) fn new(cover_sizes: CoverSizes) -> Self {
         let cell: Self = glib::Object::builder()
             .property("orientation", gtk::Orientation::Vertical)
             .property("spacing", 3)
@@ -229,13 +229,13 @@ impl AlbumCell {
         cell
     }
 
-    pub fn picture(&self) -> &gtk::Picture {
+    pub(crate) fn picture(&self) -> &gtk::Picture {
         &self.imp().picture
     }
 
     // Shows the title and the artist of an album, and no cover until it's
     // loaded
-    pub fn show_album(&self, album: &Album) {
+    pub(crate) fn show_album(&self, album: &Album) {
         let imp = self.imp();
         imp.title.set_label(&album.title());
         imp.artist.set_label(&album.artist());
@@ -243,24 +243,24 @@ impl AlbumCell {
         imp.album.replace(Some(album.clone()));
     }
 
-    pub fn album(&self) -> Option<Album> {
+    pub(crate) fn album(&self) -> Option<Album> {
         self.imp().album.borrow().clone()
     }
 
     // The line under the title, in place of the artist
-    pub fn set_subtitle(&self, subtitle: &str) {
+    pub(crate) fn set_subtitle(&self, subtitle: &str) {
         self.imp().artist.set_label(subtitle);
     }
 
-    pub fn work(&self) -> Option<CellWork> {
+    pub(crate) fn work(&self) -> Option<CellWork> {
         self.imp().work.borrow().clone()
     }
 
-    pub fn set_work(&self, work: Option<CellWork>) {
+    pub(crate) fn set_work(&self, work: Option<CellWork>) {
         self.imp().work.replace(work);
     }
 
-    pub fn set_list_item(&self, item: &gtk::ListItem) {
+    pub(crate) fn set_list_item(&self, item: &gtk::ListItem) {
         self.imp().list_item.set(Some(item));
         crate::utils::keep_selected_state(
             item,
@@ -271,7 +271,7 @@ impl AlbumCell {
     }
 
     // The position in the grid of the album the cell shows
-    pub fn position(&self) -> Option<u32> {
+    pub(crate) fn position(&self) -> Option<u32> {
         let position = self.imp().list_item.upgrade()?.position();
         (position != gtk::INVALID_LIST_POSITION).then_some(position)
     }

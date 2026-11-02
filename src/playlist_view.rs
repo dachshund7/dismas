@@ -17,50 +17,50 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/playlist-view.ui")]
-    pub struct PlaylistView {
+    pub(crate) struct PlaylistView {
         #[template_child]
-        pub header_bar: TemplateChild<adw::HeaderBar>,
+        pub(crate) header_bar: TemplateChild<adw::HeaderBar>,
         #[template_child]
-        pub title_menu_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) title_menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub title_label: TemplateChild<gtk::Label>,
+        pub(crate) title_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub back_button: TemplateChild<gtk::Button>,
+        pub(crate) back_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub sort_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) sort_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub queue_scrolled: TemplateChild<gtk::ScrolledWindow>,
+        pub(crate) queue_scrolled: TemplateChild<gtk::ScrolledWindow>,
         #[template_child]
-        pub queue_view: TemplateChild<gtk::ListView>,
+        pub(crate) queue_view: TemplateChild<gtk::ListView>,
         #[template_child]
-        pub queue_length_label: TemplateChild<gtk::Label>,
+        pub(crate) queue_length_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub queue_actionbar: TemplateChild<gtk::ActionBar>,
+        pub(crate) queue_actionbar: TemplateChild<gtk::ActionBar>,
         #[template_child]
-        pub queue_select_all_button: TemplateChild<gtk::Button>,
+        pub(crate) queue_select_all_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub queue_remove_button: TemplateChild<gtk::Button>,
+        pub(crate) queue_remove_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub queue_selected_label: TemplateChild<gtk::Label>,
+        pub(crate) queue_selected_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub queue_progress: TemplateChild<gtk::ProgressBar>,
+        pub(crate) queue_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
-        pub queue_searchbar: TemplateChild<gtk::SearchBar>,
+        pub(crate) queue_searchbar: TemplateChild<gtk::SearchBar>,
         #[template_child]
-        pub queue_searchentry: TemplateChild<gtk::SearchEntry>,
+        pub(crate) queue_searchentry: TemplateChild<gtk::SearchEntry>,
         #[template_child]
-        pub queue_search_problem: TemplateChild<gtk::Revealer>,
+        pub(crate) queue_search_problem: TemplateChild<gtk::Revealer>,
         #[template_child]
-        pub queue_search_problem_label: TemplateChild<gtk::Label>,
+        pub(crate) queue_search_problem_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub queue_no_results: TemplateChild<adw::StatusPage>,
+        pub(crate) queue_no_results: TemplateChild<adw::StatusPage>,
 
         // While a track is dragged near an edge of the queue, the pixels to
         // scroll it by on each frame
-        pub autoscroll_speed: Cell<f64>,
-        pub autoscroll_tick: RefCell<Option<gtk::TickCallbackId>>,
+        pub(crate) autoscroll_speed: Cell<f64>,
+        pub(crate) autoscroll_tick: RefCell<Option<gtk::TickCallbackId>>,
         // The drag that is scrolling the queue, to stop when it ends
-        pub autoscroll_drag: glib::WeakRef<gdk::Drag>,
+        pub(crate) autoscroll_drag: glib::WeakRef<gdk::Drag>,
     }
 
     #[glib::object_subclass]
@@ -118,7 +118,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct PlaylistView(ObjectSubclass<imp::PlaylistView>)
+    pub(crate) struct PlaylistView(ObjectSubclass<imp::PlaylistView>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -206,7 +206,7 @@ impl PlaylistView {
     }
 
     // For drags from other apps, whose end isn't known
-    pub fn stop_autoscroll(&self) {
+    pub(crate) fn stop_autoscroll(&self) {
         self.set_autoscroll_speed(0.0);
     }
 
@@ -271,75 +271,75 @@ impl PlaylistView {
     }
 
     // The name of the selected playlist
-    pub fn set_title(&self, title: &str) {
+    pub(crate) fn set_title(&self, title: &str) {
         self.imp().title_label.set_label(title);
     }
 
     // The playlists the title switches to
-    pub fn set_playlists_menu(&self, menu: &gio::MenuModel) {
+    pub(crate) fn set_playlists_menu(&self, menu: &gio::MenuModel) {
         self.imp().title_menu_button.set_menu_model(Some(menu));
     }
 
-    pub fn back_button(&self) -> gtk::Button {
+    pub(crate) fn back_button(&self) -> gtk::Button {
         self.imp().back_button.get()
     }
 
-    pub fn sort_button(&self) -> gtk::MenuButton {
+    pub(crate) fn sort_button(&self) -> gtk::MenuButton {
         self.imp().sort_button.get()
     }
 
-    pub fn queue_actionbar(&self) -> gtk::ActionBar {
+    pub(crate) fn queue_actionbar(&self) -> gtk::ActionBar {
         self.imp().queue_actionbar.get()
     }
 
-    pub fn queue_select_all_button(&self) -> gtk::Button {
+    pub(crate) fn queue_select_all_button(&self) -> gtk::Button {
         self.imp().queue_select_all_button.get()
     }
 
-    pub fn queue_selected_label(&self) -> gtk::Label {
+    pub(crate) fn queue_selected_label(&self) -> gtk::Label {
         self.imp().queue_selected_label.get()
     }
 
-    pub fn queue_scrolled(&self) -> gtk::ScrolledWindow {
+    pub(crate) fn queue_scrolled(&self) -> gtk::ScrolledWindow {
         self.imp().queue_scrolled.get()
     }
 
-    pub fn queue_view(&self) -> gtk::ListView {
+    pub(crate) fn queue_view(&self) -> gtk::ListView {
         self.imp().queue_view.get()
     }
 
-    pub fn queue_length_label(&self) -> gtk::Label {
+    pub(crate) fn queue_length_label(&self) -> gtk::Label {
         self.imp().queue_length_label.get()
     }
 
-    pub fn queue_searchbar(&self) -> gtk::SearchBar {
+    pub(crate) fn queue_searchbar(&self) -> gtk::SearchBar {
         self.imp().queue_searchbar.get()
     }
 
-    pub fn queue_searchentry(&self) -> gtk::SearchEntry {
+    pub(crate) fn queue_searchentry(&self) -> gtk::SearchEntry {
         self.imp().queue_searchentry.get()
     }
 
-    pub fn begin_loading(&self) {
+    pub(crate) fn begin_loading(&self) {
         self.imp().queue_progress.set_fraction(0.0);
         self.imp().queue_progress.set_visible(true);
     }
 
-    pub fn end_loading(&self) {
+    pub(crate) fn end_loading(&self) {
         self.imp().queue_progress.set_visible(false);
     }
 
-    pub fn update_loading(&self, cur: u32, max: u32) {
+    pub(crate) fn update_loading(&self, cur: u32, max: u32) {
         let step = f64::from(cur) / f64::from(max);
         self.imp().queue_progress.set_fraction(step);
     }
 
-    pub fn set_search(&self, search: bool) {
+    pub(crate) fn set_search(&self, search: bool) {
         self.imp().queue_searchbar.set_search_mode(search);
     }
 
     // Says that the search found nothing, in place of an empty list
-    pub fn set_no_results(&self, no_results: bool) {
+    pub(crate) fn set_no_results(&self, no_results: bool) {
         self.imp().queue_no_results.set_visible(no_results);
     }
 }

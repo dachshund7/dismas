@@ -73,7 +73,7 @@ impl Window {
 
     // Opens the playlist selected in the last session: a saved one always,
     // and the queue if the user wants it; otherwise, it starts empty
-    pub fn restore_playlist_on_startup(&self) {
+    pub(crate) fn restore_playlist_on_startup(&self) {
         // A window opened again while playing in the background
         if !self.queue_is_empty() {
             self.end_startup();
@@ -664,7 +664,7 @@ impl Window {
         ));
     }
 
-    pub fn open_files(&self, files: &[gio::File]) {
+    pub(crate) fn open_files(&self, files: &[gio::File]) {
         // Files opened while the playlist of the last session is still read
         // wait for it, and are then added to it, as in a running Dismas: if
         // they took the place of the queue now, they'd go among its tracks
@@ -743,12 +743,12 @@ impl Window {
 
     // Adds files from the command line to the end of the selected playlist,
     // leaving the page and the pane as they are
-    pub fn add_files(&self, files: Vec<gio::File>) {
+    pub(crate) fn add_files(&self, files: Vec<gio::File>) {
         self.after_startup(move |win| win.add_files_to_queue(files, QueueMode::Quiet, None));
     }
 
     // Plays files from the command line in place of the queue
-    pub fn play_files(&self, files: Vec<gio::File>) {
+    pub(crate) fn play_files(&self, files: Vec<gio::File>) {
         self.after_startup(move |win| win.play_dropped_files(files));
     }
 

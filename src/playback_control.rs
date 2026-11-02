@@ -11,48 +11,48 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/playback-control.ui")]
-    pub struct PlaybackControl {
+    pub(crate) struct PlaybackControl {
         // Template widgets
         #[template_child]
-        pub center_box: TemplateChild<gtk::Box>,
+        pub(crate) center_box: TemplateChild<gtk::Box>,
         #[template_child]
-        pub end_box: TemplateChild<gtk::Box>,
+        pub(crate) end_box: TemplateChild<gtk::Box>,
 
         #[template_child]
-        pub previous_button: TemplateChild<gtk::Button>,
+        pub(crate) previous_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub play_button: TemplateChild<gtk::Button>,
+        pub(crate) play_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub next_button: TemplateChild<gtk::Button>,
+        pub(crate) next_button: TemplateChild<gtk::Button>,
 
         #[template_child]
-        pub volume_control: TemplateChild<VolumeControl>,
+        pub(crate) volume_control: TemplateChild<VolumeControl>,
 
         #[template_child]
-        pub shuffle_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) shuffle_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub repeat_button: TemplateChild<gtk::Button>,
+        pub(crate) repeat_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub sleep_timer_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) sleep_timer_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub sleep_timer_popover: TemplateChild<gtk::Popover>,
+        pub(crate) sleep_timer_popover: TemplateChild<gtk::Popover>,
         #[template_child]
-        pub sleep_timer_label: TemplateChild<gtk::Label>,
+        pub(crate) sleep_timer_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
+        pub(crate) sleep_timer_minutes: TemplateChild<gtk::SpinButton>,
         #[template_child]
-        pub stop_after_work_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) stop_after_work_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub favorite_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) favorite_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub track_info_button: TemplateChild<gtk::Button>,
+        pub(crate) track_info_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub more_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) more_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub booklet_section: TemplateChild<gio::Menu>,
+        pub(crate) booklet_section: TemplateChild<gio::Menu>,
 
         // What the sleep timer is waiting for, which its tooltip says
-        pub sleep_timer_status: std::cell::RefCell<Option<String>>,
+        pub(crate) sleep_timer_status: std::cell::RefCell<Option<String>>,
     }
 
     #[glib::object_subclass]
@@ -132,7 +132,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct PlaybackControl(ObjectSubclass<imp::PlaybackControl>)
+    pub(crate) struct PlaybackControl(ObjectSubclass<imp::PlaybackControl>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -144,53 +144,53 @@ impl Default for PlaybackControl {
 }
 
 impl PlaybackControl {
-    pub fn play_button(&self) -> gtk::Button {
+    pub(crate) fn play_button(&self) -> gtk::Button {
         self.imp().play_button.get()
     }
 
-    pub fn volume_control(&self) -> VolumeControl {
+    pub(crate) fn volume_control(&self) -> VolumeControl {
         self.imp().volume_control.get()
     }
 
-    pub fn sleep_timer_minutes(&self) -> gtk::SpinButton {
+    pub(crate) fn sleep_timer_minutes(&self) -> gtk::SpinButton {
         self.imp().sleep_timer_minutes.get()
     }
 
-    pub fn track_info_button(&self) -> gtk::Button {
+    pub(crate) fn track_info_button(&self) -> gtk::Button {
         self.imp().track_info_button.get()
     }
 
-    pub fn more_button(&self) -> gtk::MenuButton {
+    pub(crate) fn more_button(&self) -> gtk::MenuButton {
         self.imp().more_button.get()
     }
 
     // The section of the More menu with the booklets of the album playing
-    pub fn booklet_section(&self) -> gio::Menu {
+    pub(crate) fn booklet_section(&self) -> gio::Menu {
         self.imp().booklet_section.get()
     }
 
-    pub fn sleep_timer_button(&self) -> gtk::MenuButton {
+    pub(crate) fn sleep_timer_button(&self) -> gtk::MenuButton {
         self.imp().sleep_timer_button.get()
     }
 
     // Whether the sleep timer or the menu of more options is open
-    pub fn has_open_menu(&self) -> bool {
+    pub(crate) fn has_open_menu(&self) -> bool {
         let imp = self.imp();
         imp.sleep_timer_button.is_active() || imp.more_button.is_active()
     }
 
     // Stopping after the work is offered while a movement plays
-    pub fn set_stop_after_work_visible(&self, visible: bool) {
+    pub(crate) fn set_stop_after_work_visible(&self, visible: bool) {
         self.imp().stop_after_work_button.set_visible(visible);
     }
 
-    pub fn close_sleep_timer(&self) {
+    pub(crate) fn close_sleep_timer(&self) {
         self.imp().sleep_timer_popover.popdown();
     }
 
     // Shows what the sleep timer is waiting for, or None when it's off:
     // its button is highlighted, and its tooltip says it
-    pub fn set_sleep_timer(&self, status: Option<&str>) {
+    pub(crate) fn set_sleep_timer(&self, status: Option<&str>) {
         let imp = self.imp();
         imp.sleep_timer_status
             .replace(status.map(ToString::to_string));
@@ -204,13 +204,13 @@ impl PlaybackControl {
 
     // The time left, at the top of the popover while the timer counts
     // down; the end of a track or a work shows on its button instead
-    pub fn set_sleep_timer_remaining(&self, remaining: Option<&str>) {
+    pub(crate) fn set_sleep_timer_remaining(&self, remaining: Option<&str>) {
         let label = &self.imp().sleep_timer_label;
         label.set_label(remaining.unwrap_or_default());
         label.set_visible(remaining.is_some());
     }
 
-    pub fn set_repeat_mode(&self, repeat_mode: RepeatMode) {
+    pub(crate) fn set_repeat_mode(&self, repeat_mode: RepeatMode) {
         let repeat_button = self.imp().repeat_button.get();
         match repeat_mode {
             RepeatMode::Consecutive => {

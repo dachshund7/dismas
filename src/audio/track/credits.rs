@@ -19,9 +19,9 @@ pub(super) const MAX_CREDITS: usize = 500;
 const MAX_NAMES_LEN: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Credit {
-    pub name: String,
-    pub role: Option<String>,
+pub(crate) struct Credit {
+    pub(crate) name: String,
+    pub(crate) role: Option<String>,
 }
 
 impl Credit {
@@ -89,7 +89,7 @@ const GROUP_ROLES: [&str; 6] = [
 // Who a performer the credits name is, which the list of performers is
 // divided by, in this order
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum PerformerKind {
+pub(crate) enum PerformerKind {
     Conductor,
     Ensemble,
     Soloist,
@@ -98,123 +98,123 @@ pub enum PerformerKind {
 // A performer the credits name, with the role the tags give them, e.g.
 // "piano" or "orchestra"
 #[derive(Debug, Clone, PartialEq)]
-pub struct ListedPerformer {
-    pub kind: PerformerKind,
-    pub name: String,
-    pub role: Option<String>,
+pub(crate) struct ListedPerformer {
+    pub(crate) kind: PerformerKind,
+    pub(crate) name: String,
+    pub(crate) role: Option<String>,
 }
 
 // The additional credits and release information in the tags, mostly
 // relevant for classical music
 #[derive(Debug, Clone, Default)]
-pub struct TrackCredits {
-    pub work: Option<String>,
+pub(crate) struct TrackCredits {
+    pub(crate) work: Option<String>,
     // The full title of the work, when it's part of a larger one, e.g.
     // "The Well-Tempered Clavier, Book I: Prelude and Fugue no. 1 in C
     // major, BWV 846"
-    pub work_title: Option<String>,
+    pub(crate) work_title: Option<String>,
     // The MusicBrainz id of the work, from the "Work Hierarchy" plugin
-    pub work_id: Option<String>,
+    pub(crate) work_id: Option<String>,
     // The work it's part of, or the collection it's in, from the "Work
     // Hierarchy" plugin
-    pub work_collection: Option<String>,
+    pub(crate) work_collection: Option<String>,
     // The work it arranges, if MusicBrainz has it as an arrangement, from
     // the "Work Hierarchy" plugin
-    pub work_arrangement: Option<Arrangement>,
+    pub(crate) work_arrangement: Option<Arrangement>,
     // The MusicBrainz ids of the parts of the work the track performs, at
     // every level below the work, from the "Work Hierarchy" plugin, which
     // an arrangement of one of them finds the work by
-    pub work_part_ids: Vec<String>,
+    pub(crate) work_part_ids: Vec<String>,
     // Where the movement is in the work, which tells two recordings of a
     // work on one album apart: the positions in each level below the work,
     // empty if they aren't known, and `None` if the track performs the
     // whole work or isn't part of one
-    pub movement_order: Option<Vec<u32>>,
+    pub(crate) movement_order: Option<Vec<u32>>,
     // The names of the works in the tag of the "Work Hierarchy" plugin,
     // which lofty doesn't search, see `WorkHierarchy::search_names()`
-    pub work_names: Vec<String>,
+    pub(crate) work_names: Vec<String>,
     // The MusicBrainz types of the works, from the "Work Hierarchy" plugin,
     // see `WorkHierarchy::forms()`
-    pub work_forms: Vec<String>,
+    pub(crate) work_forms: Vec<String>,
     // How MusicBrainz links the recording to its works, e.g. "live", from
     // the "Work Hierarchy" plugin
-    pub performance_attributes: Vec<String>,
-    pub movement: Option<String>,
-    pub movement_number: Option<String>,
+    pub(crate) performance_attributes: Vec<String>,
+    pub(crate) movement: Option<String>,
+    pub(crate) movement_number: Option<String>,
     // The levels of the work above the movement, and the movement, when
     // the movement is part of a part of the work, e.g. "Book I: Prelude
     // and Fugue no. 1 in C major" and "1. Prelude"; the queue shows them
     // on separate lines, as the movement would be cut off
-    pub movement_levels: Option<(String, String)>,
-    pub composers: Vec<String>,
+    pub(crate) movement_levels: Option<(String, String)>,
+    pub(crate) composers: Vec<String>,
     // The sort names of the composers, e.g. "Bach, Johann Sebastian", as
     // the tags give them; they go with the composers only when there are
     // as many of each, see `library::credited_work_composers()`
-    pub composer_sorts: Vec<String>,
+    pub(crate) composer_sorts: Vec<String>,
     // The name the artist is sorted by, e.g. "Beatles, The", as the tags
     // give it
-    pub artist_sort: Option<String>,
+    pub(crate) artist_sort: Option<String>,
     // The composers of the work, from the "Work Hierarchy" plugin; empty
     // if it didn't record them. Its movements can credit others too, e.g.
     // the author of the hymn in a chorale of a Bach cantata, or Süßmayr in
     // the movements of Mozart's Requiem he completed
-    pub work_composers: Vec<String>,
-    pub lyricists: Vec<String>,
-    pub arrangers: Vec<String>,
-    pub conductors: Vec<String>,
-    pub performers: Vec<Credit>,
-    pub producers: Vec<String>,
-    pub engineers: Vec<String>,
-    pub mixers: Vec<String>,
-    pub remixers: Vec<String>,
-    pub dj_mixers: Vec<String>,
-    pub album_artist: Option<String>,
-    pub disc_number: Option<u32>,
-    pub disc_total: Option<u32>,
-    pub disc_subtitle: Option<String>,
-    pub track_number: Option<u32>,
-    pub track_total: Option<u32>,
-    pub date: Option<String>,
-    pub original_date: Option<String>,
+    pub(crate) work_composers: Vec<String>,
+    pub(crate) lyricists: Vec<String>,
+    pub(crate) arrangers: Vec<String>,
+    pub(crate) conductors: Vec<String>,
+    pub(crate) performers: Vec<Credit>,
+    pub(crate) producers: Vec<String>,
+    pub(crate) engineers: Vec<String>,
+    pub(crate) mixers: Vec<String>,
+    pub(crate) remixers: Vec<String>,
+    pub(crate) dj_mixers: Vec<String>,
+    pub(crate) album_artist: Option<String>,
+    pub(crate) disc_number: Option<u32>,
+    pub(crate) disc_total: Option<u32>,
+    pub(crate) disc_subtitle: Option<String>,
+    pub(crate) track_number: Option<u32>,
+    pub(crate) track_total: Option<u32>,
+    pub(crate) date: Option<String>,
+    pub(crate) original_date: Option<String>,
     // The date of the release from the release date tag, which taggers
     // other than Picard write
-    pub release_date: Option<String>,
+    pub(crate) release_date: Option<String>,
     // When the track was recorded, e.g. "1937-11-08/1938-03-08", which the
     // "Work Hierarchy" plugin writes from MusicBrainz
-    pub recording_date: Option<String>,
+    pub(crate) recording_date: Option<String>,
     // The MusicBrainz release types, e.g. "album" and "live"
-    pub release_types: Vec<String>,
+    pub(crate) release_types: Vec<String>,
     // The medium of the disc, e.g. "CD" or "Digital Media"
-    pub media: Vec<String>,
+    pub(crate) media: Vec<String>,
     // A country code, or one of the MusicBrainz codes like "XW" for the
     // whole world
-    pub release_country: Option<String>,
-    pub labels: Vec<String>,
-    pub catalog_numbers: Vec<String>,
-    pub barcodes: Vec<String>,
-    pub isrcs: Vec<String>,
-    pub genres: Vec<String>,
-    pub copyright: Vec<String>,
-    pub musicbrainz: MusicBrainzIds,
+    pub(crate) release_country: Option<String>,
+    pub(crate) labels: Vec<String>,
+    pub(crate) catalog_numbers: Vec<String>,
+    pub(crate) barcodes: Vec<String>,
+    pub(crate) isrcs: Vec<String>,
+    pub(crate) genres: Vec<String>,
+    pub(crate) copyright: Vec<String>,
+    pub(crate) musicbrainz: MusicBrainzIds,
     // The MusicBrainz ids of the composers of the works the track
     // performs, from the "Work Hierarchy" plugin; `None` if it didn't
     // record them
-    pub composer_ids: Option<Vec<String>>,
+    pub(crate) composer_ids: Option<Vec<String>>,
 }
 
 // The ids of a track on MusicBrainz; they are only set if they are valid,
 // so they can be put in a URL
 #[derive(Debug, Clone, Default)]
-pub struct MusicBrainzIds {
-    pub recording: Option<String>,
-    pub release: Option<String>,
-    pub work: Option<String>,
-    pub track: Option<String>,
-    pub release_group: Option<String>,
+pub(crate) struct MusicBrainzIds {
+    pub(crate) recording: Option<String>,
+    pub(crate) release: Option<String>,
+    pub(crate) work: Option<String>,
+    pub(crate) track: Option<String>,
+    pub(crate) release_group: Option<String>,
     // The ids of the track artists
-    pub artists: Vec<String>,
+    pub(crate) artists: Vec<String>,
     // The ids of the album artists
-    pub release_artists: Vec<String>,
+    pub(crate) release_artists: Vec<String>,
 }
 
 impl MusicBrainzIds {
@@ -245,7 +245,7 @@ impl MusicBrainzIds {
 impl TrackCredits {
     // The credits in the tags; lofty leaves the tags it doesn't know out of
     // `tag`, so `extra` has the ones we need
-    pub fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
+    pub(crate) fn from_tag(tag: &Tag, extra: &ExtraComments) -> Self {
         let mut credits = Self::from_tag_items(tag);
         credits.recording_date = extra
             .recording_date
@@ -394,7 +394,7 @@ impl TrackCredits {
     // which is shown with them: the year it was recorded, or else the year
     // it was first released, as the date of a reissue says nothing of the
     // recording, or else the year of the release
-    pub fn year(&self) -> Option<String> {
+    pub(crate) fn year(&self) -> Option<String> {
         self.year_date()
             .and_then(|date| date.get(..4))
             .map(ToString::to_string)
@@ -402,7 +402,7 @@ impl TrackCredits {
 
     // The date `year()` takes the year from, as the tag has it, e.g.
     // "1937-11-08/1938-03-08" for a recording made over several months
-    pub fn year_date(&self) -> Option<&str> {
+    pub(crate) fn year_date(&self) -> Option<&str> {
         [
             &self.recording_date,
             &self.original_date,
@@ -420,7 +420,7 @@ impl TrackCredits {
 
     // The original release date, if it's not the same as the date, e.g.
     // for reissues; the dates can be just a year
-    pub fn distinct_original_date(&self) -> Option<&str> {
+    pub(crate) fn distinct_original_date(&self) -> Option<&str> {
         let original = self.original_date.as_deref()?;
         match self.date.as_deref() {
             Some(date) if date.starts_with(original) || original.starts_with(date) => None,
@@ -431,13 +431,13 @@ impl TrackCredits {
     // The composers to show in the queue for a track that is not part of
     // a larger work, unless the artist already names them; only for
     // classical music, as for popular music they are the songwriters
-    pub fn listed_composers(&self, artist: Option<&str>) -> Option<String> {
+    pub(crate) fn listed_composers(&self, artist: Option<&str>) -> Option<String> {
         self.listed_composer_names(artist)
             .map(|composers| composers.join(", "))
     }
 
     // The composers `listed_composers()` names, one by one
-    pub fn listed_composer_names(&self, artist: Option<&str>) -> Option<&[String]> {
+    pub(crate) fn listed_composer_names(&self, artist: Option<&str>) -> Option<&[String]> {
         let classical = self
             .genres
             .iter()
@@ -453,7 +453,7 @@ impl TrackCredits {
     // The movement, with its number if any, e.g. "2. Adagio"; only set if
     // the track is part of a larger work, as tagged by MusicBrainz Picard's
     // "Work & Movement" or "Work Hierarchy" plugins
-    pub fn movement_label(&self) -> Option<String> {
+    pub(crate) fn movement_label(&self) -> Option<String> {
         self.work.as_ref()?;
         let movement = self.movement.as_deref()?;
         match self.movement_number.as_deref() {
@@ -464,25 +464,25 @@ impl TrackCredits {
 
     // Whether the track is a movement of a work, which `movement_label()`
     // names
-    pub fn is_movement(&self) -> bool {
+    pub(crate) fn is_movement(&self) -> bool {
         self.work.is_some() && self.movement.is_some()
     }
 
     // The work the track is a movement of, if it is one
-    pub fn movement_work(&self) -> Option<&str> {
+    pub(crate) fn movement_work(&self) -> Option<&str> {
         self.work.as_deref().filter(|_| self.is_movement())
     }
 
     // The levels of the work above the movement, and the movement, if the
     // track is a movement that the queue shows them for, on lines of their
     // own
-    pub fn shown_levels(&self) -> Option<&(String, String)> {
+    pub(crate) fn shown_levels(&self) -> Option<&(String, String)> {
         self.movement_levels.as_ref().filter(|_| self.is_movement())
     }
 
     // The composers of the work of a movement, which all its movements
     // share, or else the track's
-    pub fn work_composer_names(&self) -> &[String] {
+    pub(crate) fn work_composer_names(&self) -> &[String] {
         if self.work_composers.is_empty() {
             &self.composers
         } else {
@@ -496,14 +496,14 @@ impl TrackCredits {
     // They come from the tags, or else from the album artist. Not when the
     // artist performs too, as songwriters do, whose band would only
     // clutter the row
-    pub fn performers_of_composer(&self, artist: Option<&str>) -> Option<String> {
+    pub(crate) fn performers_of_composer(&self, artist: Option<&str>) -> Option<String> {
         let (conductors, performers) = self.performer_groups_of_composer(artist)?;
         Some(summary_line(&conductors, &performers))
     }
 
     // The performers `performers_of_composer()` names, one by one; the
     // performers in the album artist are one name, as they are written
-    pub fn performer_names_of_composer(&self, artist: Option<&str>) -> Option<Vec<&str>> {
+    pub(crate) fn performer_names_of_composer(&self, artist: Option<&str>) -> Option<Vec<&str>> {
         let (conductors, performers) = self.performer_groups_of_composer(artist)?;
         Some(conductors.into_iter().chain(performers).collect())
     }
@@ -668,7 +668,7 @@ impl TrackCredits {
     // names that are already displayed as the artist; the performers are
     // the featured ones, or the ones in the album artist in place of a
     // long list of players
-    pub fn summary(&self, artist: Option<&str>) -> String {
+    pub(crate) fn summary(&self, artist: Option<&str>) -> String {
         let (conductors, performers) = self.summary_names(artist);
         summary_line(&conductors, &performers)
     }
@@ -702,7 +702,7 @@ impl TrackCredits {
     // list of performers: the same ones as `summary()`, and not the
     // players of a group, which Picard lists with it. Unlike there, the
     // artist is kept, as it's one of the performers
-    pub fn listed_performers(&self) -> Vec<ListedPerformer> {
+    pub(crate) fn listed_performers(&self) -> Vec<ListedPerformer> {
         let mut listed = self
             .conductors
             .iter()
@@ -798,7 +798,7 @@ fn short_name(name: &str) -> Option<String> {
 // "John Lennon & Paul McCartney" or "Lennon / McCartney", without repeats.
 // Only with spaces around them, so that "AC/DC" stays whole, and not by
 // commas, which a sort name has, as in "Bach, Johann Sebastian"
-pub fn split_composers<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
+pub(crate) fn split_composers<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
     values
         .flat_map(|value| value.split(';'))
         .flat_map(|value| value.split(" & "))

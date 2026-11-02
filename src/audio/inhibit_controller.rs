@@ -12,12 +12,12 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
-pub struct InhibitController {
+pub(crate) struct InhibitController {
     cookie: Cell<u32>,
 }
 
 impl InhibitController {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 }

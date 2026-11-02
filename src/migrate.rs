@@ -23,7 +23,7 @@ const DATA_FILES: [&str; 4] = ["library.db", "library.db-wal", "queue.m3u8", "pl
 // are left alone, and the caches are made again as they're needed. It's
 // recorded in the settings, which outlive the data folder: once Dismas has
 // settings of its own, Amberol's must not come back over them
-pub fn migrate_from_amberol() {
+pub(crate) fn migrate_from_amberol() {
     let settings = utils::settings_manager();
     if settings.boolean(MIGRATED_KEY) {
         return;

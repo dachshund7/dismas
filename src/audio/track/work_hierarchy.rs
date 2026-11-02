@@ -111,21 +111,21 @@ pub(super) struct WorkLabels {
 // arrangements" of a partita, which a recording of its Chaconne on the
 // lute is linked to
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Arrangement {
+pub(crate) struct Arrangement {
     // The title of the work it arranges
-    pub of: String,
+    pub(crate) of: String,
     // The MusicBrainz id of the work it arranges, which finds that work in
     // the library
-    pub of_id: Option<String>,
+    pub(crate) of_id: Option<String>,
     // What MusicBrainz says it is, e.g. "for two pianos, Busoni"; `None`
     // for the catch-all for the arrangements of a work, or without a word
-    pub label: Option<String>,
+    pub(crate) label: Option<String>,
 }
 
 impl Arrangement {
     // What it's shown as after its name: what it is, or that it's an
     // arrangement
-    pub fn shown(&self) -> String {
+    pub(crate) fn shown(&self) -> String {
         self.label
             .clone()
             .unwrap_or_else(|| crate::i18n::i18n("arrangement"))

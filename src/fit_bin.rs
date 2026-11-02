@@ -15,9 +15,9 @@ mod imp {
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::FitBin)]
-    pub struct FitBin {
+    pub(crate) struct FitBin {
         #[property(get, set = Self::set_child, nullable)]
-        pub child: RefCell<Option<gtk::Widget>>,
+        pub(crate) child: RefCell<Option<gtk::Widget>>,
     }
 
     #[glib::object_subclass]
@@ -77,7 +77,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct FitBin(ObjectSubclass<imp::FitBin>)
+    pub(crate) struct FitBin(ObjectSubclass<imp::FitBin>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }

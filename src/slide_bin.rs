@@ -9,18 +9,18 @@ use gtk::{glib, graphene};
 // How long a row takes to slide into its new place, or a work to open, and
 // how it speeds up and slows down: an ease-out would start at full speed,
 // which looks like a jump for a row dropped far from its place
-pub const SLIDE_DURATION_MS: u32 = 300;
-pub const SLIDE_EASING: adw::Easing = adw::Easing::EaseInOutCubic;
+pub(crate) const SLIDE_DURATION_MS: u32 = 300;
+pub(crate) const SLIDE_EASING: adw::Easing = adw::Easing::EaseInOutCubic;
 
 mod imp {
     use super::*;
 
     #[derive(Debug, Default)]
-    pub struct SlideBin {
-        pub child: RefCell<Option<gtk::Widget>>,
+    pub(crate) struct SlideBin {
+        pub(crate) child: RefCell<Option<gtk::Widget>>,
         // How far above (negative) or below its place the child is drawn
-        pub offset: Cell<f64>,
-        pub animation: RefCell<Option<adw::TimedAnimation>>,
+        pub(crate) offset: Cell<f64>,
+        pub(crate) animation: RefCell<Option<adw::TimedAnimation>>,
     }
 
     #[glib::object_subclass]
@@ -65,33 +65,33 @@ mod imp {
 glib::wrapper! {
     // Draws its child away from its place, to slide it there after it
     // moved, as rows do when tracks are moved in the queue
-    pub struct SlideBin(ObjectSubclass<imp::SlideBin>)
+    pub(crate) struct SlideBin(ObjectSubclass<imp::SlideBin>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl SlideBin {
-    pub fn new(child: &impl IsA<gtk::Widget>) -> Self {
+    pub(crate) fn new(child: &impl IsA<gtk::Widget>) -> Self {
         let bin: Self = glib::Object::new();
         child.set_parent(&bin);
         bin.imp().child.replace(Some(child.clone().upcast()));
         bin
     }
 
-    pub fn child(&self) -> Option<gtk::Widget> {
+    pub(crate) fn child(&self) -> Option<gtk::Widget> {
         self.imp().child.borrow().clone()
     }
 
     // Where the child is drawn, in the coordinates of another widget,
     // while it slides
-    pub fn shown_y(&self, target: &impl IsA<gtk::Widget>) -> Option<f64> {
+    pub(crate) fn shown_y(&self, target: &impl IsA<gtk::Widget>) -> Option<f64> {
         let point = self.compute_point(target, &graphene::Point::zero())?;
         Some(f64::from(point.y()) + self.imp().offset.get())
     }
 
     // Slides the child to its place from where it was drawn before, in
     // the coordinates of another widget
-    pub fn slide_from(&self, y: f64, target: &impl IsA<gtk::Widget>) {
+    pub(crate) fn slide_from(&self, y: f64, target: &impl IsA<gtk::Widget>) {
         self.stop_sliding();
         let Some(point) = self.compute_point(target, &graphene::Point::zero()) else {
             return;
@@ -126,7 +126,7 @@ impl SlideBin {
     }
 
     // Puts the child back in its place, as when it shows another item
-    pub fn stop_sliding(&self) {
+    pub(crate) fn stop_sliding(&self) {
         if let Some(animation) = self.imp().animation.take() {
             animation.skip();
         }

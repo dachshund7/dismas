@@ -55,35 +55,40 @@ fn kreplace(input: String, kwargs: &[(&str, &str)]) -> String {
 
 // Simple translations functions
 
-pub fn i18n(format: &str) -> String {
+pub(crate) fn i18n(format: &str) -> String {
     gettext(format)
 }
 
-pub fn i18n_f(format: &str, args: &[&str]) -> String {
+pub(crate) fn i18n_f(format: &str, args: &[&str]) -> String {
     let s = gettext(format);
     freplace(s, args)
 }
 
-pub fn i18n_k(format: &str, kwargs: &[(&str, &str)]) -> String {
+pub(crate) fn i18n_k(format: &str, kwargs: &[(&str, &str)]) -> String {
     let s = gettext(format);
     kreplace(s, kwargs)
 }
 
 // Singular and plural translations functions
 
-pub fn ni18n_f(single: &str, multiple: &str, number: u32, args: &[&str]) -> String {
+pub(crate) fn ni18n_f(single: &str, multiple: &str, number: u32, args: &[&str]) -> String {
     let s = ngettext(single, multiple, number);
     freplace(s, args)
 }
 
-pub fn ni18n_k(single: &str, multiple: &str, number: u32, kwargs: &[(&str, &str)]) -> String {
+pub(crate) fn ni18n_k(
+    single: &str,
+    multiple: &str,
+    number: u32,
+    kwargs: &[(&str, &str)],
+) -> String {
     let s = ngettext(single, multiple, number);
     kreplace(s, kwargs)
 }
 
 // Translations with context functions
 
-pub fn pi18n(ctx: &str, format: &str) -> String {
+pub(crate) fn pi18n(ctx: &str, format: &str) -> String {
     pgettext(ctx, format)
 }
 

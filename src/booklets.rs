@@ -15,7 +15,7 @@ use gtk::{gio, glib, prelude::*};
 use crate::{cue_sheet, i18n::i18n, library::disc_album_folder, utils};
 
 // The action that opens a booklet, with the URI of its file
-pub const OPEN_ACTION: &str = "win.open-booklet";
+pub(crate) const OPEN_ACTION: &str = "win.open-booklet";
 
 // A folder with more PDF files than this isn't an album's, but one like
 // Downloads that a track was opened from: its PDFs aren't booklets, and a
@@ -26,7 +26,7 @@ const MAX_BOOKLETS: usize = 10;
 // of their album when they're in a disc folder, as in Album/CD1, where the
 // album's booklet is often left; in the order a file manager shows their
 // names. This reads the folders, so it must not run on the main thread
-pub fn find(paths: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn find(paths: &[PathBuf]) -> Vec<PathBuf> {
     let folders: HashSet<&Path> = paths
         .iter()
         // The folder of a CUE sheet, for its tracks
@@ -75,7 +75,7 @@ fn pdf_files(folder: &Path) -> Vec<PathBuf> {
 
 // The item of a menu that opens the booklets: "Open Booklet" for one, and
 // for several, a submenu of their names
-pub fn menu_item(booklets: &[PathBuf]) -> Option<gio::MenuItem> {
+pub(crate) fn menu_item(booklets: &[PathBuf]) -> Option<gio::MenuItem> {
     match booklets {
         [] => None,
         [booklet] => {
@@ -91,7 +91,7 @@ pub fn menu_item(booklets: &[PathBuf]) -> Option<gio::MenuItem> {
 }
 
 // A menu of the booklets, by their names (see `labels()`)
-pub fn menu(booklets: &[PathBuf]) -> gio::Menu {
+pub(crate) fn menu(booklets: &[PathBuf]) -> gio::Menu {
     let menu = gio::Menu::new();
     let names: Vec<String> = booklets
         .iter()
@@ -246,7 +246,7 @@ fn joined(head: &[char], tail: &[char], before: bool, after: bool) -> String {
 
 // The target of the action that opens a booklet: its URI, which is text
 // whatever the encoding of its path
-pub fn target(booklet: &Path) -> glib::Variant {
+pub(crate) fn target(booklet: &Path) -> glib::Variant {
     gio::File::for_path(booklet).uri().to_variant()
 }
 

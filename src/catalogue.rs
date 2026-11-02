@@ -28,18 +28,18 @@ const MAX_NAME_LEN: usize = 4096;
 // to put it in order by, e.g. 1006 and 1 for "BWV 1006.1/1006", or 384
 // and "a" for "K. 384a/388", so that "BWV 1004" comes before "BWV 1007"
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CatalogueNumber {
+pub(crate) struct CatalogueNumber {
     // As in `CATALOGUES`, with "kv" as "k", as Köchel's catalogue is
     // written both ways
-    pub catalogue: &'static str,
-    pub order: Vec<(u32, String)>,
+    pub(crate) catalogue: &'static str,
+    pub(crate) order: Vec<(u32, String)>,
 }
 
 impl CatalogueNumber {
     // How the search keeps it, e.g. "bwv 1047", "op 2.4" or "hob 16.52":
     // the catalogue, then the parts of the number, which a search for a
     // number compares one by one, so that "op. 2" finds "op. 2 no. 4"
-    pub fn search_text(&self) -> String {
+    pub(crate) fn search_text(&self) -> String {
         let parts: Vec<String> = self
             .order
             .iter()
@@ -50,7 +50,7 @@ impl CatalogueNumber {
 
     // As one word, e.g. "bwv1047", which plain words find, as they're
     // often typed without the space
-    pub fn word(&self) -> Option<String> {
+    pub(crate) fn word(&self) -> Option<String> {
         let (value, rest) = self.order.first()?;
         Some(format!("{}{value}{rest}", self.catalogue))
     }
@@ -58,7 +58,7 @@ impl CatalogueNumber {
 
 // A catalogue by the name written before its numbers, e.g. "BWV" or "op.",
 // with "kv" as "k", as in `CatalogueNumber`
-pub fn catalogue_name(word: &str) -> Option<&'static str> {
+pub(crate) fn catalogue_name(word: &str) -> Option<&'static str> {
     let word = word.strip_suffix('.').unwrap_or(word).to_lowercase();
     CATALOGUES
         .iter()
@@ -86,7 +86,7 @@ fn read_part(name: &str) -> (&str, bool) {
 
 // The catalogue numbers in the name of a work, in the order they're in;
 // none in "Book I" or "Act II"
-pub fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
+pub(crate) fn catalogue_numbers(name: &str) -> Vec<CatalogueNumber> {
     let (name, cut) = read_part(name);
     let words: Vec<&str> = name
         .split(is_separator)

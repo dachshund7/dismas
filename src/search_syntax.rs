@@ -14,7 +14,7 @@ use crate::{
     search_query::{Field, IsFlag},
 };
 
-pub fn show(parent: &impl IsA<gtk::Widget>) {
+pub(crate) fn show(parent: &impl IsA<gtk::Widget>) {
     let page = adw::PreferencesPage::new();
     page.add(&group(
         &i18n("Words"),

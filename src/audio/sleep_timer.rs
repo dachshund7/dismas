@@ -16,7 +16,7 @@ use crate::audio::PlaybackAction;
 // What the music stops at the end of, rather than when the timer runs out
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Eq, Default)]
 #[enum_type(name = "DismasTimerEnd")]
-pub enum TimerEnd {
+pub(crate) enum TimerEnd {
     #[default]
     None,
     // The track playing: the timer ran out and it's playing to its end, or
@@ -32,24 +32,24 @@ mod imp {
 
     #[derive(Debug, Default, glib::Properties)]
     #[properties(wrapper_type = super::SleepTimer)]
-    pub struct SleepTimer {
+    pub(crate) struct SleepTimer {
         // Whether the timer is counting down, or waiting for the end of
         // the track once it ran out
         #[property(get)]
-        pub active: Cell<bool>,
+        pub(crate) active: Cell<bool>,
         // The seconds left before the music stops, 0 once the timer ran out
         #[property(get)]
-        pub remaining: Cell<u64>,
+        pub(crate) remaining: Cell<u64>,
         // Whether the music stops at the end of the track that is playing
         // when the timer runs out, instead of right away
         #[property(get, set)]
-        pub finish_track: Cell<bool>,
+        pub(crate) finish_track: Cell<bool>,
         #[property(get, builder(TimerEnd::default()))]
-        pub waiting_for: Cell<TimerEnd>,
+        pub(crate) waiting_for: Cell<TimerEnd>,
 
-        pub deadline: Cell<Option<Instant>>,
-        pub source: RefCell<Option<glib::SourceId>>,
-        pub sender: OnceCell<Sender<PlaybackAction>>,
+        pub(crate) deadline: Cell<Option<Instant>>,
+        pub(crate) source: RefCell<Option<glib::SourceId>>,
+        pub(crate) sender: OnceCell<Sender<PlaybackAction>>,
     }
 
     #[glib::object_subclass]
@@ -71,18 +71,18 @@ mod imp {
 // Counts down to the time when the music stops, and tells the player
 // with a SleepTimerExpired action once it's there
 glib::wrapper! {
-    pub struct SleepTimer(ObjectSubclass<imp::SleepTimer>);
+    pub(crate) struct SleepTimer(ObjectSubclass<imp::SleepTimer>);
 }
 
 impl SleepTimer {
-    pub fn new(sender: Sender<PlaybackAction>) -> Self {
+    pub(crate) fn new(sender: Sender<PlaybackAction>) -> Self {
         let res: Self = glib::Object::new();
         res.imp().sender.set(sender).unwrap();
         res
     }
 
     // Starts counting down again from the given number of minutes
-    pub fn start(&self, minutes: u32) {
+    pub(crate) fn start(&self, minutes: u32) {
         self.stop_countdown();
 
         let imp = self.imp();
@@ -107,7 +107,7 @@ impl SleepTimer {
     }
 
     // Turns the timer off, so the music keeps playing
-    pub fn cancel(&self) {
+    pub(crate) fn cancel(&self) {
         self.stop_countdown();
         self.imp().deadline.set(None);
         self.set_remaining(0);
@@ -118,7 +118,7 @@ impl SleepTimer {
     // Stops the music at the end of the track that is playing, or at the
     // end of its work, without counting down; the player works out where
     // the work ends, as the tracks after it can change meanwhile
-    pub fn stop_at_end(&self, work: bool) {
+    pub(crate) fn stop_at_end(&self, work: bool) {
         self.stop_countdown();
         self.imp().deadline.set(None);
         self.set_remaining(0);
@@ -131,7 +131,7 @@ impl SleepTimer {
     }
 
     // Waits for the end of the track instead of stopping the music now
-    pub fn wait_for_track_end(&self) {
+    pub(crate) fn wait_for_track_end(&self) {
         self.set_waiting_for(TimerEnd::Track);
     }
 
@@ -139,7 +139,7 @@ impl SleepTimer {
     // another playlist was selected. Waiting for the end of the track or
     // the work is over, so the timer turns off; a countdown goes on, as it
     // doesn't depend on a track
-    pub fn track_gone(&self) {
+    pub(crate) fn track_gone(&self) {
         if self.waiting_for() != TimerEnd::None {
             self.cancel();
         }

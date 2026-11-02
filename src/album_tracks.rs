@@ -32,65 +32,65 @@ mod imp {
     #[derive(Debug, Default, CompositeTemplate, glib::Properties)]
     #[template(resource = "/io/github/dachshund7/Dismas/album-tracks.ui")]
     #[properties(wrapper_type = super::AlbumTracks)]
-    pub struct AlbumTracks {
+    pub(crate) struct AlbumTracks {
         #[template_child]
-        pub back_button: TemplateChild<gtk::Button>,
+        pub(crate) back_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub album_title: TemplateChild<gtk::Label>,
+        pub(crate) album_title: TemplateChild<gtk::Label>,
         #[template_child]
-        pub album_artist: TemplateChild<gtk::Label>,
+        pub(crate) album_artist: TemplateChild<gtk::Label>,
         #[template_child]
-        pub album_info: TemplateChild<gtk::Label>,
+        pub(crate) album_info: TemplateChild<gtk::Label>,
         #[template_child]
-        pub favorite_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) favorite_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub booklet_button: TemplateChild<gtk::Button>,
+        pub(crate) booklet_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub booklets_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) booklets_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub filter_bar: TemplateChild<gtk::Revealer>,
+        pub(crate) filter_bar: TemplateChild<gtk::Revealer>,
         #[template_child]
-        pub filter_label: TemplateChild<gtk::Label>,
+        pub(crate) filter_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub tracks_view: TemplateChild<gtk::ListView>,
+        pub(crate) tracks_view: TemplateChild<gtk::ListView>,
         #[template_child]
-        pub buttons: TemplateChild<gtk::Box>,
+        pub(crate) buttons: TemplateChild<gtk::Box>,
         #[template_child]
-        pub play_button: TemplateChild<gtk::Button>,
+        pub(crate) play_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub add_button: TemplateChild<adw::SplitButton>,
+        pub(crate) add_button: TemplateChild<adw::SplitButton>,
         #[template_child]
-        pub select_all_button: TemplateChild<gtk::Button>,
+        pub(crate) select_all_button: TemplateChild<gtk::Button>,
         #[template_child]
-        pub selected_label: TemplateChild<gtk::Label>,
+        pub(crate) selected_label: TemplateChild<gtk::Label>,
 
         // Whether clicking a track selects it, so that only the selected
         // tracks are played or added
         #[property(get, set = Self::set_selection_mode)]
-        pub selection_mode: Cell<bool>,
+        pub(crate) selection_mode: Cell<bool>,
         // The last track selected or unselected with a click, where
         // Shift+click starts selecting from
-        pub selection_anchor: glib::WeakRef<Track>,
+        pub(crate) selection_anchor: glib::WeakRef<Track>,
         // Tracks are being added to the queue
-        pub loading: Cell<bool>,
+        pub(crate) loading: Cell<bool>,
 
         // The id of the album that is showing
-        pub album_id: RefCell<String>,
-        pub tracks: RefCell<Option<gio::ListStore>>,
-        pub files: RefCell<Vec<gio::File>>,
+        pub(crate) album_id: RefCell<String>,
+        pub(crate) tracks: RefCell<Option<gio::ListStore>>,
+        pub(crate) files: RefCell<Vec<gio::File>>,
         // Whether the album is on more than one disc, whose sections then
         // start with each disc
-        pub multi_disc: Rc<Cell<bool>>,
+        pub(crate) multi_disc: Rc<Cell<bool>>,
         // The search, and the composer and performer, the album that is
         // showing was shown for, with their names
-        pub filter: RefCell<TrackFilter>,
-        pub picks: RefCell<PickNames>,
+        pub(crate) filter: RefCell<TrackFilter>,
+        pub(crate) picks: RefCell<PickNames>,
         // While the search leaves out some of the tracks, which aren't
         // shown, how many it matches and how many the album has
-        pub matching: Cell<Option<(u32, u32)>>,
+        pub(crate) matching: Cell<Option<(u32, u32)>>,
         // Bumped for each album, to stop loading the tracks of the
         // previous one
-        pub generation: Cell<u32>,
+        pub(crate) generation: Cell<u32>,
     }
 
     #[glib::object_subclass]
@@ -193,7 +193,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct AlbumTracks(ObjectSubclass<imp::AlbumTracks>)
+    pub(crate) struct AlbumTracks(ObjectSubclass<imp::AlbumTracks>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -205,7 +205,7 @@ impl Default for AlbumTracks {
 }
 
 impl AlbumTracks {
-    pub fn connect_back<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_back<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "back",
             false,
@@ -213,7 +213,7 @@ impl AlbumTracks {
         )
     }
 
-    pub fn connect_add<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_add<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "add",
             false,
@@ -221,7 +221,7 @@ impl AlbumTracks {
         )
     }
 
-    pub fn connect_favorite_toggled<F: Fn(&Self, bool) + 'static>(
+    pub(crate) fn connect_favorite_toggled<F: Fn(&Self, bool) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -232,7 +232,7 @@ impl AlbumTracks {
         )
     }
 
-    pub fn connect_play<F: Fn(&Self, u32) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_play<F: Fn(&Self, u32) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_closure(
             "play",
             false,
@@ -240,7 +240,7 @@ impl AlbumTracks {
         )
     }
 
-    pub fn connect_menu_requested<F: Fn(&Self, &QueueRow, f64, f64) + 'static>(
+    pub(crate) fn connect_menu_requested<F: Fn(&Self, &QueueRow, f64, f64) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -253,7 +253,9 @@ impl AlbumTracks {
         )
     }
 
-    pub fn connect_work_menu_requested<F: Fn(&Self, &gtk::Widget, f64, f64, &Track) + 'static>(
+    pub(crate) fn connect_work_menu_requested<
+        F: Fn(&Self, &gtk::Widget, f64, f64, &Track) + 'static,
+    >(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -437,7 +439,7 @@ impl AlbumTracks {
     }
 
     // The tracks of the album that is showing
-    pub fn tracks(&self) -> Vec<Track> {
+    pub(crate) fn tracks(&self) -> Vec<Track> {
         self.imp()
             .tracks
             .borrow()
@@ -448,7 +450,7 @@ impl AlbumTracks {
 
     // Shows the new tags of a track that was updated: its row and the
     // section of its work are made again
-    pub fn track_changed(&self, track: &Track) {
+    pub(crate) fn track_changed(&self, track: &Track) {
         let tracks = self.imp().tracks.borrow().clone();
         if let Some(tracks) = tracks
             && let Some(pos) = tracks.find(track)
@@ -459,7 +461,7 @@ impl AlbumTracks {
 
     // The files of the tracks the Play and Add buttons take, in order: the
     // ones the search matches; in selection mode, only the selected ones
-    pub fn files(&self) -> Vec<gio::File> {
+    pub(crate) fn files(&self) -> Vec<gio::File> {
         if self.selection_mode() {
             self.tracks()
                 .iter()
@@ -472,7 +474,7 @@ impl AlbumTracks {
     }
 
     // Selects or unselects a track, entering selection mode if needed
-    pub fn toggle_track(&self, track: &Track) {
+    pub(crate) fn toggle_track(&self, track: &Track) {
         if self.selection_mode() {
             track.set_selected(!track.selected());
         } else {
@@ -518,7 +520,7 @@ impl AlbumTracks {
         }
     }
 
-    pub fn select_all(&self) {
+    pub(crate) fn select_all(&self) {
         self.set_selection_mode(true);
         for track in self.tracks() {
             track.set_selected(true);
@@ -555,27 +557,27 @@ impl AlbumTracks {
     }
 
     // The tooltip of the button that goes back to the selected playlist
-    pub fn set_back_tooltip(&self, tooltip: &str) {
+    pub(crate) fn set_back_tooltip(&self, tooltip: &str) {
         self.imp().back_button.set_tooltip_text(Some(tooltip));
     }
 
     // The menu next to the button that adds the tracks, with the other
     // ways to add them
-    pub fn set_add_menu(&self, menu: &gio::MenuModel) {
+    pub(crate) fn set_add_menu(&self, menu: &gio::MenuModel) {
         self.imp().add_button.set_menu_model(Some(menu));
     }
 
     // The label of the button that adds the tracks to the selected playlist
-    pub fn set_add_label(&self, label: &str) {
+    pub(crate) fn set_add_label(&self, label: &str) {
         utils::set_playlist_button_label(&self.imp().add_button, label);
     }
 
-    pub fn adding_enabled(&self) -> bool {
+    pub(crate) fn adding_enabled(&self) -> bool {
         !self.imp().loading.get()
     }
 
     // Albums can't be added while tracks are being added to the queue
-    pub fn set_adding_enabled(&self, enabled: bool) {
+    pub(crate) fn set_adding_enabled(&self, enabled: bool) {
         self.imp().loading.set(!enabled);
         self.update_selection();
     }
@@ -585,7 +587,7 @@ impl AlbumTracks {
     // `picks` names the composer and the performer the filter picks, if
     // any. The track of `reveal`, if any, is scrolled to and flashes once
     // it's read
-    pub fn show_album(
+    pub(crate) fn show_album(
         &self,
         album: &Album,
         filter: TrackFilter,
@@ -613,13 +615,13 @@ impl AlbumTracks {
     }
 
     // The id of the album that is showing
-    pub fn album_id(&self) -> String {
+    pub(crate) fn album_id(&self) -> String {
         self.imp().album_id.borrow().clone()
     }
 
     // Shows whether the album is a favorite, when it's one of the albums
     // marked or unmarked elsewhere
-    pub fn show_favorite(&self, album_ids: &[String], favorite: bool) {
+    pub(crate) fn show_favorite(&self, album_ids: &[String], favorite: bool) {
         let imp = self.imp();
         if album_ids.contains(&imp.album_id.borrow()) {
             imp.favorite_button.set_active(favorite);

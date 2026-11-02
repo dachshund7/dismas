@@ -752,7 +752,7 @@ impl Window {
     // toast's Undo puts them back. When the focus goes with them, it goes to
     // the track next to them, rather than wherever GTK puts it, which was
     // the first track of the list
-    pub fn remove_tracks(&self, tracks: &[Track]) {
+    pub(crate) fn remove_tracks(&self, tracks: &[Track]) {
         let removed: HashSet<&Track> = tracks.iter().collect();
         let focused = utils::focused_child::<QueueRow>(&self.imp().playlist_view.queue_view())
             .and_then(|row| row.track());

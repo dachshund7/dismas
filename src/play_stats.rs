@@ -89,29 +89,29 @@ const LOGGED: u64 = 30;
 const PLAYED: u64 = 4 * 60;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Listen {
-    pub uri: String,
+pub(crate) struct Listen {
+    pub(crate) uri: String,
     // Seconds since the epoch
-    pub ended: i64,
+    pub(crate) ended: i64,
     // Seconds heard
-    pub heard: u64,
+    pub(crate) heard: u64,
     // Whether it counts as a play
-    pub counted: bool,
+    pub(crate) counted: bool,
     // The row it was saved in while it went on, see
     // `ListenTracker::saved_as()`, which it takes the place of
-    pub row: Option<i64>,
+    pub(crate) row: Option<i64>,
 }
 
 // What was heard of a track, from its totals
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TrackStats {
-    pub plays: u32,
+pub(crate) struct TrackStats {
+    pub(crate) plays: u32,
     // Seconds since the epoch: the end of the last listen logged, whether
     // it counted as a play or not
-    pub last_heard: i64,
+    pub(crate) last_heard: i64,
 }
 
-pub fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
@@ -132,7 +132,7 @@ fn thresholds(duration: u64) -> (u64, u64) {
 // step of a second or two is playback; seeks, resume points and going
 // back to the start jump further, or backwards, and add nothing
 #[derive(Debug, Default)]
-pub struct ListenTracker {
+pub(crate) struct ListenTracker {
     // The URI and the duration of the track
     track: Option<(String, u64)>,
     heard: u64,
@@ -142,14 +142,14 @@ pub struct ListenTracker {
 }
 
 impl ListenTracker {
-    pub fn start(&mut self, uri: String, duration: u64) {
+    pub(crate) fn start(&mut self, uri: String, duration: u64) {
         self.track = Some((uri, duration));
         self.heard = 0;
         self.last = None;
         self.row = None;
     }
 
-    pub fn advance(&mut self, position: u64, playing: bool) {
+    pub(crate) fn advance(&mut self, position: u64, playing: bool) {
         if self.track.is_none() {
             return;
         }
@@ -163,7 +163,7 @@ impl ListenTracker {
     }
 
     // The listen so far, if it was heard long enough to log, which goes on
-    pub fn so_far(&self, ended: i64) -> Option<Listen> {
+    pub(crate) fn so_far(&self, ended: i64) -> Option<Listen> {
         let (uri, duration) = self.track.as_ref()?;
         let (logged, played) = thresholds(*duration);
         (self.heard >= logged).then(|| Listen {
@@ -178,20 +178,20 @@ impl ListenTracker {
     // The listen so far was saved in `row` while it goes on. When it ends,
     // it takes the place of that row, so that it's still one listen, and
     // counts as a play once
-    pub fn saved_as(&mut self, row: i64) {
+    pub(crate) fn saved_as(&mut self, row: i64) {
         self.row = Some(row);
     }
 
     // The listen, if it was heard long enough to log. The track stays, so
     // playing it again, e.g. once the queue finished, is another listen
-    pub fn finish(&mut self, ended: i64) -> Option<Listen> {
+    pub(crate) fn finish(&mut self, ended: i64) -> Option<Listen> {
         let listen = self.so_far(ended);
         self.heard = 0;
         self.row = None;
         listen
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         *self = Self::default();
     }
 }
@@ -239,7 +239,7 @@ static WRITES: AtomicU64 = AtomicU64::new(0);
 
 // A number that changes each time plays.db is written to. What's read
 // after taking it is at least as new as the number
-pub fn writes() -> u64 {
+pub(crate) fn writes() -> u64 {
     WRITES.load(Ordering::SeqCst)
 }
 
@@ -285,7 +285,7 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
 static HISTORY_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 // What a listen that ends now is recorded with
-pub fn history_generation() -> u64 {
+pub(crate) fn history_generation() -> u64 {
     HISTORY_GENERATION.load(Ordering::SeqCst)
 }
 
@@ -295,7 +295,7 @@ pub fn history_generation() -> u64 {
 // thread's to write, as clearing it bumps the generation first
 // Writes the listen, and gives the row it's in, which a listen that goes
 // on takes the place of when it ends
-pub fn record(listen: &Listen, generation: u64) -> Option<i64> {
+pub(crate) fn record(listen: &Listen, generation: u64) -> Option<i64> {
     let result = with_connection(|conn| {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if history_generation() != generation {
@@ -381,7 +381,7 @@ fn write_listen(tx: &rusqlite::Transaction, listen: &Listen) -> rusqlite::Result
 
 // Forgets the listens and the totals of the tracks, but not the favorites,
 // which are marked rather than heard
-pub fn clear_history() -> rusqlite::Result<()> {
+pub(crate) fn clear_history() -> rusqlite::Result<()> {
     HISTORY_GENERATION.fetch_add(1, Ordering::SeqCst);
     with_connection(delete_history)
 }
@@ -409,7 +409,7 @@ fn delete_history(conn: &mut Connection) -> rusqlite::Result<()> {
 
 // The URIs of the last tracks heard, in the order they were last heard,
 // so that the movements of a work play in their order
-pub fn recently_played() -> Vec<String> {
+pub(crate) fn recently_played() -> Vec<String> {
     match with_connection(|conn| query_recently_played(conn)) {
         Ok(uris) => uris,
         Err(e) => {
@@ -433,7 +433,7 @@ fn query_recently_played(conn: &Connection) -> rusqlite::Result<Vec<String>> {
 // The URIs of the tracks played the most in the last 6 months. Tracks
 // with the same number of plays are in the order they were last heard,
 // so that a work heard through keeps its movements in order
-pub fn most_played() -> Vec<String> {
+pub(crate) fn most_played() -> Vec<String> {
     match with_connection(|conn| query_most_played(conn, now())) {
         Ok(uris) => uris,
         Err(e) => {
@@ -462,7 +462,7 @@ fn query_most_played(conn: &Connection, now: i64) -> rusqlite::Result<Vec<String
 // same number of plays are in the order they were last heard, so that a
 // work heard through keeps its movements in order, and the ones kept are
 // those that went unheard the longest
-pub fn not_heard_lately() -> Vec<String> {
+pub(crate) fn not_heard_lately() -> Vec<String> {
     match with_connection(|conn| query_not_heard_lately(conn, now())) {
         Ok(uris) => uris,
         Err(e) => {
@@ -486,7 +486,7 @@ fn query_not_heard_lately(conn: &Connection, now: i64) -> rusqlite::Result<Vec<S
 
 // The totals of the tracks heard, by URI, for the shuffle; the tracks
 // never heard are left out
-pub fn track_stats(uris: &[String]) -> HashMap<String, TrackStats> {
+pub(crate) fn track_stats(uris: &[String]) -> HashMap<String, TrackStats> {
     match with_connection(|conn| query_track_stats(conn, uris)) {
         Ok(stats) => stats,
         Err(e) => {
@@ -498,7 +498,7 @@ pub fn track_stats(uris: &[String]) -> HashMap<String, TrackStats> {
 
 // The totals of every track heard, by URI: for many tracks, as a library's,
 // one read of them all is quicker than reading them one at a time
-pub fn all_track_stats() -> HashMap<String, TrackStats> {
+pub(crate) fn all_track_stats() -> HashMap<String, TrackStats> {
     match with_connection(|conn| query_all_track_stats(conn)) {
         Ok(stats) => stats,
         Err(e) => {
@@ -547,7 +547,7 @@ fn query_track_stats(
 // The favorites are read and written on the main thread, as each is a
 // single row. If they were written in GLib's pool, like the listens, two
 // clicks on the heart close together could be written in the wrong order
-pub fn is_favorite(uri: &str) -> bool {
+pub(crate) fn is_favorite(uri: &str) -> bool {
     match with_connection(|conn| query_is_favorite(conn, uri)) {
         Ok(favorite) => favorite,
         Err(e) => {
@@ -562,7 +562,7 @@ fn query_is_favorite(conn: &Connection, uri: &str) -> rusqlite::Result<bool> {
         .exists([uri])
 }
 
-pub fn set_favorite(uri: &str, favorite: bool) {
+pub(crate) fn set_favorite(uri: &str, favorite: bool) {
     let result = with_connection(|conn| {
         if favorite {
             insert_favorite(conn, uri, now())
@@ -591,7 +591,7 @@ fn delete_favorite(conn: &Connection, uri: &str) -> rusqlite::Result<()> {
 
 // The URIs of the favorites, in the order they were marked, so that the
 // movements of a work marked one after another play in their order
-pub fn favorites() -> Vec<String> {
+pub(crate) fn favorites() -> Vec<String> {
     match with_connection(|conn| query_favorites(conn)) {
         Ok(uris) => uris,
         Err(e) => {
@@ -610,15 +610,15 @@ fn query_favorites(conn: &Connection) -> rusqlite::Result<Vec<String>> {
 // the URI of the recording's first track, which tells two recordings of
 // the work on one album apart
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct FavoriteRecording {
-    pub work_key: String,
-    pub album_id: String,
-    pub uri: String,
+pub(crate) struct FavoriteRecording {
+    pub(crate) work_key: String,
+    pub(crate) album_id: String,
+    pub(crate) uri: String,
 }
 
 // The favorite works and recordings are read and written on the main
 // thread too, like the favorite tracks
-pub fn is_favorite_work(key: &str) -> bool {
+pub(crate) fn is_favorite_work(key: &str) -> bool {
     with_connection(|conn| {
         conn.prepare_cached("SELECT 1 FROM favorite_works WHERE key = ?1")?
             .exists([key])
@@ -629,7 +629,7 @@ pub fn is_favorite_work(key: &str) -> bool {
     })
 }
 
-pub fn set_favorite_work(key: &str, favorite: bool) {
+pub(crate) fn set_favorite_work(key: &str, favorite: bool) {
     let result = with_connection(|conn| set_work(conn, key, favorite, now()));
     if let Err(e) = result {
         warn!("Unable to change whether work {key} is a favorite: {e}");
@@ -648,7 +648,7 @@ fn set_work(conn: &Connection, key: &str, favorite: bool, added: i64) -> rusqlit
     }
 }
 
-pub fn is_favorite_recording(recording: &FavoriteRecording) -> bool {
+pub(crate) fn is_favorite_recording(recording: &FavoriteRecording) -> bool {
     with_connection(|conn| {
         conn.prepare_cached(
             "SELECT 1 FROM favorite_recordings
@@ -668,7 +668,7 @@ pub fn is_favorite_recording(recording: &FavoriteRecording) -> bool {
 
 // The favorite recordings, which Play a Random Work prefers among the
 // recordings of a favorite work
-pub fn favorite_recordings() -> std::collections::HashSet<FavoriteRecording> {
+pub(crate) fn favorite_recordings() -> std::collections::HashSet<FavoriteRecording> {
     with_connection(|conn| query_favorite_recordings(conn)).unwrap_or_else(|e| {
         warn!("Unable to load the favorite recordings: {e}");
         Default::default()
@@ -689,7 +689,7 @@ fn query_favorite_recordings(
     .collect()
 }
 
-pub fn set_favorite_recording(recording: &FavoriteRecording, favorite: bool) {
+pub(crate) fn set_favorite_recording(recording: &FavoriteRecording, favorite: bool) {
     let result = with_connection(|conn| set_recording(conn, recording, favorite, now()));
     if let Err(e) = result {
         warn!("Unable to change whether a recording is a favorite: {e}");
@@ -724,20 +724,20 @@ fn set_recording(
 // What the search syntax looks into in plays.db, by URI, read only as far
 // as a search needs it, see `search_query::Needs`
 #[derive(Clone, Debug, Default)]
-pub struct SearchStats {
+pub(crate) struct SearchStats {
     // The totals of the tracks heard, for `plays:` and `played:`
-    pub heard: HashMap<String, TrackStats>,
+    pub(crate) heard: HashMap<String, TrackStats>,
     // When each favorite track was marked, for `is:favorite` and
     // `favorited:`
-    pub favorites: HashMap<String, i64>,
+    pub(crate) favorites: HashMap<String, i64>,
     // The ids of the favorite albums, for `is:favorite-album`
-    pub favorite_albums: BTreeSet<String>,
+    pub(crate) favorite_albums: BTreeSet<String>,
     // The keys of the favorite works, and of the works with a favorite
     // recording, for `is:favorite-work`
-    pub favorite_works: std::collections::HashSet<String>,
+    pub(crate) favorite_works: std::collections::HashSet<String>,
 }
 
-pub fn search_stats(needs: &crate::search_query::Needs) -> SearchStats {
+pub(crate) fn search_stats(needs: &crate::search_query::Needs) -> SearchStats {
     match with_connection(|conn| query_search_stats(conn, needs)) {
         Ok(stats) => stats,
         Err(e) => {
@@ -772,7 +772,7 @@ fn query_search_stats(
 
 // The keys of the works that are favorites, or have a favorite recording,
 // which the Works page marks
-pub fn favorite_work_keys() -> std::collections::HashSet<String> {
+pub(crate) fn favorite_work_keys() -> std::collections::HashSet<String> {
     with_connection(|conn| query_favorite_work_keys(conn)).unwrap_or_else(|e| {
         warn!("Unable to load the favorite works: {e}");
         Default::default()
@@ -790,15 +790,15 @@ fn query_favorite_work_keys(
 // An album marked as a favorite, and the URI of its first track, once it's
 // been looked up in the library
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FavoriteAlbum {
-    pub id: String,
-    pub uri: Option<String>,
+pub(crate) struct FavoriteAlbum {
+    pub(crate) id: String,
+    pub(crate) uri: Option<String>,
 }
 
 // The favorite albums are read and written on the main thread too, like
 // the favorite tracks. Albums marked together, from a selection, keep the
 // order they're given in
-pub fn set_favorite_albums(ids: &[String], favorite: bool) {
+pub(crate) fn set_favorite_albums(ids: &[String], favorite: bool) {
     let result = with_connection(|conn| set_albums(conn, ids, favorite, now()));
     if let Err(e) = result {
         warn!("Unable to change whether albums are favorites: {e}");
@@ -829,7 +829,7 @@ fn set_albums(
 }
 
 // The ids of the favorite albums, in a set whose order doesn't change
-pub fn favorite_album_ids() -> BTreeSet<String> {
+pub(crate) fn favorite_album_ids() -> BTreeSet<String> {
     with_connection(|conn| query_favorite_album_ids(conn)).unwrap_or_else(|e| {
         warn!("Unable to load the favorite albums: {e}");
         Default::default()
@@ -842,7 +842,7 @@ fn query_favorite_album_ids(conn: &Connection) -> rusqlite::Result<BTreeSet<Stri
 }
 
 // The favorite albums, in the order they were marked
-pub fn favorite_albums() -> Vec<FavoriteAlbum> {
+pub(crate) fn favorite_albums() -> Vec<FavoriteAlbum> {
     with_connection(|conn| query_favorite_albums(conn)).unwrap_or_else(|e| {
         warn!("Unable to load the favorite albums: {e}");
         Vec::new()
@@ -865,15 +865,15 @@ fn query_favorite_albums(conn: &Connection) -> rusqlite::Result<Vec<FavoriteAlbu
 // albums whose ids changed, as (old id, new id), and the URIs of the first
 // tracks of the albums looked up since they were marked, as (id, URI)
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FavoriteAlbumUpdates {
-    pub moves: Vec<(String, String)>,
-    pub uris: Vec<(String, String)>,
+pub(crate) struct FavoriteAlbumUpdates {
+    pub(crate) moves: Vec<(String, String)>,
+    pub(crate) uris: Vec<(String, String)>,
 }
 
 // Follows the favorite albums to their new ids, and keeps the URIs of their
 // first tracks. An album unmarked meanwhile stays unmarked, and one that
 // moves onto a favorite stays in that one's place
-pub fn update_favorite_albums(updates: &FavoriteAlbumUpdates) {
+pub(crate) fn update_favorite_albums(updates: &FavoriteAlbumUpdates) {
     if updates.moves.is_empty() && updates.uris.is_empty() {
         return;
     }

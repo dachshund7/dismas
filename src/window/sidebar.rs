@@ -16,7 +16,7 @@ const MIN_WINDOW_HEIGHT: i32 = 660;
 
 // What the content of the window needs, in pixels
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SizeLimits {
+pub(crate) struct SizeLimits {
     // The width of the sidebar and the content side by side, under which
     // the split view collapses
     side_by_side: i32,

@@ -217,7 +217,7 @@ fn placeholder(uri: &str, files: &FileCache) -> Option<TrackData> {
 // the threads stop once the receiver is dropped. With `placeholders`, for
 // the tracks of a playlist, a file that gives no track is one that
 // `placeholder()` makes, so that saving the playlist doesn't lose it
-pub fn load_tracks(
+pub(crate) fn load_tracks(
     files: Vec<gio::File>,
     placeholders: bool,
 ) -> async_channel::Receiver<Vec<TrackData>> {

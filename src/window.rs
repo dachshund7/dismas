@@ -130,69 +130,69 @@ mod imp {
     #[derive(CompositeTemplate, glib::Properties)]
     #[properties(wrapper_type = super::Window)]
     #[template(resource = "/io/github/dachshund7/Dismas/window.ui")]
-    pub struct Window {
+    pub(crate) struct Window {
         // Template widgets
         #[template_child]
-        pub drag_overlay: TemplateChild<DragOverlay>,
+        pub(crate) drag_overlay: TemplateChild<DragOverlay>,
         #[template_child]
-        pub toast_overlay: TemplateChild<adw::ToastOverlay>,
+        pub(crate) toast_overlay: TemplateChild<adw::ToastOverlay>,
         #[template_child]
-        pub track_cover: TemplateChild<TrackCover>,
+        pub(crate) track_cover: TemplateChild<TrackCover>,
         #[template_child]
-        pub track_details: TemplateChild<TrackDetails>,
+        pub(crate) track_details: TemplateChild<TrackDetails>,
         #[template_child]
-        pub waveform_view: TemplateChild<WaveformView>,
+        pub(crate) waveform_view: TemplateChild<WaveformView>,
         #[template_child]
-        pub seek_scale: TemplateChild<gtk::Scale>,
+        pub(crate) seek_scale: TemplateChild<gtk::Scale>,
         #[template_child]
-        pub elapsed_label: TemplateChild<gtk::Label>,
+        pub(crate) elapsed_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub remaining_label: TemplateChild<gtk::Label>,
+        pub(crate) remaining_label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub playback_control: TemplateChild<PlaybackControl>,
+        pub(crate) playback_control: TemplateChild<PlaybackControl>,
         #[template_child]
-        pub menu_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub player_header_bar: TemplateChild<adw::HeaderBar>,
+        pub(crate) player_header_bar: TemplateChild<adw::HeaderBar>,
         #[template_child]
-        pub player_backdrop: TemplateChild<CoverBackdrop>,
+        pub(crate) player_backdrop: TemplateChild<CoverBackdrop>,
         #[template_child]
-        pub main_box: TemplateChild<PlayerBox>,
+        pub(crate) main_box: TemplateChild<PlayerBox>,
         #[template_child]
-        pub split_view: TemplateChild<adw::OverlaySplitView>,
+        pub(crate) split_view: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
-        pub playlist_view: TemplateChild<PlaylistView>,
+        pub(crate) playlist_view: TemplateChild<PlaylistView>,
         #[template_child]
-        pub content_stack: TemplateChild<gtk::Stack>,
+        pub(crate) content_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub library_view: TemplateChild<LibraryView>,
+        pub(crate) library_view: TemplateChild<LibraryView>,
         #[template_child]
-        pub playlists_page: TemplateChild<PlaylistsPage>,
+        pub(crate) playlists_page: TemplateChild<PlaylistsPage>,
         #[template_child]
-        pub sidebar_stack: TemplateChild<gtk::Stack>,
+        pub(crate) sidebar_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub album_tracks: TemplateChild<AlbumTracks>,
+        pub(crate) album_tracks: TemplateChild<AlbumTracks>,
         #[template_child]
-        pub lyrics_view: TemplateChild<LyricsView>,
+        pub(crate) lyrics_view: TemplateChild<LyricsView>,
         #[template_child]
-        pub playlist_pane: TemplateChild<gtk::Box>,
+        pub(crate) playlist_pane: TemplateChild<gtk::Box>,
         #[template_child]
-        pub sidebar_handle: TemplateChild<gtk::Box>,
+        pub(crate) sidebar_handle: TemplateChild<gtk::Box>,
         #[template_child]
-        pub narrow_breakpoint: TemplateChild<adw::Breakpoint>,
+        pub(crate) narrow_breakpoint: TemplateChild<adw::Breakpoint>,
 
-        pub provider: gtk::CssProvider,
+        pub(crate) provider: gtk::CssProvider,
         // The colors of the cover the provider has, as CSS
-        pub provider_css: RefCell<String>,
-        pub settings: gio::Settings,
+        pub(crate) provider_css: RefCell<String>,
+        pub(crate) settings: gio::Settings,
 
         #[property(get, set = Self::set_queue_shuffled, explicit_notify)]
-        pub queue_shuffled: Cell<bool>,
+        pub(crate) queue_shuffled: Cell<bool>,
         // Whether the playing track is a favorite, for the heart button
         #[property(get, set = Self::set_track_favorite, explicit_notify)]
-        pub track_favorite: Cell<bool>,
+        pub(crate) track_favorite: Cell<bool>,
         #[property(get, set = Self::set_playlist_visible, explicit_notify)]
-        pub playlist_visible: Cell<bool>,
+        pub(crate) playlist_visible: Cell<bool>,
         // The same, as the user shows and hides the pane, with the pane
         // button, F9 and Esc, which is kept for the next start; the pane
         // also opens by itself, e.g. to show the tracks added
@@ -202,23 +202,23 @@ mod imp {
         #[property(name = "lyrics-shown", get = Self::lyrics_shown, set = Self::set_lyrics_shown, explicit_notify, type = bool)]
         lyrics_shown: std::marker::PhantomData<bool>,
         #[property(get, set = Self::set_queue_selection, explicit_notify)]
-        pub queue_selection: Cell<bool>,
+        pub(crate) queue_selection: Cell<bool>,
         // The last track selected or unselected with a click, where
         // Shift+click starts selecting from
-        pub queue_anchor: glib::WeakRef<Track>,
+        pub(crate) queue_anchor: glib::WeakRef<Track>,
         #[property(get, set = Self::set_queue_search, explicit_notify)]
-        pub queue_search: Cell<bool>,
+        pub(crate) queue_search: Cell<bool>,
         #[property(get, set = Self::set_replaygain_mode, explicit_notify, builder(ReplayGainMode::default()))]
-        pub replaygain_mode: Cell<ReplayGainMode>,
-        pub sidebar_width: Cell<i32>,
+        pub(crate) replaygain_mode: Cell<ReplayGainMode>,
+        pub(crate) sidebar_width: Cell<i32>,
         // The sizes the window is limited to, from measuring its content
-        pub size_limits: Cell<Option<SizeLimits>>,
-        pub size_limits_idle: Cell<bool>,
+        pub(crate) size_limits: Cell<Option<SizeLimits>>,
+        pub(crate) size_limits_idle: Cell<bool>,
         #[property(get, set = Self::set_library_visible, explicit_notify)]
-        pub library_visible: Cell<bool>,
+        pub(crate) library_visible: Cell<bool>,
         // The list of playlists, shown over the player or the album grid
         #[property(get, set = Self::set_playlists_visible, explicit_notify)]
-        pub playlists_visible: Cell<bool>,
+        pub(crate) playlists_visible: Cell<bool>,
         // The visible page: "player", "albums", "works" or "playlists"; the
         // albums and the works are the same page of the content, the
         // library view, whose own page says which
@@ -226,97 +226,97 @@ mod imp {
         page: std::marker::PhantomData<String>,
         // Whether there is anything to play, to go to the player
         #[property(get)]
-        pub player_available: Cell<bool>,
+        pub(crate) player_available: Cell<bool>,
         // Whether the music folders are being read, for the page switchers;
         // the one in the album grid's header is in the window before the
         // library view is bound, so it can't follow the view itself
         #[property(get, set)]
-        pub library_scanning: Cell<bool>,
+        pub(crate) library_scanning: Cell<bool>,
         // Whether a track is part of a work, for the Works buttons of the
         // page switchers, like `library_scanning`
         #[property(get, set)]
-        pub works_available: Cell<bool>,
+        pub(crate) works_available: Cell<bool>,
         // Whether the queue might still be restored or opened at startup
-        pub starting: Cell<bool>,
+        pub(crate) starting: Cell<bool>,
         // What waits for the end of startup, e.g. files from the command line
-        pub after_startup: RefCell<Vec<Deferred>>,
+        pub(crate) after_startup: RefCell<Vec<Deferred>>,
         // Whether to hide the focus again once the page is shown
-        pub hide_focus_after_transition: Cell<bool>,
+        pub(crate) hide_focus_after_transition: Cell<bool>,
         // The playlist whose tracks are loading, to take the place of
         // those of the selected one once they're loaded
-        pub pending_playlist: RefCell<Option<String>>,
+        pub(crate) pending_playlist: RefCell<Option<String>>,
         // Scrolling the queue to the playing track, once it's laid out
-        pub queue_scroll_tick: RefCell<Option<gtk::TickCallbackId>>,
+        pub(crate) queue_scroll_tick: RefCell<Option<gtk::TickCallbackId>>,
         // The length of the tracks after the current one, in seconds, so
         // that each position only adds what's left of the current track
-        pub queue_time_after_current: Cell<u64>,
-        pub queue_time_idle: Cell<bool>,
+        pub(crate) queue_time_after_current: Cell<u64>,
+        pub(crate) queue_time_idle: Cell<bool>,
         // The number of times tracks are being read for the queue
-        pub loads: Cell<u32>,
+        pub(crate) loads: Cell<u32>,
         // What waits for them to be read, in the order asked
-        pub after_loads: RefCell<VecDeque<Deferred>>,
+        pub(crate) after_loads: RefCell<VecDeque<Deferred>>,
         // What Play a Random … played last on each page, which it doesn't
         // play again right away: the album, by its id, the track, by its
         // URI, and the work, by its key
-        pub last_random_album: RefCell<Option<String>>,
-        pub last_random_track: RefCell<Option<String>>,
-        pub last_random_work: RefCell<Option<String>>,
+        pub(crate) last_random_album: RefCell<Option<String>>,
+        pub(crate) last_random_track: RefCell<Option<String>>,
+        pub(crate) last_random_work: RefCell<Option<String>>,
         // The pages of the pane to go back to, see `PaneHistory`
-        pub pane_history: RefCell<PaneHistory>,
+        pub(crate) pane_history: RefCell<PaneHistory>,
         // Whether the sidebar was showing before the split view collapsed
-        pub sidebar_visible_uncollapsed: Cell<bool>,
+        pub(crate) sidebar_visible_uncollapsed: Cell<bool>,
 
         // Zen mode: the wait before the controls fade out, and their fading
-        pub zen_timeout: RefCell<Option<glib::SourceId>>,
-        pub zen_animation: RefCell<Option<adw::TimedAnimation>>,
+        pub(crate) zen_timeout: RefCell<Option<glib::SourceId>>,
+        pub(crate) zen_animation: RefCell<Option<adw::TimedAnimation>>,
         // Where the pointer last moved to, as only moving it counts in
         // fullscreen
-        pub zen_pointer: Cell<Option<(f64, f64)>>,
+        pub(crate) zen_pointer: Cell<Option<(f64, f64)>>,
 
         // Fullscreen: the cover the backdrop is blurred from, and the page
         // and the pane to go back to
-        pub backdrop_source: RefCell<Option<gdk::Texture>>,
+        pub(crate) backdrop_source: RefCell<Option<gdk::Texture>>,
         // The cover at full size, with the id of the album's cover, which
         // the next tracks of the album show without decoding it again
-        pub full_cover: RefCell<Option<(String, gdk::Texture)>>,
-        pub page_before_fullscreen: RefCell<Option<String>>,
-        pub pane_before_fullscreen: Cell<bool>,
+        pub(crate) full_cover: RefCell<Option<(String, gdk::Texture)>>,
+        pub(crate) page_before_fullscreen: RefCell<Option<String>>,
+        pub(crate) pane_before_fullscreen: Cell<bool>,
 
         // The search of the queue, and the tracks it lets through
-        pub queue_filter: SearchFilter,
-        pub queue_filtermodel: RefCell<Option<gio::ListModel>>,
+        pub(crate) queue_filter: SearchFilter,
+        pub(crate) queue_filtermodel: RefCell<Option<gio::ListModel>>,
         // The rows of the queue, to slide them to their new places when
         // tracks are moved
-        pub queue_rows: RefCell<Vec<glib::WeakRef<SlideBin>>>,
+        pub(crate) queue_rows: RefCell<Vec<glib::WeakRef<SlideBin>>>,
         // The row showing where files dragged over the pane would go
-        pub file_drop_row: glib::WeakRef<QueueRow>,
+        pub(crate) file_drop_row: glib::WeakRef<QueueRow>,
         // The header of the work at the top of the queue, when files would
         // go above it
-        pub file_drop_header: glib::WeakRef<gtk::Widget>,
+        pub(crate) file_drop_header: glib::WeakRef<gtk::Widget>,
         // The pane was shown for dragging albums, and is hidden again if
         // they aren't dropped
-        pub pane_opened_for_drag: Cell<bool>,
+        pub(crate) pane_opened_for_drag: Cell<bool>,
 
         // The application's player, see `Window::player()`
-        pub player: std::cell::OnceCell<Rc<AudioPlayer>>,
+        pub(crate) player: std::cell::OnceCell<Rc<AudioPlayer>>,
 
         // The toast about the last track that failed to play, which the
         // next one takes the place of
-        pub failed_toast: glib::WeakRef<adw::Toast>,
+        pub(crate) failed_toast: glib::WeakRef<adw::Toast>,
         // The toast with an Undo button that Ctrl+Z presses, while it's up,
         // which the next one takes the place of
-        pub undo_toast: glib::WeakRef<adw::Toast>,
+        pub(crate) undo_toast: glib::WeakRef<adw::Toast>,
         // What the Undo of the toast about removed tracks puts back, while
         // that toast is up
         pub(super) queue_undo: RefCell<Option<QueueUndo>>,
         // The toast whose Undo puts back the order from before a sort,
         // which goes when the order changes otherwise, see `sort_queue()`
-        pub sort_toast: glib::WeakRef<adw::Toast>,
+        pub(crate) sort_toast: glib::WeakRef<adw::Toast>,
 
         // The handlers connected to objects that outlive the window, the
         // player's and the style manager, which are disconnected when it
         // closes: one reaching the closed window would find its widgets gone
-        pub handlers: RefCell<Vec<(glib::Object, glib::SignalHandlerId)>>,
+        pub(crate) handlers: RefCell<Vec<(glib::Object, glib::SignalHandlerId)>>,
     }
 
     #[glib::object_subclass]
@@ -1066,14 +1066,14 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Window(ObjectSubclass<imp::Window>)
+    pub(crate) struct Window(ObjectSubclass<imp::Window>)
         @extends gtk::Widget, gtk::Window, gtk::ApplicationWindow, adw::ApplicationWindow,
         @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible, gtk::Buildable,
                     gtk::ConstraintTarget, gtk::Native, gtk::Root, gtk::ShortcutManager;
 }
 
 impl Window {
-    pub fn new(application: &crate::application::Application) -> Self {
+    pub(crate) fn new(application: &crate::application::Application) -> Self {
         let win = glib::Object::builder::<Window>()
             .property("application", application)
             .build();
@@ -1411,7 +1411,7 @@ impl Window {
     // When the window is closed, and when quitting, which doesn't close it;
     // the playlist pane is stored when the user shows or hides it. The keys
     // can be locked down by the system administrator
-    pub fn save_window_state(&self) {
+    pub(crate) fn save_window_state(&self) {
         debug!("Saving window state");
         let (width, height) = self.default_size();
         let settings = &self.imp().settings;
@@ -1446,7 +1446,7 @@ impl Window {
         dialog
     }
 
-    pub fn add_toast(&self, msg: String) {
+    pub(crate) fn add_toast(&self, msg: String) {
         self.imp().toast_overlay.add_toast(utils::plain_toast(&msg));
     }
 
@@ -1506,7 +1506,7 @@ impl Window {
 
     // The queue can change while the toast is up, so the track is
     // looked up when the button is clicked
-    pub fn add_skip_to_toast(&self, msg: String, button: String, track: &Track) {
+    pub(crate) fn add_skip_to_toast(&self, msg: String, button: String, track: &Track) {
         let toast = utils::plain_toast(&msg);
         toast.set_button_label(Some(&button));
         toast.connect_button_clicked(clone!(

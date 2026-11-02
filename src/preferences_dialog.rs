@@ -23,38 +23,38 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/preferences-dialog.ui")]
-    pub struct PreferencesDialog {
+    pub(crate) struct PreferencesDialog {
         #[template_child]
-        pub music_folders_group: TemplateChild<adw::PreferencesGroup>,
+        pub(crate) music_folders_group: TemplateChild<adw::PreferencesGroup>,
         #[template_child]
-        pub add_folder_row: TemplateChild<adw::ButtonRow>,
+        pub(crate) add_folder_row: TemplateChild<adw::ButtonRow>,
         #[template_child]
-        pub background_play_row: TemplateChild<adw::SwitchRow>,
+        pub(crate) background_play_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub restore_playlist_row: TemplateChild<adw::SwitchRow>,
+        pub(crate) restore_playlist_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub play_history_row: TemplateChild<adw::SwitchRow>,
+        pub(crate) play_history_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub recoloring_row: TemplateChild<adw::SwitchRow>,
+        pub(crate) recoloring_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub waveform_row: TemplateChild<adw::SwitchRow>,
+        pub(crate) waveform_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub zen_mode_row: TemplateChild<adw::SwitchRow>,
+        pub(crate) zen_mode_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub header_bars_row: TemplateChild<adw::SwitchRow>,
+        pub(crate) header_bars_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub replaygain_preamp_row: TemplateChild<adw::SpinRow>,
+        pub(crate) replaygain_preamp_row: TemplateChild<adw::SpinRow>,
 
-        pub settings: OnceCell<gio::Settings>,
+        pub(crate) settings: OnceCell<gio::Settings>,
         // The music folders, as `MusicFolder`s; each change is stored right
         // away, and the window reads them again once the dialog is closed
-        pub folders: OnceCell<gio::ListStore>,
+        pub(crate) folders: OnceCell<gio::ListStore>,
         // A folder in the list was added again, e.g. one whose access was
         // taken back and given again, so they're read again all the same
-        pub rescan: Cell<bool>,
+        pub(crate) rescan: Cell<bool>,
         // The paths of the folders that are missing or empty, which their
         // rows say
-        pub unavailable: RefCell<HashSet<PathBuf>>,
+        pub(crate) unavailable: RefCell<HashSet<PathBuf>>,
     }
 
     #[glib::object_subclass]
@@ -117,7 +117,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct PreferencesDialog(ObjectSubclass<imp::PreferencesDialog>)
+    pub(crate) struct PreferencesDialog(ObjectSubclass<imp::PreferencesDialog>)
         @extends gtk::Widget, adw::Dialog, adw::PreferencesDialog,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
@@ -131,7 +131,7 @@ impl Default for PreferencesDialog {
 impl PreferencesDialog {
     // Whether the music folders should be read again even if they're the
     // same
-    pub fn rescan_requested(&self) -> bool {
+    pub(crate) fn rescan_requested(&self) -> bool {
         self.imp().rescan.get()
     }
 
@@ -363,11 +363,11 @@ impl PreferencesDialog {
 
     // Puts the focus on Add Folder…, for the button of the album page
     // without albums, so that Enter goes on to pick a folder
-    pub fn focus_add_folder(&self) {
+    pub(crate) fn focus_add_folder(&self) {
         adw::prelude::AdwDialogExt::set_focus(self, Some(&*self.imp().add_folder_row));
     }
 
-    pub fn toast(&self, title: &str) {
+    pub(crate) fn toast(&self, title: &str) {
         self.add_toast(utils::plain_toast(title));
     }
 

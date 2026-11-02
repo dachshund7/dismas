@@ -24,26 +24,26 @@ mod imp {
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(resource = "/io/github/dachshund7/Dismas/page-switcher.ui")]
-    pub struct PageSwitcher {
+    pub(crate) struct PageSwitcher {
         #[template_child]
-        pub queue_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) queue_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub pages_box: TemplateChild<gtk::Box>,
+        pub(crate) pages_box: TemplateChild<gtk::Box>,
         #[template_child]
-        pub player_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) player_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub works_button: TemplateChild<gtk::ToggleButton>,
+        pub(crate) works_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub library_stack: TemplateChild<gtk::Stack>,
+        pub(crate) library_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub pages_menu_button: TemplateChild<gtk::MenuButton>,
+        pub(crate) pages_menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub pages_menu_stack: TemplateChild<gtk::Stack>,
+        pub(crate) pages_menu_stack: TemplateChild<gtk::Stack>,
         #[template_child]
-        pub pages_menu_icon: TemplateChild<gtk::Image>,
+        pub(crate) pages_menu_icon: TemplateChild<gtk::Image>,
         // The bindings to the window, while the switcher is in it
-        pub bindings: RefCell<Vec<glib::Binding>>,
-        pub handlers: RefCell<Vec<(glib::WeakRef<gtk::Window>, glib::SignalHandlerId)>>,
+        pub(crate) bindings: RefCell<Vec<glib::Binding>>,
+        pub(crate) handlers: RefCell<Vec<(glib::WeakRef<gtk::Window>, glib::SignalHandlerId)>>,
     }
 
     #[glib::object_subclass]
@@ -233,7 +233,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct PageSwitcher(ObjectSubclass<imp::PageSwitcher>)
+    pub(crate) struct PageSwitcher(ObjectSubclass<imp::PageSwitcher>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }

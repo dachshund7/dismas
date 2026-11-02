@@ -41,7 +41,7 @@ const BACKDROP_BLUR: f32 = 4.0;
 
 // The pixels of a decoded cover, with no padding between the rows
 #[derive(Clone)]
-pub struct CoverImage {
+pub(crate) struct CoverImage {
     width: u32,
     height: u32,
     has_alpha: bool,
@@ -51,7 +51,7 @@ pub struct CoverImage {
 impl CoverImage {
     // Decodes the cover, scaled down to fit in `max_size`, keeping its
     // aspect ratio; smaller covers are not scaled up
-    pub fn decode(data: glib::Bytes, max_size: u32) -> Option<Self> {
+    pub(crate) fn decode(data: glib::Bytes, max_size: u32) -> Option<Self> {
         let frame = match decode_frame(data) {
             Ok(frame) => frame,
             Err(e) => {
@@ -89,7 +89,7 @@ impl CoverImage {
     }
 
     // The pixels of a texture made from a cover, without its transparency
-    pub fn from_texture(texture: &gdk::Texture) -> Option<Self> {
+    pub(crate) fn from_texture(texture: &gdk::Texture) -> Option<Self> {
         let width = u32::try_from(texture.width()).ok()?;
         let height = u32::try_from(texture.height()).ok()?;
         let mut downloader = gdk::TextureDownloader::new(texture);
@@ -119,13 +119,13 @@ impl CoverImage {
     // One of the album grid's thumbnails, to make a smaller one from it.
     // Dismas made it, from pixels decoded in the sandbox, so it's decoded
     // in the process, like `read_thumbnail`
-    pub fn open_thumbnail(path: &Path) -> Option<Self> {
+    pub(crate) fn open_thumbnail(path: &Path) -> Option<Self> {
         let image = image::ImageReader::open(path).ok()?.decode().ok()?;
         Some(Self::from_image(image))
     }
 
     // A copy of the cover, scaled down to fit in `max_size`
-    pub fn thumbnail(&self, max_size: u32) -> Option<Self> {
+    pub(crate) fn thumbnail(&self, max_size: u32) -> Option<Self> {
         match self.size_within(max_size) {
             Some((width, height)) => self.resized(width, height),
             None => Some(self.clone()),
@@ -134,7 +134,7 @@ impl CoverImage {
 
     // A small blurred copy of the cover, to fill the screen behind the
     // player in fullscreen
-    pub fn backdrop(&self) -> Option<Self> {
+    pub(crate) fn backdrop(&self) -> Option<Self> {
         let small = self.thumbnail(BACKDROP_SIZE)?;
         let pixels = if small.has_alpha {
             blur::<Rgba<u8>>(small.width, small.height, small.pixels)?
@@ -174,7 +174,7 @@ impl CoverImage {
     }
 
     // The main colors of the cover, for styling the UI
-    pub fn palette(&self) -> Option<Vec<gdk::RGBA>> {
+    pub(crate) fn palette(&self) -> Option<Vec<gdk::RGBA>> {
         let format = if self.has_alpha {
             ColorFormat::Rgba
         } else {
@@ -200,7 +200,7 @@ impl CoverImage {
     // How much of the cover each color of the palette covers: the share of
     // the pixels the palette was made from (the opaque ones that aren't
     // white) that are nearest to it, in RGB, where the palette was found
-    pub fn shares(&self, palette: &[gdk::RGBA]) -> Vec<f32> {
+    pub(crate) fn shares(&self, palette: &[gdk::RGBA]) -> Vec<f32> {
         let colors: Vec<[f32; 3]> = palette
             .iter()
             .map(|c| [c.red() * 255.0, c.green() * 255.0, c.blue() * 255.0])
@@ -232,7 +232,7 @@ impl CoverImage {
     }
 
     // The cover encoded as PNG
-    pub fn png_bytes(&self) -> Result<Vec<u8>, String> {
+    pub(crate) fn png_bytes(&self) -> Result<Vec<u8>, String> {
         let color_type = if self.has_alpha {
             image::ExtendedColorType::Rgba8
         } else {
@@ -256,19 +256,19 @@ impl CoverImage {
     // Saves the cover as PNG; the file is written under a temporary name,
     // and renamed once it's complete, so that an interrupted write doesn't
     // leave a partial cover behind
-    pub fn save_png(&self, path: &Path) -> Result<(), String> {
+    pub(crate) fn save_png(&self, path: &Path) -> Result<(), String> {
         let data = self.png_bytes()?;
         glib::file_set_contents(path, &data).map_err(|e| e.to_string())
     }
 
-    pub fn has_alpha(&self) -> bool {
+    pub(crate) fn has_alpha(&self) -> bool {
         self.has_alpha
     }
 
     // Saves the cover as JPEG, like `save_png`. A photo takes a fraction of
     // the room it takes as PNG, and of the time to read; JPEG has no
     // transparency, so a cover with some can't be saved this way
-    pub fn save_jpeg(&self, path: &Path) -> Result<(), String> {
+    pub(crate) fn save_jpeg(&self, path: &Path) -> Result<(), String> {
         if self.has_alpha {
             return Err("JPEG can't keep the transparency of the cover".to_string());
         }
@@ -301,7 +301,7 @@ impl CoverImage {
         }
     }
 
-    pub fn into_texture(self) -> gdk::Texture {
+    pub(crate) fn into_texture(self) -> gdk::Texture {
         let (format, bytes_per_pixel) = if self.has_alpha {
             (gdk::MemoryFormat::R8g8b8a8, 4)
         } else {
@@ -330,7 +330,7 @@ impl CoverImage {
 // average of those it covers (`area_downscale`), which takes a fraction of
 // the time of `image`'s filters: from 480 to 240 pixels, the whole read
 // took 2.2 ms rather than 4.3 ms with `image`'s decoder and triangle filter
-pub fn read_thumbnail(path: &Path, size: u32) -> Option<gdk::Texture> {
+pub(crate) fn read_thumbnail(path: &Path, size: u32) -> Option<gdk::Texture> {
     let texture = gdk::Texture::from_filename(path).ok()?;
     let width = u32::try_from(texture.width()).ok()?;
     let height = u32::try_from(texture.height()).ok()?;
@@ -496,7 +496,7 @@ const ACCENT_SHARE_WEIGHT: f32 = 0.25;
 // so that a small detail, like a red streak on a purple painting, only wins
 // when it's much more chromatic. The stylesheet only keeps its hue and some
 // of its chroma, at a lightness that white text can be read on
-pub fn accent_color(palette: &[gdk::RGBA], shares: &[f32]) -> Option<gdk::RGBA> {
+pub(crate) fn accent_color(palette: &[gdk::RGBA], shares: &[f32]) -> Option<gdk::RGBA> {
     palette
         .iter()
         .zip(shares)
@@ -508,7 +508,7 @@ pub fn accent_color(palette: &[gdk::RGBA], shares: &[f32]) -> Option<gdk::RGBA> 
 }
 
 // The chroma of an sRGB color in OKLCH: its distance from grey in OKLab
-pub fn oklch_chroma(color: &gdk::RGBA) -> f32 {
+pub(crate) fn oklch_chroma(color: &gdk::RGBA) -> f32 {
     fn linear(c: f32) -> f32 {
         if c <= 0.04045 {
             c / 12.92
