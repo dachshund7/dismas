@@ -554,18 +554,21 @@ impl Window {
     // library finds new tags; the tracks are updated in place, so the
     // lists keep their order and the current track keeps playing. The
     // tracks whose files weren't found are looked for again, as a scan
-    // follows plugging in a drive. It waits for the tracks being read for
-    // the queue, which aren't in it yet: they would be left out, and a
-    // later scan doesn't list them again, as when a download is added
-    // while its cover is written
-    pub(super) fn reload_changed_tracks(&self, uris: Vec<String>) {
-        self.after_loads(move |win| win.reload_tracks(&uris));
+    // follows plugging in a drive. The tracks of `uris_without_cover`, of
+    // albums new to the library, are read again if they have no cover, as
+    // they can have been read before their cover file came. It waits for
+    // the tracks being read for the queue, which aren't in it yet: they
+    // would be left out, and a later scan doesn't list them again, as when
+    // a download is added while its cover is written
+    pub(super) fn reload_changed_tracks(&self, uris: Vec<String>, uris_without_cover: Vec<String>) {
+        self.after_loads(move |win| win.reload_tracks(&uris, &uris_without_cover));
     }
 
-    fn reload_tracks(&self, uris: &[String]) {
+    fn reload_tracks(&self, uris: &[String], uris_without_cover: &[String]) {
         // Each track shown is looked up, and there can be thousands of
         // them, as of the tracks of a scan
         let uris: HashSet<&str> = uris.iter().map(String::as_str).collect();
+        let without_cover: HashSet<&str> = uris_without_cover.iter().map(String::as_str).collect();
         let player = self.player();
         // The tracks shown, with whether their file changed
         let shown: Vec<(Track, bool)> = player
@@ -575,7 +578,9 @@ impl Window {
             .flatten()
             .chain(self.imp().album_tracks.tracks())
             .map(|track| {
-                let changed = uris.contains(track.uri().as_str());
+                let uri = track.uri();
+                let changed = uris.contains(uri.as_str())
+                    || (without_cover.contains(uri.as_str()) && track.cover_uuid().is_none());
                 (track, changed)
             })
             .collect();

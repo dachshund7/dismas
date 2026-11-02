@@ -420,11 +420,15 @@ mod imp {
                     // Albums started or stopped being dragged
                     Signal::builder("albums-drag-begin").build(),
                     Signal::builder("albums-drag-end").build(),
-                    // The URIs of the tracks whose files changed since the
-                    // last scan, the number of tracks that are new, changed
-                    // or gone, and whether the user asked for the scan
+                    // The URIs of the tracks to read again, as their files or
+                    // cover files changed since the last scan, and of those
+                    // to read again if they have no cover, see
+                    // `ScanResult`; the number of tracks that are new,
+                    // changed or gone, and whether the user asked for the
+                    // scan
                     Signal::builder("scan-finished")
                         .param_types([
+                            Vec::<String>::static_type(),
                             Vec::<String>::static_type(),
                             u32::static_type(),
                             bool::static_type(),
@@ -543,7 +547,9 @@ impl LibraryView {
         )
     }
 
-    pub(crate) fn connect_scan_finished<F: Fn(&Self, Vec<String>, u32, bool) + 'static>(
+    pub(crate) fn connect_scan_finished<
+        F: Fn(&Self, Vec<String>, Vec<String>, u32, bool) + 'static,
+    >(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
@@ -552,9 +558,10 @@ impl LibraryView {
             false,
             glib::closure_local!(move |view: &Self,
                                        uris: Vec<String>,
+                                       uris_without_cover: Vec<String>,
                                        n_changed: u32,
                                        requested: bool| {
-                f(view, uris, n_changed, requested);
+                f(view, uris, uris_without_cover, n_changed, requested);
             }),
         )
     }

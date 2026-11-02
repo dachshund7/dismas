@@ -19,10 +19,29 @@ pub(super) struct MadeCovers {
     // The number of thumbnails made: one made again can keep its name,
     // which the grid can't tell otherwise
     pub(super) count: usize,
-    // The tracks of the albums whose cover files changed without them, or
-    // that are new with cover files, which the queue has to look for
-    // their cover again
+    // The tracks of the albums whose cover files changed without them,
+    // see `Listed::All`
     pub(super) tracks_with_new_cover: Vec<PathBuf>,
+    // The tracks of the albums new to the library with cover files, see
+    // `Listed::WithoutCover`
+    pub(super) tracks_of_new_albums: Vec<PathBuf>,
+}
+
+// Which tracks of an album the scan lists, for the queue to look for
+// their cover again; an album is listed once, as its key is kept, even
+// when its cover can't be decoded
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Listed {
+    No,
+    // Its cover files changed without its tracks: all of them, as they
+    // can show the cover that was replaced or removed
+    All,
+    // It's new to the library, with cover files: those the queue has
+    // without a cover, which reached it before their cover file, as when a
+    // download is added to it before its cover is written. Those read with
+    // their cover are left alone, as are all the tracks of a library made
+    // anew, with every album new to it
+    WithoutCover,
 }
 
 // An album whose thumbnail `update_covers` makes
@@ -35,8 +54,7 @@ struct CoverJob {
     // The key of the cover files next to its first track, kept with the
     // thumbnail, "" when there are none
     cover_files: String,
-    // Whether they changed without its tracks
-    cover_files_changed: bool,
+    listed: Listed,
 }
 
 // Creates the thumbnails of the albums that don't have one yet, or whose
@@ -99,20 +117,21 @@ pub(super) fn update_covers(
             .flatten();
         let files = album_files_key(first_files, other_files);
         let cover_files = files.clone().unwrap_or_default();
-        // The tracks of an album that's new to the library can have reached
-        // the playlist before its cover file, as when a download is added
-        // to it before its cover is written, so they're listed too, once,
-        // as the key is kept
-        let cover_files_changed = match (has_row, &kept_files) {
-            (true, Some(kept)) => *kept != cover_files,
+        let listed = match (has_row, &kept_files) {
+            (true, Some(kept)) if *kept != cover_files => Listed::All,
             // An older version kept no key, and went by the times of the
             // cover files: one newer than the thumbnail changed while it
             // wasn't running, which is noticed once, as the key is kept then
-            (true, None) => cover.as_deref().is_some_and(|thumbnail| {
-                let files = album.folders.iter().filter_map(|f| folder_files.get(f));
-                cover_file_newer(files.flatten(), Path::new(thumbnail))
-            }),
-            (false, _) => files.is_some(),
+            (true, None)
+                if cover.as_deref().is_some_and(|thumbnail| {
+                    let files = album.folders.iter().filter_map(|f| folder_files.get(f));
+                    cover_file_newer(files.flatten(), Path::new(thumbnail))
+                }) =>
+            {
+                Listed::All
+            }
+            (false, _) if files.is_some() => Listed::WithoutCover,
+            _ => Listed::No,
         };
         // An album without a thumbnail whose cover file couldn't be decoded
         // is tried again, as it was before keys were kept; the thumbnail is
@@ -121,7 +140,7 @@ pub(super) fn update_covers(
         if !has_row
             || update == ThumbnailUpdate::Remake
             || removed
-            || cover_files_changed
+            || listed != Listed::No
             || retried
             || stale_albums.contains(&id)
         {
@@ -133,7 +152,7 @@ pub(super) fn update_covers(
                     first_track,
                     larger: None,
                     cover_files,
-                    cover_files_changed,
+                    listed,
                 });
             }
         } else if let (ThumbnailUpdate::Shrink(size), Some(cover)) = (update, cover) {
@@ -142,7 +161,7 @@ pub(super) fn update_covers(
                 first_track,
                 larger: Some((PathBuf::from(cover), size)),
                 cover_files,
-                cover_files_changed: false,
+                listed: Listed::No,
             });
         } else if has_row && kept_files.is_none() {
             unknown.push((id, cover_files));
@@ -151,10 +170,8 @@ pub(super) fn update_covers(
 
     debug!("Library: generating {} album covers", missing.len());
     let mut made_covers = MadeCovers::default();
-    // The albums whose cover files changed; their key is kept, so they're
-    // listed once, even when their cover can't be decoded, as their tracks
-    // in the queue can still show the cover that was removed
-    let mut new_cover_files = Vec::new();
+    // The albums whose tracks are listed, see `Listed`
+    let mut listed_albums = Vec::new();
 
     glib::mkdir_with_parents(dir, 0o700);
 
@@ -189,8 +206,8 @@ pub(super) fn update_covers(
             done += 1;
             let _ = sender.try_send(ScanEvent::Covers(done, total));
             made_covers.count += usize::from(made.is_some());
-            if job.cover_files_changed {
-                new_cover_files.push(job.id.as_str());
+            if job.listed != Listed::No {
+                listed_albums.push((job.id.as_str(), job.listed));
             }
             // A thumbnail that couldn't be made smaller is kept as it is
             let cover = made
@@ -218,12 +235,15 @@ pub(super) fn update_covers(
         // its first track's keep their cover apart, and can show the same
         // cover file, in the folder above
         let mut album_tracks = tx.prepare("SELECT path FROM tracks WHERE album_id = ?1")?;
-        for id in new_cover_files {
+        for (id, listed) in listed_albums {
+            let tracks = match listed {
+                Listed::All => &mut made_covers.tracks_with_new_cover,
+                Listed::WithoutCover => &mut made_covers.tracks_of_new_albums,
+                Listed::No => continue,
+            };
             let paths = album_tracks.query_map([id], |row| row.get::<_, Vec<u8>>(0))?;
             for path in paths {
-                made_covers
-                    .tracks_with_new_cover
-                    .push(path_from_bytes(path?));
+                tracks.push(path_from_bytes(path?));
             }
         }
     }

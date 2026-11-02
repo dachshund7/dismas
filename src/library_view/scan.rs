@@ -286,12 +286,8 @@ impl LibraryView {
                 }
                 // The tracks to read again: those that changed, and those
                 // whose cover file did
-                let uris: Vec<String> = result
-                    .updated
-                    .iter()
-                    .chain(&result.tracks_with_new_cover)
-                    .map(|path| gio::File::for_path(path).uri().to_string())
-                    .collect();
+                let uris = std::mem::take(&mut result.reread);
+                let uris_without_cover = std::mem::take(&mut result.reread_without_cover);
                 let n_changed = u32::try_from(result.n_changed).unwrap_or(u32::MAX);
 
                 // The folders the scan read are watched from now on. Files
@@ -311,13 +307,19 @@ impl LibraryView {
 
                 // The next scan goes on without stopping the spinner
                 if this.imp().rescan_pending.take() {
-                    this.emit_by_name::<()>("scan-finished", &[&uris, &n_changed, &requested]);
+                    this.emit_by_name::<()>(
+                        "scan-finished",
+                        &[&uris, &uris_without_cover, &n_changed, &requested],
+                    );
                     this.run_scan(false);
                     return;
                 }
                 this.set_scanning(false);
                 this.reload();
-                this.emit_by_name::<()>("scan-finished", &[&uris, &n_changed, &requested]);
+                this.emit_by_name::<()>(
+                    "scan-finished",
+                    &[&uris, &uris_without_cover, &n_changed, &requested],
+                );
             }
         ));
     }

@@ -14,20 +14,23 @@ pub(crate) enum ScanEvent {
 
 #[derive(Debug, Default)]
 pub(crate) struct ScanResult {
-    // The tracks that were already known and changed, so that the queue
-    // can read their tags again
-    pub(crate) updated: Vec<PathBuf>,
+    // The URIs of the tracks for the queue to read again: those that were
+    // already known and changed, for their tags, and those of the albums
+    // whose cover files changed without them, as when a cover is added
+    // next to them, replaced or removed, for their cover. They're made in
+    // the scan's thread, as there can be thousands of them
+    pub(crate) reread: Vec<String>,
+    // The URIs of the tracks of the albums new to the library with cover
+    // files, for the queue to read again if it has them without a cover,
+    // see `covers::Listed::WithoutCover`
+    pub(crate) reread_without_cover: Vec<String>,
     // The number of tracks that are new, changed or gone
     pub(crate) n_changed: usize,
     // Whether covers of the albums were made again, which can keep their
-    // names, as when a cover file next to the tracks changed
+    // names, as when a cover file next to the tracks changed; not the same
+    // as the tracks of the albums with new cover files, as it's about the
+    // grid's thumbnails
     pub(crate) covers_changed: bool,
-    // The tracks of the albums whose cover files changed without them, as
-    // when a cover is added next to them, replaced or removed, and of the
-    // new albums with cover files, so that the queue can look for their
-    // cover again; not the same as
-    // `covers_changed`, which is about the grid's thumbnails
-    pub(crate) tracks_with_new_cover: Vec<PathBuf>,
     // What to watch for changes, see `folders_to_watch()`
     pub(crate) watch: WatchList,
 }
@@ -139,7 +142,8 @@ pub(crate) fn scan(
             sender,
         )?;
         result.covers_changed = made.count > 0;
-        result.tracks_with_new_cover = made.tracks_with_new_cover;
+        result.reread.extend(uris(&made.tracks_with_new_cover));
+        result.reread_without_cover = uris(&made.tracks_of_new_albums);
         Ok(result)
     })
     .unwrap_or_else(|e| {
@@ -151,6 +155,14 @@ pub(crate) fn scan(
     result.watch = folders_to_watch(folders, &roots, &trees);
 
     let _ = sender.try_send(ScanEvent::Finished(result));
+}
+
+// The URIs of the files, by which the queue knows its tracks
+fn uris(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| gio::File::for_path(path).uri().to_string())
+        .collect()
 }
 
 // What the scan reads in each music folder that's there, in their order,
@@ -558,7 +570,7 @@ pub(super) fn scan_with(
 
     Ok((
         ScanResult {
-            updated,
+            reread: uris(&updated),
             n_changed,
             ..ScanResult::default()
         },

@@ -628,8 +628,10 @@ fn thumbnails_are_made_smaller_from_larger_ones() {
 
 // A cover file added next to the tracks of an album makes the scan list
 // all its tracks, so that the queue looks for their cover again, once,
-// even when it can't be read; so does an album that's new to the library
-// with a cover file, as its tracks can have reached the queue before it
+// even when it can't be read. An album that's new to the library with a
+// cover file has its tracks listed apart, as the queue only looks again
+// for the cover of those it has without one, which reached it before
+// their cover file
 #[test]
 fn a_cover_file_added_to_an_album_lists_its_tracks() {
     use crate::utils::write_test_wav;
@@ -658,46 +660,51 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
         wanted: 240,
         scale_2: 480,
     };
+    // The tracks listed, and those of new albums
     let mut scan = || {
         let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
-        let mut made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender)
-            .unwrap()
-            .tracks_with_new_cover;
-        made.sort();
-        made
+        let mut made =
+            super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
+        made.tracks_with_new_cover.sort();
+        (made.tracks_with_new_cover, made.tracks_of_new_albums)
     };
-    assert_eq!(scan(), [covered]);
+    let none = Vec::<PathBuf>::new;
+    assert_eq!(scan(), (none(), vec![covered]));
 
     red.save(music.join("Plain/cover.png")).unwrap();
     red.save(music.join("Discs/folder.png")).unwrap();
     std::fs::write(music.join("Unreadable/cover.jpg"), b"not an image").unwrap();
     assert_eq!(
         scan(),
-        [first_disc.clone(), second_disc.clone(), plain, unreadable]
+        (
+            vec![first_disc.clone(), second_disc.clone(), plain, unreadable],
+            none()
+        )
     );
     // Once made, and while the one that can't be read is tried again
-    assert_eq!(scan(), Vec::<PathBuf>::new());
+    assert_eq!(scan(), (none(), none()));
 
     // The tracks of another disc folder than the first track's show the
     // cover files in theirs, and the same file moved to the first one
     // shows on the other tracks
     red.save(music.join("Discs/CD2/cover.png")).unwrap();
-    assert_eq!(scan(), [first_disc.clone(), second_disc.clone()]);
+    let discs = vec![first_disc, second_disc];
+    assert_eq!(scan(), (discs.clone(), none()));
     std::fs::rename(
         music.join("Discs/CD2/cover.png"),
         music.join("Discs/CD1/cover.png"),
     )
     .unwrap();
-    assert_eq!(scan(), [first_disc, second_disc]);
-    assert_eq!(scan(), Vec::<PathBuf>::new());
+    assert_eq!(scan(), (discs, none()));
+    assert_eq!(scan(), (none(), none()));
 
     // A disc folder that only shows the cover files of the album's folder,
     // as the first one does, can come and go without a change to them
     std::fs::create_dir_all(music.join("Discs/CD3")).unwrap();
     write_test_wav(&music.join("Discs/CD3/1.wav"), 1);
-    assert_eq!(scan(), Vec::<PathBuf>::new());
+    assert_eq!(scan(), (none(), none()));
     std::fs::remove_dir_all(music.join("Discs/CD2")).unwrap();
-    assert_eq!(scan(), Vec::<PathBuf>::new());
+    assert_eq!(scan(), (none(), none()));
 
     std::fs::remove_dir_all(&music).unwrap();
     std::fs::remove_dir_all(&covers).unwrap();
@@ -742,7 +749,9 @@ fn a_changed_cover_file_is_noticed_whatever_its_time() {
     let mut scan = || {
         let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
         let made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
-        (made.count, made.tracks_with_new_cover)
+        // The album is new at first, which lists its tracks apart
+        let listed = [made.tracks_with_new_cover, made.tracks_of_new_albums].concat();
+        (made.count, listed)
     };
     let listed = vec![track];
 

@@ -533,8 +533,8 @@ impl Window {
         library_view.connect_scan_finished(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, uris, n_changed, requested| {
-                win.reload_changed_tracks(uris);
+            move |_, uris, uris_without_cover, n_changed, requested| {
+                win.reload_changed_tracks(uris, uris_without_cover);
                 if requested {
                     let msg = if n_changed == 0 {
                         i18n("No changes found in the music folders")
