@@ -2863,8 +2863,12 @@ pub fn scan(folders: &[MusicFolder], thumbnail_sizes: ThumbnailSizes, sender: &S
         .flat_map(|tree| std::mem::take(&mut tree.files))
         .filter_map(|file| file.path())
         .collect();
+    let unread: Vec<PathBuf> = trees
+        .iter_mut()
+        .flat_map(|tree| std::mem::take(&mut tree.unread))
+        .collect();
     let mut result = with_connection(|conn| {
-        let (mut result, stale_albums) = scan_with(conn, &roots, paths, sender)?;
+        let (mut result, stale_albums) = scan_with(conn, &roots, paths, &unread, sender)?;
         result.covers_changed = update_covers(
             conn,
             &stale_albums,
@@ -2989,7 +2993,7 @@ struct Source {
 }
 
 impl Source {
-    fn new(path: PathBuf, audio: Vec<PathBuf>) -> Option<Self> {
+    fn new(path: PathBuf, audio: Vec<PathBuf>) -> std::io::Result<Self> {
         let seconds = |t: std::io::Result<std::time::SystemTime>| {
             t.ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
@@ -3002,14 +3006,14 @@ impl Source {
         };
         let mut created = i64::MAX;
         for file in std::iter::once(&path).chain(&audio) {
-            let metadata = std::fs::metadata(file).ok()?;
+            let metadata = std::fs::metadata(file)?;
             let mtime = seconds(metadata.modified()).unwrap_or_default();
             stamp.mtime = stamp.mtime.max(mtime);
             stamp.ctime = stamp.ctime.max(change_time(&metadata));
             stamp.size += metadata.len() as i64;
             created = created.min(seconds(metadata.created()).unwrap_or(mtime));
         }
-        Some(Self {
+        Ok(Self {
             path,
             stamp,
             created,
@@ -3018,13 +3022,24 @@ impl Source {
     }
 }
 
+// Whether a file couldn't be read because it isn't there anymore, or a
+// folder on its path isn't, rather than because it can't be read now
+fn is_not_there(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
+}
+
 // Updates the tracks from the files of the music folders, the `paths` of
 // `read_roots()`, and returns the albums whose cover should be looked for
-// again
+// again. The files in the `unread` folders, which couldn't be read whole,
+// keep their tracks
 fn scan_with(
     conn: &mut Connection,
     roots: &Roots,
     paths: Vec<PathBuf>,
+    unread: &[PathBuf],
     sender: &Sender<ScanEvent>,
 ) -> rusqlite::Result<(ScanResult, HashSet<String>)> {
     // The CUE sheets that split audio files have their tracks, in place
@@ -3081,11 +3096,19 @@ fn scan_with(
         } else {
             continue;
         };
-        let Some(source) = Source::new(path, audio) else {
-            continue;
+        let key = path_bytes(&path).to_vec();
+        let source = match Source::new(path, audio) {
+            Ok(source) => source,
+            // A file that's there, but can't be read now, e.g. on a network
+            // share that stopped answering, keeps its tracks as they are
+            Err(e) => {
+                if !is_not_there(&e) {
+                    warn!("Unable to read {}: {e}", path_of_bytes(&key).display());
+                    present.insert(key);
+                }
+                continue;
+            }
         };
-
-        let key = path_bytes(&source.path).to_vec();
         if known.get(&key).map(|(stamp, _)| stamp) != Some(&source.stamp) {
             changed.push(source);
         }
@@ -3221,12 +3244,21 @@ fn scan_with(
 
     // Forget the files that are gone, or left out, but not those of the
     // folders that aren't there, e.g. on a drive that isn't plugged in, which
-    // aren't read again once they're back
+    // aren't read again once they're back: the music folders that weren't
+    // there when the scan started, those that went while it read them, as
+    // when a drive is unplugged, and the folders that couldn't be read whole
+    let kept_folders: Vec<&Path> = roots
+        .unavailable
+        .iter()
+        .chain(roots.available.iter().filter(|root| !is_available(root)))
+        .chain(unread)
+        .map(PathBuf::as_path)
+        .collect();
     let is_gone = |file: &&[u8]| {
         !present.contains(*file)
-            && (roots.unavailable.is_empty() || {
+            && (kept_folders.is_empty() || {
                 let path = path_of_bytes(file);
-                !roots.unavailable.iter().any(|root| path.starts_with(root))
+                !kept_folders.iter().any(|folder| path.starts_with(folder))
             })
     };
     let gone: Vec<&[u8]> = known.keys().map(Vec::as_slice).filter(is_gone).collect();
@@ -4084,12 +4116,17 @@ mod tests {
     ) -> rusqlite::Result<(super::ScanResult, std::collections::HashSet<String>)> {
         use gtk::gio::prelude::FileExt;
 
-        let paths = super::read_roots(roots)
+        let trees = super::read_roots(roots);
+        let unread: Vec<PathBuf> = trees
+            .iter()
+            .flat_map(|tree| tree.unread.iter().cloned())
+            .collect();
+        let paths = trees
             .into_iter()
             .flat_map(|tree| tree.files)
             .filter_map(|file| file.path())
             .collect();
-        super::scan_with(conn, roots, paths, sender)
+        super::scan_with(conn, roots, paths, &unread, sender)
     }
 
     fn watch_list(folders: &[MusicFolder]) -> super::WatchList {
@@ -4715,6 +4752,81 @@ mod tests {
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap()
+    }
+
+    // As in a folder on a network share that stops answering: the files
+    // that couldn't be listed can still be there
+    #[cfg(unix)]
+    #[test]
+    fn the_tracks_of_a_folder_that_cannot_be_read_are_kept() {
+        use std::os::unix::fs::PermissionsExt;
+
+        use crate::utils::write_test_wav;
+
+        // Root reads any folder, as in the containers of CI
+        // SAFETY: geteuid has no preconditions
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let music = test_dir("unread");
+        let locked = music.join("Locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        write_test_wav(&music.join("Gone.wav"), 1);
+        write_test_wav(&music.join("Open.wav"), 1);
+        write_test_wav(&locked.join("Locked.wav"), 1);
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        let roots = roots_of(&[&music]);
+        scan_roots(&mut conn, &roots, &sender).unwrap();
+        assert_eq!(tracks(&conn, &music).len(), 3);
+
+        // A file that's gone is still forgotten
+        std::fs::remove_file(music.join("Gone.wav")).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let scanned = scan_roots(&mut conn, &roots, &sender);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        scanned.unwrap();
+        let paths: Vec<String> = tracks(&conn, &music)
+            .into_iter()
+            .map(|row| row.path)
+            .collect();
+        assert_eq!(paths, ["Locked/Locked.wav", "Open.wav"]);
+
+        std::fs::remove_dir_all(&music).unwrap();
+    }
+
+    // As a drive unplugged while the scan reads it: the folders were read,
+    // and then the files are gone
+    #[test]
+    fn the_tracks_of_a_music_folder_that_goes_while_it_is_read_are_kept() {
+        use gtk::gio::prelude::FileExt;
+
+        use crate::utils::write_test_wav;
+
+        let music = test_dir("going-music");
+        let drive = test_dir("going-drive");
+        write_test_wav(&music.join("Here.wav"), 1);
+        write_test_wav(&drive.join("Away.wav"), 1);
+        let mut conn = test_db();
+        let (sender, _receiver) = async_channel::unbounded();
+        let count = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+                .unwrap()
+        };
+        let roots = roots_of(&[&music, &drive]);
+        scan_roots(&mut conn, &roots, &sender).unwrap();
+        assert_eq!(count(&conn), 2);
+
+        let paths = super::read_roots(&roots)
+            .into_iter()
+            .flat_map(|tree| tree.files)
+            .filter_map(|file| file.path())
+            .collect();
+        std::fs::remove_dir_all(&drive).unwrap();
+        super::scan_with(&mut conn, &roots, paths, &[], &sender).unwrap();
+        assert_eq!(count(&conn), 2);
+
+        std::fs::remove_dir_all(&music).unwrap();
     }
 
     #[test]

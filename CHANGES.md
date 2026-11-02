@@ -418,6 +418,10 @@ All notable changes to this project will be documented in this file.
   what had been heard of that track when it was under 30 seconds, and
   otherwise counted the rest of the track as another listen, which could
   make it two plays
+- The scan forgot the tracks of a folder it couldn't read, like one on a
+  network share that stopped answering, and those of a drive unplugged
+  while it read them, and read them and made their covers again once they
+  were back
 
 ### Removed
 

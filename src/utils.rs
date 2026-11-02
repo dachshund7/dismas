@@ -726,6 +726,10 @@ pub struct FolderTree {
     // Whether a symbolic link leads nowhere, as one to a drive that isn't
     // mounted does
     pub broken_links: bool,
+    // The folders that couldn't be read whole, e.g. on a network share that
+    // stopped answering: the files in them that weren't found can still be
+    // there. Not those that are gone, or aren't folders anymore
+    pub unread: Vec<std::path::PathBuf>,
 }
 
 // Following symbolic links, the type is that of what they lead to
@@ -746,15 +750,28 @@ struct FolderWalk<'a> {
 impl FolderWalk<'_> {
     fn read_folder(&mut self, folder: &gio::File) {
         self.tree.folders.push(folder.clone());
-        let Ok(mut enumerator) = folder.enumerate_children(
+        let mut enumerator = match folder.enumerate_children(
             WALK_ATTRIBUTES,
             gio::FileQueryInfoFlags::NONE,
             None::<&gio::Cancellable>,
-        ) else {
-            warn!("Unable to enumerate {}", folder.uri());
-            return;
+        ) {
+            Ok(enumerator) => enumerator,
+            Err(e) => {
+                warn!("Unable to enumerate {}: {e}", folder.uri());
+                self.unread(folder, &e);
+                return;
+            }
         };
-        while let Some(info) = enumerator.next().and_then(Result::ok) {
+        loop {
+            let info = match enumerator.next() {
+                Some(Ok(info)) => info,
+                Some(Err(e)) => {
+                    warn!("Unable to read the whole of {}: {e}", folder.uri());
+                    self.unread(folder, &e);
+                    break;
+                }
+                None => break,
+            };
             let child = enumerator.child(&info);
             if child.path().is_some_and(|path| !(self.keep)(&path)) {
                 continue;
@@ -764,6 +781,14 @@ impl FolderWalk<'_> {
             } else {
                 self.add(child, &info, false);
             }
+        }
+    }
+
+    fn unread(&mut self, folder: &gio::File, error: &glib::Error) {
+        if may_have_files(error)
+            && let Some(path) = folder.path()
+        {
+            self.tree.unread.push(path);
         }
     }
 
@@ -808,6 +833,12 @@ impl FolderWalk<'_> {
 // round follows the links found the round before, in the order of their
 // paths, so that of two links to one folder, the same one is read at
 // each scan
+// Whether a folder that gave `error` while it was read can still have
+// files: unless it isn't there anymore, or isn't a folder
+fn may_have_files(error: &glib::Error) -> bool {
+    !error.matches(gio::IOErrorEnum::NotFound) && !error.matches(gio::IOErrorEnum::NotDirectory)
+}
+
 pub fn read_folder_tree(
     folder: &gio::File,
     recursive: bool,
@@ -1118,6 +1149,46 @@ mod tests {
                 ".git/x.flac",
             ]
         );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn only_folders_that_are_still_there_can_have_files_left() {
+        let error = |code| glib::Error::new(code, "");
+        assert!(!may_have_files(&error(gio::IOErrorEnum::NotFound)));
+        assert!(!may_have_files(&error(gio::IOErrorEnum::NotDirectory)));
+        assert!(may_have_files(&error(gio::IOErrorEnum::PermissionDenied)));
+        assert!(may_have_files(&error(gio::IOErrorEnum::TimedOut)));
+        assert!(may_have_files(&error(gio::IOErrorEnum::Failed)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_be_read_is_noted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Root reads any folder, as in the containers of CI
+        // SAFETY: geteuid has no preconditions
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("dismas-unread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let locked = root.join("Locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(root.join("a.flac"), "").unwrap();
+        std::fs::write(locked.join("b.flac"), "").unwrap();
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let tree = read_folder_tree(&gio::File::for_path(&root), true, &|_| true);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let files: Vec<_> = tree.files.iter().filter_map(FileExt::path).collect();
+        assert_eq!(files, [root.join("a.flac")]);
+        assert_eq!(tree.unread, [locked]);
+
+        // A folder that isn't there has nothing left in it
+        let gone = read_folder_tree(&gio::File::for_path(root.join("Gone")), true, &|_| true);
+        assert!(gone.unread.is_empty());
         std::fs::remove_dir_all(&root).unwrap();
     }
 
