@@ -15,7 +15,7 @@
 use std::{
     collections::HashSet,
     ffi::OsString,
-    io::Write,
+    io::{Read, Write},
     process::{Command, Stdio},
 };
 
@@ -39,6 +39,16 @@ const DISCOVERER_SECONDS: u64 = 5;
 // How long the child lives at most, so the kernel ends it if it hangs,
 // even in Discoverer
 const CHILD_SECONDS: u32 = 15;
+
+// The most bytes of pictures the child sends, as many as a cover file next
+// to the tracks that's read: a crafted file can have dozens of pictures of
+// 16 MiB, which the parent kept all of, twice over, as it read them
+const MAX_PICTURES_SIZE: usize = 32 * 1024 * 1024;
+
+// The most bytes the parent reads from the child: its pictures, a third
+// larger in base64, and the tags; a child that writes more is ended, and
+// the file is left unread
+const MAX_REPORT_SIZE: u64 = 64 * 1024 * 1024;
 
 // The program started as the child, Dismas itself, which `main` sets
 static HELPER: OnceLock<PathBuf> = OnceLock::new();
@@ -116,30 +126,52 @@ pub(super) fn discover(path: &Path, options: ReadOptions) -> Option<FileTags> {
 }
 
 fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
-    let output = Command::new(helper)
+    let spawned = Command::new(helper)
         .arg(CHILD_ARG)
         .arg(if covers { "covers" } else { "no-covers" })
         .arg(path)
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
-        .output();
-    match output {
-        Ok(output) if output.status.success() => match serde_json::from_slice(&output.stdout) {
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            warn!("Unable to start the reader of {path:?}: {e}");
+            return None;
+        }
+    };
+    let mut report = Vec::new();
+    let read = child.stdout.take().is_some_and(|stdout| {
+        stdout
+            .take(MAX_REPORT_SIZE + 1)
+            .read_to_end(&mut report)
+            .is_ok()
+    });
+    let too_much = report.len() as u64 > MAX_REPORT_SIZE;
+    if too_much || !read {
+        // It would go on writing to a pipe that's no longer read
+        let _ = child.kill();
+    }
+    let status = child.wait();
+    if too_much {
+        warn!("GStreamer found more in {path:?} than is read");
+        return None;
+    }
+    match status {
+        Ok(status) if status.success() && read => match serde_json::from_slice(&report) {
             Ok(discovered) => discovered,
             Err(e) => {
                 warn!("Unable to read what GStreamer found in {path:?}: {e}");
                 None
             }
         },
-        Ok(output) => {
-            warn!(
-                "GStreamer couldn't read {path:?}: its reader ended with {}",
-                output.status
-            );
+        Ok(status) => {
+            warn!("GStreamer couldn't read {path:?}: its reader ended with {status}");
             None
         }
         Err(e) => {
-            warn!("Unable to start the reader of {path:?}: {e}");
+            warn!("Unable to wait for the reader of {path:?}: {e}");
             None
         }
     }
@@ -147,8 +179,11 @@ fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
 
 // The child: reads a file, and writes what it found as JSON, or null
 pub fn child_main(args: &[OsString]) -> glib::ExitCode {
-    // SAFETY: alarm() only sets a timer, whose signal ends the process
+    // SAFETY: signal() puts back the default of SIGALRM, which ends the
+    // process, in case Dismas was started with it ignored, and alarm()
+    // only sets a timer, whose signal then ends the process
     unsafe {
+        libc::signal(libc::SIGALRM, libc::SIG_DFL);
         libc::alarm(CHILD_SECONDS);
     }
     let [covers, path] = args else {
@@ -274,14 +309,14 @@ fn comments(
     covers: bool,
 ) -> (Vec<(String, String)>, Vec<DiscoveredPicture>) {
     let mut comments = Vec::new();
-    let mut pictures = Vec::new();
+    let mut images = Vec::new();
     // The date can be there twice, as a date and as a date and time
     let has_date_time = tags.get::<gst::tags::DateTime>().is_some();
     for (name, values) in tags.iter_generic() {
         match name.as_str() {
             "image" => {
                 if covers {
-                    pictures.extend(values.filter_map(|v| picture(&v.get().ok()?)));
+                    images.extend(values.filter_map(|v| v.get::<gst::Sample>().ok()));
                 }
             }
             // The comments GStreamer has no tag for, as "KEY=value", like
@@ -310,7 +345,29 @@ fn comments(
     // which GStreamer takes for a performer, and LEAD_PERFORMER
     let mut unique = HashSet::new();
     comments.retain(|comment| unique.insert(comment.clone()));
-    (comments, pictures)
+    (comments, kept_pictures(images, MAX_PICTURES_SIZE))
+}
+
+// The pictures the parent gets: the front cover first, which covers are
+// looked for first, then the others, as long as they come to at most
+// `budget` bytes
+fn kept_pictures(mut images: Vec<gst::Sample>, budget: usize) -> Vec<DiscoveredPicture> {
+    images.sort_by_key(|sample| picture_kind(sample) != PictureType::CoverFront.as_u8());
+    let mut left = budget;
+    let mut kept = Vec::new();
+    for sample in &images {
+        let Some(size) = sample.buffer().map(gst::BufferRef::size) else {
+            continue;
+        };
+        if size > left {
+            continue;
+        }
+        if let Some(picture) = picture(sample) {
+            left -= size;
+            kept.push(picture);
+        }
+    }
+    kept
 }
 
 // A comment that GStreamer passes on as it is, under the name lofty reads it
@@ -368,20 +425,24 @@ fn picture(sample: &gst::Sample) -> Option<DiscoveredPicture> {
         .caps()
         .and_then(|caps| caps.structure(0))
         .map(|s| s.name().to_string());
+    Some(DiscoveredPicture {
+        kind: picture_kind(sample),
+        mime_type,
+        data: glib::base64_encode(&buffer).to_string(),
+    })
+}
+
+// A picture's type as in ID3v2, e.g. 3 for the front cover
+fn picture_kind(sample: &gst::Sample) -> u8 {
     let image_type = sample
         .info()
         .and_then(|info| info.get::<gst_tag::TagImageType>("image-type").ok())
         .map_or(0, IntoGlib::into_glib);
     // GStreamer's types are ID3v2's without its two icons, with -1 for none
-    let kind = u8::try_from(image_type + 2)
+    u8::try_from(image_type + 2)
         .ok()
         .filter(|_| image_type > 0)
-        .unwrap_or(0);
-    Some(DiscoveredPicture {
-        kind,
-        mime_type,
-        data: glib::base64_encode(&buffer).to_string(),
-    })
+        .unwrap_or(0)
 }
 
 // The name of the format: the codec's, after the container's when it isn't
@@ -575,6 +636,53 @@ mod tests {
         );
         assert_eq!(kind(gst_tag::TagImageType::Undefined), PictureType::Other);
         assert_eq!(kind(gst_tag::TagImageType::None), PictureType::Other);
+    }
+
+    // A crafted file can have dozens of pictures of 16 MiB
+    #[test]
+    fn the_front_cover_is_kept_first_and_the_others_as_they_fit() {
+        gst::init().unwrap();
+        let sample = |image_type| gst::Sample::from_image_data(&PNG, image_type).unwrap();
+        let images = vec![
+            sample(gst_tag::TagImageType::BackCover),
+            sample(gst_tag::TagImageType::Undefined),
+            sample(gst_tag::TagImageType::FrontCover),
+        ];
+        let kinds = |budget| {
+            kept_pictures(images.clone(), budget)
+                .iter()
+                .map(|picture| PictureType::from_u8(picture.kind))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            kinds(3 * PNG.len()),
+            [
+                PictureType::CoverFront,
+                PictureType::CoverBack,
+                PictureType::Other
+            ]
+        );
+        assert_eq!(
+            kinds(2 * PNG.len()),
+            [PictureType::CoverFront, PictureType::CoverBack]
+        );
+        assert!(kinds(PNG.len() - 1).is_empty());
+    }
+
+    // What the reader writes is read into memory, so one that writes more
+    // than a file's tags and pictures can come to is ended
+    #[cfg(unix)]
+    #[test]
+    fn a_reader_that_writes_too_much_is_ended() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = test_dir("reader");
+        let helper = dir.join("reader.sh");
+        let script = format!("#!/bin/sh\nhead -c {} /dev/zero\n", MAX_REPORT_SIZE + 1);
+        std::fs::write(&helper, script).unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(run_child(&helper, Path::new("Nimrod.oga"), true), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
