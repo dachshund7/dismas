@@ -5,7 +5,7 @@ use super::*;
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-pub(super) const SCHEMA_VERSION: i32 = 31;
+pub(super) const SCHEMA_VERSION: i32 = 32;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -52,7 +52,8 @@ pub(super) const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
     CREATE INDEX tracks_work ON tracks (work_key);
     CREATE TABLE IF NOT EXISTS covers (
         album_id TEXT PRIMARY KEY,
-        path TEXT
+        path TEXT,
+        cover_files TEXT
     );
     CREATE TABLE IF NOT EXISTS added_times (
         file BLOB PRIMARY KEY,
@@ -153,6 +154,7 @@ pub(super) fn open_at(path: &Path) -> rusqlite::Result<Connection> {
         debug!("Library schema version {version}, recreating it");
         keep_added_times(&tx);
         tx.execute_batch(SCHEMA)?;
+        add_cover_files_column(&tx)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()?;
@@ -183,6 +185,22 @@ fn keep_added_times(conn: &Connection) {
     if let Err(e) = kept {
         warn!("Unable to keep the times the tracks were added: {e}");
     }
+}
+
+// The covers outlive the versions of the schema, so a column added to
+// them since is added to the table an older version made. The albums it
+// has start without the key of their cover files, which the next scan
+// fills in, see `update_covers`
+fn add_cover_files_column(conn: &Connection) -> rusqlite::Result<()> {
+    let has_column: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('covers') WHERE name = 'cover_files')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_column {
+        conn.execute_batch("ALTER TABLE covers ADD COLUMN cover_files TEXT")?;
+    }
+    Ok(())
 }
 
 // Whether the database has a table, which one made by an older version

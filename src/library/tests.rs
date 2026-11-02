@@ -628,7 +628,8 @@ fn thumbnails_are_made_smaller_from_larger_ones() {
 
 // A cover file added next to the tracks of an album the library knows makes
 // the scan list all its tracks, so that the queue looks for their cover
-// again; an album that's new to it doesn't, nor a cover that can't be read
+// again, once, even when it can't be read; an album that's new to it
+// doesn't
 #[test]
 fn a_cover_file_added_to_an_album_lists_its_tracks() {
     use crate::utils::write_test_wav;
@@ -643,10 +644,10 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
     let plain = music.join("Plain/1.wav");
     let first_disc = music.join("Discs/CD1/1.wav");
     let second_disc = music.join("Discs/CD2/1.wav");
-    for track in [&plain, &first_disc, &second_disc] {
+    let unreadable = music.join("Unreadable/1.wav");
+    for track in [&plain, &first_disc, &second_disc, &unreadable] {
         write_test_wav(track, 1);
     }
-    write_test_wav(&music.join("Unreadable/1.wav"), 1);
     write_test_wav(&music.join("Covered/1.wav"), 1);
 
     let mut conn = test_db();
@@ -670,12 +671,129 @@ fn a_cover_file_added_to_an_album_lists_its_tracks() {
     red.save(music.join("Plain/cover.png")).unwrap();
     red.save(music.join("Discs/folder.png")).unwrap();
     std::fs::write(music.join("Unreadable/cover.jpg"), b"not an image").unwrap();
-    assert_eq!(scan(), [first_disc, second_disc, plain]);
+    assert_eq!(scan(), [first_disc, second_disc, plain, unreadable]);
     // Once made, and while the one that can't be read is tried again
     assert_eq!(scan(), Vec::<PathBuf>::new());
 
     std::fs::remove_dir_all(&music).unwrap();
     std::fs::remove_dir_all(&covers).unwrap();
+}
+
+// A cover file changed next to an album's tracks is noticed whatever its
+// time: one replaced by an older file, as moving a file in keeps its
+// time, one dated in the future, only once, one replaced while the
+// thumbnail was gone from the cache, and one removed
+#[test]
+fn a_changed_cover_file_is_noticed_whatever_its_time() {
+    use std::time::{Duration, SystemTime};
+
+    use crate::utils::write_test_wav;
+
+    let music = test_dir("cover-times");
+    let covers = test_dir("cover-times-thumbnails");
+    let track = music.join("1.wav");
+    write_test_wav(&track, 1);
+    let cover = music.join("cover.png");
+    let save_cover = |color, time| {
+        image::RgbImage::from_pixel(8, 8, image::Rgb(color))
+            .save(&cover)
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&cover)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    };
+    let now = SystemTime::now();
+    let day = Duration::from_secs(24 * 60 * 60);
+
+    let mut conn = test_db();
+    let (sender, _receiver) = async_channel::unbounded();
+    let roots = roots_of(&[&music]);
+    let sizes = ThumbnailSizes {
+        wanted: 240,
+        scale_2: 480,
+    };
+    let mut scan = || {
+        let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
+        let made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
+        (made.count, made.cover_changed)
+    };
+    let listed = vec![track];
+
+    save_cover([255, 0, 0], now);
+    assert_eq!(scan(), (1, vec![]));
+    save_cover([0, 255, 0], now - 7 * day);
+    assert_eq!(scan(), (1, listed.clone()));
+    save_cover([0, 0, 255], now + day);
+    assert_eq!(scan(), (1, listed.clone()));
+    assert_eq!(scan(), (0, vec![]));
+    std::fs::remove_dir_all(&covers).unwrap();
+    save_cover([255, 255, 0], now);
+    assert_eq!(scan(), (1, listed.clone()));
+    std::fs::remove_file(&cover).unwrap();
+    assert_eq!(scan(), (0, listed));
+    assert_eq!(scan(), (0, vec![]));
+
+    std::fs::remove_dir_all(&music).unwrap();
+    std::fs::remove_dir_all(&covers).unwrap();
+}
+
+// The covers outlive the versions of the schema, so the key of the cover
+// files is added to the covers of an older version, which keep their
+// thumbnails, and the next scan fills it in without making them again
+#[test]
+fn a_new_version_of_the_schema_adds_the_key_of_the_cover_files() {
+    use crate::utils::write_test_wav;
+
+    let music = test_dir("cover-key-music");
+    let covers = test_dir("cover-key-thumbnails");
+    write_test_wav(&music.join("1.wav"), 1);
+    image::RgbImage::from_pixel(8, 8, image::Rgb([255, 0, 0]))
+        .save(music.join("cover.png"))
+        .unwrap();
+    let dir = test_dir("cover-key-db");
+    let path = dir.join("library.db");
+    let (sender, _receiver) = async_channel::unbounded();
+    let roots = roots_of(&[&music]);
+    let sizes = ThumbnailSizes {
+        wanted: 240,
+        scale_2: 480,
+    };
+    let keys = |conn: &rusqlite::Connection| -> Vec<Option<String>> {
+        conn.prepare("SELECT cover_files FROM covers")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+
+    let mut conn = super::open_at(&path).unwrap();
+    let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
+    super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
+    // As if an older version had made the database, without the column
+    conn.execute_batch(
+        "CREATE TABLE old_covers AS SELECT album_id, path FROM covers;
+         DROP TABLE covers;
+         ALTER TABLE old_covers RENAME TO covers;",
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", super::SCHEMA_VERSION - 1)
+        .unwrap();
+    drop(conn);
+
+    let mut conn = super::open_at(&path).unwrap();
+    assert_eq!(keys(&conn), [None]);
+    let (_, stale) = scan_roots(&mut conn, &roots, &sender).unwrap();
+    let made = super::update_covers(&mut conn, &covers, &stale, &[], sizes, &sender).unwrap();
+    assert_eq!((made.count, made.cover_changed), (0, vec![]));
+    assert!(keys(&conn)[0].as_ref().is_some_and(|key| !key.is_empty()));
+
+    std::fs::remove_dir_all(&music).unwrap();
+    std::fs::remove_dir_all(&covers).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // A track in the database, with paths relative to a folder

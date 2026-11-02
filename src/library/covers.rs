@@ -16,18 +16,32 @@ pub(super) struct MadeCovers {
     // The number of thumbnails made: one made again can keep its name,
     // which the grid can't tell otherwise
     pub(super) count: usize,
-    // The tracks of the albums whose cover file changed without them,
+    // The tracks of the albums whose cover files changed without them,
     // which the queue has to look for their cover again
     pub(super) cover_changed: Vec<PathBuf>,
 }
 
+// An album whose thumbnail `update_covers` makes
+struct CoverJob {
+    id: String,
+    first_track: PathBuf,
+    // The thumbnail to make smaller, with its new size, when it's only
+    // too large
+    larger: Option<(PathBuf, u32)>,
+    // The key of the cover files next to its first track, kept with the
+    // thumbnail, "" when there are none
+    cover_files: String,
+    // Whether they changed without its tracks
+    cover_files_changed: bool,
+}
+
 // Creates the thumbnails of the albums that don't have one yet, or whose
-// tracks changed, in `dir`, the cache directory, so they might have been
-// removed since the last scan. They're made from the tracks that are
-// there, so the albums of the `hidden` folders, which aren't, keep theirs
-// until they're back. An album whose cover can't be decoded is tried at
-// every scan, and counts for nothing, as its thumbnail stays as it was,
-// missing
+// tracks or cover files changed, in `dir`, the cache directory, so they
+// might have been removed since the last scan. They're made from the
+// tracks that are there, so the albums of the `hidden` folders, which
+// aren't, keep theirs until they're back. An album whose cover can't be
+// decoded is tried at every scan while it has cover files, and counts for
+// nothing, as its thumbnail stays as it was, missing
 pub(super) fn update_covers(
     conn: &mut Connection,
     dir: &Path,
@@ -36,15 +50,16 @@ pub(super) fn update_covers(
     sizes: ThumbnailSizes,
     sender: &Sender<ScanEvent>,
 ) -> rusqlite::Result<MadeCovers> {
-    // Each album with its first track, the thumbnail to make smaller, with
-    // its new size, when it's only too large, and whether its cover file
-    // changed without its tracks
     let mut missing = Vec::new();
-    let mut cover_times = HashMap::new();
+    // The albums kept as they are whose cover files aren't known yet, as
+    // an older version made their thumbnail, with the key to keep
+    let mut unknown = Vec::new();
+    // The folders are read once, as albums can share one
+    let mut folder_keys = HashMap::new();
     {
         let (hidden_sql, hidden_params) = hidden_condition("t.file", hidden);
         let mut stmt = conn.prepare(&format!(
-            "SELECT t.album_id, MIN(t.path), c.album_id, c.path
+            "SELECT t.album_id, MIN(t.path), c.album_id, c.path, c.cover_files
              FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
              WHERE t.album_id IS NOT NULL{hidden_sql}
              GROUP BY t.album_id"
@@ -55,10 +70,11 @@ pub(super) fn update_covers(
                 path_from_bytes(row.get::<_, Vec<u8>>(1)?),
                 row.get::<_, Option<String>>(2)?.is_some(),
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })?;
         for row in rows {
-            let (id, first_track, has_row, cover) = row?;
+            let (id, first_track, has_row, cover, kept_files) = row?;
             // Thumbnails at another size than the grid shows them, or in
             // the format of older versions, are made again, or smaller
             let update = cover.as_deref().map_or(ThumbnailUpdate::Keep, |p| {
@@ -66,55 +82,72 @@ pub(super) fn update_covers(
             });
             // Albums without cover art have no thumbnail, so we only check
             // that the thumbnails we created are still there
-            let made = cover
-                .as_ref()
-                .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
-            let removed = matches!(made, Some(None));
+            let removed = cover
+                .as_deref()
+                .is_some_and(|p| std::fs::metadata(p).is_err());
             // A cover file next to the tracks can change without them: it's
-            // newer than the thumbnail, or the album had no cover before. The
-            // folder is read once, as albums can share one
-            let mut cover_time = || {
-                let dir = cue_sheet::real_path(&first_track).parent()?;
-                *cover_times
-                    .entry(dir.to_path_buf())
-                    .or_insert_with(|| cover_file_time(dir))
-            };
-            let cover_file_changed = match made {
-                Some(Some(made)) => cover_time().is_some_and(|t| t > made),
-                Some(None) => false,
-                None => cover_time().is_some(),
-            };
+            // added, removed or replaced
+            let files = cue_sheet::real_path(&first_track)
+                .parent()
+                .and_then(|folder| {
+                    folder_keys
+                        .entry(folder.to_path_buf())
+                        .or_insert_with(|| cover_files_key(folder))
+                        .clone()
+                });
+            let cover_files = files.clone().unwrap_or_default();
+            let cover_files_changed =
+                has_row && kept_files.as_ref().is_some_and(|k| *k != cover_files);
+            // An album without a thumbnail whose cover file couldn't be
+            // decoded is tried again, as it was before keys were kept
+            let retried = has_row && cover.is_none() && files.is_some();
             if !has_row
                 || update == ThumbnailUpdate::Remake
                 || removed
-                || cover_file_changed
+                || cover_files_changed
+                || retried
                 || stale_albums.contains(&id)
             {
                 // A track that's gone since the scan would leave its album
                 // without a cover for good. The tracks of an album that's
                 // new to the scan were read with the cover file there
                 if cue_sheet::real_path(&first_track).is_file() {
-                    missing.push((id, first_track, None, has_row && cover_file_changed));
+                    missing.push(CoverJob {
+                        id,
+                        first_track,
+                        larger: None,
+                        cover_files,
+                        cover_files_changed,
+                    });
                 }
             } else if let (ThumbnailUpdate::Shrink(size), Some(cover)) = (update, cover) {
-                missing.push((id, first_track, Some((PathBuf::from(cover), size)), false));
+                missing.push(CoverJob {
+                    id,
+                    first_track,
+                    larger: Some((PathBuf::from(cover), size)),
+                    cover_files,
+                    cover_files_changed: false,
+                });
+            } else if has_row && kept_files.is_none() {
+                unknown.push((id, cover_files));
             }
         }
     }
 
     debug!("Library: generating {} album covers", missing.len());
     let mut made_covers = MadeCovers::default();
-    // The albums whose cover file changed and made a thumbnail; one that
-    // doesn't decode is tried at every scan, and would have its tracks read
-    // again each time
+    // The albums whose cover files changed; their key is kept, so they're
+    // listed once, even when their cover can't be decoded, as their tracks
+    // in the queue can still show the cover that was removed
     let mut new_cover_files = Vec::new();
 
     glib::mkdir_with_parents(dir, 0o700);
 
     let tx = conn.transaction()?;
     {
-        let mut upsert =
-            tx.prepare("INSERT OR REPLACE INTO covers (album_id, path) VALUES (?1, ?2)")?;
+        let mut upsert = tx.prepare(
+            "INSERT OR REPLACE INTO covers (album_id, path, cover_files) VALUES (?1, ?2, ?3)",
+        )?;
         let total = missing.len();
         if total > 0 {
             let _ = sender.try_send(ScanEvent::Covers(0, total));
@@ -124,35 +157,42 @@ pub(super) fn update_covers(
         // few are made at a time, which goes faster, as for the loader.
         // Making them smaller takes a fraction of that. They're written in
         // this thread, which has the transaction
-        let make =
-            |(id, first_track, larger, _): &(String, PathBuf, Option<(PathBuf, u32)>, bool)| {
-                utils::guarded(
-                    first_track.display(),
-                    || match larger {
-                        Some((thumbnail, size)) => shrink_thumbnail(thumbnail, dir, id, *size)
-                            .or_else(|| create_thumbnail(first_track, dir, id, sizes.wanted)),
-                        None => create_thumbnail(first_track, dir, id, sizes.wanted),
-                    },
-                    || None,
-                )
-            };
+        let make = |job: &CoverJob| {
+            utils::guarded(
+                job.first_track.display(),
+                || match &job.larger {
+                    Some((thumbnail, size)) => shrink_thumbnail(thumbnail, dir, &job.id, *size)
+                        .or_else(|| create_thumbnail(&job.first_track, dir, &job.id, sizes.wanted)),
+                    None => create_thumbnail(&job.first_track, dir, &job.id, sizes.wanted),
+                },
+                || None,
+            )
+        };
         let mut done = 0;
         utils::in_threads(&missing, utils::READING_THREADS, make, |i, made| {
-            let (id, _, larger, cover_file_changed) = &missing[i];
+            let job = &missing[i];
             done += 1;
             let _ = sender.try_send(ScanEvent::Covers(done, total));
             made_covers.count += usize::from(made.is_some());
-            if *cover_file_changed && made.is_some() {
-                new_cover_files.push(id.as_str());
+            if job.cover_files_changed {
+                new_cover_files.push(job.id.as_str());
             }
             // A thumbnail that couldn't be made smaller is kept as it is
             let cover = made
                 .as_deref()
-                .or_else(|| larger.as_ref().map(|(thumbnail, _)| thumbnail.as_path()))
+                .or_else(|| {
+                    job.larger
+                        .as_ref()
+                        .map(|(thumbnail, _)| thumbnail.as_path())
+                })
                 .map(|path| path.to_string_lossy().to_string());
-            upsert.execute(params![id, cover])?;
+            upsert.execute(params![job.id, cover, job.cover_files])?;
             Ok::<_, rusqlite::Error>(())
         })?;
+        let mut keep_key = tx.prepare("UPDATE covers SET cover_files = ?2 WHERE album_id = ?1")?;
+        for (id, cover_files) in &unknown {
+            keep_key.execute([id, cover_files])?;
+        }
         tx.execute(
             "DELETE FROM covers WHERE album_id NOT IN
              (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)",
@@ -279,13 +319,35 @@ fn remove_unused_covers(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     Ok(())
 }
 
-// When the newest cover file for a folder of tracks was changed, if it
-// has any; the thumbnail is made from the first track of the album, which
-// takes its cover from these files when its tags have none
-fn cover_file_time(dir: &Path) -> Option<std::time::SystemTime> {
-    CoverCache::cover_files_for(dir)
-        .filter_map(|file| std::fs::metadata(file).ok()?.modified().ok())
-        .max()
+// What the cover files for a folder of tracks are, if it has any: a hash
+// of their names, sizes and modification times, which the scan keeps with
+// the album's thumbnail; the thumbnail is made from the first track of
+// the album, which takes its cover from these files when its tags have
+// none. Any change to them changes the key, a file added, removed or
+// replaced, even by an older file, as moving or copying one can keep the
+// time it was written, and whatever the clock said then: comparing their
+// times with the thumbnail's missed a cover moved in from elsewhere, and
+// made a cover dated in the future again at every scan. The names are
+// those of the files, so that moving the music folder keeps the keys
+fn cover_files_key(dir: &Path) -> Option<String> {
+    let mut hasher = Sha256::new();
+    let mut any = false;
+    for file in CoverCache::cover_files_for(dir) {
+        let Ok(metadata) = std::fs::metadata(&file) else {
+            continue;
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .unwrap_or_default();
+        hasher.update(file.file_name().unwrap_or_default().as_encoded_bytes());
+        hasher.update([0]);
+        hasher.update(metadata.len().to_le_bytes());
+        hasher.update(modified.as_nanos().to_le_bytes());
+        any = true;
+    }
+    any.then(|| utils::hex(&hasher.finalize()))
 }
 
 // Makes the thumbnail of an album in `dir`, from the cover of its first

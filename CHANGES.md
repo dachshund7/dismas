@@ -454,6 +454,12 @@ All notable changes to this project will be documented in this file.
   showed it once Dismas was started again
 - A cover replaced in the folder of an album while the album grid showed
   it kept the old cover in the grid
+- A cover file moved or copied into the folder of an album wasn't noticed
+  when it kept an older date, as moving a file does, and the album kept
+  its old cover. A cover file that was removed wasn't noticed either. A
+  cover file dated in the future, as on a drive written where the clock
+  was ahead, made the album's cover again at every scan of the music
+  folders
 
 ### Removed
 
