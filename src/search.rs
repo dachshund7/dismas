@@ -36,18 +36,37 @@ pub struct QueueSources {
     pub stats: SearchStats,
     // From the library, by path
     pub tracks: HashMap<PathBuf, TrackEntry>,
+    // What they were read for, and plays.db's `writes()` then
+    needs: Needs,
+    writes: u64,
 }
 
 impl QueueSources {
     fn read(needs: &Needs) -> Self {
         Self {
+            writes: play_stats::writes(),
             stats: play_stats::search_stats(needs),
             tracks: if needs.library_entry() {
                 library::track_entries()
             } else {
                 HashMap::new()
             },
+            needs: *needs,
         }
+    }
+
+    // Whether they have what a search that needs `needs` reads, as they
+    // were read, with plays.db at `writes`: each key typed would otherwise
+    // read all the tracks of the library again, and all their play stats,
+    // on the main thread
+    fn cover(&self, needs: &Needs, writes: u64) -> bool {
+        let read = &self.needs;
+        (!needs.library_entry() || read.library_entry())
+            && (!needs.stats || read.stats)
+            && (!needs.favorites || read.favorites)
+            && (!needs.favorite_albums || read.favorite_albums)
+            && (!needs.favorite_works || read.favorite_works)
+            && self.writes == writes
     }
 }
 
@@ -95,9 +114,13 @@ mod imp {
                 .map(|text| Query::parse(text, Mode::Search))
                 .filter(|query| !query.matches_all())
                 .map(|query| query.at(&context));
-            let sources = query
-                .as_ref()
-                .map(|query| QueueSources::read(&query.needs()));
+            let sources = query.as_ref().map(|query| {
+                let needs = query.needs();
+                match self.sources.take() {
+                    Some(sources) if sources.cover(&needs, play_stats::writes()) => sources,
+                    _ => QueueSources::read(&needs),
+                }
+            });
             self.sources.replace(sources);
 
             let was_filtering = self.filtering();
@@ -161,12 +184,13 @@ impl SearchFilter {
     pub fn favorites_changed(&self) {
         let imp = self.imp();
         let needs = imp.query.borrow().as_ref().map(Query::needs);
-        let Some(needs) = needs.filter(Needs::any_favorites) else {
+        if !needs.as_ref().is_some_and(Needs::any_favorites) {
             return;
-        };
+        }
         // What the library keeps of the tracks stays the same
         if let Some(sources) = imp.sources.borrow_mut().as_mut() {
-            sources.stats = play_stats::search_stats(&needs);
+            sources.writes = play_stats::writes();
+            sources.stats = play_stats::search_stats(&sources.needs);
         }
         self.changed(gtk::FilterChange::Different);
     }
@@ -260,4 +284,43 @@ pub fn setup_query_entry(
             pending.replace(Some(id));
         }
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sources_read_serve_the_searches_that_need_as_much() {
+        let read = Needs {
+            added: true,
+            stats: true,
+            ..Needs::default()
+        };
+        let sources = QueueSources {
+            needs: read,
+            writes: 7,
+            ..QueueSources::default()
+        };
+        assert!(sources.cover(&read, 7));
+        // Less, or the same with words to look for too
+        assert!(sources.cover(&Needs::default(), 7));
+        assert!(sources.cover(
+            &Needs {
+                search_key: true,
+                ..read
+            },
+            7
+        ));
+        // More
+        assert!(!sources.cover(
+            &Needs {
+                favorites: true,
+                ..read
+            },
+            7
+        ));
+        // Once plays.db was written to
+        assert!(!sources.cover(&read, 8));
+    }
 }

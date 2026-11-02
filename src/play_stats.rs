@@ -214,8 +214,33 @@ fn with_connection<T>(
             Some(conn) => conn,
             None => connection.insert(open()?),
         };
-        query(conn)
+        counting_writes(conn, query)
     })
+}
+
+// Runs `query`, and changes `writes()` if it wrote anything. Once what it
+// wrote is committed, so that what's read with the number from before is
+// never newer than that number
+fn counting_writes<T>(
+    conn: &mut Connection,
+    query: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    let changes = conn.total_changes();
+    let result = query(conn);
+    if conn.total_changes() != changes {
+        WRITES.fetch_add(1, Ordering::SeqCst);
+    }
+    result
+}
+
+// How many times plays.db was written to, in any thread, so that what a
+// search reads from it can be kept while it stays the same, see `writes()`
+static WRITES: AtomicU64 = AtomicU64::new(0);
+
+// A number that changes each time plays.db is written to. What's read
+// after taking it is at least as new as the number
+pub fn writes() -> u64 {
+    WRITES.load(Ordering::SeqCst)
 }
 
 fn open() -> rusqlite::Result<Connection> {
@@ -1097,6 +1122,21 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM listens", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn writes_change_the_number_and_reads_dont() {
+        let mut conn = test_db();
+        let before = writes();
+        counting_writes(&mut conn, |conn| {
+            conn.query_row("SELECT COUNT(*) FROM totals", [], |row| {
+                row.get::<_, i64>(0)
+            })
+        })
+        .unwrap();
+        assert_eq!(writes(), before);
+        counting_writes(&mut conn, |conn| insert_favorite(conn, "a", 1)).unwrap();
+        assert_ne!(writes(), before);
     }
 
     #[test]

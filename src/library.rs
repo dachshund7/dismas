@@ -4997,8 +4997,6 @@ mod tests {
 
     #[test]
     fn the_queue_and_the_library_find_the_same_tracks() {
-        use std::collections::HashMap;
-
         use gtk::gio::prelude::FileExt;
 
         use crate::search_query::Context;
@@ -5030,10 +5028,8 @@ mod tests {
             ..Default::default()
         };
         super::TEST_SEARCH_STATS.set(stats.clone());
-        let sources = crate::search::QueueSources {
-            stats,
-            tracks: HashMap::new(),
-        };
+        let mut sources = crate::search::QueueSources::default();
+        sources.stats = stats;
         let context = Context::now();
 
         for (text, found) in [
