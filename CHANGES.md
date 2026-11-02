@@ -440,6 +440,9 @@ All notable changes to this project will be documented in this file.
   and so did the apps it opened
 - Seeking to a time from another app, over MPRIS, in a track whose length
   couldn't be read went back to its start
+- A file with tens of thousands of performers or composers in its tags,
+  as only a crafted one has, made the player and its rows in the playlist
+  take seconds to show it
 
 ### Removed
 

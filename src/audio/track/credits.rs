@@ -7,6 +7,17 @@
 
 use super::*;
 
+// The most names a credit takes from the tags, far more than a recording
+// has: the credits line looks for each name among the others, and in the
+// artists, so a crafted file with tens of thousands of performers made
+// each row and the player take seconds to show
+pub(super) const MAX_CREDITS: usize = 500;
+
+// How much of an artist, or an album artist, names are looked for in: the
+// start of a longer one, which no list of names is, as for the catalogue
+// numbers of a name
+const MAX_NAMES_LEN: usize = 4096;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Credit {
     pub name: String,
@@ -431,11 +442,12 @@ impl TrackCredits {
             .genres
             .iter()
             .any(|g| g.eq_ignore_ascii_case("classical"));
-        let named = artist.is_some_and(|a| self.artist_is_composer(a));
-        if !classical || self.composers.is_empty() || named {
+        // The quick checks first, as rows ask for it as they're shown
+        if !classical || self.composers.is_empty() {
             return None;
         }
-        Some(&self.composers)
+        let named = artist.is_some_and(|a| self.artist_is_composer(a));
+        (!named).then_some(&self.composers)
     }
 
     // The movement, with its number if any, e.g. "2. Adagio"; only set if
@@ -548,16 +560,24 @@ impl TrackCredits {
             Some(ids) if !ids.is_empty() && !self.musicbrainz.artists.is_empty() => {
                 ids.iter().all(|id| self.musicbrainz.artists.contains(id))
             }
-            _ => self.composers.iter().all(|c| names_composer(artist, c)),
+            _ => {
+                let artist = super::search::text_start(artist, MAX_NAMES_LEN);
+                self.composers.iter().all(|c| names_composer(artist, c))
+            }
         }
+    }
+
+    // The album artist, as far as names are looked for in it
+    fn album_artist(&self) -> Option<&str> {
+        self.album_artist
+            .as_deref()
+            .map(|a| super::search::text_start(a, MAX_NAMES_LEN))
     }
 
     // Whether the album artist names someone, as a release credits there
     // its soloists and the groups that play it
     fn album_artist_names(&self, name: &str) -> bool {
-        self.album_artist
-            .as_deref()
-            .is_some_and(|a| a.contains(name))
+        self.album_artist().is_some_and(|a| a.contains(name))
     }
 
     // Whether a performer is a group rather than a player. Picard gives
@@ -620,7 +640,7 @@ impl TrackCredits {
         if players <= 5 || self.performers.iter().any(|p| self.is_group(p)) {
             return None;
         }
-        let album_artist = self.album_artist.as_deref()?;
+        let album_artist = self.album_artist()?;
         let performers = match album_artist.rsplit_once(';') {
             Some((_, performers)) => performers.trim(),
             None if self
@@ -786,6 +806,7 @@ pub fn split_composers<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String>
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .unique()
+        .take(MAX_CREDITS)
         .map(ToString::to_string)
         .collect()
 }
@@ -802,4 +823,5 @@ fn tag_strs(tag: &Tag, key: ItemKey) -> impl Iterator<Item = &str> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unique()
+        .take(MAX_CREDITS)
 }

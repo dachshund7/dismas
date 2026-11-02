@@ -496,6 +496,9 @@ impl WorkHierarchy {
     // some, as the plugin does for the composer tags
     pub(super) fn composer_ids(&self) -> Option<Vec<String>> {
         let mut ids: Vec<String> = Vec::new();
+        // Each once, and only as many as a credit has, as they're compared
+        // with the ids of the artists
+        let mut seen = std::collections::HashSet::new();
         for segment in &self.segments {
             let (last, parents) = segment.path.split_last()?;
             let mut composers = last.composers.as_ref()?;
@@ -512,7 +515,7 @@ impl WorkHierarchy {
             }
             for composer in composers {
                 let id = composer.id.as_deref().filter(|id| is_mbid(id))?;
-                if !ids.iter().any(|i| i == id) {
+                if ids.len() < super::credits::MAX_CREDITS && seen.insert(id) {
                     ids.push(id.to_string());
                 }
             }

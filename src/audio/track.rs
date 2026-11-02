@@ -1287,6 +1287,27 @@ mod tests {
         assert_eq!(credits.artist_sort, None);
     }
 
+    // A crafted file can name tens of thousands of performers, and the
+    // credits line looks for each name among the others
+    #[test]
+    fn a_credit_takes_at_most_max_credits_names() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        for i in 0..2000 {
+            let player = format!("Player {i} (violin)");
+            tag.push_unchecked(lofty::tag::TagItem::new(
+                ItemKey::Performer,
+                lofty::tag::ItemValue::Text(player),
+            ));
+        }
+        let composers = (0..2000).map(|i| format!("Composer {i}")).join("; ");
+        tag.insert_text(ItemKey::Composer, composers);
+        let credits = TrackCredits::from_tag(&tag, &Default::default());
+        assert_eq!(credits.performers.len(), super::credits::MAX_CREDITS);
+        assert_eq!(credits.performers[0].name, "Player 0");
+        assert_eq!(credits.composers.len(), super::credits::MAX_CREDITS);
+        assert_eq!(credits.composers[0], "Composer 0");
+    }
+
     #[test]
     fn composers_are_listed_for_classical_music() {
         let brentner = TrackCredits {

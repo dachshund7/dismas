@@ -3950,14 +3950,23 @@ pub(crate) fn credited_work_composers(
 ) -> Vec<WorkComposer> {
     let names = &credits.composers;
     let sorts = &credits.composer_sorts;
-    let sort_of = |composer: &str| {
+    // The sort names by the keys of the names, made once, as a crafted file
+    // can name many composers; reversed, so that the first of the names
+    // with a key gives its sort name
+    let sorts: HashMap<String, &String> = if sorts.len() == names.len() {
         names
             .iter()
-            .position(|name| composer_key(name) == composer_key(composer))
-            .and_then(|i| sorts.get(i))
-            .filter(|_| sorts.len() == names.len())
-            .cloned()
-            .unwrap_or_else(|| sort_name(composer))
+            .map(|name| composer_key(name))
+            .zip(sorts)
+            .rev()
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    let sort_of = |composer: &str| {
+        sorts
+            .get(&composer_key(composer))
+            .map_or_else(|| sort_name(composer), |sort| (*sort).clone())
     };
     let work_names = credits.work_composer_names();
     let named: Vec<&str> = if work_names.is_empty() {
