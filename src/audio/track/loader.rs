@@ -193,16 +193,17 @@ impl FileCache {
 }
 
 // The track that keeps the place of a file of a playlist that gave none:
-// it isn't there, or it is but couldn't be read, e.g. it's damaged or it
-// can't be opened. An audio file that a CUE sheet among the files splits
-// has its tracks there, and needs none
+// it isn't there, or it is but couldn't be read, e.g. it's damaged, it
+// can't be opened, or it isn't a regular file, like a named pipe. An audio
+// file that a CUE sheet among the files splits has its tracks there, and
+// needs none
 fn placeholder(uri: &str, files: &FileCache) -> Option<TrackData> {
     let file = gio::File::for_uri(uri);
     let path = file.path()?;
     if files.claims.sheet_of(&path).is_some() {
         return None;
     }
-    let reason = if cue_sheet::location_exists(&path) {
+    let reason = if cue_sheet::location_exists(&path) || path.exists() {
         Missing::Unreadable
     } else {
         Missing::NotFound
@@ -530,6 +531,27 @@ mod tests {
         // out
         let read = load(&[&damaged, &gone], false);
         assert!(read.iter().all(Vec::is_empty));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_named_pipe_in_a_playlist_keeps_its_place_without_stopping_the_load() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-placeholders-XXXXXX")).unwrap();
+        let pipe = dir.join("Pipe.flac");
+        crate::utils::make_test_pipe(&pipe);
+        let wav = dir.join("Track.wav");
+        crate::utils::write_test_wav(&wav, 1);
+
+        let files = [pipe, wav];
+        let reasons = crate::utils::within_seconds(move || {
+            let files: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+            load(&files, true)
+                .iter()
+                .map(|tracks| tracks.iter().map(TrackData::missing_reason).collect())
+                .collect::<Vec<Vec<Option<Missing>>>>()
+        });
+        assert_eq!(reasons, [vec![Some(Missing::Unreadable)], vec![None]]);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

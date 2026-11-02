@@ -104,7 +104,7 @@ pub(super) fn guessed_from_junk(path: &Path, file_type: Option<FileType>) -> boo
         return false;
     }
     let mut start = [0; 36];
-    let Ok(read) = File::open(path).and_then(|mut file| file.read(&mut start)) else {
+    let Ok(read) = utils::open_regular_file(path).and_then(|mut file| file.read(&mut start)) else {
         return false;
     };
     let start = &start[..read];

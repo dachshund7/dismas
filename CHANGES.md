@@ -404,6 +404,11 @@ All notable changes to this project will be documented in this file.
 - A cover file that was a symbolic link to one of the system's own files
   that say they're empty but aren't, such as `/proc/self/pagemap`, could
   fill the memory at every start
+- A playlist that listed a named pipe, a special file that waits for a
+  program to write to it, stopped loading there for good; it now keeps its
+  place as a track that couldn't be read. A cover file or a CUE sheet
+  swapped for one as the music folders were read could stop the scan the
+  same way
 
 ### Removed
 

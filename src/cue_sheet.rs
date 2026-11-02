@@ -305,7 +305,7 @@ pub fn is_cue_path(path: &Path) -> bool {
 }
 
 fn read_sheet(path: &Path) -> Option<CueSheet> {
-    let file = std::fs::File::open(path).ok()?;
+    let file = utils::open_regular_file(path).ok()?;
     let mut bytes = Vec::new();
     file.take(MAX_SHEET_SIZE).read_to_end(&mut bytes).ok()?;
     parse(&decode(&bytes))

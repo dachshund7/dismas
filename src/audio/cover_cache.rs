@@ -352,12 +352,9 @@ fn folder_covers(dir: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
 fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
     debug!("Looking for external cover file: {file:?}");
 
-    // Opening a named pipe would wait for something to write to it
-    let metadata = std::fs::metadata(file).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    if metadata.len() > MAX_COVER_FILE_SIZE {
+    // Not a named pipe, which would wait for something to write to it
+    let opened = utils::open_regular_file(file).ok()?;
+    if opened.metadata().ok()?.len() > MAX_COVER_FILE_SIZE {
         warn!("Skipping cover file {file:?}, which is too large");
         return None;
     }
@@ -366,8 +363,7 @@ fn read_cover_file(file: &Path) -> Option<glib::Bytes> {
     // symbolic link among the covers can lead to one, so the read itself
     // stops past the largest size
     let mut data = Vec::new();
-    let read = std::fs::File::open(file)
-        .and_then(|opened| opened.take(MAX_COVER_FILE_SIZE + 1).read_to_end(&mut data));
+    let read = opened.take(MAX_COVER_FILE_SIZE + 1).read_to_end(&mut data);
     match read {
         Ok(_) if data.len() as u64 > MAX_COVER_FILE_SIZE => {
             warn!("Skipping cover file {file:?}, which is too large");

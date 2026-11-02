@@ -605,6 +605,49 @@ pub fn guarded<T>(
     })
 }
 
+// Opens a file that anyone could have put there, such as a cover next to
+// the tracks or a track of a playlist, if it's a regular file. Opening a
+// named pipe would wait for something to write to it, which stopped the
+// queue loader, or a scan, for good. Checking the path first isn't enough,
+// as a symbolic link can be swapped for a pipe in between, so the file is
+// opened without waiting, and the file opened is checked
+pub fn open_regular_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    // So that a device is never opened, as far as the path tells
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(not_a_regular_file());
+    }
+    open_if_regular(path)
+}
+
+fn open_if_regular(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(not_a_regular_file());
+    }
+    // Reading a regular file never waits, but it's read as usual, so that
+    // nothing reading it is ever told to try again
+    let fd = file.as_raw_fd();
+    // SAFETY: the descriptor is open for both calls, which only change its
+    // flags
+    let cleared = unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        flags != -1 && libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) != -1
+    };
+    if !cleared {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(file)
+}
+
+fn not_a_regular_file() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file")
+}
+
 // How many files are read at a time where reading them mostly waits, as
 // decoding a cover waits for its sandboxed loader: a few at a time go
 // faster, even on fewer cores
@@ -917,6 +960,27 @@ pub fn set_window_drag(widget: &gtk::Widget, enabled: bool) {
     }
 }
 
+// Makes a named pipe, which opening as usual would wait on
+#[cfg(test)]
+pub fn make_test_pipe(path: &std::path::Path) {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: the path is a C string that lives through the call
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+}
+
+// Runs `f` in another thread, and fails if it hasn't returned within a
+// few seconds, so that an open that waits fails the test rather than
+// stopping the whole run
+#[cfg(test)]
+pub fn within_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || sender.send(f()));
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("it waited on a named pipe")
+}
+
 // A WAV file of silence, 8000 bytes a second
 #[cfg(test)]
 pub fn write_test_wav(path: &std::path::Path, seconds: u32) {
@@ -1144,6 +1208,38 @@ mod tests {
     fn guarded_falls_back_after_a_panic() {
         assert_eq!(guarded("a file", || 1, || 0), 1);
         assert_eq!(guarded("a file", || panic!("malformed"), || 0), 0);
+    }
+
+    #[test]
+    fn a_named_pipe_is_turned_down_without_waiting() {
+        use std::{io::Read, os::fd::AsRawFd};
+
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let pipe = dir.join("cover.jpg");
+        make_test_pipe(&pipe);
+        let path = pipe.clone();
+        let opened = within_seconds(move || open_regular_file(&path).map(drop));
+        assert_eq!(opened.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+        // As when the path was swapped for the pipe once it was checked
+        let opened = within_seconds(move || open_if_regular(&pipe).map(drop));
+        assert_eq!(opened.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+
+        // A regular file is read as usual
+        let path = dir.join("folder.jpg");
+        std::fs::write(&path, "cover").unwrap();
+        let mut file = open_regular_file(&path).unwrap();
+        // SAFETY: the descriptor is open for the call
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+        assert_eq!(flags & libc::O_NONBLOCK, 0);
+        let mut text = String::new();
+        file.read_to_string(&mut text).unwrap();
+        assert_eq!(text, "cover");
+
+        // Neither a folder nor a file that isn't there is opened
+        assert!(open_regular_file(&dir).is_err());
+        let gone = open_regular_file(&dir.join("front.jpg")).unwrap_err();
+        assert_eq!(gone.kind(), std::io::ErrorKind::NotFound);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

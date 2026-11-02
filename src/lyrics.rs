@@ -19,7 +19,7 @@ use log::debug;
 
 use crate::{
     audio::{ReadOptions, read_file_tags},
-    cue_sheet,
+    cue_sheet, utils,
 };
 
 // The largest file of lyrics that's read, as lyrics take a few kilobytes
@@ -139,19 +139,14 @@ fn lyrics_file_texts(audio_file: &Path) -> impl Iterator<Item = String> {
 
 // The text of a file, unless it's too large to be lyrics
 fn read_text_file(path: &Path) -> Option<String> {
-    // Opening a named pipe would wait for something to write to it
-    let metadata = std::fs::metadata(path).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    if metadata.len() > MAX_LYRICS_FILE_SIZE {
+    // Not a named pipe, which would wait for something to write to it
+    let file = utils::open_regular_file(path).ok()?;
+    if file.metadata().ok()?.len() > MAX_LYRICS_FILE_SIZE {
         debug!("Not reading {path:?}, which is too large to be lyrics");
         return None;
     }
     let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .ok()?
-        .take(MAX_LYRICS_FILE_SIZE)
+    file.take(MAX_LYRICS_FILE_SIZE)
         .read_to_end(&mut bytes)
         .ok()?;
     Some(cue_sheet::decode(&bytes).into_owned())

@@ -305,16 +305,24 @@ impl FileTags {
 // has them; the options can leave out the covers and the properties. A
 // file that lofty can't read, GStreamer may
 pub fn read_file_tags(path: &Path, options: ReadOptions) -> Option<FileTags> {
-    let parse_options = options.parse_options();
-    let probe = match Probe::open(path).map(|probe| probe.options(parse_options).guess_file_type())
-    {
-        Ok(Ok(probe)) => probe,
-        Ok(Err(e)) => {
-            warn!("Unable to parse file type {path:?}: {e}");
-            return None;
-        }
+    // Opened as `Probe::open` does, with the type the extension gives,
+    // which the contents can change, but not if it's a named pipe, which
+    // would wait for something to write to it
+    let file = match utils::open_regular_file(path) {
+        Ok(file) => file,
         Err(e) => {
             warn!("Unable to open file {path:?}: {e}");
+            return None;
+        }
+    };
+    let mut probe = Probe::new(BufReader::new(file));
+    if let Some(file_type) = FileType::from_path(path) {
+        probe = probe.set_file_type(file_type);
+    }
+    let probe = match probe.options(options.parse_options()).guess_file_type() {
+        Ok(probe) => probe,
+        Err(e) => {
+            warn!("Unable to parse file type {path:?}: {e}");
             return None;
         }
     };
