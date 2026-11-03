@@ -280,7 +280,8 @@ impl LibraryView {
         if self.is_work_open(&work.key) {
             self.close_work(true);
         } else {
-            self.open_work(work, Opening::Toggled, None);
+            let shown = self.shown_work_row(&work.key).is_some();
+            self.open_work(work, Opening::Toggled { shown }, None);
         }
     }
 
@@ -391,7 +392,7 @@ impl LibraryView {
                     this.update_work_row(&row, &key, by_user);
                 }
                 if by_user {
-                    this.show_when_open(&key, cover, opening == Opening::GoneTo);
+                    this.show_when_open(&key, cover, opening);
                 } else if let Some(cover) =
                     cover.and_then(|cover| this.work_row(&key)?.cover_of(&cover))
                 {
@@ -632,13 +633,16 @@ impl LibraryView {
     // it closes at the same time. A work reopened as it closed slides on from
     // the share that still showed, which counts as none of the way, or the
     // line would jump that much at the first frame. When the list is
-    // scrolled away from the row as it slides, or while its covers are
-    // read, the user goes somewhere else, and the list is left where it is.
+    // scrolled away from the row as it slides, or while the covers of a
+    // work opened from its row in view are read, the user goes somewhere
+    // else, and the list is left where it is.
     //
-    // Otherwise, as when Go to Work goes to a work out of view, or to one
-    // open already, the list glides there as Show the Playing Track glides to
-    // a track, rather than jumping: at each frame, it goes its part of what's
-    // left of the way, to where the line goes if its row is laid out, or else
+    // Otherwise, the list glides there as Show the Playing Track glides to a
+    // track, rather than jumping: when Go to Work goes to a work out of view,
+    // or to one open already, or when the keys open a work whose row is out
+    // of view, as the list keeps the focus on a row it was scrolled away
+    // from. At each frame, it goes its part of what's left of the way, to
+    // where the line goes if its row is laid out, or else
     // to where the row is reckoned to be. The list only lays out the rows
     // near its view, so the work's row is made as the list comes near it, and
     // comes in open. The glide only ends with the line in its place: when
@@ -674,7 +678,7 @@ impl LibraryView {
     // cover pointed out by the last one into view. Both would move the list
     // in the same frames, and their moves would add up. So is the list going
     // on by itself after a fling, see `list_scroll::stop_kinetic_scrolling()`
-    fn show_when_open(&self, key: &str, cover: Option<CoverRef>, gone_to: bool) {
+    fn show_when_open(&self, key: &str, cover: Option<CoverRef>, opening: Opening) {
         let imp = self.imp();
         if let Some(placing) = imp.placing.take() {
             placing.remove();
@@ -682,12 +686,13 @@ impl LibraryView {
         if let Some(glide) = imp.cover_glide.take() {
             adw::prelude::AnimationExt::pause(&glide);
         }
-        // A work clicked whose row the user scrolled away from while its
-        // covers were read
+        // A work opened from its row in view, which the user scrolled away
+        // from while its covers were read
         let shown = self.shown_work_row(key);
-        if shown.is_none() && !gone_to {
+        if shown.is_none() && opening == (Opening::Toggled { shown: true }) {
             return;
         }
+        let gone_to = opening == Opening::GoneTo;
         list_scroll::stop_kinetic_scrolling(&*imp.works_list);
         let Some(pos) = self.work_position(key) else {
             return;
@@ -1325,12 +1330,13 @@ fn leaves_covers(flowbox: &gtk::FlowBox, up: bool) -> bool {
     }
 }
 
-// Why a work opens: from its row, clicked or with the keys; gone to, as
-// with Go to Work, which can be from out of view, see `show_when_open()`;
-// or read again, as the library or the search changed
+// Why a work opens: from its row, clicked or with the keys, with whether
+// the list showed the row then; gone to, as with Go to Work, which can be
+// from out of view, see `show_when_open()`; or read again, as the library
+// or the search changed
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Opening {
-    Toggled,
+    Toggled { shown: bool },
     GoneTo,
     ReadAgain,
 }
