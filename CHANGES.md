@@ -8,10 +8,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Go to Work glides to the work, as Show the Playing Track glides to a
+  track, rather than jumping to it
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
   later
 
 ### Fixed
+
+- The covers of a work on the Works page often shook as they slid open
+- A work opened while the works were read again, as after a scan or a
+  change to the favorites, could stay closed
 
 ### Removed
 

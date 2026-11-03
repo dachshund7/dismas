@@ -209,6 +209,12 @@ mod imp {
         pub(crate) expanded_work: RefCell<Option<super::works::ExpandedWork>>,
         pub(crate) work_rows: RefCell<HashMap<String, glib::WeakRef<work_row::WorkRow>>>,
         pub(crate) covers_generation: Cell<u32>,
+        // The tick callback that puts the line of the work opening in its
+        // place, see `show_when_open()`
+        pub(crate) placing: RefCell<Option<gtk::TickCallbackId>>,
+        // The work the user is opening, while its covers are read, see
+        // `open_work()`
+        pub(crate) opening: RefCell<Option<super::works::UserOpening>>,
         // A work to go to once the works are read, and the number of works
         // gone to, so that a new search's list isn't scrolled to its top
         // once one was

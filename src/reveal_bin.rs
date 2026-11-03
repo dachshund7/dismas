@@ -20,7 +20,6 @@ mod imp {
         pub(crate) child: RefCell<Option<gtk::Widget>>,
         // The share of the child that shows, from 0 when it's closed to 1
         pub(crate) progress: Cell<f64>,
-        pub(crate) revealed: Cell<bool>,
         pub(crate) animation: RefCell<Option<adw::TimedAnimation>>,
     }
 
@@ -108,10 +107,6 @@ impl RevealBin {
         self.imp().child.borrow().clone()
     }
 
-    pub(crate) fn is_revealed(&self) -> bool {
-        self.imp().revealed.get()
-    }
-
     // The share of the child that shows, 1 once it's open
     pub(crate) fn progress(&self) -> f64 {
         self.imp().progress.get()
@@ -121,7 +116,6 @@ impl RevealBin {
     // place, or at once
     pub(crate) fn set_revealed(&self, revealed: bool, animate: bool) {
         let imp = self.imp();
-        imp.revealed.set(revealed);
         if let Some(animation) = imp.animation.take() {
             animation.pause();
         }

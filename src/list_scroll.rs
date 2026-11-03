@@ -51,9 +51,7 @@ pub(crate) fn glide_adjustment(
 // scroll once it has its size, so this waits for a frame where it has it
 pub(crate) fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCallbackId {
     let waited = Cell::new(0);
-    // When the glide started, in the frame clock's microseconds, and the
-    // share of the way that was left at the last frame
-    let glide = Cell::new(None::<(i64, f64)>);
+    let glide = Cell::new(None::<Glide>);
     // The frames since the list was asked to scroll to the track itself,
     // when the glide ended where its row wasn't
     let fallback = Cell::new(None::<u32>);
@@ -87,29 +85,19 @@ pub(crate) fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk:
                 Some(bounds) => centered_value(view, &adjustment, bounds),
                 None => estimated_value(view, &adjustment, pos),
             };
-            let duration = if view.settings().is_gtk_enable_animations() {
-                GLIDE_DURATION.as_micros() as i64
-            } else {
-                0
-            };
             let now = clock.frame_time();
-            let Some((start, left_before)) = glide.get() else {
-                glide.set(Some((now, 1.0)));
-                if duration == 0 {
-                    adjustment.set_value(target);
-                }
+            let Some(mut started) = glide.get() else {
+                // The first step goes none of the way, or all of it without
+                // animations, and the row is only laid out from the next
+                let mut new = Glide::new(now, view.settings().is_gtk_enable_animations());
+                adjustment.set_value(new.step(adjustment.value(), target, now));
+                glide.set(Some(new));
                 return glib::ControlFlow::Continue;
             };
 
-            let progress = if duration > 0 {
-                ((now - start) as f64 / duration as f64).min(1.0)
-            } else {
-                1.0
-            };
-            let (value, left) = glide_step(adjustment.value(), target, left_before, progress);
-            adjustment.set_value(value);
-            glide.set(Some((start, left)));
-            if progress < 1.0 {
+            adjustment.set_value(started.step(adjustment.value(), target, now));
+            glide.set(Some(started));
+            if started.progress(now) < 1.0 {
                 return glib::ControlFlow::Continue;
             }
 
@@ -124,6 +112,56 @@ pub(crate) fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk:
             glib::ControlFlow::Break
         }
     ))
+}
+
+// A glide of a list's scroll to a place that can move as the list lays out
+// its rows, as `flash_track()` glides to a track and the works to an open
+// one: it lasts `GLIDE_DURATION` from the frame time it starts at, or no
+// time when animations are off, as GTK's settings can ask, and it jumps
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Glide {
+    start: i64,
+    duration: i64,
+    // The share of the way still to go after the last step
+    left: f64,
+}
+
+impl Glide {
+    pub(crate) fn new(start: i64, animate: bool) -> Self {
+        let duration = if animate {
+            GLIDE_DURATION.as_micros() as i64
+        } else {
+            0
+        };
+        Self {
+            start,
+            duration,
+            left: 1.0,
+        }
+    }
+
+    // The share of its time that has passed at the frame time `now`, from
+    // 0 to 1, which `glide_step()` eases
+    pub(crate) fn progress(&self, now: i64) -> f64 {
+        if self.duration > 0 {
+            ((now - self.start) as f64 / self.duration as f64).clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    }
+
+    // Where the list goes from `value` at the frame time `now`, on its way
+    // to `target`, see `glide_step()`
+    pub(crate) fn step(&mut self, value: f64, target: f64, now: i64) -> f64 {
+        let (value, left) = glide_step(value, target, self.left, self.progress(now));
+        self.left = left;
+        value
+    }
+
+    // Whether it went all its way
+    pub(crate) fn is_done(&self) -> bool {
+        self.left == 0.0
+    }
 }
 
 // A frame of a glide: where it moves to from `value`, and the share of the
@@ -263,7 +301,7 @@ pub(crate) fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCall
 
 // Waits one more frame for a list to get its size, unless it was waited for
 // long enough
-fn wait_for_size(waited: &Cell<u32>) -> glib::ControlFlow {
+pub(crate) fn wait_for_size(waited: &Cell<u32>) -> glib::ControlFlow {
     waited.set(waited.get() + 1);
     if waited.get() < SIZE_WAIT_FRAMES {
         glib::ControlFlow::Continue
@@ -362,7 +400,7 @@ fn centered_value(
 
 // The same for a row that isn't laid out: the list reckons the rows it
 // hasn't laid out at the height of the others, on average
-fn estimated_value(view: &gtk::ListView, adjustment: &gtk::Adjustment, pos: u32) -> f64 {
+pub(crate) fn estimated_value(view: &gtk::ListView, adjustment: &gtk::Adjustment, pos: u32) -> f64 {
     let n_items = view.model().map_or(0, |model| model.n_items());
     if n_items == 0 {
         return adjustment.value();
@@ -408,7 +446,28 @@ fn track_item(view: &gtk::ListView, track: &Track) -> Option<(gtk::Widget, Queue
 
 #[cfg(test)]
 mod tests {
-    use super::glide_step;
+    use super::{GLIDE_DURATION, Glide, glide_step};
+
+    #[test]
+    fn a_glide_starts_in_place_or_jumps_without_animations() {
+        let duration = GLIDE_DURATION.as_micros() as i64;
+        // Its first step goes none of the way, and once its time is up,
+        // each step goes all the rest of it, to where the row turned out
+        let mut glide = Glide::new(1_000, true);
+        assert_eq!(glide.step(0.0, 100.0, 1_000), 0.0);
+        assert!(!glide.is_done());
+        assert_eq!(glide.progress(1_000 + duration / 2), 0.5);
+        assert_eq!(glide.step(0.0, 100.0, 1_000 + duration), 100.0);
+        assert!(glide.is_done());
+        assert_eq!(glide.step(100.0, 130.0, 1_000 + duration * 2), 130.0);
+
+        // Without animations, the first step goes all the way
+        let mut jump = Glide::new(1_000, false);
+        assert_eq!(jump.progress(1_000), 1.0);
+        assert_eq!(jump.step(0.0, 100.0, 1_000), 100.0);
+        assert!(jump.is_done());
+        assert_eq!(jump.step(100.0, 130.0, 1_017), 130.0);
+    }
 
     #[test]
     fn a_glide_eases_and_ends_on_its_target() {

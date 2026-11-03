@@ -35,6 +35,15 @@ pub(crate) struct PendingWork {
     cleared: bool,
 }
 
+// A work the user opens, whose covers are being read, with how it opens
+// and the cover to point out, see `open_work()`
+#[derive(Debug)]
+pub(crate) struct UserOpening {
+    key: String,
+    opening: Opening,
+    cover: Option<CoverRef>,
+}
+
 // A cover among those of an open work: the one of the recording of a track
 // of an album, or without the track, or when it's in none, the first one
 // of the album
@@ -198,12 +207,11 @@ impl LibraryView {
         })
     }
 
-    // The position of the work that a work is listed under, itself or the
-    // work it arranges, and the work there
-    fn listing(&self, key: &str) -> Option<(u32, library::WorkInfo)> {
-        self.find_work(|i, work| {
+    // The work that a work is listed under, itself or the work it arranges
+    fn listing(&self, key: &str) -> Option<library::WorkInfo> {
+        self.find_work(|_, work| {
             let listed = work.key == key || work.arrangements.iter().any(|a| a == key);
-            listed.then(|| (i, work.clone()))
+            listed.then(|| work.clone())
         })
     }
 
@@ -267,7 +275,7 @@ impl LibraryView {
         if self.is_work_open(&work.key) {
             self.close_work(true);
         } else {
-            self.open_work(work, true, None);
+            self.open_work(work, Opening::Toggled, None);
         }
     }
 
@@ -277,6 +285,7 @@ impl LibraryView {
         let imp = self.imp();
         imp.covers_generation
             .set(imp.covers_generation.get().wrapping_add(1));
+        imp.opening.take();
         if imp.expanded_work.borrow().is_none() {
             return;
         }
@@ -298,14 +307,24 @@ impl LibraryView {
     // glides to show its covers; the `cover`, if any, is then pointed out.
     // Read again, the `cover` only takes the focus back. Covers selected
     // among those of another work are unselected, and the same work read
-    // again keeps those of the recordings still there
-    fn open_work(&self, work: &library::WorkInfo, by_user: bool, cover: Option<CoverRef>) {
+    // again keeps those of the recordings still there.
+    //
+    // Covers read before the latest opening are dropped. When the works are
+    // read again meanwhile, a work the user opens is opened again, see
+    // `show_works()`, rather than dropped for the work that was open
+    fn open_work(&self, work: &library::WorkInfo, opening: Opening, cover: Option<CoverRef>) {
         let imp = self.imp();
+        let by_user = opening != Opening::ReadAgain;
         let key = work.key.clone();
         let keys = work.keys();
         let name = work.name.clone();
         let generation = imp.covers_generation.get().wrapping_add(1);
         imp.covers_generation.set(generation);
+        imp.opening.replace(by_user.then(|| UserOpening {
+            key: key.clone(),
+            opening,
+            cover: cover.clone(),
+        }));
         let filter = self.search_filter_for_works();
         let hidden = imp.hidden_folders.borrow().clone();
         glib::spawn_future_local(clone!(
@@ -329,6 +348,7 @@ impl LibraryView {
                 if imp.covers_generation.get() != generation {
                     return;
                 }
+                imp.opening.take();
                 let read_again = this.is_work_open(&key);
                 // Before the other work's covers go, so that they're
                 // unselected
@@ -358,13 +378,16 @@ impl LibraryView {
                 {
                     this.update_work_row(&row, &before.key, by_user);
                 }
+                // A row the list hasn't made comes in open when it does
                 if let Some(row) = this.work_row(&key) {
                     this.update_work_row(&row, &key, by_user);
-                    if by_user {
-                        this.show_when_open(&row, cover);
-                    } else if let Some(cover) = cover.and_then(|cover| row.cover_of(&cover)) {
-                        cover.grab_focus();
-                    }
+                }
+                if by_user {
+                    this.show_when_open(&key, cover, opening == Opening::GoneTo);
+                } else if let Some(cover) =
+                    cover.and_then(|cover| this.work_row(&key)?.cover_of(&cover))
+                {
+                    cover.grab_focus();
                 }
             }
         ));
@@ -592,56 +615,182 @@ impl LibraryView {
 
     // As a work opens, the list glides along, so that its covers end in the
     // middle of the list, as far as its line stays in view, so a work too
-    // tall for that has its line at the top. Where the line ends is known
-    // from the height of the covers before they open, and at each frame of
-    // their slide, the list puts the line that much of the way there, with
-    // the slide's easing, which keeps it in place as a work above it closes
-    // at the same time. Its row is laid out open at the frame after the
-    // last, when the `cover`, if any, is pointed out
-    fn show_when_open(&self, row: &WorkRow, cover: Option<CoverRef>) {
-        let list = self.imp().works_list.get();
-        let Some(bin) = row.covers() else {
+    // tall for that has its line at the top.
+    //
+    // When its row is in view and its covers slide open, where the line ends
+    // is known from the height of the covers before they open, and at each
+    // frame of their slide, the list puts the line that much of the way
+    // there, with the slide's easing, which keeps it in place as a work above
+    // it closes at the same time. A work reopened as it closed slides on from
+    // the share that still showed, which counts as none of the way, or the
+    // line would jump that much at the first frame. When the list is
+    // scrolled away from the row as it slides, the user goes somewhere else,
+    // and the line is left there.
+    //
+    // Otherwise, as when Go to Work goes to a work out of view, or to one
+    // open already, the list glides there as Show the Playing Track glides to
+    // a track, rather than jumping: at each frame, it goes its part of what's
+    // left of the way, to where the line goes if its row is laid out, or else
+    // to where the row is reckoned to be. The list only lays out the rows
+    // near its view, so the work's row is made as the list comes near it, and
+    // comes in open. The glide only ends with the line in its place: when
+    // its last step aimed at where the row was reckoned to be, the line is
+    // placed at the next frame, from where the row was laid out, and when
+    // the row isn't there either, the list is scrolled to it, and the line
+    // is placed from there.
+    //
+    // The row is laid out open at the frame after the last, when the
+    // `cover`, if any, is pointed out. A work `gone_to` without one takes
+    // the focus then; one opened from its row has it already, or the user
+    // took it somewhere else meanwhile.
+    //
+    // The line is put in its place after the list is laid out, not before.
+    // A scroll keeps one item of the list in place, and lays out the others
+    // from it: GTK picks the item at a point of the view that depends on how
+    // far down the list is, and keeps either its top or its bottom where it
+    // was. Scrolled before the layout, the line stayed in its place when the
+    // top of its row or a row above it was kept, but went up by what the
+    // covers grew in that frame when the bottom of its row or a row below it
+    // was, and as the item kept changed from frame to frame, the covers
+    // shook. Scrolled after the layout, when no row changes height any more,
+    // the list is laid out again before it's drawn, as the frame clock
+    // repeats its layout while one is asked for, with the line in its place.
+    //
+    // The frame clock only lays out a frame when something asks for it. The
+    // covers ask at each frame of their slide, but nothing does as the list
+    // glides, so the list asks for a layout at each frame until the line is
+    // placed.
+    //
+    // Only one work opens at a time, so a placement still running when
+    // another one starts is stopped first. Both would move the list from the
+    // same layout, and their moves would add up
+    fn show_when_open(&self, key: &str, cover: Option<CoverRef>, gone_to: bool) {
+        let imp = self.imp();
+        if let Some(placing) = imp.placing.take() {
+            placing.remove();
+        }
+        let Some(pos) = self.work_position(key) else {
             return;
         };
-        let line = row.line();
-        let Some(start) = row.compute_bounds(&list).map(|bounds| bounds.y()) else {
-            return;
-        };
-        let covers = bin.child().map_or(0, |covers| {
-            covers.measure(gtk::Orientation::Vertical, row.width()).1
+        let list = imp.works_list.get();
+        let slide = self.shown_work_row(key).and_then(|(row, start)| {
+            let from = row.covers()?.progress();
+            (from < 1.0).then(|| Pace::Slide {
+                start,
+                end: line_end(&list, &row),
+                from,
+            })
         });
-        let end =
-            (list.height() as f32 / 2.0 - line.height() as f32 - covers as f32 / 2.0).max(0.0);
+        let key = key.to_string();
+        let pace = Cell::new(None);
+        // The line is placed until this callback is dropped: when it's done,
+        // when the next placement removes it, or when the list is disposed
+        let after_layout = Cell::new(None);
+        let waited = Cell::new(0);
         let laid_out = Cell::new(false);
-        bin.add_tick_callback(clone!(
+        let settling = Cell::new(0);
+        let fell_back = Cell::new(false);
+        let tick = list.add_tick_callback(clone!(
             #[weak(rename_to = this)]
             self,
-            #[weak]
-            list,
-            #[weak]
-            row,
             #[upgrade_or]
             glib::ControlFlow::Break,
-            move |bin, _| {
-                if !bin.is_revealed() {
+            move |list, clock| {
+                if !this.is_work_open(&key) {
                     return glib::ControlFlow::Break;
                 }
-                let progress = bin.progress();
-                if let (Some(bounds), Some(adjustment)) =
-                    (row.compute_bounds(&list), list.vadjustment())
-                {
-                    let wanted = start + (end - start) * progress as f32;
-                    adjustment.set_value(adjustment.value() + f64::from(bounds.y() - wanted));
+                // A list just shown gets its size at a later frame
+                if list.height() == 0 {
+                    return list_scroll::wait_for_size(&waited);
                 }
-                if progress < 1.0 || !laid_out.replace(true) {
-                    return glib::ControlFlow::Continue;
-                }
-                if let Some(cover) = cover.as_ref().and_then(|cover| row.cover_of(cover)) {
-                    this.point_out_cover(&cover);
+                // Set at the first frame, which comes once the list is
+                // realized, as it may have had no frame clock before
+                let pace = pace.get().unwrap_or_else(|| {
+                    let new = slide.unwrap_or_else(|| {
+                        let animate = list.settings().is_gtk_enable_animations();
+                        Pace::Glide(list_scroll::Glide::new(clock.frame_time(), animate))
+                    });
+                    pace.set(Some(new));
+                    let place = place_line(&this, &key, pos, new);
+                    after_layout.set(Some(AfterLayout::connect(clock, place)));
+                    new
+                });
+                let shown = this.shown_work_row(&key);
+                let row = match pace {
+                    Pace::Slide { .. } => {
+                        // The list was scrolled away from the row, and the
+                        // user goes somewhere else
+                        let Some((row, _)) = shown else {
+                            return glib::ControlFlow::Break;
+                        };
+                        let progress = row.covers().map_or(1.0, |bin| bin.progress());
+                        if pace.share(progress, clock.frame_time()) < 1.0 || !laid_out.replace(true)
+                        {
+                            list.queue_allocate();
+                            return glib::ControlFlow::Continue;
+                        }
+                        row
+                    }
+                    // The glide's last step is made in the layout of the
+                    // first frame its time is up in
+                    Pace::Glide { .. }
+                        if pace.share(1.0, clock.frame_time()) < 1.0 || !laid_out.replace(true) =>
+                    {
+                        list.queue_allocate();
+                        return glib::ControlFlow::Continue;
+                    }
+                    Pace::Glide { .. } => match shown {
+                        Some((row, y))
+                            if line_is_placed(list, &row, y) || settling.get() >= SETTLE_FRAMES =>
+                        {
+                            row
+                        }
+                        // The row was laid out after the last step, which
+                        // aimed at where it was reckoned to be: the next
+                        // layout goes the rest of the way to its line
+                        Some(_) => {
+                            settling.set(settling.get() + 1);
+                            list.queue_allocate();
+                            return glib::ControlFlow::Continue;
+                        }
+                        // The glide ended where the row was reckoned to be,
+                        // and it wasn't there; the list knows where it is,
+                        // and the next layout places the line from there
+                        None => {
+                            if fell_back.replace(true) {
+                                return glib::ControlFlow::Break;
+                            }
+                            list.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+                            list.queue_allocate();
+                            return glib::ControlFlow::Continue;
+                        }
+                    },
+                };
+                match cover.as_ref().and_then(|cover| row.cover_of(cover)) {
+                    Some(cover) => this.point_out_cover(&cover),
+                    None if gone_to => {
+                        if let Some(item) = utils::list_item_of(&row) {
+                            item.grab_focus();
+                        }
+                    }
+                    None => {}
                 }
                 glib::ControlFlow::Break
             }
         ));
+        imp.placing.replace(Some(tick));
+    }
+
+    // The row of a work and where it is in the list, if the list shows it.
+    // The list keeps some rows out of its view, e.g. the one of the item
+    // with the focus, hidden where they last were, which isn't where they
+    // are now
+    fn shown_work_row(&self, key: &str) -> Option<(WorkRow, f32)> {
+        let row = self.work_row(key).filter(WidgetExt::is_mapped)?;
+        let bounds = row
+            .compute_bounds(&*self.imp().works_list)
+            .filter(|bounds| bounds.height() > 0.0)?;
+        Some((row, bounds.y()))
     }
 
     // The cover of the recording gone to with a work takes the focus, glides
@@ -824,15 +973,24 @@ impl LibraryView {
         }
 
         // The open work stays open, with its covers read again, as the
-        // albums or the favorites can have changed, unless it's gone
+        // albums or the favorites can have changed, unless it's gone. A work
+        // the user is opening, whose covers are still being read, is opened
+        // again instead, as that reading is dropped now, and it's the work
+        // that will be open
         let open = imp
             .expanded_work
             .borrow()
             .as_ref()
             .map(|work| work.key.clone());
-        if let Some(key) = open {
+        let opening = imp.opening.take().and_then(|opening| {
+            let work = self.find_work(|_, work| (work.key == opening.key).then(|| work.clone()))?;
+            Some((work, opening))
+        });
+        if let Some((work, opening)) = opening {
+            self.open_work(&work, opening.opening, opening.cover);
+        } else if let Some(key) = open {
             match self.find_work(|_, work| (work.key == key).then(|| work.clone())) {
-                Some(work) => self.open_work(&work, false, focused),
+                Some(work) => self.open_work(&work, Opening::ReadAgain, focused),
                 None => self.close_work(false),
             }
         }
@@ -840,13 +998,13 @@ impl LibraryView {
         self.reveal_pending_work();
     }
 
-    // Goes to a work, as from Go to Work in the menu of a track: the list
-    // scrolls to it, or to the work it's listed under if it's an
-    // arrangement, it takes the focus, and it opens, pointing out the cover
-    // of the recording of `track` on `album`, if any, as if it had been
-    // clicked. That's once the works shown are read for the search as it
-    // is, and the library, which can take a moment when the page was just
-    // shown
+    // Goes to a work, as from Go to Work in the menu of a track: it opens,
+    // as if it had been clicked, and the list glides to it, or to the work
+    // it's listed under if it's an arrangement; then the cover of the
+    // recording of `track` on `album`, if any, is pointed out, or else the
+    // work takes the focus. That's once the works shown are read for the
+    // search as it is, and the library, which can take a moment when the
+    // page was just shown
     pub(crate) fn reveal_work(&self, key: &str, album: Option<&str>, track: Option<&Path>) {
         self.imp().pending_work.replace(Some(PendingWork {
             key: key.to_string(),
@@ -876,13 +1034,11 @@ impl LibraryView {
         let Some(mut pending) = imp.pending_work.take() else {
             return;
         };
-        if let Some((pos, work)) = self.listing(&pending.key) {
+        if let Some(work) = self.listing(&pending.key) {
+            // The list glides to it once it's read, see `show_when_open()`
             imp.works_revealed
                 .set(imp.works_revealed.get().wrapping_add(1));
-            imp.works_list
-                .scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
-            utils::focus_when_laid_out(&*imp.works_list);
-            self.open_work(&work, true, pending.cover);
+            self.open_work(&work, Opening::GoneTo, pending.cover);
             return;
         }
         if pending.cleared || (filter.is_empty() && !imp.favorites_button.is_active()) {
@@ -1144,6 +1300,161 @@ fn leaves_covers(flowbox: &gtk::FlowBox, up: bool) -> bool {
     }
 }
 
+// Why a work opens: from its row, clicked or with the keys; gone to, as
+// with Go to Work, which can be from out of view, see `show_when_open()`;
+// or read again, as the library or the search changed
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Opening {
+    Toggled,
+    GoneTo,
+    ReadAgain,
+}
+
+// How far along its way the line of a work opening is, see
+// `show_when_open()`
+#[derive(Clone, Copy, Debug)]
+enum Pace {
+    // The covers slide open in view, and the line goes from `start` to
+    // `end`, in the list's coordinates, as far as they slid since they
+    // showed the share `from`, with the slide's easing
+    Slide { start: f32, end: f32, from: f64 },
+    // The list glides to the line, as it glides to a track with Show the
+    // Playing Track
+    Glide(list_scroll::Glide),
+}
+
+impl Pace {
+    // How far the move is, from 0 to 1, with the bin's `progress` at the
+    // frame time `now`: the share of the way that the covers slid, which is
+    // eased already, or the share of the glide's time, which the glide eases
+    fn share(self, progress: f64, now: i64) -> f64 {
+        match self {
+            Self::Slide { from, .. } if from < 1.0 => {
+                ((progress - from) / (1.0 - from)).clamp(0.0, 1.0)
+            }
+            Self::Slide { .. } => 1.0,
+            Self::Glide(glide) => glide.progress(now),
+        }
+    }
+}
+
+// Where the line of an open work's row goes in the list, so that its covers
+// are in the middle of the list, as far as the line stays in view
+fn line_end(list: &gtk::ListView, row: &WorkRow) -> f32 {
+    let covers = row
+        .covers()
+        .and_then(|bin| bin.child())
+        .map_or(0, |covers| {
+            covers.measure(gtk::Orientation::Vertical, row.width()).1
+        });
+    (list.height() as f32 / 2.0 - row.line().height() as f32 - covers as f32 / 2.0).max(0.0)
+}
+
+// Where the list of works scrolls to, so that the line of an open work's
+// row, at `y` in the list, is in its place, as far as the list scrolls
+fn line_target(list: &gtk::ListView, adjustment: &gtk::Adjustment, row: &WorkRow, y: f32) -> f64 {
+    let off = (y - line_end(list, row)).round();
+    list_scroll::within_scroll(adjustment, adjustment.value() + f64::from(off))
+}
+
+// The frames that a glide to a work is waited for to put its line in its
+// place, after its time is up, as rows laid out at its last step can move
+// the line: then it ends where the line is
+const SETTLE_FRAMES: u32 = 5;
+
+// Whether the line of an open work's row, at `y` in the list, is in its
+// place, give or take the pixel that the list rounds its scroll to
+fn line_is_placed(list: &gtk::ListView, row: &WorkRow, y: f32) -> bool {
+    list.vadjustment().is_none_or(|adjustment| {
+        (line_target(list, &adjustment, row, y) - adjustment.value()).abs() <= 1.0
+    })
+}
+
+// The layout handler that moves the list of works so that the line of the
+// work `key`, at `pos`, is as far along its way as `pace` says, see
+// `show_when_open()`. It moves the list once a frame: a glide goes its part
+// of the way once, and the list rounds its scroll to whole pixels, so the
+// line of a slide can still be a pixel off after it's placed, and isn't
+// laid out again and again for that pixel
+fn place_line(
+    view: &LibraryView,
+    key: &str,
+    pos: u32,
+    pace: Pace,
+) -> impl Fn(&gdk::FrameClock) + 'static {
+    let key = key.to_string();
+    let placed_at = Cell::new(None);
+    // A glide keeps how much of its way is left
+    let pace = Cell::new(pace);
+    clone!(
+        #[weak]
+        view,
+        move |clock: &gdk::FrameClock| {
+            let frame = clock.frame_counter();
+            if placed_at.get() == Some(frame) || !view.is_work_open(&key) {
+                return;
+            }
+            let list = view.imp().works_list.get();
+            let Some(adjustment) = list.vadjustment() else {
+                return;
+            };
+            let shown = view.shown_work_row(&key);
+            let value = match (pace.get(), shown) {
+                (slide @ Pace::Slide { start, end, .. }, Some((row, y))) => {
+                    let progress = row.covers().map_or(1.0, |bin| bin.progress());
+                    let share = slide.share(progress, clock.frame_time());
+                    let off = y - (start + (end - start) * share as f32).round();
+                    if off.abs() < 1.0 {
+                        return;
+                    }
+                    adjustment.value() + f64::from(off)
+                }
+                (Pace::Slide { .. }, None) => return,
+                // The glide went all its way, and the row wasn't there: the
+                // tick scrolls to it, which aiming at where it's reckoned
+                // to be again would undo
+                (Pace::Glide(glide), None) if glide.is_done() => return,
+                (Pace::Glide(mut glide), shown) => {
+                    let target = match shown {
+                        Some((row, y)) => line_target(&list, &adjustment, &row, y),
+                        None => list_scroll::estimated_value(&list, &adjustment, pos),
+                    };
+                    let value = glide.step(adjustment.value(), target, clock.frame_time());
+                    pace.set(Pace::Glide(glide));
+                    value
+                }
+            };
+            placed_at.set(Some(frame));
+            adjustment.set_value(value);
+        }
+    )
+}
+
+// A handler of a frame clock's layout signal, disconnected when this is
+// dropped. It runs after the handlers connected without `after`, whatever
+// the order they were connected in, among them the one the window's surface
+// lays the window out with
+struct AfterLayout(gdk::FrameClock, Option<glib::SignalHandlerId>);
+
+impl AfterLayout {
+    fn connect(clock: &gdk::FrameClock, f: impl Fn(&gdk::FrameClock) + 'static) -> Self {
+        let handler = clock.connect_closure(
+            "layout",
+            true,
+            glib::closure_local!(move |clock: &gdk::FrameClock| f(clock)),
+        );
+        Self(clock.clone(), Some(handler))
+    }
+}
+
+impl Drop for AfterLayout {
+    fn drop(&mut self) {
+        if let Some(handler) = self.1.take() {
+            self.0.disconnect(handler);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1211,5 +1522,42 @@ mod tests {
 
         merge_works(&store, Vec::new());
         assert_eq!(store.n_items(), 0);
+    }
+
+    #[test]
+    fn the_line_goes_all_its_way_however_the_work_opens() {
+        // A work opening from closed goes as far as its covers slid open
+        let slide = Pace::Slide {
+            start: 0.0,
+            end: 0.0,
+            from: 0.0,
+        };
+        assert_eq!(slide.share(0.0, 0), 0.0);
+        assert_eq!(slide.share(0.3, 0), 0.3);
+        assert_eq!(slide.share(1.0, 0), 1.0);
+
+        // One reopened as it closed starts at none of the way, not at the
+        // share that still showed
+        let reopened = Pace::Slide {
+            start: 0.0,
+            end: 0.0,
+            from: 0.6,
+        };
+        assert_eq!(reopened.share(0.6, 0), 0.0);
+        assert!((reopened.share(0.8, 0) - 0.5).abs() < 1e-9);
+        assert_eq!(reopened.share(1.0, 0), 1.0);
+
+        // A glide goes by its own time, from its start, whatever the covers
+        // show
+        let duration = list_scroll::GLIDE_DURATION.as_micros() as i64;
+        let glide = Pace::Glide(list_scroll::Glide::new(1_000, true));
+        assert_eq!(glide.share(0.0, 1_000), 0.0);
+        assert_eq!(glide.share(1.0, 1_000 + duration / 2), 0.5);
+        assert_eq!(glide.share(0.0, 1_000 + duration), 1.0);
+        assert_eq!(glide.share(1.0, 1_000 + duration * 3), 1.0);
+
+        // Without animations, it's there at once
+        let jump = Pace::Glide(list_scroll::Glide::new(1_000, false));
+        assert_eq!(jump.share(0.0, 1_000), 1.0);
     }
 }
