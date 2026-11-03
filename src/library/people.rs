@@ -64,22 +64,58 @@ fn read_entries(
     hidden: &[PathBuf],
     mut read: impl FnMut(&str, Option<&str>, &str),
 ) -> rusqlite::Result<()> {
+    read_entries_with(
+        conn,
+        column,
+        [],
+        counted,
+        filter,
+        hidden,
+        |album, counts_for, entries, []| {
+            if let Some(entries) = entries {
+                read(album, counts_for, entries);
+            }
+        },
+    )
+}
+
+// `read_entries()`, also with the values of the `also` columns, of the
+// tracks with some in `column` or in any of them, in one pass
+fn read_entries_with<const N: usize>(
+    conn: &Connection,
+    column: &str,
+    also: [&str; N],
+    counted: Counted,
+    filter: &TrackFilter,
+    hidden: &[PathBuf],
+    mut read: impl FnMut(&str, Option<&str>, Option<&str>, [Option<&str>; N]),
+) -> rusqlite::Result<()> {
     let counted = match counted {
         Counted::Albums => "album_id",
         Counted::Works => "work_key",
     };
+    let columns: String = also.iter().map(|c| format!(", {c}")).collect();
+    let any = std::iter::once(column)
+        .chain(also.iter().copied())
+        .map(|c| format!("{c} IS NOT NULL"))
+        .join(" OR ");
     let mut stmt = conn.prepare(&format!(
-        "SELECT album_id, CASE WHEN {} = 1 THEN {counted} END, {column} FROM tracks
-         WHERE album_id IS NOT NULL AND {column} IS NOT NULL{}",
+        "SELECT album_id, CASE WHEN {} = 1 THEN {counted} END, {column}{columns} FROM tracks
+         WHERE album_id IS NOT NULL AND ({any}){}",
         filter.matches_sql(),
         hidden_condition("file", hidden).0
     ))?;
     let mut rows = stmt.query(rusqlite::params_from_iter(filter_values(filter, hidden)))?;
     while let Some(row) = rows.next()? {
+        let mut others = [None; N];
+        for (i, other) in others.iter_mut().enumerate() {
+            *other = row.get_ref(3 + i)?.as_str_or_null()?;
+        }
         read(
             row.get_ref(0)?.as_str()?,
             row.get_ref(1)?.as_str_or_null()?,
-            row.get_ref(2)?.as_str()?,
+            row.get_ref(2)?.as_str_or_null()?,
+            others,
         );
     }
     Ok(())
@@ -271,9 +307,23 @@ pub(crate) fn performers(
 // do, as someone who conducts can play too. A name in the album artist
 // that a track doesn't credit is taken to be a group's, without a role,
 // though it can be a player's that other tracks credit, so it only counts
-// when nothing else does. What they do, their names and their roles go by
-// all their tracks, whatever the filter, so that they're under the same
-// header, and named the same, in every list
+// when nothing else does; an artist, such as a band, only when neither
+// does, so that a singer the tags credit with their voice is with the
+// soloists, and a soloist on an album of their own stays one. What they
+// do, their names and their roles go by all their tracks, whatever the
+// filter, so that they're under the same header, and named the same, in
+// every list.
+//
+// An artist is left out when it's a composer rather than a performer:
+// when the library has more albums with music they wrote that others are
+// credited with performing than albums they perform on, as some classical
+// releases give the composer as the album artist, without crediting them
+// as the composer, e.g. "Jan Dismas Zelenka" or "Ludwig van Beethoven,
+// Ensemble Zefiro", a name in which is one. Only an album whose tracks
+// credit conductors or performers, or are works, counts against them, so
+// that a songwriter stays when all their library has is the albums of
+// their band, tagged with the artist and the composers, as iTunes tags
+// them, e.g. "Paul McCartney" with those of The Beatles
 pub(super) fn query_performers(
     conn: &Connection,
     hidden: &[PathBuf],
@@ -287,19 +337,39 @@ pub(super) fn query_performers(
     struct Seen {
         counted: HashSet<String>,
         kinds: HashMap<PerformerKind, HashSet<String>>,
+        // The albums with any line of theirs, and whether they're a guessed
+        // group
+        albums: HashSet<String>,
+        guessed: bool,
+        // The sort names of the artist's lines, which only count for an
+        // artist, as a soloist's has their last name first; empty unless
+        // they're an artist anywhere
+        artist_sorts: HashMap<String, usize>,
         names: HashMap<String, usize>,
         sorts: HashMap<String, usize>,
         roles: HashMap<String, usize>,
     }
+    impl Seen {
+        fn is_artist(&self) -> bool {
+            !self.artist_sorts.is_empty()
+        }
+    }
 
     let mut seen: HashMap<String, Seen> = HashMap::new();
-    read_entries(
+    // The albums of each composer with a track that others are credited
+    // with performing
+    let mut composed: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut short = String::new();
+    read_entries_with(
         conn,
         "performers",
+        ["composers", "work_composers", "work_key"],
         counted,
         filter,
         hidden,
-        |album, counts_for, entries| {
+        |album, counts_for, entries, [composers, work_composers, work]| {
+            let entries = entries.unwrap_or_default();
+            let mut credited = false;
             for line in entries.lines() {
                 let mut fields = line.split('\t');
                 let (Some(kind), Some(key), Some(name), Some(sort), Some(role)) = (
@@ -311,32 +381,99 @@ pub(super) fn query_performers(
                 ) else {
                     continue;
                 };
+                credited |= kind != PerformerKind::Artist;
                 let performer = entry_of(&mut seen, key);
                 if let Some(counts_for) = counts_for {
                     insert_str(&mut performer.counted, counts_for);
                 }
+                insert_str(&mut performer.albums, album);
                 let guessed = kind == PerformerKind::Ensemble && role.is_empty();
-                if !guessed {
-                    insert_str(performer.kinds.entry(kind).or_default(), album);
+                if kind == PerformerKind::Artist {
+                    count(&mut performer.artist_sorts, sort);
+                } else {
+                    if guessed {
+                        performer.guessed = true;
+                    } else {
+                        insert_str(performer.kinds.entry(kind).or_default(), album);
+                    }
+                    count(&mut performer.sorts, sort);
                 }
                 count(&mut performer.names, name);
-                count(&mut performer.sorts, sort);
                 if !role.is_empty() {
                     count(&mut performer.roles, role);
+                }
+            }
+            if !credited && work.is_none() {
+                return;
+            }
+            // A composer performs a track that a performer whose name has
+            // theirs plays, as a singer fronts a band named after them, e.g.
+            // "Tom Petty and the Heartbreakers". The composer is also counted
+            // by their first and last names, as MusicBrainz names composers
+            // with their middle names or patronymics but other tags don't,
+            // e.g. "Alexander Borodin" for "Alexander Porfyrevich Borodin"
+            let performs = |key: &str| {
+                entries
+                    .lines()
+                    .filter_map(|line| line.split('\t').nth(1))
+                    .any(|on| has_name(on, key))
+            };
+            let composer_keys = [composers, work_composers]
+                .into_iter()
+                .flatten()
+                .flat_map(|entries| entries.lines())
+                .filter_map(|line| line.split('\t').next())
+                .filter(|key| !key.is_empty());
+            for key in composer_keys {
+                for key in [Some(key), short_key(key, &mut short)]
+                    .into_iter()
+                    .flatten()
+                {
+                    if !performs(key) {
+                        insert_str(entry_of(&mut composed, key), album);
+                    }
                 }
             }
         },
     )?;
 
+    // Whether a name is a composer's rather than a performer's
+    let performed_on = |key: &str| seen.get(key).map_or(0, |seen| seen.albums.len());
+    let is_composer = |key: &str| {
+        composed
+            .get(key)
+            .is_some_and(|albums| albums.len() > performed_on(key))
+    };
+    let composer_artists: HashSet<String> = seen
+        .iter()
+        .filter(|(_, seen)| seen.is_artist() && seen.kinds.is_empty() && !seen.guessed)
+        .filter(|(key, seen)| {
+            is_composer(key)
+                || seen.names.keys().any(|name| {
+                    name.split([',', '&', '/', ':'])
+                        .map(composer_key)
+                        .any(|part| !part.is_empty() && is_composer(&part))
+                })
+        })
+        .map(|(key, _)| key.clone())
+        .collect();
+
     let mut performers: Vec<(glib::CollationKey, PerformerInfo)> = seen
         .into_iter()
-        .filter(|(_, seen)| !seen.counted.is_empty())
+        .filter(|(key, seen)| !seen.counted.is_empty() && !composer_artists.contains(key))
         .map(|(key, seen)| {
-            // With as many albums, conducting comes first, and a group last
+            // With as many albums, conducting comes first, and a group last;
+            // artists don't count here
             let preference = |kind: &PerformerKind| match kind {
-                PerformerKind::Conductor => 2,
-                PerformerKind::Soloist => 1,
-                PerformerKind::Ensemble => 0,
+                PerformerKind::Conductor => 3,
+                PerformerKind::Soloist => 2,
+                PerformerKind::Ensemble => 1,
+                PerformerKind::Artist => 0,
+            };
+            let unvoted = if seen.is_artist() && !seen.guessed {
+                PerformerKind::Artist
+            } else {
+                PerformerKind::Ensemble
             };
             let kind = seen
                 .kinds
@@ -346,11 +483,12 @@ pub(super) fn query_performers(
                         .cmp(&b.1.len())
                         .then_with(|| preference(a.0).cmp(&preference(b.0)))
                 })
-                .map_or(PerformerKind::Ensemble, |(kind, _)| *kind);
+                .map_or(unvoted, |(kind, _)| *kind);
             let name = most_common(seen.names);
             let sort = match kind {
                 PerformerKind::Ensemble => name.clone(),
                 PerformerKind::Conductor | PerformerKind::Soloist => most_common(seen.sorts),
+                PerformerKind::Artist => most_common(seen.artist_sorts),
             };
             let roles: Vec<String> = seen
                 .roles
@@ -428,11 +566,12 @@ pub(crate) fn credited_work_composers(
 }
 
 // The conductors and performers of a track, as the library keeps them: a
-// line for each, with its kind ("c", "e" or "s", see `PerformerKind`), its
-// key, as for composers, its name, the name it's sorted by, and its role,
-// separated by tabs, between line breaks, so that a filter finds a
+// line for each, with its kind ("c", "e", "s" or "a", see `PerformerKind`),
+// its key, as for composers, its name, the name it's sorted by, and its
+// role, separated by tabs, between line breaks, so that a filter finds a
 // performer by "\t{key}\t", whatever its kind (`TrackFilter`). People are
-// sorted by their last names, and groups by their names
+// sorted by their last names, groups by their names, and artists by the
+// sort names their tags give them, or else their names
 pub(super) fn performer_entries(performers: &[ListedPerformer]) -> Option<String> {
     if performers.is_empty() {
         return None;
@@ -443,6 +582,9 @@ pub(super) fn performer_entries(performers: &[ListedPerformer]) -> Option<String
         let sort = match performer.kind {
             PerformerKind::Ensemble => Cow::Borrowed(performer.name.as_str()),
             PerformerKind::Conductor | PerformerKind::Soloist => sort_name(&performer.name).into(),
+            PerformerKind::Artist => {
+                Cow::Borrowed(performer.sort.as_deref().unwrap_or(&performer.name))
+            }
         };
         entries.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\n",
@@ -462,6 +604,7 @@ fn performer_kind_code(kind: PerformerKind) -> char {
         PerformerKind::Conductor => 'c',
         PerformerKind::Ensemble => 'e',
         PerformerKind::Soloist => 's',
+        PerformerKind::Artist => 'a',
     }
 }
 
@@ -470,6 +613,7 @@ pub(super) fn performer_kind_from_code(code: &str) -> Option<PerformerKind> {
         "c" => Some(PerformerKind::Conductor),
         "e" => Some(PerformerKind::Ensemble),
         "s" => Some(PerformerKind::Soloist),
+        "a" => Some(PerformerKind::Artist),
         _ => None,
     }
 }
@@ -500,6 +644,17 @@ pub(super) fn composer_entries(names: &[String], sorts: &[String]) -> Option<Str
         ));
     }
     Some(entries)
+}
+
+// The key of a composer by their first and last names only, for a key of
+// three or more words, as `TrackCredits` shortens names, made in `buf`
+fn short_key<'a>(key: &str, buf: &'a mut String) -> Option<&'a str> {
+    let (first, last) = first_and_last_names(key)?;
+    buf.clear();
+    buf.push_str(first);
+    buf.push(' ');
+    buf.push_str(last);
+    Some(buf)
 }
 
 // What tells a composer apart: the name, ignoring case and accents, and

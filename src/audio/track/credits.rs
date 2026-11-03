@@ -86,22 +86,33 @@ const GROUP_ROLES: [&str; 6] = [
     "choir vocals",
 ];
 
+// The album artist of compilations, as MusicBrainz names it, and its id,
+// which the tags of a release with a translated name still give
+const VARIOUS_ARTISTS: &str = "Various Artists";
+const VARIOUS_ARTISTS_ID: &str = "89ad4ac3-39f7-470e-963a-56509c546377";
+
 // Who a performer the credits name is, which the list of performers is
-// divided by, in this order
+// divided by, in this order. An artist is the album artist, or the artist,
+// of a track that isn't a movement, such as a band, which the credits
+// don't name (`TrackCredits::listed_artists()`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum PerformerKind {
     Conductor,
     Ensemble,
     Soloist,
+    Artist,
 }
 
 // A performer the credits name, with the role the tags give them, e.g.
-// "piano" or "orchestra"
+// "piano" or "orchestra". An artist has the sort name its tags give it,
+// if any, as the one worked out from the name would turn a band's name
+// around
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListedPerformer {
     pub(crate) kind: PerformerKind,
     pub(crate) name: String,
     pub(crate) role: Option<String>,
+    pub(crate) sort: Option<String>,
 }
 
 // The additional credits and release information in the tags, mostly
@@ -169,6 +180,8 @@ pub(crate) struct TrackCredits {
     pub(crate) remixers: Vec<String>,
     pub(crate) dj_mixers: Vec<String>,
     pub(crate) album_artist: Option<String>,
+    // The name the album artist is sorted by, e.g. "Kinks, The"
+    pub(crate) album_artist_sort: Option<String>,
     pub(crate) disc_number: Option<u32>,
     pub(crate) disc_total: Option<u32>,
     pub(crate) disc_subtitle: Option<String>,
@@ -350,6 +363,9 @@ impl TrackCredits {
             remixers: tag_strings(tag, ItemKey::Remixer),
             dj_mixers: tag_strings(tag, ItemKey::MixDj),
             album_artist: tag.get_string(ItemKey::AlbumArtist).map(plain_commas),
+            album_artist_sort: tag
+                .get_string(ItemKey::AlbumArtistSortOrder)
+                .map(ToString::to_string),
             disc_number: tag.disk(),
             disc_total: tag.disk_total(),
             disc_subtitle: tag
@@ -652,7 +668,7 @@ impl TrackCredits {
             }
             None => album_artist.trim(),
         };
-        (!performers.is_empty() && performers != "Various Artists").then_some(performers)
+        (!performers.is_empty() && performers != VARIOUS_ARTISTS).then_some(performers)
     }
 
     // Whether a composer conducts or plays the track, named in full or
@@ -710,6 +726,7 @@ impl TrackCredits {
                 kind: PerformerKind::Conductor,
                 name: name.clone(),
                 role: None,
+                sort: None,
             })
             .collect::<Vec<_>>();
 
@@ -720,9 +737,8 @@ impl TrackCredits {
             // the others are taken to be groups, although they can be
             // players that the tags of other tracks credit, which the list
             // of performers puts right
-            for name in ensemble.split(", ").flat_map(|part| part.split(" & ")) {
-                let name = name.trim();
-                if name.is_empty() || self.conductors.iter().any(|c| c == name) {
+            for name in names_in(ensemble) {
+                if self.conductors.iter().any(|c| c == name) {
                     continue;
                 }
                 let credited = listed.len();
@@ -731,6 +747,7 @@ impl TrackCredits {
                         kind: PerformerKind::Soloist,
                         name: name.to_string(),
                         role: p.role.clone(),
+                        sort: None,
                     }
                 }));
                 if listed.len() == credited {
@@ -738,6 +755,7 @@ impl TrackCredits {
                         kind: PerformerKind::Ensemble,
                         name: name.to_string(),
                         role: None,
+                        sort: None,
                     });
                 }
             }
@@ -755,9 +773,99 @@ impl TrackCredits {
                     },
                     name: performer.name.clone(),
                     role: performer.role.clone(),
+                    sort: None,
                 }),
         );
         listed
+    }
+
+    // Everyone the list of performers has for the track: the conductors
+    // and performers, then the artists, see `listed_artists()`
+    pub(crate) fn listed_with_artists(&self, artist: Option<&str>) -> Vec<ListedPerformer> {
+        let mut listed = self.listed_performers();
+        listed.extend(self.listed_artists(&listed, artist));
+        listed
+    }
+
+    // The artist of a track that isn't a movement, for the list of
+    // performers, as the credits don't name a band, nor anyone on an album
+    // tagged with only its artists: the album artist, or else the artist
+    // when there's no album artist or it's Various Artists, as on a
+    // compilation, with the sort name its tags give it. It's kept whole,
+    // as bands have commas and ampersands in their names. It's left out
+    // when it's a classical album artist, "Composer; Performers"; when the
+    // track already lists it, or all of the names in it, among its
+    // performers (`listed`), such as a singer credited with their voice;
+    // and when it names a composer of the track who doesn't perform it,
+    // while the tags credit others, as some classical releases give the
+    // composer as the album artist. When the track lists some of its
+    // names, the others are the artists, each on its own, without a sort
+    // name, as "The Band" of "Bob Dylan & The Band" when he's credited, or
+    // the orchestra of "Wiener Philharmoniker, Carlos Kleiber" when the
+    // tags only name its conductor. The library leaves out the composers
+    // that the tags don't name here (`library::query_performers()`)
+    pub(crate) fn listed_artists(
+        &self,
+        listed: &[ListedPerformer],
+        artist: Option<&str>,
+    ) -> Vec<ListedPerformer> {
+        if self.is_movement() {
+            return Vec::new();
+        }
+        fn named(name: Option<&str>) -> Option<&str> {
+            name.map(str::trim)
+                .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case(VARIOUS_ARTISTS))
+        }
+        let various = self
+            .musicbrainz
+            .release_artists
+            .iter()
+            .any(|id| id == VARIOUS_ARTISTS_ID);
+        let (name, sort) = match named(self.album_artist()).filter(|_| !various) {
+            Some(name) => (name, self.album_artist_sort.as_deref()),
+            None => match named(artist.map(|a| super::search::text_start(a, MAX_NAMES_LEN))) {
+                Some(name) => (name, self.artist_sort.as_deref()),
+                None => return Vec::new(),
+            },
+        };
+        if name.contains(';') {
+            return Vec::new();
+        }
+
+        let is_listed = |name: &str| listed.iter().any(|p| p.name == name);
+        let names: Vec<&str> = names_in(name).collect();
+        if is_listed(name) || names.iter().all(|part| is_listed(part)) {
+            return Vec::new();
+        }
+
+        let credits_others = !self.conductors.is_empty() || !self.performers.is_empty();
+        if credits_others
+            && self
+                .work_composer_names()
+                .iter()
+                .any(|c| names_composer(name, c) && !self.performs(c))
+        {
+            return Vec::new();
+        }
+
+        let artist = |name: &str, sort: Option<&str>| ListedPerformer {
+            kind: PerformerKind::Artist,
+            name: name.to_string(),
+            role: None,
+            sort: sort
+                .map(str::trim)
+                .filter(|sort| !sort.is_empty())
+                .map(ToString::to_string),
+        };
+        if names.iter().any(|part| is_listed(part)) {
+            names
+                .into_iter()
+                .filter(|part| !is_listed(part))
+                .map(|part| artist(part, None))
+                .collect()
+        } else {
+            vec![artist(name, sort)]
+        }
     }
 }
 
@@ -775,7 +883,19 @@ fn summary_line(conductors: &[&str], performers: &[&str]) -> String {
 // Borodin" for "Alexander Porfyrevich Borodin"; for tags without the ids
 // of the composers
 fn names_composer(artist: &str, composer: &str) -> bool {
-    artist.contains(composer) || short_name(composer).is_some_and(|s| artist.contains(&s))
+    has_name(artist, composer) || short_name(composer).is_some_and(|s| has_name(artist, &s))
+}
+
+// Whether a text has a name, whole: "Ludwig van Beethoven, Ensemble
+// Zefiro" has "Ludwig van Beethoven", and "Tom Petty and the
+// Heartbreakers" has "Tom Petty", but "Offenbach" doesn't have "Bach"
+pub(crate) fn has_name(text: &str, name: &str) -> bool {
+    let boundary = |c: Option<char>| c.is_none_or(|c| !c.is_alphanumeric());
+    !name.is_empty()
+        && text.match_indices(name).any(|(start, _)| {
+            boundary(text[..start].chars().next_back())
+                && boundary(text[start + name.len()..].chars().next())
+        })
 }
 
 // Whether a name is the composer's, in full or shortened
@@ -785,11 +905,27 @@ pub(super) fn is_composer(name: &str, composer: &str) -> bool {
 
 // "Alexander Borodin" for "Alexander Porfyrevich Borodin"
 fn short_name(name: &str) -> Option<String> {
-    let words = name.split_whitespace().collect::<Vec<_>>();
-    match words[..] {
-        [first, _, .., last] => Some(format!("{first} {last}")),
-        _ => None,
-    }
+    first_and_last_names(name).map(|(first, last)| format!("{first} {last}"))
+}
+
+// The first and the last of a name of three words or more, as "Alexander"
+// and "Borodin" of "Alexander Porfyrevich Borodin", for `short_name()`
+pub(crate) fn first_and_last_names(name: &str) -> Option<(&str, &str)> {
+    let mut words = name.split_whitespace();
+    let first = words.next()?;
+    words.next()?;
+    Some((first, words.next_back()?))
+}
+
+// The names in an artist that names several, each on its own, as "Bob
+// Dylan" and "The Band" of "Bob Dylan & The Band", or the orchestra and
+// the conductor of "Wiener Philharmoniker, Carlos Kleiber"
+fn names_in(artist: &str) -> impl Iterator<Item = &str> {
+    artist
+        .split(", ")
+        .flat_map(|part| part.split(" & "))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
 }
 
 // The names of composers, or their sort names, in the values of a tag,

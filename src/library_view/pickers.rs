@@ -537,5 +537,6 @@ fn section_name(kind: PerformerKind) -> String {
         PerformerKind::Conductor => i18n("Conductors"),
         PerformerKind::Ensemble => i18n("Ensembles"),
         PerformerKind::Soloist => i18n("Soloists"),
+        PerformerKind::Artist => i18n("Artists"),
     }
 }

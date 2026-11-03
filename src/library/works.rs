@@ -995,6 +995,8 @@ fn performers_line<'a>(entries: impl Iterator<Item = &'a str>) -> String {
             PerformerKind::Conductor => conductors.push(name),
             PerformerKind::Soloist => soloists.push(name),
             PerformerKind::Ensemble => groups.push(name),
+            // Not given, see `performer_lines()`
+            PerformerKind::Artist => {}
         }
     }
     let performers = soloists.into_iter().chain(groups).join(", ");
@@ -1005,11 +1007,16 @@ fn performers_line<'a>(entries: impl Iterator<Item = &'a str>) -> String {
 }
 
 // The kind, the key and the name of each conductor and performer in the
-// lines of `performer_entries()`
+// lines of `performer_entries()`. Not the artists, which the tags of a
+// whole work, as Picard gives a song, can have too, so that a recording
+// is named, and told apart from others, by its credits as before
 fn performer_lines(entries: &str) -> impl Iterator<Item = (PerformerKind, &str, &str)> {
     entries.lines().filter_map(|line| {
         let mut fields = line.split('\t');
         let kind = performer_kind_from_code(fields.next()?)?;
+        if kind == PerformerKind::Artist {
+            return None;
+        }
         Some((kind, fields.next()?, fields.next()?))
     })
 }
@@ -1032,4 +1039,23 @@ pub(crate) fn named_work_key(name: &str, composers: &[WorkComposer]) -> String {
         .sorted()
         .join("\x1f");
     format!("t:{}\x1f{composers}", composer_key(name))
+}
+
+#[cfg(test)]
+mod tests {
+    // The artist of a whole work, as Picard gives a song, neither names
+    // its recording nor tells it apart from others
+    #[test]
+    fn artists_are_not_among_the_performers_of_a_recording() {
+        let entries = "\nc\tvaclav luks\tVáclav Luks\tLuks, Václav\t\n\
+                       a\tcollegium 1704\tCollegium 1704\tCollegium 1704\t\n";
+        assert_eq!(
+            super::performers_line(std::iter::once(entries)),
+            "Václav Luks"
+        );
+        assert_eq!(
+            super::performer_keys(Some(entries)).collect::<Vec<_>>(),
+            ["vaclav luks"]
+        );
+    }
 }

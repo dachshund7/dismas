@@ -564,7 +564,9 @@ impl Field {
             Self::Composer => i18n("The composers"),
             Self::Lyricist => i18n("The lyricists"),
             Self::Arranger => i18n("The arrangers"),
-            Self::Performer => i18n("The performers, with their roles, and the conductors"),
+            Self::Performer => {
+                i18n("The performers, with their roles, the conductors and the artists")
+            }
             Self::Conductor => i18n("The conductors"),
             Self::Ensemble => i18n("The orchestras, choirs and other groups"),
             Self::Soloist => i18n("The soloists and other players"),

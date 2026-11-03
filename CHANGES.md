@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The Performers list has an Artists section, with the album artists of
+  albums that aren't classical works, such as bands, even when the tags
+  credit the band's members, or the artists of the tracks of a
+  compilation, and the performer: search finds them too; Performers so
+  shows in a library with no conductors or soloists in its tags too. A
+  composer given as the album artist isn't listed, and the library is
+  read again once
+
 ### Changed
 
 - The sections of the Performers list stand out, with a line above each

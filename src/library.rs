@@ -53,8 +53,8 @@ use crate::{
     audio::{
         Arrangement, AudioProperties, CoverCache, ExtraComments, FieldCode, FieldParts, FileTags,
         ListedPerformer, PerformerKind, ReadOptions, TrackCredits, field_values,
-        normalize_key_text, normalize_search_text, plain_commas, read_file_tags, search_key,
-        title_from_file_name, track_search_text, track_title,
+        first_and_last_names, has_name, normalize_key_text, normalize_search_text, plain_commas,
+        read_file_tags, search_key, title_from_file_name, track_search_text, track_title,
     },
     catalogue::{self, CatalogueNumber},
     cover_image::CoverImage,

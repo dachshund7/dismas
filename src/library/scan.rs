@@ -72,7 +72,7 @@ pub(super) struct TrackTags {
     // The work the track performs, or a movement of, see `WorkEntry`
     pub(super) work: Option<WorkEntry>,
     // The conductors and performers, see `performer_entries()`
-    performers: Option<String>,
+    pub(super) performers: Option<String>,
     // The first record label, and the first catalogue number
     pub(super) label: Option<String>,
     pub(super) catalog_number: Option<String>,
@@ -759,16 +759,18 @@ impl TrackTags {
             &track_search_text(tag, &credits),
             folder_album.as_deref(),
         );
+        let performers = credits.listed_with_artists(artist);
         let fields = FieldParts {
             tag,
             credits: &credits,
+            performers: &performers,
             title: searched_title.as_deref(),
             album: album.as_deref().or(folder_album.as_deref()),
             format,
             properties,
         }
         .encode();
-
+        let performers = performer_entries(&performers);
         TrackTags {
             album_id: Some(album_id),
             album: album.or(folder_album),
@@ -783,7 +785,7 @@ impl TrackTags {
             search: Some(search),
             composers: composer_entries(&credits.composers, &credits.composer_sorts),
             work: work_entry(&credits, artist),
-            performers: performer_entries(&credits.listed_performers()),
+            performers,
             label: credits.labels.into_iter().next(),
             catalog_number: credits.catalog_numbers.into_iter().next(),
             fields: Some(fields),

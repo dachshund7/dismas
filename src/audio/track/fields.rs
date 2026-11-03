@@ -247,6 +247,9 @@ impl AudioProperties {
 pub(crate) struct FieldParts<'a> {
     pub(crate) tag: &'a Tag,
     pub(crate) credits: &'a TrackCredits,
+    // The conductors, performers and artists the list of performers has,
+    // see `TrackCredits::listed_performers()` and `listed_artists()`
+    pub(crate) performers: &'a [ListedPerformer],
     // The title that searches look into, see `TrackData::searched_title()`
     pub(crate) title: Option<&'a str>,
     // The album, or else the name of its folder, see `folder_album_title()`
@@ -276,7 +279,6 @@ impl FieldParts<'_> {
         lines.extend(FieldCode::Lyricist, &credits.lyricists);
         lines.extend(FieldCode::Arranger, &credits.arrangers);
 
-        let listed = credits.listed_performers();
         for credit in &credits.performers {
             let credited = match &credit.role {
                 Some(role) => format!("{} ({role})", credit.name),
@@ -286,12 +288,15 @@ impl FieldParts<'_> {
             lines.push(FieldCode::Role, credit.role.as_deref());
         }
         lines.extend(FieldCode::Performer, &credits.conductors);
-        for performer in &listed {
+        for performer in self.performers {
             lines.push(FieldCode::Performer, Some(&performer.name));
             let kind = match performer.kind {
                 PerformerKind::Conductor => FieldCode::Conductor,
                 PerformerKind::Ensemble => FieldCode::Ensemble,
                 PerformerKind::Soloist => FieldCode::Soloist,
+                // A performer, as the list of performers has it, and also
+                // found as the artist and the album artist
+                PerformerKind::Artist => continue,
             };
             lines.push(kind, Some(&performer.name));
             lines.push(FieldCode::Role, performer.role.as_deref());
@@ -499,6 +504,7 @@ mod tests {
         let fields = FieldParts {
             tag: &tag,
             credits: &credits,
+            performers: &credits.listed_performers(),
             title: tag.title().as_deref(),
             album: None,
             format: None,
@@ -523,6 +529,7 @@ mod tests {
             ),
             (ItemKey::TrackArtist, "Musica Antiqua Köln"),
             (ItemKey::TrackArtist, "Reinhard  Goebel"),
+            (ItemKey::AlbumArtist, "Musica Antiqua Köln, Reinhard Goebel"),
             (ItemKey::Composer, "Johann Sebastian Bach"),
             (ItemKey::Performer, "Reinhard Goebel (violin)"),
             (ItemKey::Conductor, "Reinhard Goebel"),
@@ -538,6 +545,7 @@ mod tests {
         let fields = FieldParts {
             tag: &tag,
             credits: &credits,
+            performers: &credits.listed_with_artists(None),
             title: tag.title().as_deref(),
             album: Some("Brandenburgische Konzerte"),
             format: Some("FLAC"),
@@ -556,10 +564,14 @@ mod tests {
             // The spaces collapsed, as in a search
             "ar\treinhard goebel",
             "co\tjohann sebastian bach",
+            "aa\tmusica antiqua koln, reinhard goebel",
             "pf\treinhard goebel (violin)",
             "pf\treinhard goebel",
             "ro\tviolin",
             "cd\treinhard goebel",
+            // The group in the album artist, as the list of performers
+            // has it
+            "pf\tmusica antiqua koln",
             "al\tbrandenburgische konzerte",
             "ca\tbwv 1047",
             "ge\tbaroque",
@@ -594,6 +606,7 @@ mod tests {
         let fields = FieldParts {
             tag: &tag,
             credits: &credits,
+            performers: &credits.listed_performers(),
             title: Some("Song"),
             album: None,
             format: None,

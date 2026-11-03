@@ -130,6 +130,36 @@ fn tracks_without_titles_are_searched_by_file_name() {
 }
 
 #[test]
+fn the_album_artist_of_a_track_that_is_not_a_movement_is_kept_as_an_artist() {
+    use lofty::tag::{ItemKey, Tag, TagType};
+
+    let path = Path::new("/music/Kinks/01.flac");
+    let performers = |work: Option<(&str, &str)>| {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::AlbumArtist, "The Kinks".to_string());
+        tag.insert_text(ItemKey::AlbumArtistSortOrder, "Kinks, The".to_string());
+        tag.insert_text(ItemKey::TrackArtist, "The Kinks".to_string());
+        if let Some((work, movement)) = work {
+            tag.insert_text(ItemKey::Work, work.to_string());
+            tag.insert_text(ItemKey::Movement, movement.to_string());
+        }
+        super::TrackTags::from_tag(
+            &tag,
+            path,
+            Some(path),
+            &super::ExtraComments::default(),
+            (None, None),
+        )
+        .performers
+    };
+    assert_eq!(
+        performers(None).as_deref(),
+        Some("\na\tthe kinks\tThe Kinks\tKinks, The\t\n")
+    );
+    assert_eq!(performers(Some(("Arthur", "Victoria"))), None);
+}
+
+#[test]
 fn works_are_told_apart_by_their_ids_or_names_and_composers() {
     use lofty::tag::{ItemKey, Tag, TagType};
 
@@ -281,6 +311,7 @@ fn performers_are_kept_with_their_kinds_and_roles() {
         kind,
         name: name.to_string(),
         role: role.map(ToString::to_string),
+        sort: None,
     };
     assert_eq!(super::performer_entries(&[]), None);
     assert_eq!(
@@ -303,6 +334,26 @@ fn performers_are_kept_with_their_kinds_and_roles() {
                  e\tcollegium vocale gent\tCollegium Vocale Gent\tCollegium Vocale Gent\t\
                  choir vocals\n\
                  s\tilse eerens\tIlse Eerens\tEerens, Ilse\tsoprano vocals\n"
+        )
+    );
+
+    // An artist is sorted by the sort name its tags give it, or else by
+    // its name, never turned around
+    let artist = |name: &str, sort: Option<&str>| ListedPerformer {
+        kind: PerformerKind::Artist,
+        name: name.to_string(),
+        role: None,
+        sort: sort.map(ToString::to_string),
+    };
+    assert_eq!(
+        super::performer_entries(&[
+            artist("The Kinks", Some("Kinks, The")),
+            artist("Pink Floyd", None),
+        ])
+        .as_deref(),
+        Some(
+            "\na\tthe kinks\tThe Kinks\tKinks, The\t\n\
+                 a\tpink floyd\tPink Floyd\tPink Floyd\t\n"
         )
     );
 }
@@ -2707,6 +2758,287 @@ fn performers_are_listed_once_by_what_they_do_the_most() {
     };
     let albums = super::query_search_albums(&conn, &filter, &hidden).unwrap();
     assert_eq!(albums.get("a"), Some(&(1, 2)));
+}
+
+#[test]
+fn artists_are_listed_when_nothing_else_names_them() {
+    use crate::audio::PerformerKind;
+
+    let conn = test_db();
+    let artist = |name: &str, sort: &str| format!("a\t{}\t{name}\t{sort}\t", name.to_lowercase());
+    let kinks = artist("The Kinks", "Kinks, The");
+    let ray = "s\tray davies\tRay Davies\tDavies, Ray\tlead vocals".to_string();
+    let rostropovich_solo =
+        "s\tmstislav rostropovich\tMstislav Rostropovich\tRostropovich, Mstislav\tcello"
+            .to_string();
+    let rostropovich = artist("Mstislav Rostropovich", "Mstislav Rostropovich");
+    let zefiro_guessed = "e\tensemble zefiro\tEnsemble Zefiro\tEnsemble Zefiro\t".to_string();
+    let zefiro = artist("Ensemble Zefiro", "Ensemble Zefiro");
+    let luks = "c\tvaclav luks\tVáclav Luks\tLuks, Václav\t".to_string();
+    let hendrix = artist("Jimi Hendrix Experience", "Jimi Hendrix Experience");
+    let heartbreakers = artist(
+        "Tom Petty and the Heartbreakers",
+        "Tom Petty and the Heartbreakers",
+    );
+    let beatles = artist("The Beatles", "Beatles, The");
+    let composer = |name: &str| Some(format!("\n{}\t{name}\t\n", name.to_lowercase()));
+    let entries = |lines: &[&String]| {
+        Some(format!(
+            "\n{}\n",
+            lines
+                .iter()
+                .map(|l| l.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        ))
+    };
+    let rows = [
+        // A band, its singer credited on one album
+        ("/m/K1/01.opus", "k1", entries(&[&kinks, &ray]), None, None),
+        ("/m/K2/01.opus", "k2", entries(&[&kinks]), None, None),
+        // A soloist, credited once, the album artist of two albums of
+        // encores, stays a soloist
+        (
+            "/m/R1/01.opus",
+            "r1",
+            entries(&[&rostropovich_solo]),
+            None,
+            Some("w1"),
+        ),
+        ("/m/R2/01.opus", "r2", entries(&[&rostropovich]), None, None),
+        ("/m/R3/01.opus", "r3", entries(&[&rostropovich]), None, None),
+        // A group guessed from an album artist stays a group
+        (
+            "/m/Z1/01.opus",
+            "z1",
+            entries(&[&zefiro_guessed]),
+            None,
+            Some("w2"),
+        ),
+        ("/m/Z2/01.opus", "z2", entries(&[&zefiro]), None, None),
+        // A composer as the album artist, whom others record more often
+        (
+            "/m/Zel/01.opus",
+            "zel",
+            entries(&[&artist("Jan Dismas Zelenka", "Jan Dismas Zelenka")]),
+            None,
+            None,
+        ),
+        (
+            "/m/L1/01.opus",
+            "l1",
+            entries(&[&luks]),
+            composer("Jan Dismas Zelenka"),
+            Some("w3"),
+        ),
+        (
+            "/m/L2/01.opus",
+            "l2",
+            entries(&[&luks]),
+            composer("Jan Dismas Zelenka"),
+            Some("w3"),
+        ),
+        // and one named with a group, recorded by others once
+        (
+            "/m/BZ/01.opus",
+            "bz",
+            entries(&[&artist(
+                "Ludwig van Beethoven, Ensemble Zefiro",
+                "Ludwig van Beethoven, Ensemble Zefiro",
+            )]),
+            None,
+            None,
+        ),
+        (
+            "/m/L3/01.opus",
+            "l3",
+            entries(&[&luks]),
+            composer("Ludwig van Beethoven"),
+            Some("w4"),
+        ),
+        // A composer as the album artist of two albums, recorded once by
+        // others, stays
+        (
+            "/m/Q1/01.opus",
+            "q1",
+            entries(&[&artist("Johann Joachim Quantz", "Johann Joachim Quantz")]),
+            None,
+            None,
+        ),
+        (
+            "/m/Q2/01.opus",
+            "q2",
+            entries(&[&artist("Johann Joachim Quantz", "Johann Joachim Quantz")]),
+            None,
+            None,
+        ),
+        (
+            "/m/L4/01.opus",
+            "l4",
+            entries(&[&luks]),
+            composer("Johann Joachim Quantz"),
+            Some("w5"),
+        ),
+        // A songwriter credited on their own albums, the album they made
+        // with a band, and a cover tagged with only its artist, which
+        // isn't evidence of others performing their songs
+        (
+            "/m/D1/01.opus",
+            "d1",
+            entries(&[&"s\tbob dylan\tBob Dylan\tDylan, Bob\tvocals".to_string()]),
+            composer("Bob Dylan"),
+            None,
+        ),
+        (
+            "/m/D2/01.opus",
+            "d2",
+            entries(&[&"s\tbob dylan\tBob Dylan\tDylan, Bob\tvocals".to_string()]),
+            composer("Bob Dylan"),
+            None,
+        ),
+        (
+            "/m/D3/01.opus",
+            "d3",
+            entries(&[&artist("Bob Dylan & The Band", "Bob Dylan & The Band")]),
+            composer("Bob Dylan"),
+            None,
+        ),
+        (
+            "/m/H/01.opus",
+            "h",
+            entries(&[&hendrix]),
+            composer("Bob Dylan"),
+            None,
+        ),
+        // A composer as the album artist, whom others record under the
+        // name MusicBrainz gives them, with their patronymic
+        (
+            "/m/AB/01.opus",
+            "ab",
+            entries(&[&artist("Alexander Borodin", "Alexander Borodin")]),
+            None,
+            None,
+        ),
+        (
+            "/m/L5/01.opus",
+            "l5",
+            entries(&[&luks]),
+            composer("Alexander Porfyrevich Borodin"),
+            Some("w6"),
+        ),
+        (
+            "/m/L6/01.opus",
+            "l6",
+            entries(&[&luks]),
+            composer("Alexander Porfyrevich Borodin"),
+            Some("w6"),
+        ),
+        // A singer who writes the songs of the band named after them
+        (
+            "/m/TP/01.opus",
+            "tp",
+            entries(&[&artist("Tom Petty", "Tom Petty")]),
+            composer("Tom Petty"),
+            None,
+        ),
+        (
+            "/m/HB1/01.opus",
+            "hb1",
+            entries(&[&heartbreakers]),
+            composer("Tom Petty"),
+            None,
+        ),
+        (
+            "/m/HB2/01.opus",
+            "hb2",
+            entries(&[&heartbreakers]),
+            composer("Tom Petty"),
+            None,
+        ),
+        // A songwriter whose band's albums, tagged with only their artist
+        // and composers, as iTunes tags them, outnumber their own
+        (
+            "/m/PM/01.opus",
+            "pm",
+            entries(&[&artist("Paul McCartney", "McCartney, Paul")]),
+            composer("Paul McCartney"),
+            None,
+        ),
+        (
+            "/m/B1/01.opus",
+            "b1",
+            entries(&[&beatles]),
+            composer("Paul McCartney"),
+            None,
+        ),
+        (
+            "/m/B2/01.opus",
+            "b2",
+            entries(&[&beatles]),
+            composer("Paul McCartney"),
+            None,
+        ),
+    ];
+    for (path, album, performers, composers, work_key) in rows {
+        conn.execute(
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, performers,
+                                 composers, work_key, search)
+             VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4, ?5, '')",
+            rusqlite::params![path.as_bytes(), album, performers, composers, work_key],
+        )
+        .unwrap();
+    }
+
+    let all = super::TrackFilter::default();
+    let performers = super::query_performers(&conn, &[], &all, super::Counted::Albums).unwrap();
+    let listed: Vec<(PerformerKind, &str, u32)> = performers
+        .iter()
+        .map(|p| (p.kind, p.sort.as_str(), p.count))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (PerformerKind::Conductor, "Luks, Václav", 6),
+            (PerformerKind::Ensemble, "Ensemble Zefiro", 2),
+            (PerformerKind::Soloist, "Davies, Ray", 1),
+            (PerformerKind::Soloist, "Dylan, Bob", 2),
+            (PerformerKind::Soloist, "Rostropovich, Mstislav", 3),
+            (PerformerKind::Artist, "Beatles, The", 2),
+            (PerformerKind::Artist, "Bob Dylan & The Band", 1),
+            (PerformerKind::Artist, "Jimi Hendrix Experience", 1),
+            (PerformerKind::Artist, "Johann Joachim Quantz", 2),
+            (PerformerKind::Artist, "Kinks, The", 2),
+            (PerformerKind::Artist, "McCartney, Paul", 1),
+            (PerformerKind::Artist, "Tom Petty", 1),
+            (PerformerKind::Artist, "Tom Petty and the Heartbreakers", 2),
+        ]
+    );
+
+    // A band's albums
+    let filter = super::TrackFilter {
+        performer: Some("the kinks".to_string()),
+        ..Default::default()
+    };
+    let mut albums: Vec<String> = super::query_search_albums(&conn, &filter, &[])
+        .unwrap()
+        .into_keys()
+        .collect();
+    albums.sort();
+    assert_eq!(albums, ["k1", "k2"]);
+
+    // On the Works page, only those of works
+    let works = super::query_performers(&conn, &[], &all, super::Counted::Works).unwrap();
+    assert!(works.iter().all(|p| p.kind != PerformerKind::Artist));
+
+    // A library with only artists has performers
+    let conn = test_db();
+    conn.execute(
+        "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, performers, search)
+         VALUES (?1, ?1, 0, 0, 0, 0, 'k1', ?2, '')",
+        rusqlite::params![b"/m/K1/01.opus".as_slice(), entries(&[&kinks])],
+    )
+    .unwrap();
+    assert!(super::query_tracks_have(&conn, "performers", &[]).unwrap());
 }
 
 #[test]

@@ -63,7 +63,8 @@ What Dismas adds
   the composers of your albums, sorted by their last names; pick one to see
   only their albums, with only the tracks that are theirs. The Performers
   button next to it does the same for the conductors, the ensembles and the
-  soloists, with what they play or sing, and picking a composer and a
+  soloists, with what they play or sing, and for the artists, such as
+  bands, by the album artist of their albums, and picking a composer and a
   performer shows the albums where they meet; once one is picked, the
   other list has only the names that go with it. The Works page, next to the
   tracks, lists the works instead, by composer and in the order of their

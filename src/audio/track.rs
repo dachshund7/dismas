@@ -57,7 +57,9 @@ mod tags;
 mod work_hierarchy;
 
 use credits::is_composer;
-pub(crate) use credits::{ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits};
+pub(crate) use credits::{
+    ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits, first_and_last_names, has_name,
+};
 use fields::sane_duration;
 pub(crate) use fields::{AudioProperties, FieldCode, FieldParts, Flag, field_values};
 pub(crate) use file_name::title_from_file_name;
@@ -2400,6 +2402,220 @@ mod tests {
                 performer(PerformerKind::Soloist, "Simon Fröh", Some("tuba")),
             ]
         );
+    }
+
+    #[test]
+    fn the_artist_of_a_track_that_is_not_a_movement_is_listed() {
+        struct Tags<'a> {
+            album_artist: Option<&'a str>,
+            album_artist_sort: Option<&'a str>,
+            artist: Option<&'a str>,
+            artist_sort: Option<&'a str>,
+            work: Option<&'a str>,
+            movement: Option<&'a str>,
+            composers: &'a [&'a str],
+            conductors: &'a [&'a str],
+            performers: &'a [&'a str],
+            various: bool,
+        }
+        let plain = Tags {
+            album_artist: None,
+            album_artist_sort: None,
+            artist: None,
+            artist_sort: None,
+            work: None,
+            movement: None,
+            composers: &[],
+            conductors: &[],
+            performers: &[],
+            various: false,
+        };
+        let listed = |tags: Tags| {
+            let strings = |s: &[&str]| s.iter().map(ToString::to_string).collect::<Vec<_>>();
+            let credits = TrackCredits {
+                album_artist: tags.album_artist.map(ToString::to_string),
+                album_artist_sort: tags.album_artist_sort.map(ToString::to_string),
+                artist_sort: tags.artist_sort.map(ToString::to_string),
+                work: tags.work.map(ToString::to_string),
+                movement: tags.movement.map(ToString::to_string),
+                composers: strings(tags.composers),
+                conductors: strings(tags.conductors),
+                performers: tags.performers.iter().map(|p| Credit::parse(p)).collect(),
+                musicbrainz: super::credits::MusicBrainzIds {
+                    release_artists: if tags.various {
+                        vec!["89ad4ac3-39f7-470e-963a-56509c546377".to_string()]
+                    } else {
+                        Vec::new()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            credits
+                .listed_artists(&credits.listed_performers(), tags.artist)
+                .into_iter()
+                .map(|p| {
+                    assert_eq!(p.kind, PerformerKind::Artist);
+                    (p.name, p.sort)
+                })
+                .collect::<Vec<_>>()
+        };
+        let artist = |name: &str, sort: Option<&str>| {
+            vec![(name.to_string(), sort.map(ToString::to_string))]
+        };
+
+        // A band, with the sort name its tags give it
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("The Kinks"),
+                album_artist_sort: Some("Kinks, The"),
+                artist: Some("The Kinks"),
+                ..plain
+            }),
+            artist("The Kinks", Some("Kinks, The"))
+        );
+        // A band whose members are credited is listed too, and its members
+        // stay among the performers
+        let members = Tags {
+            album_artist: Some("The Kinks"),
+            performers: &["Ray Davies (lead vocals)", "Dave Davies (guitar)"],
+            ..plain
+        };
+        assert_eq!(listed(members), artist("The Kinks", None));
+        // So is the artist of a song that Picard gives a work, but not
+        // that of a movement
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Fleetwood Mac"),
+                work: Some("Dreams"),
+                ..plain
+            }),
+            artist("Fleetwood Mac", None)
+        );
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Ensemble Inégal"),
+                work: Some("Missa Dei Filii, ZWV 20"),
+                movement: Some("Kyrie"),
+                ..plain
+            }),
+            vec![]
+        );
+        // Names with commas and ampersands stay whole
+        for band in ["Simon & Garfunkel", "Earth, Wind & Fire"] {
+            assert_eq!(
+                listed(Tags {
+                    album_artist: Some(band),
+                    ..plain
+                }),
+                artist(band, None)
+            );
+        }
+        // On a compilation, or without an album artist, the artist of the
+        // track, with its own sort name
+        for (album_artist, various) in [
+            (Some("Various Artists"), false),
+            (Some("Verschiedene Interpreten"), true),
+            (None, false),
+        ] {
+            assert_eq!(
+                listed(Tags {
+                    album_artist,
+                    artist: Some("The Zombies"),
+                    artist_sort: Some("Zombies, The"),
+                    various,
+                    ..plain
+                }),
+                artist("The Zombies", Some("Zombies, The"))
+            );
+        }
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Various Artists"),
+                ..plain
+            }),
+            vec![]
+        );
+        // A classical album artist, with its composer, is left out
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Johann Sebastian Bach; Musica Antiqua Köln"),
+                ..plain
+            }),
+            vec![]
+        );
+        // So are names the credits list already: a singer credited with
+        // their voice, and a group with its conductor
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Joni Mitchell"),
+                performers: &["Joni Mitchell (vocals)"],
+                ..plain
+            }),
+            vec![]
+        );
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Berliner Philharmoniker, Herbert von Karajan"),
+                conductors: &["Herbert von Karajan"],
+                performers: &["Berliner Philharmoniker (orchestra)"],
+                ..plain
+            }),
+            vec![]
+        );
+        // The composer as the album artist, while others are credited
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Johann Joachim Quantz"),
+                composers: &["Johann Joachim Quantz"],
+                performers: &["Mary Oleskiewicz (flute)"],
+                ..plain
+            }),
+            vec![]
+        );
+        // A singer-songwriter, without credits, is listed
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Joni Mitchell"),
+                composers: &["Joni Mitchell"],
+                ..plain
+            }),
+            artist("Joni Mitchell", None)
+        );
+        // When the credits name some of the names in the album artist, the
+        // others are the artists, without the sort name of the whole
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Wiener Philharmoniker, Carlos Kleiber"),
+                album_artist_sort: Some("Wiener Philharmoniker, Kleiber, Carlos"),
+                conductors: &["Carlos Kleiber"],
+                ..plain
+            }),
+            artist("Wiener Philharmoniker", None)
+        );
+        assert_eq!(
+            listed(Tags {
+                album_artist: Some("Bob Dylan & The Band"),
+                performers: &["Bob Dylan (vocals)"],
+                ..plain
+            }),
+            artist("The Band", None)
+        );
+    }
+
+    #[test]
+    fn a_name_is_only_found_whole() {
+        use super::has_name;
+
+        assert!(has_name("Tom Petty and the Heartbreakers", "Tom Petty"));
+        assert!(has_name(
+            "Ludwig van Beethoven, Ensemble Zefiro",
+            "Ludwig van Beethoven"
+        ));
+        assert!(has_name("Bach", "Bach"));
+        assert!(!has_name("Offenbach Trio", "Bach"));
+        assert!(!has_name("Sebastian Bachmann", "Bach"));
+        assert!(!has_name("Bach", ""));
     }
 
     #[test]

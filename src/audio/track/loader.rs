@@ -389,6 +389,7 @@ impl TrackData {
         let fields = FieldParts {
             tag,
             credits: &credits,
+            performers: &credits.listed_with_artists(artist.as_deref()),
             title: title.as_deref().or(Some(&fallback_title)),
             album: album.as_deref().or(folder_album.as_deref()),
             format: read.tags.format.as_deref(),
@@ -441,6 +442,7 @@ impl TrackData {
         let fields = FieldParts {
             tag: &tag,
             credits: &credits,
+            performers: &credits.listed_with_artists(artist.as_deref()),
             title: title.as_deref(),
             album: album.as_deref().or(folder_album.as_deref()),
             format: cue_file.details.format.as_deref(),
