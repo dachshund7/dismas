@@ -158,6 +158,18 @@ fn holds_items(widget: &gtk::Widget) -> bool {
     widget.is::<gtk::ListBase>() || widget.is::<gtk::FlowBox>()
 }
 
+// Gives a child of a flow box the focus, as the keys would. The arrow keys
+// move from the flow box's cursor, which only follows the focus when the
+// flow box gives it: a child given the focus with `grab_focus()` kept it,
+// and the arrows did nothing. The child's focus handler moves the cursor
+// to it, from any direction but the left or backward, which go into its
+// own widgets; it also selects it, in a flow box that selects children
+pub(crate) fn focus_flow_box_child(child: &gtk::FlowBoxChild) {
+    if !child.has_focus() {
+        child.child_focus(gtk::DirectionType::TabForward);
+    }
+}
+
 // How fast a swipe to the right has to be to go back, in pixels a second
 const SWIPE_BACK_VELOCITY: f64 = 500.0;
 

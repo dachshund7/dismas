@@ -104,6 +104,7 @@ Files in the music folders can be crafted, and the library scans them at every s
   - A list with headers is scrolled to its top through `scroll_to_top_when_laid_out`, as GTK ignores or undoes a scroll made in the frame its items change.
   - When a menu's action takes away the row it was opened on, GTK keeps a chain of focus children that leads nowhere, and the keys skip the list; `forget_focus_above` and `forget_focus_below` drop it.
   - Idle callbacks don't run while a list scrolls, so work that must keep up with scrolling (reading the grid's covers) runs in the map handler.
+  - A flow box's arrow keys move from its cursor, which `grab_focus()` on a child doesn't move, so a child is focused with `focus_flow_box_child`.
 - **Screen readers:** GTK names an icon-only button by its tooltip, so only widgets without one need an `accessibility` label. In selection mode, whether a row is selected is set on the list's item, not the row, and only while the row is mapped, as a list binds a row before it takes its item. AT-SPI names can be read with the system Python's `Atspi` bindings, in a headless session with `at-spi-bus-launcher`.
 - **Touch:** menus also open with a touch-only `GestureLongPress`; a gesture inside a scrolled list acts when it's let go of, so that the list still scrolls.
 

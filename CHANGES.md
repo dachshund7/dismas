@@ -21,6 +21,8 @@ All notable changes to this project will be documented in this file.
 - Show the Playing Track and Show in Playlist left the queue where it
   was, or made it flicker, while it was still moving on after a fling of
   the touchpad or a quick spin of the mouse wheel
+- The arrow keys did nothing on the cover that Go to Work gave the focus
+  to
 
 ### Removed
 

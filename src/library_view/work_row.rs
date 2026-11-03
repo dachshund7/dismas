@@ -123,15 +123,17 @@ impl WorkRow {
     }
 
     // A cover among the covers: the flow box's child that holds its cell,
-    // which takes the focus. It's the one of the recording of the track on
-    // the album, or else the album's first, see `CoverRef`
-    pub(crate) fn cover_of(&self, cover: &CoverRef) -> Option<gtk::Widget> {
+    // which takes the focus, see `utils::focus_flow_box_child()`. It's the
+    // one of the recording of the track on the album, or else the album's
+    // first, see `CoverRef`
+    pub(crate) fn cover_of(&self, cover: &CoverRef) -> Option<gtk::FlowBoxChild> {
         let flowbox = self.covers()?.child().and_downcast::<gtk::FlowBox>()?;
-        let of_album: Vec<(gtk::Widget, AlbumCell)> =
+        let of_album: Vec<(gtk::FlowBoxChild, AlbumCell)> =
             std::iter::successors(flowbox.first_child(), WidgetExt::next_sibling)
                 .filter_map(|child| {
                     let cell = child.first_child().and_downcast::<AlbumCell>()?;
                     let album = cell.album()?;
+                    let child = child.downcast::<gtk::FlowBoxChild>().ok()?;
                     (album.id_str() == cover.album).then_some((child, cell))
                 })
                 .collect();

@@ -395,7 +395,7 @@ impl LibraryView {
                 } else if let Some(cover) =
                     cover.and_then(|cover| this.work_row(&key)?.cover_of(&cover))
                 {
-                    cover.grab_focus();
+                    utils::focus_flow_box_child(&cover);
                 }
             }
         ));
@@ -816,8 +816,8 @@ impl LibraryView {
     // The cover of the recording gone to with a work takes the focus, glides
     // into view if the work's covers go on below the list, and flashes, as
     // a track gone to does
-    fn point_out_cover(&self, cover: &gtk::Widget) {
-        cover.grab_focus();
+    fn point_out_cover(&self, cover: &gtk::FlowBoxChild) {
+        utils::focus_flow_box_child(cover);
         let list = &*self.imp().works_list;
         if let (Some(bounds), Some(adjustment)) = (cover.compute_bounds(list), list.vadjustment()) {
             let below = bounds.y() + bounds.height() - list.height() as f32;
