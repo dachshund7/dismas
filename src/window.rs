@@ -1106,6 +1106,17 @@ impl Window {
         win.restore_window_state();
         win.set_initial_state();
         win.update_default_widget();
+        let play = win.imp().playback_control.play_button();
+        play.connect_map(clone!(
+            #[weak]
+            win,
+            move |_| win.update_default_widget()
+        ));
+        play.connect_unmap(clone!(
+            #[weak]
+            win,
+            move |_| win.update_default_widget()
+        ));
 
         win
     }
@@ -1114,12 +1125,14 @@ impl Window {
     // the play button is the default widget. A dialog inside the window
     // passes Enter on to the window, where it played or paused from a row
     // of the preferences, so while one shows the window has no default
-    // widget, and Enter activates the row with the focus
+    // widget, and Enter activates the row with the focus. Nor while the
+    // player page is hidden: GTK drops a default widget that's unmapped,
+    // which left Enter to the rows of the other pages, until a dialog had
+    // closed and the button was made the default again while hidden
     fn update_default_widget(&self) {
-        let play = adw::prelude::AdwApplicationWindowExt::visible_dialog(self)
-            .is_none()
-            .then(|| self.imp().playback_control.play_button());
-        self.set_default_widget(play.as_ref());
+        let play = self.imp().playback_control.play_button();
+        let no_dialog = adw::prelude::AdwApplicationWindowExt::visible_dialog(self).is_none();
+        self.set_default_widget((no_dialog && play.is_mapped()).then_some(&play));
     }
 
     // Saves where playback is in the selected playlist, right away

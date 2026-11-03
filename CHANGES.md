@@ -36,6 +36,9 @@ All notable changes to this project will be documented in this file.
   the touchpad or a quick spin of the mouse wheel
 - The arrow keys did nothing on the cover that Go to Work gave the focus
   to
+- Once a dialog had closed, Enter on a row of the Playlists page, or of
+  any list on a page other than the player, played or paused instead of
+  opening the row
 
 ### Removed
 
