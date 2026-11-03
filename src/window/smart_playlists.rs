@@ -17,45 +17,23 @@ use crate::{
 };
 
 impl Window {
-    // Plays the tracks of a smart playlist in place of the queue, like
-    // dropped files, with an Undo. They're read from the play stats each
-    // time, so it's never the selected playlist
-    pub(super) fn play_smart_playlist(&self, name: &str) {
-        type Query = Box<dyn FnOnce() -> Vec<String> + Send>;
-        let (query, empty): (Query, _) = match name {
-            "recently-played" => (
-                Box::new(play_stats::recently_played),
-                i18n("No tracks played yet"),
-            ),
-            "most-played" => (
-                Box::new(play_stats::most_played),
-                i18n("No tracks played yet"),
-            ),
-            "not-heard-lately" => (
-                Box::new(play_stats::not_heard_lately),
-                i18n("No often played tracks have gone 2 months unheard yet"),
-            ),
-            _ => return,
-        };
-        // What was heard of the track playing isn't saved until it ends,
-        // so it's saved now, to be on the list
+    // The tracks of a smart playlist, read from the play stats each time,
+    // in a separate thread; with none, a toast says why. What was heard of
+    // the track playing isn't saved until it ends, so it's saved now, to be
+    // on the list
+    pub(super) async fn smart_playlist_files(&self, kind: SmartPlaylist) -> Option<Vec<gio::File>> {
         self.player().save_listen();
-
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = win)]
-            self,
-            async move {
-                let Ok(uris) = gio::spawn_blocking(query).await else {
-                    return;
-                };
-                if uris.is_empty() {
-                    win.add_toast(empty);
-                    return;
-                }
-                let files = uris.iter().map(|uri| gio::File::for_uri(uri)).collect();
-                win.play_in_place_of_queue(files);
-            }
-        ));
+        let query = match kind {
+            SmartPlaylist::RecentlyPlayed => play_stats::recently_played,
+            SmartPlaylist::MostPlayed => play_stats::most_played,
+            SmartPlaylist::NotHeardLately => play_stats::not_heard_lately,
+        };
+        let uris = gio::spawn_blocking(query).await.ok()?;
+        if uris.is_empty() {
+            self.add_toast(kind.empty_message());
+            return None;
+        }
+        Some(uris.iter().map(|uri| gio::File::for_uri(uri)).collect())
     }
 
     // Play a Random …, in the album pages' menu: plays an album, a track or
@@ -138,6 +116,68 @@ impl Window {
             Err(e) => {
                 log::warn!("Unable to clear the play history: {e}");
                 i18n("Unable to clear the play history")
+            }
+        }
+    }
+}
+
+// The smart playlists, made of the tracks the play stats pick when they're
+// shown. They play a snapshot in place of the queue, so they're never the
+// selected playlist
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SmartPlaylist {
+    RecentlyPlayed,
+    MostPlayed,
+    NotHeardLately,
+}
+
+impl SmartPlaylist {
+    pub(crate) const ALL: [Self; 3] = [
+        SmartPlaylist::RecentlyPlayed,
+        SmartPlaylist::MostPlayed,
+        SmartPlaylist::NotHeardLately,
+    ];
+
+    // Its name, as the target of the action that shows it
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            SmartPlaylist::RecentlyPlayed => "recently-played",
+            SmartPlaylist::MostPlayed => "most-played",
+            SmartPlaylist::NotHeardLately => "not-heard-lately",
+        }
+    }
+
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+
+    pub(crate) fn title(self) -> String {
+        match self {
+            SmartPlaylist::RecentlyPlayed => i18n("Recently Played"),
+            SmartPlaylist::MostPlayed => i18n("Most Played"),
+            SmartPlaylist::NotHeardLately => i18n("Not Heard Lately"),
+        }
+    }
+
+    // What it picks
+    pub(crate) fn description(self) -> String {
+        match self {
+            SmartPlaylist::RecentlyPlayed => i18n("The last 100 tracks played"),
+            SmartPlaylist::MostPlayed => i18n("The tracks played the most in the last 6 months"),
+            SmartPlaylist::NotHeardLately => {
+                i18n("The tracks played the most, but not heard in the last 2 months")
+            }
+        }
+    }
+
+    // Why it has no tracks
+    fn empty_message(self) -> String {
+        match self {
+            SmartPlaylist::RecentlyPlayed | SmartPlaylist::MostPlayed => {
+                i18n("No tracks played yet")
+            }
+            SmartPlaylist::NotHeardLately => {
+                i18n("No often played tracks have gone 2 months unheard yet")
             }
         }
     }
@@ -527,6 +567,14 @@ mod tests {
             },
             recordings,
         }
+    }
+
+    #[test]
+    fn smart_playlists_are_found_by_their_names() {
+        for kind in SmartPlaylist::ALL {
+            assert_eq!(SmartPlaylist::named(kind.name()), Some(kind));
+        }
+        assert_eq!(SmartPlaylist::named("favorites"), None);
     }
 
     #[test]

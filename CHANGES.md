@@ -13,9 +13,26 @@ All notable changes to this project will be documented in this file.
   shows in a library with no conductors or soloists in its tags too. A
   composer given as the album artist isn't listed, and the library is
   read again once
+- A playlist can be looked at without switching to it: on the Playlists
+  page, its row shows its tracks in the pane, over the queue, with how
+  many there are and how long they last, while what plays goes on. Play
+  there switches to it and plays it, from where it was or from the track
+  clicked, and the queue stays as it was, to switch back to; Play Next
+  and Add put its tracks in the playlist that's playing
+- The smart playlists show the tracks they pick in the pane in the same
+  way, before playing them, and Play plays those tracks in place of the
+  queue, with an Undo
 
 ### Changed
 
+- Switching to a playlist from the Playlists page is Switch To, in its
+  row's menu, as a click on the row shows its tracks; the menu of the
+  playlist pane's title still switches with one click
+- The toasts after adding tracks to another playlist, or saving the
+  queue as a playlist, have a Show button, which shows its tracks in the
+  pane, rather than Open, which switched to it
+- A playlist saved from the queue goes on from where the queue was, once
+  it's played
 - The sections of the Performers list stand out, with a line above each
   and its name in bold, and screen readers say which section a performer
   is in
@@ -36,9 +53,15 @@ All notable changes to this project will be documented in this file.
   the touchpad or a quick spin of the mouse wheel
 - The arrow keys did nothing on the cover that Go to Work gave the focus
   to
+- Play on the tracks of an album, with the Playlists page over the
+  player, played them without showing the player
+- Play on an album with its tracks still being looked up emptied the
+  queue, with nothing to put in it and no Undo
 - Once a dialog had closed, Enter on a row of the Playlists page, or of
   any list on a page other than the player, played or paused instead of
   opening the row
+- The Menu key and Shift+F10 open the menu of a playlist on the
+  Playlists page, as they do on the rows of other lists
 
 ### Removed
 

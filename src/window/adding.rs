@@ -8,9 +8,9 @@ use super::*;
 pub(super) enum Tracks {
     // Tracks of the queue, which are moved rather than added again
     InQueue(Vec<Track>),
-    // Tracks of the album shown in the pane, which shows the queue again
-    // when they go to it, as with their Add button
-    ShownAlbum(Vec<gio::File>),
+    // Tracks of the album or the playlist shown in the pane, which shows
+    // the queue again when they go to it, as with their Add button
+    Shown(Vec<gio::File>),
     // Albums of the grid, each with what its tracks have to match
     Albums(Vec<(String, TrackFilter)>),
 }
@@ -21,7 +21,7 @@ impl Tracks {
     async fn files(self, win: &Window) -> Option<Vec<gio::File>> {
         match self {
             Tracks::InQueue(tracks) => Some(tracks.iter().map(Track::file).collect()),
-            Tracks::ShownAlbum(files) => Some(files),
+            Tracks::Shown(files) => Some(files),
             Tracks::Albums(albums) => win.album_files(albums).await,
         }
     }
@@ -42,7 +42,7 @@ impl Window {
                 self.move_to_play_next(tracks);
                 return;
             }
-            Tracks::ShownAlbum(_) => self.show_playlist_view(),
+            Tracks::Shown(_) => self.show_playlist_view(),
             Tracks::Albums(_) => {}
         }
 
@@ -115,7 +115,7 @@ impl Window {
             return;
         }
         let to_queue = name == self.selected_playlist();
-        if to_queue && matches!(tracks, Tracks::ShownAlbum(_)) {
+        if to_queue && matches!(tracks, Tracks::Shown(_)) {
             self.show_playlist_view();
         }
 
@@ -226,32 +226,25 @@ impl Window {
             )
         };
         let name = name.to_string();
-        self.add_toast_with_button(message, i18n("Open"), move |win| {
-            win.open_playlist(&name);
+        // Its tracks show in the pane, without switching to it, so that
+        // what plays goes on; it could have been renamed or deleted while
+        // the toast was up, which the pane says
+        self.add_toast_with_button(message, i18n("Show"), move |win| {
+            win.show_playlist_preview(&name);
         });
-    }
-
-    // Switches to the playlist tracks were added to, which stops what
-    // plays, like any switch
-    fn open_playlist(&self, name: &str) {
-        // It could have been renamed or deleted while the toast was up
-        if !name.is_empty() && !playlists::exists(name) {
-            self.add_toast(i18n("Unable to open the playlist"));
-            return;
-        }
-        self.select_playlist(name);
     }
 
     // The items of a menu that add tracks, for the actions of
     // `add_adding_actions()`: Play Next, the item that adds them to the
     // selected playlist, with its name shortened like the other playlists of
-    // a menu, and the other playlists
+    // a menu, and the other playlists, leaving out the one the tracks are
+    // `already_in`, if any, see `add_to_menu()`
     pub(super) fn append_adding_items(
         &self,
         section: &gio::Menu,
         prefix: &str,
         play_next: bool,
-        to_selected: bool,
+        already_in: Option<&str>,
     ) {
         if play_next {
             section.append(
@@ -259,8 +252,8 @@ impl Window {
                 Some(&format!("{prefix}.play-next")),
             );
         }
-        if to_selected {
-            let selected = self.selected_playlist();
+        let selected = self.selected_playlist();
+        if already_in != Some(selected.as_str()) {
             let label = add_to_label(&utils::playlist_menu_label(&selected));
             let item = gio::MenuItem::new(Some(&label), None);
             item.set_action_and_target_value(
@@ -269,18 +262,24 @@ impl Window {
             );
             section.append_item(&item);
         }
-        section.append_submenu(Some(&i18n("Add to Playlist")), &self.add_to_menu(prefix));
+        section.append_submenu(
+            Some(&i18n("Add to Playlist")),
+            &self.add_to_menu(prefix, already_in),
+        );
     }
 
     // The playlists that tracks can be added to besides the selected one,
     // which has an item or a button of its own: the queue first, as in the
     // menu of the pane's title, the saved ones, and a new one. Their items
-    // activate `{prefix}.add-to` with the name, and `{prefix}.add-to-new`
-    pub(super) fn add_to_menu(&self, prefix: &str) -> gio::Menu {
+    // activate `{prefix}.add-to` with the name, and `{prefix}.add-to-new`.
+    // The tracks aren't added again to the playlist they're `already_in`,
+    // the selected one for the tracks of the queue, or the one on the
+    // tracks page of the pane
+    fn add_to_menu(&self, prefix: &str, already_in: Option<&str>) -> gio::Menu {
         let selected = self.selected_playlist();
         let names = std::iter::once(String::new()).chain(playlists::names());
         let others = gio::Menu::new();
-        for name in names.filter(|name| *name != selected) {
+        for name in names.filter(|name| *name != selected && Some(name.as_str()) != already_in) {
             let label = if name.is_empty() {
                 i18n("Queue")
             } else {
@@ -306,8 +305,9 @@ impl Window {
         menu
     }
 
-    // The menu of an Add button, with the other ways to add the tracks
-    pub(super) fn add_button_menu(&self, prefix: &str) -> gio::Menu {
+    // The menu of an Add button, with the other ways to add the tracks,
+    // which leaves out the playlist they're `already_in`, if any
+    pub(super) fn add_button_menu(&self, prefix: &str, already_in: Option<&str>) -> gio::Menu {
         let play_next = gio::Menu::new();
         play_next.append(
             Some(&i18n("Play Next")),
@@ -315,7 +315,10 @@ impl Window {
         );
         let menu = gio::Menu::new();
         menu.append_section(None, &play_next);
-        menu.append_section(Some(&i18n("Add to Playlist")), &self.add_to_menu(prefix));
+        menu.append_section(
+            Some(&i18n("Add to Playlist")),
+            &self.add_to_menu(prefix, already_in),
+        );
         menu
     }
 

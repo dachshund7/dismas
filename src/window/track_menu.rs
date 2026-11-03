@@ -30,17 +30,23 @@ impl Window {
         let tracks = match (in_queue, selection) {
             (true, true) => Tracks::InQueue(queue.selected_tracks()),
             (true, false) => Tracks::InQueue(vec![track.clone()]),
-            (false, true) => Tracks::ShownAlbum(album_tracks.files()),
-            (false, false) => Tracks::ShownAlbum(vec![track.file()]),
+            (false, true) => Tracks::Shown(album_tracks.files()),
+            (false, false) => Tracks::Shown(vec![track.file()]),
         };
         let enabled = self.imp().loads.get() == 0;
         self.add_adding_actions(&actions, enabled, move |_| Some(tracks.clone()));
 
         let section = gio::Menu::new();
         // The playing track is where Play Next would put it, and the tracks
-        // of the queue are in the selected playlist already
+        // of the queue are in the selected playlist already, as those of
+        // a playlist on the tracks page are in it
         let playing = !selection && in_queue && queue.current().as_ref() == Some(&track);
-        self.append_adding_items(&section, "track", !playing, !in_queue);
+        let already_in = if in_queue {
+            Some(self.selected_playlist())
+        } else {
+            self.shown_playlist()
+        };
+        self.append_adding_items(&section, "track", !playing, already_in.as_deref());
         menu.append_section(None, &section);
 
         let section = gio::Menu::new();

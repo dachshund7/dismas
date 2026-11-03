@@ -72,51 +72,13 @@ template $DismasPlaylistsPage: Widget {
             ]
           }
 
-          // They play a snapshot in place of the queue, so they're never
-          // the selected playlist. The favorite tracks, albums and works are
-          // shown by the heart beside the album search, and Play a Random …
-          // is in the album pages' menu
-          Adw.PreferencesGroup {
+          // They show the tracks they pick, which play in place of the
+          // queue, so they're never the selected playlist; their rows are
+          // made from `SmartPlaylist`, which has their names. The favorite
+          // tracks, albums and works are shown by the heart beside the
+          // album search, and Play a Random … is in the album pages' menu
+          Adw.PreferencesGroup smart_group {
             title: _("Smart Playlists");
-
-            Adw.ActionRow {
-              title: _("Recently Played");
-              subtitle: _("The last 100 tracks played");
-              activatable: true;
-              action-name: "win.play-smart-playlist";
-              action-target: "'recently-played'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
-
-            Adw.ActionRow {
-              title: _("Most Played");
-              subtitle: _("The tracks played the most in the last 6 months");
-              activatable: true;
-              action-name: "win.play-smart-playlist";
-              action-target: "'most-played'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
-
-            Adw.ActionRow {
-              title: _("Not Heard Lately");
-              subtitle: _("The tracks played the most, but not heard in the last 2 months");
-              activatable: true;
-              action-name: "win.play-smart-playlist";
-              action-target: "'not-heard-lately'";
-
-              [suffix]
-              Image {
-                icon-name: "media-playback-start-symbolic";
-              }
-            }
           }
         };
       };

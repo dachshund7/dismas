@@ -94,10 +94,12 @@ impl Window {
         imp.playlist_view.set_playlists_menu(menu.upcast_ref());
 
         // The other playlists the Add buttons can add to
-        imp.album_tracks
-            .set_add_menu(self.add_button_menu("album-tracks").upcast_ref());
+        imp.album_tracks.set_add_menu(
+            self.add_button_menu("album-tracks", self.shown_playlist().as_deref())
+                .upcast_ref(),
+        );
         imp.library_view
-            .set_add_menu(self.add_button_menu("albums").upcast_ref());
+            .set_add_menu(self.add_button_menu("albums", None).upcast_ref());
     }
 
     // The label of the buttons that add tracks to the selected playlist
@@ -400,7 +402,7 @@ impl Window {
             Some(point) => points.set("", point.clone()),
             None => points.remove(""),
         });
-        self.load_playlist(selected);
+        self.load_playlist(selected, false, None);
     }
 
     // Puts the tracks of the playlist in the queue; the tracks of the
@@ -409,16 +411,43 @@ impl Window {
     // nothing to show in the meantime. Once no other tracks are read, see
     // `after_loads()`
     pub(super) fn select_playlist(&self, name: &str) {
+        self.switch_to_playlist(name, false, None);
+    }
+
+    // The same, and then plays it from where it was, or from `start`, as
+    // Play does on the tracks of a playlist that isn't selected; the
+    // selected one just plays, or goes on from `start`
+    pub(super) fn play_playlist(&self, name: &str, start: Option<ResumePoint>) {
+        self.switch_to_playlist(name, true, start);
+    }
+
+    fn switch_to_playlist(&self, name: &str, play: bool, start: Option<ResumePoint>) {
         let name = name.to_string();
         self.after_loads(move |win| {
             if name != win.selected_playlist() {
-                win.load_playlist(&name);
+                win.load_playlist(&name, play, start);
+            } else if play {
+                let player = win.player();
+                // As when it's loaded, a track whose file isn't there can't
+                // play, so it goes on from the next one that can
+                if let Some(start) = start {
+                    let queue = player.queue();
+                    let uris: Vec<String> = queue.tracks().iter().map(Track::uri).collect();
+                    if let Some(pos) = start
+                        .find_track(&uris)
+                        .and_then(|pos| queue.playable_from(pos))
+                    {
+                        player.skip_to(pos);
+                    }
+                }
+                player.play();
             }
         });
     }
 
-    // Even the selected one, to read its tracks again
-    fn load_playlist(&self, name: &str) {
+    // Even the selected one, to read its tracks again. It goes on from
+    // `start`, if any, rather than from where it was
+    fn load_playlist(&self, name: &str, play: bool, start: Option<ResumePoint>) {
         let Some(files) = playlists::load(name) else {
             self.end_pending_playlist();
             self.add_toast(i18n("Unable to open the playlist"));
@@ -433,7 +462,8 @@ impl Window {
             self.end_pending_playlist();
         } else {
             self.imp().pending_playlist.replace(Some(name.to_string()));
-            self.queue_playlist_tracks(files, name);
+            let resume = start.or_else(|| ResumePoint::load(&self.imp().settings, name));
+            self.queue_playlist_tracks(files, name, play, resume);
         }
     }
 
@@ -580,7 +610,7 @@ impl Window {
 
     // Makes a playlist with the tracks of the queue, in their order; it
     // isn't selected, so that what's playing goes on, and the
-    // queue can be cleared without emptying it. The toast can open it.
+    // queue can be cleared without emptying it. The toast can show it.
     // Once no tracks are read, as the queue doesn't have them all until then
     fn save_queue_as_playlist(&self, name: &str) {
         let name = name.to_string();
@@ -598,50 +628,25 @@ impl Window {
                 .and_then(|files| playlists::create_with_tracks(&name, &files));
             match result {
                 Ok(()) => {
-                    // Shuffled like the queue, to put back the same order
+                    // Shuffled like the queue, to put back the same order,
+                    // and going on from where it is once it's played
                     playlists::copy_unshuffled("", &name);
+                    win.save_resume_point();
+                    ResumePoints::update(&win.imp().settings, |points| points.copy("", &name));
                     win.update_playlists_page();
                     win.update_playlists_menu();
                     // Translators: `{playlist}` must be left unmodified; it
                     // is expanded to the name of a playlist
                     let message = i18n_k("Saved as “{playlist}”", &[("playlist", &name)]);
-                    win.add_toast_with_button(message, i18n("Open"), move |win| {
-                        win.open_saved_queue(&name);
+                    // Its tracks show in the pane, so that what plays goes on
+                    win.add_toast_with_button(message, i18n("Show"), move |win| {
+                        win.show_playlist_preview(&name);
                     });
                 }
                 Err(e) => {
                     log::warn!("Unable to save the queue as '{name}': {e}");
                     win.add_toast(i18n("Unable to save the playlist"));
                 }
-            }
-        });
-    }
-
-    // Selects the playlist the queue was saved as. While the queue is
-    // selected with the same tracks, they're already in the player, so
-    // they keep playing; otherwise they're loaded from the playlist. Once no
-    // tracks are read, as the queue doesn't have them all until then
-    fn open_saved_queue(&self, name: &str) {
-        let name = name.to_string();
-        self.after_loads(move |win| {
-            // It could have been renamed or deleted while the toast was up
-            if !playlists::exists(&name) {
-                win.add_toast(i18n("Unable to open the playlist"));
-                return;
-            }
-
-            let unchanged = win.selected_playlist().is_empty() && {
-                let queue = win.player().queue().files();
-                playlists::load(&name).is_some_and(|files| {
-                    files.len() == queue.len() && files.iter().zip(&queue).all(|(a, b)| a.equal(b))
-                })
-            };
-            if unchanged {
-                // The queue still has the same tracks, and keeps its point
-                ResumePoints::update(&win.imp().settings, |points| points.copy("", &name));
-                win.set_selected_playlist(&name);
-            } else {
-                win.select_playlist(&name);
             }
         });
     }
@@ -657,6 +662,7 @@ impl Window {
         ResumePoints::update(&self.imp().settings, |points| {
             points.rename(name, new_name);
         });
+        self.shown_playlist_renamed(name, new_name);
 
         if self.selected_playlist() == name {
             self.set_selected_playlist(new_name);
@@ -702,6 +708,7 @@ impl Window {
             return;
         }
         ResumePoints::update(&self.imp().settings, |points| points.remove(name));
+        self.shown_playlist_deleted(name);
 
         if self.selected_playlist() == name {
             self.select_playlist("");
@@ -851,7 +858,7 @@ fn sorted_message(key: SortKey) -> String {
 
 // The title of a playlist: its name, or "Queue" for the queue, whose name
 // is empty
-fn playlist_title(name: &str) -> Cow<'_, str> {
+pub(super) fn playlist_title(name: &str) -> Cow<'_, str> {
     if name.is_empty() {
         Cow::Owned(i18n("Queue"))
     } else {

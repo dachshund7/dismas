@@ -53,6 +53,7 @@ src/window/favorites.rs
 src/window/loading.rs
 src/window/now_playing.rs
 src/window/playlist.rs
+src/window/previews.rs
 src/window/selected_playlist.rs
 src/window/selection.rs
 src/window/sleep_timer.rs

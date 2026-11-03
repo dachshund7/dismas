@@ -1,17 +1,19 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The pages of the playlist pane: the queue, the tracks of an album, and
-// the lyrics of the playing track. An album and the lyrics open over the
-// page that shows, and going back shows that page again, so that an album
-// opened while the lyrics show goes back to them
+// The pages of the playlist pane: the queue, the tracks of an album or of
+// a playlist that isn't selected, and the lyrics of the playing track. The
+// tracks and the lyrics open over the page that shows, and going back shows
+// that page again, so that an album opened while the lyrics show goes back
+// to them
 
 use super::*;
 
-// A page of the pane that opens over another
+// A page of the pane that opens over another: the tracks of an album or
+// of a playlist, which share a page, or the lyrics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PanePage {
-    Album,
+    Tracks,
     Lyrics,
 }
 
@@ -19,14 +21,14 @@ impl PanePage {
     // Its name in the stack of the pane
     fn name(self) -> &'static str {
         match self {
-            PanePage::Album => "album",
+            PanePage::Tracks => "album",
             PanePage::Lyrics => "lyrics",
         }
     }
 
     fn named(name: &str) -> Option<Self> {
         match name {
-            "album" => Some(PanePage::Album),
+            "album" => Some(PanePage::Tracks),
             "lyrics" => Some(PanePage::Lyrics),
             _ => None,
         }
@@ -69,11 +71,17 @@ impl PaneHistory {
     fn clear(&mut self) {
         self.0.clear();
     }
+
+    // A page that's gone, e.g. the tracks of a playlist that was deleted,
+    // leaves the pages under the one that shows
+    fn drop(&mut self, page: PanePage) {
+        self.0.retain(|back| *back != Back::Page(page));
+    }
 }
 
 impl Window {
     // The page of the pane over the queue that shows, if any
-    fn shown_pane_page(&self) -> Option<PanePage> {
+    pub(super) fn shown_pane_page(&self) -> Option<PanePage> {
         PanePage::named(self.imp().sidebar_stack.visible_child_name()?.as_str())
     }
 
@@ -102,6 +110,11 @@ impl Window {
                 }
             }
         }
+    }
+
+    // Leaves a page out of the pages that going back shows, as it's gone
+    pub(super) fn drop_pane_page(&self, page: PanePage) {
+        self.imp().pane_history.borrow_mut().drop(page);
     }
 
     // Shows the queue in the pane, under every other page, e.g. once tracks
@@ -161,9 +174,9 @@ mod tests {
         let mut history = PaneHistory::default();
         // From the queue, with the pane closed, to the lyrics and an album
         history.open(PanePage::Lyrics, None, false);
-        history.open(PanePage::Album, Some(PanePage::Lyrics), true);
+        history.open(PanePage::Tracks, Some(PanePage::Lyrics), true);
         // Another album takes the place of the first
-        history.open(PanePage::Album, Some(PanePage::Album), true);
+        history.open(PanePage::Tracks, Some(PanePage::Tracks), true);
         assert_eq!(history.back(), Back::Page(PanePage::Lyrics));
         assert_eq!(
             history.back(),
@@ -178,19 +191,28 @@ mod tests {
     #[test]
     fn a_page_is_under_another_once() {
         let mut history = PaneHistory::default();
-        history.open(PanePage::Album, None, true);
-        history.open(PanePage::Lyrics, Some(PanePage::Album), true);
+        history.open(PanePage::Tracks, None, true);
+        history.open(PanePage::Lyrics, Some(PanePage::Tracks), true);
         // Back to the album from the lyrics' item, and to the lyrics
-        history.open(PanePage::Album, Some(PanePage::Lyrics), true);
+        history.open(PanePage::Tracks, Some(PanePage::Lyrics), true);
         assert_eq!(history.back(), Back::Page(PanePage::Lyrics));
+        assert_eq!(history.back(), Back::Queue { pane_visible: true });
+    }
+
+    #[test]
+    fn a_page_that_is_gone_is_left_out() {
+        let mut history = PaneHistory::default();
+        history.open(PanePage::Tracks, None, true);
+        history.open(PanePage::Lyrics, Some(PanePage::Tracks), true);
+        history.drop(PanePage::Tracks);
         assert_eq!(history.back(), Back::Queue { pane_visible: true });
     }
 
     #[test]
     fn the_queue_starts_again() {
         let mut history = PaneHistory::default();
-        history.open(PanePage::Album, None, false);
-        history.open(PanePage::Lyrics, Some(PanePage::Album), true);
+        history.open(PanePage::Tracks, None, false);
+        history.open(PanePage::Lyrics, Some(PanePage::Tracks), true);
         history.clear();
         history.open(PanePage::Lyrics, None, true);
         assert_eq!(history.back(), Back::Queue { pane_visible: true });

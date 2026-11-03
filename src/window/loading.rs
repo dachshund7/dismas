@@ -133,15 +133,22 @@ impl Window {
     }
 
     // Puts the tracks of a playlist in the queue, in place of those of the
-    // selected one, once they're read; it goes on from where it was
-    pub(super) fn queue_playlist_tracks(&self, queue: Vec<gio::File>, name: &str) {
-        let resume = ResumePoint::load(&self.imp().settings, name);
+    // selected one, once they're read; it goes on from `resume`, paused, or
+    // playing with `play`
+    pub(super) fn queue_playlist_tracks(
+        &self,
+        queue: Vec<gio::File>,
+        name: &str,
+        play: bool,
+        resume: Option<ResumePoint>,
+    ) {
         self.load_into_queue(
             queue,
             QueueMode::Restore,
             LoadOptions {
                 switch_to: Some(name.to_string()),
                 resume,
+                play,
                 ..Default::default()
             },
         );
@@ -168,7 +175,6 @@ impl Window {
         self.update_queue_actions();
         for action in [
             "win.select-playlist",
-            "win.play-smart-playlist",
             "win.play-random",
             "win.new-playlist",
             "win.rename-playlist",
@@ -209,6 +215,7 @@ impl Window {
         let LoadOptions {
             switch_to,
             resume,
+            play: play_from_resume,
             replaced,
             place,
             announce,
@@ -345,6 +352,9 @@ impl Window {
                             player.skip_to(first);
                             if first == pos && resume_at.is_some() {
                                 player.resume_at(position.into());
+                            }
+                            if play_from_resume {
+                                player.play();
                             }
                         }
                     }

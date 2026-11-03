@@ -18,12 +18,14 @@ impl Window {
         reveal: Option<&gio::File>,
     ) {
         let imp = self.imp();
+        self.request_shown();
+        self.set_shown_playlist(None);
         let hidden = imp.library_view.hidden_folders();
         imp.album_tracks
             .show_album(album, filter, picks, hidden, reveal);
         // Going back shows the page from before, and closes the sidebar if
         // it was opened for them
-        self.open_pane_page(pane::PanePage::Album);
+        self.open_pane_page(pane::PanePage::Tracks);
     }
 
     // Goes to an album on the Albums page, as Go to Work goes to a work:
@@ -228,7 +230,7 @@ impl Window {
     // queue had tracks that these leave out: a click on another track of
     // the album that's playing loses nothing, and the album's tracks are
     // mostly clicked for that. Once no tracks are read, see `after_loads()`
-    fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
+    pub(super) fn play_shown_tracks(&self, files: Vec<gio::File>, start: u32) {
         self.after_loads(move |win| {
             // With the queue selected, its tracks are the ones in the
             // player, and the queue as it was is only read for an Undo that
@@ -289,7 +291,7 @@ impl Window {
 
         let section = gio::Menu::new();
         section.append(Some(&i18n("Play")), Some("album.play"));
-        self.append_adding_items(&section, "album", true, true);
+        self.append_adding_items(&section, "album", true, None);
         let menu = gio::Menu::new();
         menu.append_section(None, &section);
         // Among the covers of the recordings of a work, an album of its own
@@ -456,7 +458,7 @@ impl Window {
         let actions = gio::SimpleActionGroup::new();
         self.add_adding_actions(&actions, true, |win| {
             let files = win.imp().album_tracks.files();
-            (!files.is_empty()).then_some(Tracks::ShownAlbum(files))
+            (!files.is_empty()).then_some(Tracks::Shown(files))
         });
         let album_tracks = self.imp().album_tracks.get();
         album_tracks.insert_action_group("album-tracks", Some(&actions));
@@ -496,17 +498,19 @@ impl Window {
             }
         ));
         // The Play button plays the tracks it takes from their start, and a
-        // track the same tracks from it
+        // track the same tracks from it, see `play_shown()`
         album_tracks.connect_play(clone!(
             #[weak(rename_to = win)]
             self,
-            move |album_tracks, pos| win.play_shown_tracks(album_tracks.files(), pos)
+            move |_, pos, clicked| win.play_shown(pos, clicked)
         ));
         album_tracks.connect_favorite_toggled(clone!(
             #[weak(rename_to = win)]
             self,
             move |album_tracks, favorite| {
-                win.mark_favorite_albums(&[album_tracks.album_id()], favorite);
+                if let Some(album_id) = album_tracks.album_id() {
+                    win.mark_favorite_albums(&[album_id], favorite);
+                }
             }
         ));
         album_tracks.connect_work_menu_requested(clone!(

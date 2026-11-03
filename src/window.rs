@@ -12,6 +12,7 @@ mod loading;
 mod now_playing;
 mod pane;
 mod playlist;
+mod previews;
 mod selected_playlist;
 mod selection;
 mod sidebar;
@@ -20,6 +21,8 @@ mod smart_playlists;
 mod track_menu;
 mod zen;
 mod zoom;
+
+pub(crate) use smart_playlists::SmartPlaylist;
 
 use std::{
     cell::{Cell, RefCell},
@@ -101,6 +104,10 @@ struct LoadOptions {
     switch_to: Option<String>,
     // Playback is paused where it was, in the empty queue
     resume: Option<ResumePoint>,
+    // And then goes on from there, as for Play on the tracks of a playlist
+    // that isn't selected, which keep the places of the files that aren't
+    // there, unlike tracks played with `QueueMode::Play`
+    play: bool,
     // The tracks took the place of these, which the toast can put back
     replaced: Option<ReplacedQueue>,
     // Where they go in the queue
@@ -245,6 +252,14 @@ mod imp {
         // The playlist whose tracks are loading, to take the place of
         // those of the selected one once they're loaded
         pub(crate) pending_playlist: RefCell<Option<String>>,
+        // The playlist that the tracks page of the pane shows, by its name,
+        // empty for the queue, which its Play button switches to; none for
+        // an album's tracks or a smart playlist's, which play in place of
+        // the queue
+        pub(crate) shown_playlist: RefCell<Option<String>>,
+        // Bumped each time the tracks page is asked for other tracks, so
+        // that a playlist read meanwhile doesn't take their place
+        pub(crate) shown_request: Cell<u32>,
         // Scrolling the queue to the playing track, once it's laid out
         pub(crate) queue_scroll_tick: RefCell<Option<gtk::TickCallbackId>>,
         // The length of the tracks after the current one, in seconds, so
@@ -459,14 +474,30 @@ mod imp {
                 debug!("Window::win.play-random()");
                 win.play_random();
             });
+            // The rows of the Playlists page show the tracks of a playlist
+            // in the pane, without switching to it, or those a smart
+            // playlist picks, without playing them; even while tracks are
+            // read, as for an album
             klass.install_action(
-                "win.play-smart-playlist",
+                "win.show-playlist",
                 Some(glib::VariantTy::STRING),
                 move |win, _, param| {
-                    debug!("Window::win.play-smart-playlist()");
+                    debug!("Window::win.show-playlist()");
                     if let Some(name) = param.and_then(String::from_variant) {
-                        win.set_playlists_visible(false);
-                        win.play_smart_playlist(&name);
+                        win.show_playlist_preview(&name);
+                    }
+                },
+            );
+            klass.install_action(
+                "win.show-smart-playlist",
+                Some(glib::VariantTy::STRING),
+                move |win, _, param| {
+                    debug!("Window::win.show-smart-playlist()");
+                    if let Some(kind) = param
+                        .and_then(String::from_variant)
+                        .and_then(|name| smart_playlists::SmartPlaylist::named(&name))
+                    {
+                        win.show_smart_playlist_preview(kind);
                     }
                 },
             );
@@ -646,6 +677,8 @@ mod imp {
                 starting: Cell::new(true),
                 after_startup: RefCell::default(),
                 pending_playlist: RefCell::default(),
+                shown_playlist: RefCell::default(),
+                shown_request: Cell::default(),
                 queue_scroll_tick: RefCell::default(),
                 queue_time_after_current: Cell::new(0),
                 queue_time_idle: Cell::new(false),

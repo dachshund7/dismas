@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The tracks of an album from the library, shown in the sidebar like the
-// queue, so they can be played or added to it
+// The tracks of an album from the library, or of a playlist that isn't
+// selected, shown in the sidebar like the queue, so they can be played or
+// added to it. What playing them does is up to the window, which knows
+// what they are
 
 use std::{
     cell::{Cell, RefCell},
@@ -74,8 +76,8 @@ mod imp {
         // Tracks are being added to the queue
         pub(crate) loading: Cell<bool>,
 
-        // The id of the album that is showing
-        pub(crate) album_id: RefCell<String>,
+        // The id of the album that is showing, none for a playlist
+        pub(crate) album_id: RefCell<Option<String>>,
         pub(crate) tracks: RefCell<Option<gio::ListStore>>,
         pub(crate) files: RefCell<Vec<gio::File>>,
         // Whether the album is on more than one disc, whose sections then
@@ -161,9 +163,10 @@ mod imp {
                         .param_types([bool::static_type()])
                         .build(),
                     // The tracks the Play button takes play, see `files()`,
-                    // from the position of the track to start playing from
+                    // from the position of the track to start playing from,
+                    // and whether that track was clicked
                     Signal::builder("play")
-                        .param_types([u32::static_type()])
+                        .param_types([u32::static_type(), bool::static_type()])
                         .build(),
                     // The menu of a track, at the given point of its row
                     Signal::builder("menu-requested")
@@ -232,11 +235,16 @@ impl AlbumTracks {
         )
     }
 
-    pub(crate) fn connect_play<F: Fn(&Self, u32) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    pub(crate) fn connect_play<F: Fn(&Self, u32, bool) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
         self.connect_closure(
             "play",
             false,
-            glib::closure_local!(move |view: &Self, start: u32| f(view, start)),
+            glib::closure_local!(move |view: &Self, start: u32, clicked: bool| f(
+                view, start, clicked
+            )),
         )
     }
 
@@ -409,7 +417,7 @@ impl AlbumTracks {
         imp.play_button.connect_clicked(clone!(
             #[weak(rename_to = this)]
             self,
-            move |_| this.emit_by_name::<()>("play", &[&0u32])
+            move |_| this.emit_by_name::<()>("play", &[&0u32, &false])
         ));
 
         imp.select_all_button.connect_clicked(clone!(
@@ -432,7 +440,7 @@ impl AlbumTracks {
                         this.toggle_track(&track);
                     }
                 } else if this.adding_enabled() {
-                    this.emit_by_name::<()>("play", &[&pos]);
+                    this.emit_by_name::<()>("play", &[&pos, &true]);
                 }
             }
         ));
@@ -551,7 +559,9 @@ impl AlbumTracks {
         };
         imp.selected_label.set_label(&label);
 
-        let can_add = self.adding_enabled() && (!self.selection_mode() || n_selected > 0);
+        let can_add = self.adding_enabled()
+            && !imp.files.borrow().is_empty()
+            && (!self.selection_mode() || n_selected > 0);
         imp.play_button.set_sensitive(can_add);
         imp.add_button.set_sensitive(can_add);
     }
@@ -596,8 +606,7 @@ impl AlbumTracks {
         reveal: Option<&gio::File>,
     ) {
         let imp = self.imp();
-        imp.album_title.set_label(&album.title());
-        imp.album_title.set_tooltip_text(Some(&album.title()));
+        self.set_title(&album.title());
         imp.album_artist.set_label(&album.artist());
         let info = [album.year(), album.label(), album.catalog_number()]
             .into_iter()
@@ -606,7 +615,9 @@ impl AlbumTracks {
             .join(" · ");
         imp.album_info.set_label(&info);
         imp.album_info.set_visible(!info.is_empty());
-        imp.album_id.replace(album.id());
+        imp.album_artist.set_visible(true);
+        imp.album_id.replace(Some(album.id()));
+        imp.favorite_button.set_visible(true);
         imp.favorite_button.set_active(album.favorite());
 
         imp.filter.replace(filter);
@@ -614,16 +625,84 @@ impl AlbumTracks {
         self.load(album.id(), hidden, reveal);
     }
 
-    // The id of the album that is showing
-    pub(crate) fn album_id(&self) -> String {
+    // The id of the album that is showing, none for a playlist
+    pub(crate) fn album_id(&self) -> Option<String> {
         self.imp().album_id.borrow().clone()
+    }
+
+    // Shows the tracks of a playlist, under its `title`, with a `caption`
+    // such as what a smart playlist picks, if any; how many there are and
+    // how long they last show once they're read. With `placeholders`, the
+    // files that aren't there keep their places, as in the queue a saved
+    // playlist is switched to, so that a track's place among them is its
+    // place in the playlist
+    pub(crate) fn show_files(
+        &self,
+        title: &str,
+        caption: &str,
+        files: Vec<gio::File>,
+        placeholders: bool,
+    ) {
+        let imp = self.imp();
+        self.set_title(title);
+        imp.album_artist.set_label(caption);
+        imp.album_artist.set_visible(!caption.is_empty());
+        imp.album_info.set_visible(false);
+        imp.album_id.replace(None);
+        imp.favorite_button.set_visible(false);
+        imp.filter.replace(TrackFilter::default());
+        imp.picks.replace(PickNames::default());
+
+        let generation = self.clear();
+        imp.files.replace(files.clone());
+        self.update_selection();
+        if files.is_empty() {
+            self.show_count();
+            return;
+        }
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = this)]
+            self,
+            async move {
+                this.read_tracks(generation, files, None, placeholders)
+                    .await;
+            }
+        ));
+    }
+
+    // The title of the album or the playlist that is showing, which can be
+    // renamed
+    pub(crate) fn set_title(&self, title: &str) {
+        let imp = self.imp();
+        imp.album_title.set_label(title);
+        imp.album_title.set_tooltip_text(Some(title));
+    }
+
+    // Says how many tracks the playlist that is showing has, and how long
+    // they last, once they're read; an album shows its year and label
+    // instead
+    fn show_count(&self) {
+        let imp = self.imp();
+        if imp.album_id.borrow().is_some() {
+            return;
+        }
+        let tracks = self.tracks();
+        let seconds = tracks.iter().map(Track::duration).sum();
+        let count = tracks_caption(tracks.len() as u32, seconds);
+        imp.album_info.set_label(&count);
+        imp.album_info.set_visible(true);
     }
 
     // Shows whether the album is a favorite, when it's one of the albums
     // marked or unmarked elsewhere
     pub(crate) fn show_favorite(&self, album_ids: &[String], favorite: bool) {
         let imp = self.imp();
-        if album_ids.contains(&imp.album_id.borrow()) {
+        if imp
+            .album_id
+            .borrow()
+            .as_ref()
+            .is_some_and(|id| album_ids.contains(id))
+        {
             imp.favorite_button.set_active(favorite);
         }
     }
@@ -736,23 +815,11 @@ impl AlbumTracks {
     // search, and leaving out those in the `hidden` folders
     fn load(&self, album_id: String, hidden: Vec<PathBuf>, reveal: Option<&gio::File>) {
         let imp = self.imp();
-        self.set_selection_mode(false);
-        self.show_booklets(&[]);
-
-        let Some(tracks) = imp.tracks.borrow().clone() else {
-            return;
-        };
-        tracks.remove_all();
-        imp.files.replace(Vec::new());
-        imp.matching.set(None);
-        imp.multi_disc.set(false);
-
         // The files are in the database of the library, and reading the
         // tags of the tracks takes a moment, so both are done in separate
         // threads; the tracks are shown as they come, and showing another
         // album stops it
-        let generation = imp.generation.get().wrapping_add(1);
-        imp.generation.set(generation);
+        let generation = self.clear();
         let filter = imp.filter.borrow().clone();
         let reveal = reveal.cloned();
         glib::spawn_future_local(clone!(
@@ -789,10 +856,32 @@ impl AlbumTracks {
                     .map(gio::File::for_path)
                     .collect();
                 imp.files.replace(files.clone());
+                this.update_selection();
                 this.update_filter_bar();
-                this.read_tracks(generation, files, reveal).await;
+                this.read_tracks(generation, files, reveal, false).await;
             }
         ));
+    }
+
+    // Empties the list for other tracks, stopping the reading of those
+    // that showed; returns the generation of the new ones. Play and Add
+    // are off until there are files, as those of an album are looked up
+    // meanwhile
+    fn clear(&self) -> u32 {
+        let imp = self.imp();
+        self.set_selection_mode(false);
+        self.show_booklets(&[]);
+        if let Some(tracks) = imp.tracks.borrow().as_ref() {
+            tracks.remove_all();
+        }
+        imp.files.replace(Vec::new());
+        imp.matching.set(None);
+        imp.multi_disc.set(false);
+        self.update_filter_bar();
+        self.update_selection();
+        let generation = imp.generation.get().wrapping_add(1);
+        imp.generation.set(generation);
+        generation
     }
 
     // The line over the tracks of an album on several discs where a disc
@@ -871,14 +960,20 @@ impl AlbumTracks {
 
     // Reads the tags of the tracks, which are shown as they come, unless
     // another album is shown meanwhile
-    async fn read_tracks(&self, generation: u32, files: Vec<gio::File>, reveal: Option<gio::File>) {
+    async fn read_tracks(
+        &self,
+        generation: u32,
+        files: Vec<gio::File>,
+        reveal: Option<gio::File>,
+        placeholders: bool,
+    ) {
         let imp = self.imp();
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
         // A track to reveal stays in view, rather than the top
         let revealed = Rc::new(Cell::new(false));
-        let receiver = load_tracks(files, false);
+        let receiver = load_tracks(files, placeholders);
         while let Ok(data) = receiver.recv().await {
             if imp.generation.get() != generation {
                 return;
@@ -921,5 +1016,74 @@ impl AlbumTracks {
                 utils::scroll_to_top_when_laid_out(&imp.tracks_view, still_wanted);
             }
         }
+        if imp.generation.get() == generation {
+            self.show_count();
+        }
+    }
+}
+
+// How many tracks a playlist has and how long they last, e.g. "12 tracks ·
+// 1 hour 5 minutes"; the files that aren't there count as tracks, lasting
+// nothing
+fn tracks_caption(n_tracks: u32, seconds: u64) -> String {
+    let count = if n_tracks == 0 {
+        i18n("No tracks")
+    } else {
+        ni18n_k(
+            // Translators: `{n}` must be left unmodified; it is expanded to
+            // the number of tracks of a playlist
+            "One track",
+            "{n} tracks",
+            n_tracks,
+            &[("n", &n_tracks.to_string())],
+        )
+    };
+    if seconds == 0 {
+        return count;
+    }
+    // Rounded up, so that a short track isn't "0 minutes"
+    let minutes_total = u32::try_from(seconds.div_ceil(60)).unwrap_or(u32::MAX);
+    let (hours, minutes) = (minutes_total / 60, minutes_total % 60);
+    let minutes_text = ni18n_f("{} minute", "{} minutes", minutes, &[&minutes.to_string()]);
+    let length = if hours == 0 {
+        minutes_text
+    } else {
+        let hours_text = ni18n_f(
+            // Translators: the `{}` must be left unmodified; it is expanded
+            // to the number of hours that the tracks of a playlist last
+            "{} hour",
+            "{} hours",
+            hours,
+            &[&hours.to_string()],
+        );
+        if minutes == 0 {
+            hours_text
+        } else {
+            format!("{hours_text} {minutes_text}")
+        }
+    };
+    format!("{count} · {length}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_caption_counts_the_tracks_and_their_length() {
+        assert_eq!(tracks_caption(0, 0), "No tracks");
+        assert_eq!(tracks_caption(1, 0), "One track");
+        // Missing files, whose length isn't known
+        assert_eq!(tracks_caption(3, 0), "3 tracks");
+        assert_eq!(tracks_caption(1, 20), "One track · 1 minute");
+        assert_eq!(tracks_caption(12, 59 * 60 + 1), "12 tracks · 1 hour");
+        assert_eq!(
+            tracks_caption(12, 3600 + 5 * 60),
+            "12 tracks · 1 hour 5 minutes"
+        );
+        assert_eq!(
+            tracks_caption(100, 6 * 3600 + 2 * 60),
+            "100 tracks · 6 hours 2 minutes"
+        );
     }
 }
