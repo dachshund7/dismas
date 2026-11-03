@@ -651,7 +651,12 @@ listview.navigation-sidebar > header label.works-composer {
   margin: 18px 12px 6px 12px;
 }
 
-/* The kinds of performers in the list of them */
+/* The kinds of performers in the list of them: a line, then the kind,
+ * spaced as the line above a work in the queue */
+listview.navigation-sidebar > header separator.picker-separator {
+  margin: 6px 12px 0 12px;
+}
+
 listview.navigation-sidebar > header label.picker-section {
   margin: 12px 12px 3px 12px;
 }

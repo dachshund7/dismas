@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The sections of the Performers list stand out, with a line above each
+  and its name in bold, and screen readers say which section a performer
+  is in
 - Go to Work glides to the work, as Show the Playing Track glides to a
   track, rather than jumping to it
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or

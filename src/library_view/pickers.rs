@@ -362,9 +362,11 @@ pub(super) fn fill_name_count_line(line: &gtk::Box, name: &gtk::Label, count: &g
 // The rows of the lists of composers and performers: a line with a name
 // and a number, which `bind` sets from the `T` of the item, a
 // `BoxedAnyObject`; `tooltip` makes the line's tooltip from it when it
-// shows. Their line is in a box, as a work's is in its row
+// shows, and `description` what screen readers say about the row after
+// its name. Their line is in a box, as a work's is in its row
 fn name_count_factory<T: 'static>(
     tooltip: fn(&T) -> Option<String>,
+    description: fn(&T) -> Option<String>,
     bind: fn(&T, &gtk::Label, &gtk::Label),
 ) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
@@ -395,7 +397,9 @@ fn name_count_factory<T: 'static>(
             return;
         };
         if let Some(object) = item.item().and_downcast::<glib::BoxedAnyObject>() {
-            bind(&object.borrow::<T>(), &name, &count);
+            let object = object.borrow::<T>();
+            bind(&object, &name, &count);
+            item.set_accessible_description(&description(&object).unwrap_or_default());
         }
     });
     factory
@@ -418,6 +422,7 @@ fn composer_factory() -> gtk::SignalListItemFactory {
     name_count_factory::<Option<library::ComposerInfo>>(
         // The name it's known by, as the row has the one it's sorted by
         |composer| composer.as_ref().map(|composer| composer.name.clone()),
+        |_| None,
         |composer, name, count| {
             if let Some(composer) = composer {
                 name.set_label(&composer.label);
@@ -446,6 +451,12 @@ fn performer_factory() -> gtk::SignalListItemFactory {
                 .join("\n");
             Some(text)
         },
+        // The section they're in
+        |performer| {
+            performer
+                .as_ref()
+                .map(|performer| section_name(performer.kind))
+        },
         |performer, name, count| {
             if let Some(performer) = performer {
                 name.set_markup(&with_dimmed(&performer.sort, &performer.roles.join(", ")));
@@ -458,21 +469,38 @@ fn performer_factory() -> gtk::SignalListItemFactory {
     )
 }
 
-// The headers of the sections of the list of performers; All Performers,
-// at the top, has none
+// The headers of the sections of the list of performers: a line, then the
+// name of the section, in bold, so that the sections stand out from the
+// dimmed roles in the rows. All Performers, at the top, has neither. The
+// section that starts the list has no line either, as when a search hides
+// All Performers, which leaves a line under the entry otherwise
 fn performer_section_factory() -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
+        let separator = gtk::Separator::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .css_classes(["picker-separator"])
+            .build();
         let label = gtk::Label::builder()
             .xalign(0.0)
-            .css_classes(["caption-heading", "dim-label", "picker-section"])
+            .css_classes(["heading", "picker-section"])
             .build();
-        header.set_child(Some(&label));
+        let child = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
+        child.append(&separator);
+        child.append(&label);
+        header.set_child(Some(&child));
+        header.connect_start_notify(update_section_line);
     });
     factory.connect_bind(|_, item| {
         let header = item.downcast_ref::<gtk::ListHeader>().unwrap();
-        let Some(label) = header.child().and_downcast::<gtk::Label>() else {
+        let Some(label) = header
+            .child()
+            .and_then(|child| child.last_child())
+            .and_downcast::<gtk::Label>()
+        else {
             return;
         };
         let kind = header
@@ -484,12 +512,30 @@ fn performer_section_factory() -> gtk::SignalListItemFactory {
                     .map(|performer| performer.kind)
             });
         label.set_visible(kind.is_some());
-        label.set_label(&match kind {
-            Some(PerformerKind::Conductor) => i18n("Conductors"),
-            Some(PerformerKind::Ensemble) => i18n("Ensembles"),
-            Some(PerformerKind::Soloist) => i18n("Soloists"),
-            None => String::new(),
-        });
+        label.set_label(&kind.map(section_name).unwrap_or_default());
+        update_section_line(header);
     });
     factory
+}
+
+// Shows the line above a section's header unless the section has no name
+// or starts the list
+fn update_section_line(header: &gtk::ListHeader) {
+    let Some(child) = header.child() else {
+        return;
+    };
+    let (Some(separator), Some(label)) = (child.first_child(), child.last_child()) else {
+        return;
+    };
+    separator.set_visible(label.is_visible() && header.start() > 0);
+}
+
+// The name of the section of the performers of a kind, its header, which
+// the rows also give screen readers, as they skip the headers
+fn section_name(kind: PerformerKind) -> String {
+    match kind {
+        PerformerKind::Conductor => i18n("Conductors"),
+        PerformerKind::Ensemble => i18n("Ensembles"),
+        PerformerKind::Soloist => i18n("Soloists"),
+    }
 }
