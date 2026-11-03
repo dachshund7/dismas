@@ -362,8 +362,9 @@ pub(super) fn fill_name_count_line(line: &gtk::Box, name: &gtk::Label, count: &g
 // The rows of the lists of composers and performers: a line with a name
 // and a number, which `bind` sets from the `T` of the item, a
 // `BoxedAnyObject`; `tooltip` makes the line's tooltip from it when it
-// shows, and `description` what screen readers say about the row after
-// its name. Their line is in a box, as a work's is in its row
+// shows, and its name for screen readers, with the number, and
+// `description` what they say about the row after its name. Their line is
+// in a box, as a work's is in its row
 fn name_count_factory<T: 'static>(
     tooltip: fn(&T) -> Option<String>,
     description: fn(&T) -> Option<String>,
@@ -399,6 +400,20 @@ fn name_count_factory<T: 'static>(
         if let Some(object) = item.item().and_downcast::<glib::BoxedAnyObject>() {
             let object = object.borrow::<T>();
             bind(&object, &name, &count);
+            // A row has no name of its own for screen readers: the one
+            // it's known by, with its roles, as in its tooltip, or the
+            // label of All …, and its number
+            let label = tooltip(&object).map_or_else(
+                || name.text().to_string(),
+                |tooltip| tooltip.replace('\n', ", "),
+            );
+            let count = count.text();
+            let label = if count.is_empty() {
+                label
+            } else {
+                format!("{label}, {count}")
+            };
+            item.set_accessible_label(&label);
             item.set_accessible_description(&description(&object).unwrap_or_default());
         }
     });

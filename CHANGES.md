@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 - The sections of the Performers list stand out, with a line above each
   and its name in bold, and screen readers say which section a performer
   is in
+- Screen readers name the rows of the Composers and Performers lists,
+  with what the performers play or sing and their number of albums
 - Go to Work glides to the work, as Show the Playing Track glides to a
   track, rather than jumping to it
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
