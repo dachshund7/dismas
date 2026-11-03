@@ -376,6 +376,44 @@ pub(crate) fn when_laid_out<W: IsA<gtk::Widget>>(widget: &W, f: impl FnOnce(&W) 
     });
 }
 
+// Runs `f` once, in the next frame, after the widget's window is laid out
+// and before it's drawn: the widgets have their new places then, and can
+// still be drawn somewhere else, as rows that slide there from where they
+// were. `when_laid_out()` runs a frame later, before that frame's layout.
+//
+// The handler is connected with `after`, so that it runs after the handlers
+// connected without it, whatever the order they were connected in, among
+// them the one the window's surface lays the window out with. The frame
+// clock only lays out a frame when something asks for it, so this asks,
+// or `f` would wait for whatever asks next, a resize or a track change.
+// The handler disconnects itself; it only holds the handler's id, so a
+// window closed before its frame drops `f` with its clock
+pub(crate) fn after_next_layout(widget: &impl IsA<gtk::Widget>, f: impl FnOnce() + 'static) {
+    let Some(clock) = widget.frame_clock() else {
+        return;
+    };
+    let handler = std::rc::Rc::new(Cell::new(None::<glib::SignalHandlerId>));
+    let f = Cell::new(Some(f));
+    let id = clock.connect_closure(
+        "layout",
+        true,
+        glib::closure_local!(
+            #[strong]
+            handler,
+            move |clock: &gdk::FrameClock| {
+                if let Some(id) = handler.take() {
+                    clock.disconnect(id);
+                }
+                if let Some(f) = f.take() {
+                    f();
+                }
+            }
+        ),
+    );
+    handler.set(Some(id));
+    clock.request_phase(gdk::FrameClockPhase::LAYOUT);
+}
+
 // Gives a row of a list the tooltip that `text` makes from the item it's
 // bound to, made only when it shows. Setting the tooltip as the row is bound
 // makes GTK look for the window under the pointer, which grabs the X

@@ -672,23 +672,14 @@ impl Window {
 
         // The rows get their new places when the list is laid out, before
         // it's drawn, so they can still be drawn in their old places first
-        let Some(clock) = self.imp().playlist_view.queue_view().frame_clock() else {
-            return;
-        };
-        let handler = Rc::new(RefCell::new(None));
-        let id = clock.connect_layout(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[strong]
-            handler,
-            move |clock| {
-                if let Some(id) = handler.take() {
-                    clock.disconnect(id);
-                }
-                win.slide_queue_rows(&shown, &old_order);
-            }
-        ));
-        handler.replace(Some(id));
+        utils::after_next_layout(
+            &self.imp().playlist_view.queue_view(),
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move || win.slide_queue_rows(&shown, &old_order)
+            ),
+        );
     }
 
     // The tracks of the rows in view, and where the rows are drawn
