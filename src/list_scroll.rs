@@ -307,7 +307,14 @@ pub(crate) fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCall
 // the list is scrolled, which undid the glide: a list scrolled to its end
 // went back there at each frame, and a glide without animations, which
 // takes two frames, didn't move it at all. Turning kinetic scrolling off is
-// GTK's only way to stop it, and it's turned on again at once
+// GTK's only way to stop it, and it's turned on again at once.
+//
+// Turning it off also resets the scrolled window's gestures, which only
+// follow touches: a finger dragging the list stopped moving it, and the
+// reset swipe started a fling of its own, with the finger's speed. A
+// finger on the list has stopped any fling already, as the scrolled window
+// stops one when a drag starts, so nothing is turned off while one of its
+// gestures is active
 pub(crate) fn stop_kinetic_scrolling(widget: &impl IsA<gtk::Widget>) {
     let Some(scrolled) = widget
         .ancestor(gtk::ScrolledWindow::static_type())
@@ -315,10 +322,24 @@ pub(crate) fn stop_kinetic_scrolling(widget: &impl IsA<gtk::Widget>) {
     else {
         return;
     };
-    if scrolled.is_kinetic_scrolling() {
+    if scrolled.is_kinetic_scrolling() && !is_touched(&scrolled) {
         scrolled.set_kinetic_scrolling(false);
         scrolled.set_kinetic_scrolling(true);
     }
+}
+
+// Whether a gesture of a widget is following a touch or a press. The
+// scrolled window's gestures are its own, so they're found among its
+// controllers. GTK keeps that list up to date only while it's held, which
+// slows down adding and removing controllers, and it's dropped at once
+fn is_touched(widget: &impl IsA<gtk::Widget>) -> bool {
+    let controllers = widget.observe_controllers();
+    (0..controllers.n_items()).any(|i| {
+        controllers
+            .item(i)
+            .and_downcast::<gtk::Gesture>()
+            .is_some_and(|gesture| gesture.is_active())
+    })
 }
 
 // Waits one more frame for a list to get its size, unless it was waited for
