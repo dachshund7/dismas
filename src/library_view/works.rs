@@ -663,12 +663,14 @@ impl LibraryView {
     //
     // Only one work opens at a time, so a placement still running when
     // another one starts is stopped first. Both would move the list from the
-    // same layout, and their moves would add up
+    // same layout, and their moves would add up. So is the list going on by
+    // itself after a fling, see `list_scroll::stop_kinetic_scrolling()`
     fn show_when_open(&self, key: &str, cover: Option<CoverRef>, gone_to: bool) {
         let imp = self.imp();
         if let Some(placing) = imp.placing.take() {
             placing.remove();
         }
+        list_scroll::stop_kinetic_scrolling(&*imp.works_list);
         let Some(pos) = self.work_position(key) else {
             return;
         };

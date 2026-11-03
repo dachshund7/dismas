@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
 - The covers of a work on the Works page often shook as they slid open
 - A work opened while the works were read again, as after a scan or a
   change to the favorites, could stay closed
+- Show the Playing Track and Show in Playlist left the queue where it
+  was, or made it flicker, while it was still moving on after a fling of
+  the touchpad or a quick spin of the mouse wheel
 
 ### Removed
 

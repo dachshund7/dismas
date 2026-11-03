@@ -48,8 +48,10 @@ pub(crate) fn glide_adjustment(
 // glide aims at where the row should be until the row is laid out, and at
 // the row from then on. Without animations, as GTK's settings can ask, the
 // list jumps to the track. The list was usually just shown, and can only
-// scroll once it has its size, so this waits for a frame where it has it
+// scroll once it has its size, so this waits for a frame where it has it.
+// The list may still be going on from a fling, which stops
 pub(crate) fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCallbackId {
+    stop_kinetic_scrolling(view);
     let waited = Cell::new(0);
     let glide = Cell::new(None::<Glide>);
     // The frames since the list was asked to scroll to the track itself,
@@ -297,6 +299,26 @@ pub(crate) fn reveal_track(view: &gtk::ListView, track: &Track) -> gtk::TickCall
             glib::ControlFlow::Break
         }
     ))
+}
+
+// Stops a list going on by itself after a fling of the touchpad or a quick
+// spin of the wheel, so that a glide that the user asked for goes where it
+// was asked. Its scrolled window decelerates at each frame, setting where
+// the list is scrolled, which undid the glide: a list scrolled to its end
+// went back there at each frame, and a glide without animations, which
+// takes two frames, didn't move it at all. Turning kinetic scrolling off is
+// GTK's only way to stop it, and it's turned on again at once
+pub(crate) fn stop_kinetic_scrolling(widget: &impl IsA<gtk::Widget>) {
+    let Some(scrolled) = widget
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .and_downcast::<gtk::ScrolledWindow>()
+    else {
+        return;
+    };
+    if scrolled.is_kinetic_scrolling() {
+        scrolled.set_kinetic_scrolling(false);
+        scrolled.set_kinetic_scrolling(true);
+    }
 }
 
 // Waits one more frame for a list to get its size, unless it was waited for
