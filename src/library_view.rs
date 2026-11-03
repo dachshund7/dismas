@@ -212,6 +212,9 @@ mod imp {
         // The tick callback that puts the line of the work opening in its
         // place, see `show_when_open()`
         pub(crate) placing: RefCell<Option<gtk::TickCallbackId>>,
+        // The glide that brings a cover pointed out into view, see
+        // `point_out_cover()`, stopped when another work opens
+        pub(crate) cover_glide: RefCell<Option<adw::TimedAnimation>>,
         // The work the user is opening, while its covers are read, see
         // `open_work()`
         pub(crate) opening: RefCell<Option<super::works::UserOpening>>,

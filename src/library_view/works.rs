@@ -220,6 +220,11 @@ impl LibraryView {
         self.find_work(|i, work| (work.key == key).then_some(i))
     }
 
+    // A work of the list, as the list has it
+    fn work_info(&self, key: &str) -> Option<library::WorkInfo> {
+        self.find_work(|_, work| (work.key == key).then(|| work.clone()))
+    }
+
     // The albums of the covers of the open work, in their order: copies, one
     // for each recording, which are selected on their own
     pub(super) fn open_work_albums(&self) -> Vec<Album> {
@@ -331,7 +336,7 @@ impl LibraryView {
             #[weak(rename_to = this)]
             self,
             async move {
-                let Ok((recordings, counts)) = gio::spawn_blocking(move || {
+                let read = gio::spawn_blocking(move || {
                     let recordings = library::work_recordings(&keys, &filter, &hidden);
                     // The number of each album's tracks, for the badges
                     let work = TrackFilter {
@@ -340,15 +345,18 @@ impl LibraryView {
                     };
                     (recordings, library::search_albums(&work, &hidden))
                 })
-                .await
-                else {
-                    return;
-                };
+                .await;
                 let imp = this.imp();
                 if imp.covers_generation.get() != generation {
                     return;
                 }
+                // The opening is over, even if its covers couldn't be read:
+                // left behind, it would be opened again the next time the
+                // works are read, without the user asking
                 imp.opening.take();
+                let Ok((recordings, counts)) = read else {
+                    return;
+                };
                 let read_again = this.is_work_open(&key);
                 // Before the other work's covers go, so that they're
                 // unselected
@@ -624,8 +632,8 @@ impl LibraryView {
     // it closes at the same time. A work reopened as it closed slides on from
     // the share that still showed, which counts as none of the way, or the
     // line would jump that much at the first frame. When the list is
-    // scrolled away from the row as it slides, the user goes somewhere else,
-    // and the line is left there.
+    // scrolled away from the row as it slides, or while its covers are
+    // read, the user goes somewhere else, and the list is left where it is.
     //
     // Otherwise, as when Go to Work goes to a work out of view, or to one
     // open already, the list glides there as Show the Playing Track glides to
@@ -662,20 +670,30 @@ impl LibraryView {
     // placed.
     //
     // Only one work opens at a time, so a placement still running when
-    // another one starts is stopped first. Both would move the list from the
-    // same layout, and their moves would add up. So is the list going on by
-    // itself after a fling, see `list_scroll::stop_kinetic_scrolling()`
+    // another one starts is stopped first, and so is the glide bringing the
+    // cover pointed out by the last one into view. Both would move the list
+    // in the same frames, and their moves would add up. So is the list going
+    // on by itself after a fling, see `list_scroll::stop_kinetic_scrolling()`
     fn show_when_open(&self, key: &str, cover: Option<CoverRef>, gone_to: bool) {
         let imp = self.imp();
         if let Some(placing) = imp.placing.take() {
             placing.remove();
+        }
+        if let Some(glide) = imp.cover_glide.take() {
+            adw::prelude::AnimationExt::pause(&glide);
+        }
+        // A work clicked whose row the user scrolled away from while its
+        // covers were read
+        let shown = self.shown_work_row(key);
+        if shown.is_none() && !gone_to {
+            return;
         }
         list_scroll::stop_kinetic_scrolling(&*imp.works_list);
         let Some(pos) = self.work_position(key) else {
             return;
         };
         let list = imp.works_list.get();
-        let slide = self.shown_work_row(key).and_then(|(row, start)| {
+        let slide = shown.and_then(|(row, start)| {
             let from = row.covers()?.progress();
             (from < 1.0).then(|| Pace::Slide {
                 start,
@@ -809,11 +827,12 @@ impl LibraryView {
                 below.max(0.0)
             };
             if by != 0.0 {
-                list_scroll::glide_adjustment(
+                let glide = list_scroll::glide_adjustment(
                     list,
                     &adjustment,
                     adjustment.value() + f64::from(by),
                 );
+                self.imp().cover_glide.replace(Some(glide));
             }
         }
         let Some(cell) = cover.first_child() else {
@@ -978,23 +997,27 @@ impl LibraryView {
         // albums or the favorites can have changed, unless it's gone. A work
         // the user is opening, whose covers are still being read, is opened
         // again instead, as that reading is dropped now, and it's the work
-        // that will be open
+        // that will be open. If that work is gone, the open one stays; with
+        // none open, the reading of its covers is dropped all the same, or
+        // they would open a work the list no longer has
         let open = imp
             .expanded_work
             .borrow()
             .as_ref()
             .map(|work| work.key.clone());
-        let opening = imp.opening.take().and_then(|opening| {
-            let work = self.find_work(|_, work| (work.key == opening.key).then(|| work.clone()))?;
-            Some((work, opening))
-        });
-        if let Some((work, opening)) = opening {
-            self.open_work(&work, opening.opening, opening.cover);
+        let opening = imp.opening.take();
+        let opening_work = opening
+            .as_ref()
+            .and_then(|opening| self.work_info(&opening.key));
+        if let (Some(opening), Some(work)) = (&opening, opening_work) {
+            self.open_work(&work, opening.opening, opening.cover.clone());
         } else if let Some(key) = open {
-            match self.find_work(|_, work| (work.key == key).then(|| work.clone())) {
+            match self.work_info(&key) {
                 Some(work) => self.open_work(&work, Opening::ReadAgain, focused),
                 None => self.close_work(false),
             }
+        } else if opening.is_some() {
+            self.close_work(false);
         }
         self.update_stack();
         self.reveal_pending_work();
