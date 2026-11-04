@@ -43,6 +43,9 @@ const DISCOVERER_SECONDS: u64 = 5;
 // How long the child lives at most, so the kernel ends it if it hangs,
 // even in Discoverer
 const CHILD_SECONDS: u32 = 15;
+// How long the parent lets the child run before it ends it: a little longer
+// than the child's alarm, which a file that took over the child could block
+const READER_TIME: Duration = Duration::from_secs(CHILD_SECONDS as u64 + 5);
 
 // The most bytes of pictures the child sends, as many as a cover file next
 // to the tracks that's read: a crafted file can have dozens of pictures of
@@ -134,6 +137,11 @@ pub(super) fn discover(path: &Path, options: ReadOptions) -> Option<FileTags> {
 }
 
 fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
+    run_child_for(helper, path, covers, READER_TIME)
+}
+
+// Reads a file in a child that runs for `time` at most
+fn run_child_for(helper: &Path, path: &Path, covers: bool, time: Duration) -> Option<Discovered> {
     #[cfg(not(target_os = "linux"))]
     {
         static SAID: std::sync::Once = std::sync::Once::new();
@@ -163,6 +171,7 @@ fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
             return None;
         }
     };
+    let watchdog = Watchdog::start(&child, time);
     let mut report = Vec::new();
     let read = child.stdout.take().is_some_and(|stdout| {
         stdout
@@ -175,7 +184,12 @@ fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
         // It would go on writing to a pipe that's no longer read
         let _ = child.kill();
     }
+    let timed_out = watchdog.stop();
     let status = child.wait();
+    if timed_out {
+        warn!("GStreamer's reader of {path:?} took too long, and was ended");
+        return None;
+    }
     if too_much {
         warn!("GStreamer found more in {path:?} than is read");
         return None;
@@ -202,6 +216,62 @@ fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
             warn!("Unable to wait for the reader of {path:?}: {e}");
             None
         }
+    }
+}
+
+// Ends a child that runs for longer than it's given, whatever it does.
+// Discoverer's timeout and the child's alarm end a hang, but a file that
+// took over the child could block the alarm's signal and keep the child
+// running, and the parent would wait on it for ever, at every start
+struct Watchdog {
+    pid: u32,
+    stop: std::sync::mpsc::Sender<()>,
+    thread: std::thread::JoinHandle<bool>,
+}
+
+impl Watchdog {
+    fn start(child: &std::process::Child, time: Duration) -> Self {
+        let pid = child.id();
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let late =
+                stopped.recv_timeout(time) == Err(std::sync::mpsc::RecvTimeoutError::Timeout);
+            if late {
+                // SAFETY: kill() takes no pointers. The child isn't reaped
+                // before the watchdog stops, so its pid can't have been given
+                // to another process yet
+                unsafe {
+                    libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                }
+            }
+            late
+        });
+        Watchdog { pid, stop, thread }
+    }
+
+    // Waits for the child to end, without reaping it, so that its pid stays
+    // its own while the watchdog could still end it, then stops the
+    // watchdog; true if the watchdog ended the child
+    fn stop(self) -> bool {
+        let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        loop {
+            // SAFETY: waitid only writes `info`, which is large enough
+            let waited = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    self.pid as libc::id_t,
+                    info.as_mut_ptr(),
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            };
+            if waited == 0
+                || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+            {
+                break;
+            }
+        }
+        let _ = self.stop.send(());
+        self.thread.join().unwrap_or(false)
     }
 }
 
@@ -745,6 +815,30 @@ mod tests {
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(run_child(&helper, Path::new("Nimrod.oga"), true), None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // A reader that doesn't end, as one that blocked its alarm wouldn't, is
+    // ended once its time is up
+    #[cfg(unix)]
+    #[test]
+    fn a_reader_that_runs_too_long_is_ended() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = test_dir("late");
+        let helper = dir.join("reader.sh");
+        // The shell becomes sleep, which keeps the pipe open
+        std::fs::write(&helper, "#!/bin/sh\nexec sleep 60\n").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = Instant::now();
+        let read = run_child_for(
+            &helper,
+            Path::new("Nimrod.oga"),
+            true,
+            Duration::from_millis(300),
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(read, None);
+        assert!(started.elapsed() < Duration::from_secs(30));
     }
 
     // The variable that names the file `probe` reads
