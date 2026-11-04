@@ -67,10 +67,10 @@ use file_name::{fallback_album, title_from_name};
 pub(crate) use loader::load_tracks;
 use lofty_gaps::Fills;
 pub(crate) use search::{normalize_key_text, normalize_search_text, search_key, track_search_text};
+use tags::track_album;
 pub(crate) use tags::{
-    ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_title,
+    ExtraComments, FileTags, ReadOptions, plain_commas, read_file_tags, track_artist, track_title,
 };
-use tags::{track_album, track_artist};
 pub(crate) use work_hierarchy::Arrangement;
 use work_hierarchy::{MovementName, WorkHierarchy, WorkLabels};
 

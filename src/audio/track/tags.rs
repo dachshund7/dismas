@@ -420,7 +420,7 @@ fn read_tagged_file(
 }
 
 // The artists of a track, if the tags name any
-pub(super) fn track_artist(tag: &Tag) -> Option<String> {
+pub(crate) fn track_artist(tag: &Tag) -> Option<String> {
     let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");
     (!artists.is_empty()).then(|| plain_commas(&artists))
 }

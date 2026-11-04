@@ -1181,8 +1181,9 @@ fn time_scan() {
 
 // Tracks to search, in a folder made for `name`: one tagged as Picard
 // tags it, with a "Work Hierarchy" tag, one without tags in a disc
-// folder, and a CUE sheet of two tracks, the last of which runs to the end
-// of its file; with the files, as they'd be opened
+// folder, a CUE sheet of two tracks, the last of which runs to the end
+// of its file, and a duet with two artists; with the files, as they'd be
+// opened
 fn tagged_test_files(name: &str) -> (PathBuf, Vec<PathBuf>) {
     use std::borrow::Cow;
 
@@ -1205,7 +1206,8 @@ fn tagged_test_files(name: &str) -> (PathBuf, Vec<PathBuf>) {
     let album = music.join("Brandenburg Concertos");
     let disc = music.join("Untagged/CD 2");
     let sheet = music.join("Sheet");
-    for dir in [&album, &disc, &sheet] {
+    let compilation = music.join("Compilation");
+    for dir in [&album, &disc, &sheet, &compilation] {
         std::fs::create_dir_all(dir).unwrap();
     }
 
@@ -1264,11 +1266,26 @@ fn tagged_test_files(name: &str) -> (PathBuf, Vec<PathBuf>) {
     )
     .unwrap();
 
+    // A duet on a compilation, without an album artist, whose tags name
+    // each of its two singers as an artist of its own
+    let duet = compilation.join("07 Duet.wav");
+    write_test_wav(&duet, 1);
+    let mut id3v2 = Id3v2Tag::new();
+    for (id, value) in [
+        ("TIT2", "Duet"),
+        ("TPE1", "Janet Baker\0Dietrich Fischer-Dieskau"),
+        ("TALB", "Duets"),
+    ] {
+        id3v2.insert(text(id, value));
+    }
+    write_test_id3v2(&duet, &id3v2, false);
+
     let files = vec![
         tagged,
         disc.join("03 - Gigue.wav"),
         cue,
         sheet.join("Recital.wav"),
+        duet,
     ];
     (music, files)
 }
@@ -1278,7 +1295,7 @@ fn the_queue_and_the_library_encode_the_same_fields() {
     use gtk::gio::prelude::FileExt;
 
     let (music, files) = tagged_test_files("fields");
-    let [tagged, gigue, cue, _] = <[PathBuf; 4]>::try_from(files.clone()).unwrap();
+    let [tagged, gigue, cue, _, duet] = <[PathBuf; 5]>::try_from(files.clone()).unwrap();
 
     let mut conn = test_db();
     let (sender, _receiver) = async_channel::unbounded();
@@ -1299,7 +1316,7 @@ fn the_queue_and_the_library_encode_the_same_fields() {
             .map(|data| (data.file().path().unwrap(), data.fields().to_string()))
             .collect();
 
-    assert_eq!(library.len(), 4);
+    assert_eq!(library.len(), 5);
     assert_eq!(queue, library);
     // What they have in common is the point; a few lines show that
     // they're the fields a search needs
@@ -1319,6 +1336,12 @@ fn the_queue_and_the_library_encode_the_same_fields() {
     assert!(untagged.contains("al\tuntagged\n"), "{untagged}");
     let second = &library[&cue.join("track02")];
     assert!(second.contains("ln\t6\n"), "{second}");
+    // Both of the artists of a compilation's track, not only the first
+    let duet = &library[&duet];
+    assert!(
+        duet.contains("pf\tjanet baker, dietrich fischer-dieskau\n"),
+        "{duet}"
+    );
 
     std::fs::remove_dir_all(&music).unwrap();
 }
@@ -1355,7 +1378,7 @@ fn the_queue_and_the_library_find_the_same_tracks() {
         .flatten()
         .map(crate::audio::Track::new)
         .collect();
-    assert_eq!(tracks.len(), 4);
+    assert_eq!(tracks.len(), 5);
 
     // A favorite, played 4 times, and the other tracks never heard
     let uri = gtk::gio::File::for_path(&files[0]).uri().to_string();
@@ -1379,13 +1402,13 @@ fn the_queue_and_the_library_find_the_same_tracks() {
     for (text, found) in [
         ("allegro", 1),
         ("composer:bach", 1),
-        ("-composer:bach", 3),
+        ("-composer:bach", 4),
         ("composer:(bach OR handel)", 1),
         ("people:goebel", 1),
         ("year:<1990", 1),
         ("released:1986", 1),
         ("is:live", 1),
-        ("-is:live", 3),
+        ("-is:live", 4),
         ("has:work", 1),
         ("form:concerto", 1),
         ("catalogue:bwv825", 1),
@@ -1396,14 +1419,16 @@ fn the_queue_and_the_library_find_the_same_tracks() {
         ("\"rosalyn tureck\"", 2),
         ("bach OR tureck", 3),
         ("is:favorite", 1),
-        ("-is:favorite", 3),
+        ("-is:favorite", 4),
         ("favorited:2023", 1),
         ("plays:>3", 1),
-        ("plays:0", 3),
+        ("plays:0", 4),
         ("played:<2024", 1),
         ("has:played", 1),
-        ("-has:played", 3),
-        ("format:wav", 4),
+        ("-has:played", 4),
+        ("format:wav", 5),
+        ("performer:\"fischer-dieskau\"", 1),
+        ("performer:\"janet baker\"", 1),
     ] {
         let query = super::TrackFilter::query(text).unwrap();
         let filter = super::TrackFilter {

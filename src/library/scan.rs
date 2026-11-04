@@ -716,6 +716,12 @@ impl TrackTags {
             .filter(|s| !s.is_empty());
         let artist = tag.artist();
         let artist = artist.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        // The album goes by the first artist, but the performers, the search
+        // and the work of the track take all of them, as the queue does, so
+        // that both find the same tracks: the tags of a duet can name each
+        // singer as an artist of their own
+        let artists = track_artist(tag);
+        let artists = artists.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let artist_sort = get(ItemKey::AlbumArtistSortOrder).filter(|s| !s.is_empty());
 
         // The release id from MusicBrainz tells apart albums with the same
@@ -748,18 +754,17 @@ impl TrackTags {
         // As `Track::with_search_key()` makes it, so that searching the albums
         // matches the same tracks as searching the queue
         let title = track_title(tag);
-        let artists = tag.get_strings(ItemKey::TrackArtist).join(", ");
         let searched_title = title
             .as_deref()
             .map(Cow::Borrowed)
             .or_else(|| file.map(|file| title_from_file_name(file).into()));
         let search = search_key(
-            Some(&artists),
+            artists,
             searched_title.as_deref(),
             &track_search_text(tag, &credits),
             folder_album.as_deref(),
         );
-        let performers = credits.listed_with_artists(artist);
+        let performers = credits.listed_with_artists(artists);
         let fields = FieldParts {
             tag,
             credits: &credits,
@@ -784,7 +789,7 @@ impl TrackTags {
             title,
             search: Some(search),
             composers: composer_entries(&credits.composers, &credits.composer_sorts),
-            work: work_entry(&credits, artist),
+            work: work_entry(&credits, artists),
             performers,
             label: credits.labels.into_iter().next(),
             catalog_number: credits.catalog_numbers.into_iter().next(),
