@@ -214,6 +214,8 @@ mod linux {
         ABI, Access, AccessFs, AccessNet, PathBeneath, Ruleset, RulesetAttr, RulesetCreatedAttr,
         RulesetError, RulesetStatus, Scope, path_beneath_rules,
     };
+    #[cfg(test)]
+    use libseccomp::ScmpArch;
     use libseccomp::{
         ScmpAction, ScmpArgCompare, ScmpCompareOp, ScmpFilterContext, ScmpSyscall,
         error::SeccompError,
@@ -458,6 +460,47 @@ mod linux {
         "getegid",
     ];
 
+    // The same calls on 32-bit systems, where glibc makes those with 64-bit
+    // offsets, sizes and times, as GLib and GStreamer are built with them:
+    // _llseek for lseek, mmap2 for mmap, fstat64 for fstat, futex_time64 for
+    // futex, and the like, falling back to the others on older kernels. They
+    // come from glibc's sources rather than from tracing the child on such
+    // a system. Each is allowed where the system has it: libseccomp numbers
+    // one that it doesn't have with a number that no call has there
+    const ALLOWED_32_BIT: &[&str] = &[
+        // Files
+        "_llseek",
+        "fadvise64_64",
+        "arm_fadvise64_64",
+        "fstat64",
+        "stat64",
+        "lstat64",
+        "fstatat64",
+        "statfs64",
+        "fstatfs64",
+        "fcntl64",
+        // Waiting on descriptors
+        "_newselect",
+        "ppoll_time64",
+        "pselect6_time64",
+        // Memory
+        "mmap2",
+        // Threads
+        "futex_time64",
+        // Signals
+        "sigreturn",
+        // Time
+        "clock_gettime64",
+        "clock_getres_time64",
+        "clock_nanosleep_time64",
+        // The system and the user
+        "ugetrlimit",
+        "getuid32",
+        "geteuid32",
+        "getgid32",
+        "getegid32",
+    ];
+
     // The system calls that end the child, rather than failing: those an
     // exploit would make to run a program or reach another process, which
     // the reading never does, so that an attempt shows in the parent's log as
@@ -475,12 +518,31 @@ mod linux {
 
     // The filter, which the tests build without loading it
     pub(super) fn filter_system_calls() -> Result<ScmpFilterContext, SeccompError> {
-        use ScmpCompareOp::{Equal, MaskedEqual};
-
         // What isn't allowed fails as if the kernel didn't have it. A rule
         // can't have the filter's default action, so nothing is denied with
         // ENOSYS by a rule of its own: what's left out is
         let mut filter = ScmpFilterContext::new(ScmpAction::Errno(libc::ENOSYS))?;
+        add_rules(&mut filter)?;
+        Ok(filter)
+    }
+
+    // The filter for another architecture than the tests', for which
+    // libseccomp gives the calls their numbers on it, as their names don't
+    // all have one there
+    #[cfg(test)]
+    pub(super) fn filter_system_calls_on(
+        arch: ScmpArch,
+    ) -> Result<ScmpFilterContext, SeccompError> {
+        let mut filter = ScmpFilterContext::new(ScmpAction::Errno(libc::ENOSYS))?;
+        filter.add_arch(arch)?;
+        filter.remove_arch(ScmpArch::Native)?;
+        add_rules(&mut filter)?;
+        Ok(filter)
+    }
+
+    fn add_rules(filter: &mut ScmpFilterContext) -> Result<(), SeccompError> {
+        use ScmpCompareOp::{Equal, MaskedEqual};
+
         // A call made through another architecture's interface, like the
         // 32-bit one on x86_64, ends the process, rather than one thread,
         // after which the child would wait until its alarm
@@ -504,12 +566,16 @@ mod linux {
             }
             Ok(())
         };
-        for name in ALLOWED {
-            rule(&mut filter, ScmpAction::Allow, name, &[])?;
+        for name in ALLOWED.iter().chain(ALLOWED_32_BIT) {
+            rule(filter, ScmpAction::Allow, name, &[])?;
         }
         for name in FATAL {
-            rule(&mut filter, ScmpAction::KillProcess, name, &[])?;
+            rule(filter, ScmpAction::KillProcess, name, &[])?;
         }
+        // The calls allowed only with an argument that compares as given
+        let allow_if = |filter: &mut ScmpFilterContext, name: &str, compare: ScmpArgCompare| {
+            rule(filter, ScmpAction::Allow, name, &[compare])
+        };
 
         // Opening for reading only, which keeps files from being written,
         // made or truncated whether the kernel has Landlock or not. O_TMPFILE
@@ -518,17 +584,15 @@ mod linux {
         // openat2 isn't allowed: glibc falls back to openat without it
         let writing =
             (libc::O_WRONLY | libc::O_RDWR | libc::O_CREAT | libc::O_TRUNC | libc::O_APPEND) as u64;
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
+        allow_if(
+            filter,
             "openat",
-            &[ScmpArgCompare::new(2, MaskedEqual(writing), 0)],
+            ScmpArgCompare::new(2, MaskedEqual(writing), 0),
         )?;
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
+        allow_if(
+            filter,
             "open",
-            &[ScmpArgCompare::new(1, MaskedEqual(writing), 0)],
+            ScmpArgCompare::new(1, MaskedEqual(writing), 0),
         )?;
 
         // Threads, which glibc makes with clone, as clone3 isn't allowed: no
@@ -544,70 +608,61 @@ mod linux {
             | libc::CLONE_NEWPID
             | libc::CLONE_NEWNET;
         let thread = libc::CLONE_THREAD as u64;
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
+        allow_if(
+            filter,
             "clone",
-            &[ScmpArgCompare::new(
+            ScmpArgCompare::new(
                 0,
                 MaskedEqual((libc::CLONE_THREAD | new_namespaces) as u64),
                 thread,
-            )],
+            ),
         )?;
 
         // A pair of connected sockets, which each GstBus makes to wake up
         // whatever waits on it: without it, Discoverer can't start
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
+        allow_if(
+            filter,
             "socketpair",
-            &[ScmpArgCompare::new(0, Equal, libc::AF_UNIX as u64)],
+            ScmpArgCompare::new(0, Equal, libc::AF_UNIX as u64),
         )?;
 
         // Signals to the child's own threads only, as abort() and raise()
         // send
         let pid = u64::from(std::process::id());
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
-            "tgkill",
-            &[ScmpArgCompare::new(0, Equal, pid)],
-        )?;
+        allow_if(filter, "tgkill", ScmpArgCompare::new(0, Equal, pid))?;
 
         // Whether a descriptor is a terminal, as the log asks of stderr; the
         // request is an int, whose upper bits can be anything
         #[allow(clippy::unnecessary_cast, reason = "TCGETS is an int in musl")]
         let tcgets = libc::TCGETS as u64;
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
+        allow_if(
+            filter,
             "ioctl",
-            &[ScmpArgCompare::new(1, MaskedEqual(0xFFFF_FFFF), tcgets)],
+            ScmpArgCompare::new(1, MaskedEqual(0xFFFF_FFFF), tcgets),
         )?;
 
         // The names of threads
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
+        allow_if(
+            filter,
             "prctl",
-            &[ScmpArgCompare::new(0, Equal, libc::PR_SET_NAME as u64)],
+            ScmpArgCompare::new(0, Equal, libc::PR_SET_NAME as u64),
         )?;
 
         // Resource limits read, not set, as glibc's getrlimit() does with a
         // null new limit
-        rule(
-            &mut filter,
-            ScmpAction::Allow,
-            "prlimit64",
-            &[ScmpArgCompare::new(2, Equal, 0)],
-        )?;
+        allow_if(filter, "prlimit64", ScmpArgCompare::new(2, Equal, 0))?;
 
-        Ok(filter)
+        Ok(())
     }
 
     #[cfg(test)]
     pub(super) fn listed_system_calls() -> impl Iterator<Item = &'static str> {
-        ALLOWED.iter().chain(FATAL).copied()
+        ALLOWED.iter().chain(ALLOWED_32_BIT).chain(FATAL).copied()
+    }
+
+    #[cfg(test)]
+    pub(super) fn listed_32_bit_system_calls() -> impl Iterator<Item = &'static str> {
+        ALLOWED_32_BIT.iter().copied()
     }
 }
 
@@ -687,5 +742,28 @@ mod tests {
             assert!(libseccomp::ScmpSyscall::from_name(name).is_ok(), "{name}");
         }
         linux::filter_system_calls().unwrap();
+    }
+
+    // Each call that 32-bit systems make in place of a 64-bit one is one
+    // that i386 or 32-bit ARM has, which their filters allow; the filters
+    // build, as the native one does, though some calls aren't on each
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_filters_of_32_bit_systems_allow_their_calls() {
+        use libseccomp::{ScmpArch, ScmpSyscall};
+
+        let arches = [ScmpArch::X86, ScmpArch::Arm];
+        for name in linux::listed_32_bit_system_calls() {
+            assert!(
+                arches
+                    .iter()
+                    .any(|&arch| ScmpSyscall::from_name_by_arch(name, arch)
+                        .is_ok_and(|call| call.as_raw_syscall() >= 0)),
+                "{name}"
+            );
+        }
+        for arch in arches {
+            linux::filter_system_calls_on(arch).unwrap();
+        }
     }
 }
