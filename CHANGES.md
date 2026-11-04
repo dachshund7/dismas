@@ -98,6 +98,8 @@ All notable changes to this project will be documented in this file.
   and Previous on the first track, where it did nothing
 - A program asking over MPRIS for a position past the end of a track sent
   Dismas on to the next track
+- Stop from the desktop's media controls left the position where it was,
+  though playing again started the track over
 - Programs that read the position and length of a track over MPRIS got
   whole seconds, so synced lyrics or a progress bar could be up to a
   second off

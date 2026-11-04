@@ -442,10 +442,10 @@ impl AudioPlayer {
         match action {
             PlaybackAction::Play => self.set_playback_state(PlaybackState::Playing),
             PlaybackAction::Pause => self.set_playback_state(PlaybackState::Paused),
-            PlaybackAction::Stop => self.set_playback_state(PlaybackState::Stopped),
+            PlaybackAction::Stop => self.stop(),
             PlaybackAction::SkipPrevious => self.skip_previous(),
             PlaybackAction::SkipNext => self.skip_next(),
-            PlaybackAction::UpdatePosition(pos, notify) => self.update_position(pos, notify),
+            PlaybackAction::UpdatePosition(pos, notify) => self.position_reported(pos, notify),
             PlaybackAction::VolumeChanged(vol) => self.update_volume(vol),
             PlaybackAction::SetVolume(vol) => self.set_volume(vol),
             PlaybackAction::StepVolume(steps) => self.step_volume(steps),
@@ -701,8 +701,11 @@ impl AudioPlayer {
         }
     }
 
+    // Playing again starts the track over, so the position goes back too;
+    // the end of the queue stops too, but keeps the track at its end
     pub(crate) fn stop(&self) {
         self.set_playback_state(PlaybackState::Stopped);
+        self.update_position(Duration::ZERO, true);
     }
 
     pub(crate) fn skip_previous(&self) {
@@ -947,6 +950,16 @@ impl AudioPlayer {
         self.state.track_changed();
         for c in &self.controllers {
             c.update_track(&track);
+        }
+    }
+
+    // Where the backend says the track is. A report can still be on its way
+    // when the player stops, and a stopped backend sends none that would
+    // correct it, so the position would stay wrong and be saved, while Play
+    // starts the track over
+    fn position_reported(&self, position: Duration, notify: bool) {
+        if !self.state.stopped() {
+            self.update_position(position, notify);
         }
     }
 

@@ -156,6 +156,10 @@ glib::wrapper! {
 }
 
 impl PlayerState {
+    pub(crate) fn stopped(&self) -> bool {
+        self.imp().playback_state.get() == PlaybackState::Stopped
+    }
+
     pub(crate) fn set_playback_state(&self, playback_state: PlaybackState) -> bool {
         let old_state = self.imp().playback_state.replace(playback_state);
         if old_state != playback_state {
