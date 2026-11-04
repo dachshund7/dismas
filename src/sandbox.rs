@@ -379,7 +379,8 @@ mod linux {
     // and those that glibc and GLib take on paths that a short file doesn't:
     // reading and looking at files, memory, threads, signals to the child
     // itself, time, waiting. Writing only goes to the descriptors the child
-    // has, stdout and stderr; opening is allowed below, for reading only
+    // has, stdout and stderr; opening is allowed below, for reading only, and
+    // fcntl with some of its commands
     const ALLOWED: &[&str] = &[
         // Files
         "read",
@@ -405,7 +406,6 @@ mod linux {
         "faccessat",
         "faccessat2",
         "getcwd",
-        "fcntl",
         "dup",
         "dup2",
         "dup3",
@@ -483,7 +483,6 @@ mod linux {
         "fstatat64",
         "statfs64",
         "fstatfs64",
-        "fcntl64",
         // Waiting on descriptors
         "_newselect",
         "ppoll_time64",
@@ -505,6 +504,10 @@ mod linux {
         "getgid32",
         "getegid32",
     ];
+
+    // fcntl, and fcntl64, which 32-bit systems make in its place, allowed
+    // below with some of their commands only
+    const FCNTL: &[&str] = &["fcntl", "fcntl64"];
 
     // The system calls that end the child, rather than failing: those an
     // exploit would make to run a program or reach another process, which
@@ -600,6 +603,38 @@ mod linux {
             ScmpArgCompare::new(1, MaskedEqual(writing), 0),
         )?;
 
+        // fcntl with the commands that glibc and GLib use: duplicating a
+        // descriptor, and reading and setting its close-on-exec flag and its
+        // status flags, like O_NONBLOCK. Not O_ASYNC, with which the kernel
+        // signals a descriptor's owner as it's ready, nor F_SETOWN,
+        // F_SETOWN_EX or F_SETSIG, which set the owner and the signal: the
+        // owner can be any process of the user, or, for a terminal, as stderr
+        // can be, its foreground process group, so the kernel would send any
+        // signal for the child to other processes, which Landlock only stops
+        // from Linux 6.12. The others, leases and directory notices among
+        // them, fail as calls that aren't allowed do. The command is an int,
+        // whose upper bits can be anything
+        let command_is =
+            |command: libc::c_int| ScmpArgCompare::new(1, MaskedEqual(0xFFFF_FFFF), command as u64);
+        let not_async = ScmpArgCompare::new(2, MaskedEqual(libc::O_ASYNC as u64), 0);
+        for name in FCNTL {
+            for allowed in [
+                libc::F_DUPFD,
+                libc::F_DUPFD_CLOEXEC,
+                libc::F_GETFD,
+                libc::F_SETFD,
+                libc::F_GETFL,
+            ] {
+                rule(filter, ScmpAction::Allow, name, &[command_is(allowed)])?;
+            }
+            rule(
+                filter,
+                ScmpAction::Allow,
+                name,
+                &[command_is(libc::F_SETFL), not_async],
+            )?;
+        }
+
         // Threads, which glibc makes with clone, as clone3 isn't allowed: no
         // other process, as the child starts none, and no namespaces. The
         // flags are the first argument (the second on s390x, which isn't
@@ -662,7 +697,12 @@ mod linux {
 
     #[cfg(test)]
     pub(super) fn listed_system_calls() -> impl Iterator<Item = &'static str> {
-        ALLOWED.iter().chain(ALLOWED_32_BIT).chain(FATAL).copied()
+        ALLOWED
+            .iter()
+            .chain(ALLOWED_32_BIT)
+            .chain(FCNTL)
+            .chain(FATAL)
+            .copied()
     }
 
     #[cfg(test)]

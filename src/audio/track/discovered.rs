@@ -944,7 +944,10 @@ mod tests {
     #[test]
     #[ignore = "the_sandbox_holds runs it, in a process of its own"]
     fn probe() {
-        use std::{net::TcpStream, os::unix::net::UnixStream};
+        use std::{
+            net::TcpStream,
+            os::{fd::AsRawFd, unix::net::UnixStream},
+        };
 
         let Some(path) = std::env::var_os(PROBE_FILE).map(PathBuf::from) else {
             return;
@@ -981,6 +984,23 @@ mod tests {
         assert_eq!(error(tcp), Some(libc::ENOSYS));
         let program = Command::new("/bin/sh").arg("-c").arg("true").status();
         assert_eq!(error(program), Some(libc::ENOSYS));
+        // No signals that the kernel sends for the child: a descriptor's
+        // owner and O_ASYNC can't be set, but the flags GLib sets can
+        let file = std::fs::File::open(&path).unwrap();
+        let fcntl = |command, arg: libc::c_int| {
+            // SAFETY: these commands take an int, and `file` keeps the
+            // descriptor open
+            match unsafe { libc::fcntl(file.as_raw_fd(), command, arg) } {
+                -1 => Err(std::io::Error::last_os_error()),
+                result => Ok(result),
+            }
+        };
+        let flags = fcntl(libc::F_GETFL, 0).unwrap();
+        assert!(fcntl(libc::F_SETFL, flags | libc::O_NONBLOCK).is_ok());
+        let not_async = fcntl(libc::F_SETFL, flags | libc::O_ASYNC);
+        assert_eq!(error(not_async), Some(libc::ENOSYS));
+        let pid = std::process::id() as libc::c_int;
+        assert_eq!(error(fcntl(libc::F_SETOWN, pid)), Some(libc::ENOSYS));
         // And GStreamer still reads its file
         let discovered = discover_file(&path, false).unwrap();
         assert!(
