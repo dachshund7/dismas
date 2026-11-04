@@ -2097,8 +2097,7 @@ dependencies = [
 [[package]]
 name = "lofty"
 version = "0.25.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35d45c446382e04663705aa8e786157f64ef1fa85755d410121ffbf08f54b0db"
+source = "git+https://github.com/dachshund7/lofty-rs?rev=fe371c518ed4c7d07a816227c0521f510d12e786#fe371c518ed4c7d07a816227c0521f510d12e786"
 dependencies = [
  "byteorder",
  "data-encoding",
@@ -2112,8 +2111,7 @@ dependencies = [
 [[package]]
 name = "lofty_attr"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdbca1b60ba7cea959ffc84ac27f3dbdbacd6dfda168c7eabbc00e48654bb9fd"
+source = "git+https://github.com/dachshund7/lofty-rs?rev=fe371c518ed4c7d07a816227c0521f510d12e786#fe371c518ed4c7d07a816227c0521f510d12e786"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2296,8 +2294,7 @@ dependencies = [
 [[package]]
 name = "ogg_pager"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "166611b491f939446e64c6be930843a31eb8e6798204ec3e9f57e084c18e7446"
+source = "git+https://github.com/dachshund7/lofty-rs?rev=fe371c518ed4c7d07a816227c0521f510d12e786#fe371c518ed4c7d07a816227c0521f510d12e786"
 dependencies = [
  "byteorder",
 ]

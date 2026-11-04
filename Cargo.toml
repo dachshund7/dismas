@@ -90,3 +90,11 @@ implicit_clone = "warn"
 assigning_clones = "warn"
 # From the nursery group, for the clones of values that are not used again
 redundant_clone = "warn"
+
+# lofty from a fork, with one commit on its release: a limit on how deep
+# ID3v2 chapter frames can nest, which lofty reads with no limit, so that a
+# crafted file overflowed the stack (`lofty_gaps.rs`). On each new release
+# of lofty, the commit is rebased onto it, or dropped once lofty has a limit
+# of its own
+[patch.crates-io]
+lofty = { git = "https://github.com/dachshund7/lofty-rs", rev = "fe371c518ed4c7d07a816227c0521f510d12e786" }

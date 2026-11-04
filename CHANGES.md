@@ -84,6 +84,10 @@ All notable changes to this project will be documented in this file.
   opening the row
 - The Menu key and Shift+F10 open the menu of a playlist on the
   Playlists page, as they do on the rows of other lists
+- A music file whose ID3v2 tag held chapters nested inside each other
+  dozens deep, which only a crafted file does, crashed Dismas, and at
+  every start, as the library reads its files then. Such a tag is now
+  refused, and GStreamer reads the file instead
 
 ### Removed
 

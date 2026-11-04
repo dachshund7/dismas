@@ -114,6 +114,10 @@ next one, so that the new versions are used for a month before they ship:
   `Cargo.toml` doesn't allow, as `Unchanged … (available: …)`; take the
   ones worth the changes they need. For lofty, `cargo test lofty_gaps`
   says what to change (see CLAUDE.md)
+- [ ] On a new release of lofty, rebase the fork's `chapter-depth-limit`
+  commit onto it, push it, and pin the new hash in `Cargo.toml`'s
+  `[patch.crates-io]`; or drop the patch once lofty limits how deep
+  chapter frames nest itself
 - [ ] Update the actions in `.github/workflows/`, in all the files
   together, to releases at least two weeks old: pinned to the release's
   commit, with the release in the comment

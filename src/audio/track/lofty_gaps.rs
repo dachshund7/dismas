@@ -244,6 +244,187 @@ mod tests {
         assert_eq!(results, [true, true, false, false, false]);
     }
 
+    // lofty 0.25.5 reads the frames inside an ID3v2 chapter frame (CHAP) or
+    // table of contents (CTOC) as it reads the tag's, so a chapter frame
+    // inside another is read inside that one's reading, with no limit on how
+    // deep they go. Each level takes tens of kilobytes of stack, so a tag of a
+    // few kilobytes, of chapters nested sixty deep, overflows a reader
+    // thread's stack. That aborts the whole program rather than panicking, so
+    // `utils::guarded` can't catch it, and a file in the music folders would
+    // end Dismas at every start. Dismas builds with a fork of lofty that stops
+    // at 16 levels (`[patch.crates-io]` in Cargo.toml), where such a tag is an
+    // error, and GStreamer reads the file instead; these tests check that
+    // the fork is still in use.
+
+    const CHAP: FrameId<'static> = FrameId::Valid(Cow::Borrowed("CHAP"));
+
+    fn synchsafe(size: usize) -> [u8; 4] {
+        let size = u32::try_from(size).unwrap();
+        [size >> 21, size >> 14, size >> 7, size].map(|byte| (byte & 0x7F) as u8)
+    }
+
+    // An ID3v2.4 frame, written by hand: lofty's writer would go through
+    // nested chapters the way its reader does
+    fn id3v2_frame(id: &[u8; 4], content: &[u8]) -> Vec<u8> {
+        let mut frame = id.to_vec();
+        frame.extend(synchsafe(content.len()));
+        frame.extend([0, 0]);
+        frame.extend(content);
+        frame
+    }
+
+    // What follows the header of a chapter frame that holds another, and so
+    // on, `levels` deep: 28 bytes a level
+    fn nested_chapters(levels: usize) -> Vec<u8> {
+        let mut content = Vec::new();
+        for level in 0..levels {
+            // Its ID, nul-terminated, then its times and offsets
+            let mut chapter = b"c\0".to_vec();
+            chapter.extend([0; 16]);
+            if level > 0 {
+                chapter.extend(id3v2_frame(b"CHAP", &content));
+            }
+            content = chapter;
+        }
+        content
+    }
+
+    // An MP3 file whose ID3v2.4 tag has a title, then chapters nested
+    // `levels` deep, then MPEG-1 Layer III frames at 128 kbps and 44.1 kHz,
+    // of 417 bytes each
+    fn write_mp3_with_nested_chapters(path: &Path, levels: usize) {
+        let mut frames = id3v2_frame(b"TIT2", b"\x03Nimrod");
+        frames.extend(id3v2_frame(b"CHAP", &nested_chapters(levels)));
+        let mut bytes = b"ID3\x04\0\0".to_vec();
+        bytes.extend(synchsafe(frames.len()));
+        bytes.extend(frames);
+        for _ in 0..40 {
+            bytes.extend([0xFF, 0xFB, 0x90, 0x64]);
+            bytes.extend([0; 413]);
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn lofty_stops_at_chapters_nested_too_deep() {
+        use lofty::id3::v2::{ChapterFrame, FrameFlags, Id3v2Version};
+
+        // How deep a chapter frame's chapters go once lofty has read it, or
+        // None if it refused it
+        fn depth(levels: usize) -> Option<usize> {
+            let content = nested_chapters(levels);
+            // On a stack big enough for lofty without the fork, which a
+            // debug build uses much more of, so that a missing fork fails
+            // the test rather than aborting them all. The chapters are
+            // dropped there too, as that goes as deep
+            std::thread::Builder::new()
+                .stack_size(256 << 20)
+                .spawn(move || {
+                    let chapter = ChapterFrame::parse(
+                        &mut &content[..],
+                        ParseOptions::new(),
+                        Id3v2Version::V4,
+                        FrameFlags::default(),
+                    )
+                    .ok()?;
+                    let mut depth = 1;
+                    let mut frames = &chapter.children;
+                    while let Some(Frame::Chapter(inner)) = frames.get(&CHAP) {
+                        depth += 1;
+                        frames = &inner.children;
+                    }
+                    Some(depth)
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        }
+
+        // Real files nest one or two
+        assert_eq!(depth(3), Some(3));
+        assert_eq!(
+            depth(200),
+            None,
+            "lofty reads chapters nested 200 deep: Cargo.toml no longer patches it with the \
+             fork that limits them, so a crafted file overflows the stack"
+        );
+    }
+
+    #[test]
+    fn a_few_nested_chapters_are_read_by_lofty() {
+        let dir = std::env::temp_dir().join(format!("dismas-chapters-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Nimrod.mp3");
+        write_mp3_with_nested_chapters(&path, 3);
+        let read = read_file_tags(&path, ReadOptions::SCAN);
+        let _ = std::fs::remove_dir_all(&dir);
+        let read = read.unwrap();
+        // GStreamer would name the format "MPEG-1 Layer 3 (MP3)"
+        assert_eq!(read.format.as_deref(), Some("MP3"));
+        assert_eq!(read.tag.title().as_deref(), Some("Nimrod"));
+    }
+
+    // The variable that names the file `read_deeply_nested_chapters` reads
+    const NESTED_CHAPTERS_FILE: &str = "DISMAS_NESTED_CHAPTERS";
+
+    // Reading a file whose chapters would overflow a reader thread's stack
+    // without the fork, in a process of its own, as an overflow ends the
+    // process: the test binary started again to run only
+    // `read_deeply_nested_chapters`
+    #[test]
+    fn deeply_nested_chapters_dont_crash_the_reader() {
+        let dir = std::env::temp_dir().join(format!("dismas-deep-chapters-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Nimrod.mp3");
+        write_mp3_with_nested_chapters(&path, 1000);
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "audio::track::lofty_gaps::tests::read_deeply_nested_chapters",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(NESTED_CHAPTERS_FILE, &path)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "{}: {stdout}{stderr}",
+            output.status
+        );
+        // A filter that matches no test succeeds too
+        assert!(stdout.contains("test result: ok. 1 passed"), "{stderr}");
+    }
+
+    #[test]
+    #[ignore = "deeply_nested_chapters_dont_crash_the_reader runs it, in a process of its own"]
+    fn read_deeply_nested_chapters() {
+        let Some(path) = std::env::var_os(NESTED_CHAPTERS_FILE).map(PathBuf::from) else {
+            return;
+        };
+        // On a thread with the stack of a reader thread, Rust's default
+        let read = std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || {
+                let tags = read_file_tags(&path, ReadOptions::SCAN)?;
+                Some((tags.format?.into_owned(), tags.tag.title()?.into_owned()))
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        // lofty refused the tag, and GStreamer read the file
+        assert_eq!(
+            read,
+            Some(("MPEG-1 Layer 3 (MP3)".to_string(), "Nimrod".to_string()))
+        );
+    }
+
     #[test]
     fn still_no_composer_sort_in_vorbis_comments_or_ape_tags() {
         let mut comments = VorbisComments::default();
