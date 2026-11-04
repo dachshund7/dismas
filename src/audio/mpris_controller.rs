@@ -28,7 +28,7 @@ struct Shared {
     metadata: RefCell<Metadata>,
     playback_status: Cell<PlaybackStatus>,
     loop_status: Cell<LoopStatus>,
-    can_play: Cell<bool>,
+    has_track: Cell<bool>,
     can_go_next: Cell<bool>,
     position: Cell<Time>,
     volume: Cell<Volume>,
@@ -49,18 +49,24 @@ impl Shared {
         let Some(player) = self.player.get() else {
             return;
         };
-        if let Err(err) = player.set_can_play(self.can_play.get()).await {
-            error!("Unable to set MPRIS play capability: {err:?}");
-        }
         if let Err(err) = player.set_playback_status(self.playback_status.get()).await {
             error!("Unable to set MPRIS playback status: {err:?}");
         }
     }
 
-    async fn publish_can_go_next(&self) {
+    // What clients can ask for, which their buttons follow. Each value is
+    // read just before it's published: this waits between them, and another
+    // publish can run in the meantime, whose newer values a value read
+    // earlier would then replace
+    async fn publish_capabilities(&self) {
         let Some(player) = self.player.get() else {
             return;
         };
+        // Without a current track, Play starts the track that comes next
+        let can_play = self.has_track.get() || self.can_go_next.get();
+        if let Err(err) = player.set_can_play(can_play).await {
+            error!("Unable to set MPRIS play capability: {err:?}");
+        }
         if let Err(err) = player.set_can_go_next(self.can_go_next.get()).await {
             error!("Unable to set MPRIS next capability: {err:?}");
         }
@@ -148,7 +154,7 @@ impl MprisController {
             metadata: RefCell::new(Metadata::new()),
             playback_status: Cell::new(PlaybackStatus::Stopped),
             loop_status: Cell::new(LoopStatus::None),
-            can_play: Cell::new(false),
+            has_track: Cell::new(false),
             can_go_next: Cell::new(false),
             position: Cell::new(Time::ZERO),
             volume: Cell::new(1.0),
@@ -176,7 +182,7 @@ impl MprisController {
                                 shared.publish_metadata().await;
                                 shared.publish_playback_status().await;
                                 shared.publish_loop_status().await;
-                                shared.publish_can_go_next().await;
+                                shared.publish_capabilities().await;
                                 shared.publish_volume().await;
                             }
                         ));
@@ -247,6 +253,17 @@ impl MprisController {
 
         metadata
     }
+
+    fn publish_track(&self) {
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move {
+                shared.publish_metadata().await;
+                shared.publish_capabilities().await;
+            }
+        ));
+    }
 }
 
 impl Controller for MprisController {
@@ -257,7 +274,6 @@ impl Controller for MprisController {
             PlaybackState::Stopped => PlaybackStatus::Stopped,
         };
         self.shared.playback_status.set(status);
-        self.shared.can_play.set(true);
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = shared)]
@@ -268,16 +284,15 @@ impl Controller for MprisController {
 
     fn set_track(&self, track: &Track) {
         self.shared.metadata.replace(self.track_metadata(track));
-        self.shared.can_play.set(true);
+        self.shared.has_track.set(true);
+        self.publish_track();
+    }
 
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = shared)]
-            self.shared,
-            async move {
-                shared.publish_metadata().await;
-                shared.publish_playback_status().await;
-            }
-        ));
+    fn clear_track(&self) {
+        self.shared.metadata.replace(Metadata::new());
+        self.shared.has_track.set(false);
+        self.set_position(0, false);
+        self.publish_track();
     }
 
     fn update_track(&self, track: &Track) {
@@ -320,7 +335,7 @@ impl Controller for MprisController {
         glib::spawn_future_local(clone!(
             #[weak(rename_to = shared)]
             self.shared,
-            async move { shared.publish_can_go_next().await }
+            async move { shared.publish_capabilities().await }
         ));
     }
 

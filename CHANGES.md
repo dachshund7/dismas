@@ -92,6 +92,8 @@ All notable changes to this project will be documented in this file.
   refused, and GStreamer reads the file instead
 - After a program changed the repeat mode over MPRIS, the desktop's media
   controls could go on showing the mode before
+- After the queue was cleared, the desktop's media controls went on
+  showing the last track, with Play on
 
 ### Removed
 
