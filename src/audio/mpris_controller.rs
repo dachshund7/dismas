@@ -12,7 +12,7 @@ use futures::FutureExt;
 use glib::clone;
 use gtk::{gio, glib, prelude::*};
 use log::error;
-use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId};
+use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId, Volume};
 
 use crate::{
     audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Track},
@@ -31,6 +31,7 @@ struct Shared {
     can_play: Cell<bool>,
     can_go_next: Cell<bool>,
     position: Cell<Time>,
+    volume: Cell<Volume>,
 }
 
 impl Shared {
@@ -74,6 +75,21 @@ impl Shared {
         }
     }
 
+    async fn publish_volume(&self) {
+        let Some(player) = self.player.get() else {
+            return;
+        };
+        if let Err(err) = player.set_volume(self.volume.get()).await {
+            error!("Unable to set MPRIS volume: {err:?}");
+        }
+    }
+
+    fn store_requested_volume(self: &Rc<Self>, volume: Volume) {
+        self.volume.set(volume);
+        let shared = self.clone();
+        publish_at_once(async move { shared.publish_volume().await });
+    }
+
     fn store_requested_loop_status(self: &Rc<Self>, status: LoopStatus) {
         self.loop_status.set(status);
         let shared = self.clone();
@@ -100,6 +116,12 @@ fn publish_at_once(publish: impl Future<Output = ()> + 'static) {
 fn time(seconds: u64) -> Time {
     let seconds = i64::try_from(seconds).unwrap_or(i64::MAX);
     Time::from_micros(seconds.saturating_mul(1_000_000))
+}
+
+// The volume a client asks for, within what the volume slider shows. A
+// program can send anything over D-Bus, and NaN gets through `clamp`
+fn requested_volume(volume: Volume) -> Option<f64> {
+    (!volume.is_nan()).then(|| volume.clamp(0.0, 1.0))
 }
 
 #[derive(Debug)]
@@ -129,6 +151,7 @@ impl MprisController {
             can_play: Cell::new(false),
             can_go_next: Cell::new(false),
             position: Cell::new(Time::ZERO),
+            volume: Cell::new(1.0),
         });
 
         glib::spawn_future_local(clone!(
@@ -154,6 +177,7 @@ impl MprisController {
                                 shared.publish_playback_status().await;
                                 shared.publish_loop_status().await;
                                 shared.publish_can_go_next().await;
+                                shared.publish_volume().await;
                             }
                         ));
 
@@ -314,6 +338,16 @@ impl Controller for MprisController {
             async move { shared.publish_loop_status().await }
         ));
     }
+
+    fn set_volume(&self, volume: f64) {
+        self.shared.volume.set(volume);
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_volume().await }
+        ));
+    }
 }
 
 fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Player) {
@@ -415,6 +449,22 @@ fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Pl
         }
     ));
 
+    mpris.connect_set_volume(clone!(
+        #[strong]
+        sender,
+        #[weak]
+        shared,
+        move |_, volume| {
+            let Some(volume) = requested_volume(volume) else {
+                return;
+            };
+            shared.store_requested_volume(volume);
+            if let Err(e) = sender.try_send(PlaybackAction::SetVolume(volume)) {
+                error!("Unable to send SetVolume({volume}): {e}");
+            }
+        }
+    ));
+
     mpris.connect_set_position(clone!(
         #[strong]
         sender,
@@ -448,5 +498,14 @@ mod tests {
     fn large_times_saturate() {
         assert_eq!(time(90), Time::from_secs(90));
         assert_eq!(time(u64::MAX), Time::from_micros(i64::MAX));
+    }
+
+    #[test]
+    fn requested_volumes_stay_in_the_sliders_range() {
+        assert_eq!(requested_volume(0.3), Some(0.3));
+        assert_eq!(requested_volume(-1.0), Some(0.0));
+        assert_eq!(requested_volume(2.0), Some(1.0));
+        assert_eq!(requested_volume(f64::INFINITY), Some(1.0));
+        assert_eq!(requested_volume(f64::NAN), None);
     }
 }

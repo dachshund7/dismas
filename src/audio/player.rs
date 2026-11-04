@@ -61,6 +61,8 @@ pub(crate) enum PlaybackAction {
 
     UpdatePosition(Duration, bool),
     VolumeChanged(f64),
+    // A volume asked for from outside, as the volume slider shows it
+    SetVolume(f64),
     // A number of volume steps, negative to lower it
     StepVolume(i32),
     Repeat(RepeatMode),
@@ -303,6 +305,7 @@ impl AudioPlayer {
         res.setup_channel();
         res.setup_next_track();
         res.setup_preamp();
+        res.setup_volume();
 
         res
     }
@@ -320,6 +323,23 @@ impl AudioPlayer {
                 move |settings, key| this.backend.set_preamp(settings.double(key))
             ),
         );
+    }
+
+    // Tells the controllers the volume, and again whenever it changes
+    fn setup_volume(self: &Rc<Self>) {
+        self.tell_volume();
+        self.state.connect_volume_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.tell_volume()
+        ));
+    }
+
+    fn tell_volume(&self) {
+        let volume = self.state.volume();
+        for c in &self.controllers {
+            c.set_volume(volume);
+        }
     }
 
     // Tells the backend and the controllers about the next track whenever
@@ -411,6 +431,7 @@ impl AudioPlayer {
             PlaybackAction::SkipNext => self.skip_next(),
             PlaybackAction::UpdatePosition(pos, notify) => self.update_position(pos, notify),
             PlaybackAction::VolumeChanged(vol) => self.update_volume(vol),
+            PlaybackAction::SetVolume(vol) => self.set_volume(vol),
             PlaybackAction::StepVolume(steps) => self.step_volume(steps),
             PlaybackAction::PlayNext => self.play_next(),
             PlaybackAction::TrackAdvanced(generation, uri) => self.track_advanced(generation, &uri),
@@ -964,16 +985,15 @@ impl AudioPlayer {
         self.pending_volume.save(&self.settings);
     }
 
+    // Shown right away, so that quick steps add up before the backend
+    // reports the volume
     pub(crate) fn set_volume(&self, volume: f64) {
+        self.state.set_volume(volume);
         self.backend.set_volume(volume);
     }
 
-    // Shown right away, so that quick steps add up before the backend
-    // reports the volume
     fn step_volume(&self, steps: i32) {
-        let volume = (self.state.volume() + f64::from(steps) * VOLUME_STEP).clamp(0.0, 1.0);
-        self.state.set_volume(volume);
-        self.set_volume(volume);
+        self.set_volume((self.state.volume() + f64::from(steps) * VOLUME_STEP).clamp(0.0, 1.0));
     }
 
     pub(crate) fn toggle_repeat_mode(&self) {

@@ -15,4 +15,6 @@ pub(crate) trait Controller {
     fn set_repeat_mode(&self, repeat: RepeatMode);
     // Whether a track comes after the current one
     fn set_can_go_next(&self, _can_go_next: bool) {}
+    // The volume as the volume slider shows it, not as GStreamer takes it
+    fn set_volume(&self, _volume: f64) {}
 }

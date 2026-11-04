@@ -30,6 +30,8 @@ All notable changes to this project will be documented in this file.
 - The covers of the albums that a search matches only partly say how
   many of their tracks it does, whether or not the toggle is on, rather
   than only on the Tracks page
+- The desktop's media controls and other programs that use MPRIS can read
+  and change the volume, and see it change when the volume slider moves
 
 ### Changed
 
