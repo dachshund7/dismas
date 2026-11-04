@@ -35,6 +35,8 @@ pub(crate) enum ApplicationAction {
     Present(Option<String>),
     // Closes the window if it has the focus, and presents it otherwise
     ToggleWindow(Option<String>),
+    // What the shuffle button does, asked for from outside
+    SetQueueShuffled(bool),
     Quit,
 }
 
@@ -466,6 +468,12 @@ impl Application {
                     window.close();
                 } else {
                     self.present_main_window(true, token.as_deref());
+                }
+            }
+            ApplicationAction::SetQueueShuffled(shuffled) => {
+                // While playing in the background, the window is only hidden
+                if let Some(window) = self.active_window().and_downcast::<Window>() {
+                    window.set_queue_shuffled(shuffled);
                 }
             }
             ApplicationAction::Quit => self.quit(),

@@ -420,8 +420,13 @@ impl Window {
         let loading = self.imp().loads.get() > 0;
         self.action_set_enabled("queue.clear", n_tracks > 0 && !loading);
         self.action_set_enabled("queue.select", n_tracks > 0);
-        let can_shuffle = n_tracks > 1 || (n_tracks > 0 && self.queue_shuffled());
-        self.action_set_enabled("queue.shuffle", can_shuffle && !loading);
+        let shuffled = self.queue_shuffled();
+        let can_shuffle = !loading && (n_tracks > 1 || (n_tracks > 0 && shuffled));
+        self.action_set_enabled("queue.shuffle", can_shuffle);
+        self.player().update_shuffle(
+            shuffled,
+            can_shuffle && self.can_reorder(&self.selected_playlist()),
+        );
         // The button that opens the sorts has no action of its own, and a
         // greyed out button tells screen readers it's off
         let can_sort = n_tracks > 1 && !loading;

@@ -15,6 +15,7 @@ use log::error;
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId, Volume};
 
 use crate::{
+    application::ApplicationAction,
     audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Track},
     config::APPLICATION_ID,
 };
@@ -28,6 +29,8 @@ struct Shared {
     metadata: RefCell<Metadata>,
     playback_status: Cell<PlaybackStatus>,
     loop_status: Cell<LoopStatus>,
+    shuffle: Cell<bool>,
+    can_shuffle: Cell<bool>,
     has_track: Cell<bool>,
     can_go_next: Cell<bool>,
     can_go_previous: Cell<bool>,
@@ -92,6 +95,15 @@ impl Shared {
         }
     }
 
+    async fn publish_shuffle(&self) {
+        let Some(player) = self.player.get() else {
+            return;
+        };
+        if let Err(err) = player.set_shuffle(self.shuffle.get()).await {
+            error!("Unable to set MPRIS shuffle: {err:?}");
+        }
+    }
+
     async fn publish_volume(&self) {
         let Some(player) = self.player.get() else {
             return;
@@ -111,6 +123,12 @@ impl Shared {
         self.loop_status.set(status);
         let shared = self.clone();
         publish_at_once(async move { shared.publish_loop_status().await });
+    }
+
+    fn store_requested_shuffle(self: &Rc<Self>, shuffle: bool) {
+        self.shuffle.set(shuffle);
+        let shared = self.clone();
+        publish_at_once(async move { shared.publish_shuffle().await });
     }
 }
 
@@ -159,7 +177,10 @@ pub(crate) struct MprisController {
 }
 
 impl MprisController {
-    pub(crate) fn new(sender: Sender<PlaybackAction>) -> Self {
+    pub(crate) fn new(
+        sender: Sender<PlaybackAction>,
+        app_sender: Sender<ApplicationAction>,
+    ) -> Self {
         let builder = Player::builder(APPLICATION_ID)
             .identity("Dismas")
             .desktop_entry(APPLICATION_ID)
@@ -176,6 +197,8 @@ impl MprisController {
             metadata: RefCell::new(Metadata::new()),
             playback_status: Cell::new(PlaybackStatus::Stopped),
             loop_status: Cell::new(LoopStatus::None),
+            shuffle: Cell::new(false),
+            can_shuffle: Cell::new(false),
             has_track: Cell::new(false),
             can_go_next: Cell::new(false),
             can_go_previous: Cell::new(false),
@@ -190,7 +213,7 @@ impl MprisController {
                 match builder.build().await {
                     Err(err) => error!("Failed to create MPRIS server: {err:?}"),
                     Ok(player) => {
-                        setup_signals(sender, &shared, &player);
+                        setup_signals(sender, app_sender, &shared, &player);
                         let mpris_task = player.run();
                         // Not published, as it changes too often: read when asked
                         player.set_position(shared.position.get());
@@ -205,6 +228,7 @@ impl MprisController {
                                 shared.publish_metadata().await;
                                 shared.publish_playback_status().await;
                                 shared.publish_loop_status().await;
+                                shared.publish_shuffle().await;
                                 shared.publish_capabilities().await;
                                 shared.publish_volume().await;
                             }
@@ -389,6 +413,20 @@ impl Controller for MprisController {
         ));
     }
 
+    fn set_shuffle(&self, shuffled: bool, can_change: bool) {
+        self.shared.can_shuffle.set(can_change);
+        // Asked at every change to what the queue can do
+        if self.shared.shuffle.replace(shuffled) == shuffled {
+            return;
+        }
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_shuffle().await }
+        ));
+    }
+
     fn set_volume(&self, volume: f64) {
         self.shared.volume.set(volume);
 
@@ -400,7 +438,12 @@ impl Controller for MprisController {
     }
 }
 
-fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Player) {
+fn setup_signals(
+    sender: Sender<PlaybackAction>,
+    app_sender: Sender<ApplicationAction>,
+    shared: &Rc<Shared>,
+    mpris: &Player,
+) {
     mpris.connect_play_pause(clone!(
         #[strong]
         sender,
@@ -497,6 +540,23 @@ fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Pl
 
             if let Err(e) = sender.try_send(PlaybackAction::Repeat(mode)) {
                 error!("Unable to send Repeat({mode}): {e}");
+            }
+        }
+    ));
+
+    mpris.connect_set_shuffle(clone!(
+        #[weak]
+        shared,
+        move |_, shuffle| {
+            // Left out before it's stored, so that zbus announces what's
+            // still true
+            if !shared.can_shuffle.get() {
+                return;
+            }
+
+            shared.store_requested_shuffle(shuffle);
+            if let Err(e) = app_sender.try_send(ApplicationAction::SetQueueShuffled(shuffle)) {
+                error!("Unable to send SetQueueShuffled({shuffle}): {e}");
             }
         }
     ));

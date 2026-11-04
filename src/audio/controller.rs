@@ -19,6 +19,9 @@ pub(crate) trait Controller {
     fn set_can_go_next(&self, _can_go_next: bool) {}
     // Whether Previous would do anything now
     fn set_can_go_previous(&self, _can_go_previous: bool) {}
+    // Whether the selected playlist is shuffled, and whether that can be
+    // changed now
+    fn set_shuffle(&self, _shuffled: bool, _can_change: bool) {}
     // The volume as the volume slider shows it, not as GStreamer takes it
     fn set_volume(&self, _volume: f64) {}
 }

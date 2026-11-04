@@ -32,6 +32,8 @@ All notable changes to this project will be documented in this file.
   than only on the Tracks page
 - The desktop's media controls and other programs that use MPRIS can read
   and change the volume, and see it change when the volume slider moves
+- They can turn Shuffle on and off too, as the Shuffle button does, and
+  see when it changes
 
 ### Changed
 

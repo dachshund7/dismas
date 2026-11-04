@@ -256,7 +256,7 @@ impl AudioPlayer {
 
         let mut controllers: Vec<Box<dyn Controller>> = Vec::new();
 
-        let mpris_controller = MprisController::new(sender.clone());
+        let mpris_controller = MprisController::new(sender.clone(), app_sender.clone());
         controllers.push(Box::new(mpris_controller));
 
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -1030,6 +1030,13 @@ impl AudioPlayer {
 
     fn step_volume(&self, steps: i32) {
         self.set_volume((self.state.volume() + f64::from(steps) * VOLUME_STEP).clamp(0.0, 1.0));
+    }
+
+    // Tells the controllers about the shuffle button, which is the window's
+    pub(crate) fn update_shuffle(&self, shuffled: bool, can_change: bool) {
+        for c in &self.controllers {
+            c.set_shuffle(shuffled, can_change);
+        }
     }
 
     pub(crate) fn toggle_repeat_mode(&self) {

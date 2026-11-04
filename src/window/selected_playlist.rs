@@ -165,7 +165,7 @@ impl Window {
     // another order: not while tracks are read, as the queue doesn't have
     // them all yet, nor once a saved playlist is deleted, which can still
     // be playing
-    fn can_reorder(&self, name: &str) -> bool {
+    pub(super) fn can_reorder(&self, name: &str) -> bool {
         self.imp().loads.get() == 0 && (name.is_empty() || playlists::exists(name))
     }
 
