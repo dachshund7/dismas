@@ -172,7 +172,7 @@ impl Window {
         item.set_attribute_value("accel", Some(&"<primary>c".to_variant()));
         section.append_item(&item);
 
-        section.append(Some(&i18n("Open Directory")), Some("track.open-directory"));
+        section.append(Some(&i18n("Open Folder")), Some("track.open-directory"));
         if let Some(path) = track.file().path() {
             self.add_booklet_item(&section, move || vec![path]);
         }

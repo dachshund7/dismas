@@ -19,7 +19,7 @@ impl Window {
     // several can open PDF files, until it remembers the choice for the
     // app's ID; outside a sandbox, on a session without systemd, it has no
     // ID for Dismas, so it asked every time. In the Flatpak, the portal is
-    // the only way out, and knows the app; like Open Directory, it takes
+    // the only way out, and knows the app; like Open Folder, it takes
     // the file's own path, which the launcher hands to the portal
     pub(super) async fn open_booklet(&self, file: gio::File) {
         let opened = if utils::in_flatpak() {

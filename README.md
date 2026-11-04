@@ -350,7 +350,7 @@ And it fixes these bugs of Amberol's:
   the window.
 - On X11 without a compositor, files dragged over the part of the window
   gained by widening it went to the window below.
-- In the Flatpak, Open Directory failed for tracks opened or dropped from
+- In the Flatpak, Open Folder failed for tracks opened or dropped from
   outside the Music folder.
 - GLib warnings when nothing was left to play.
 - `RUST_LOG` didn't change what was logged, so a release build couldn't give

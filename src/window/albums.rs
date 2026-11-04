@@ -390,7 +390,7 @@ impl Window {
             actions.add_action(&open_directory);
 
             let section = gio::Menu::new();
-            section.append(Some(&i18n("Open Directory")), Some("album.open-directory"));
+            section.append(Some(&i18n("Open Folder")), Some("album.open-directory"));
             menu.append_section(None, &section);
             let album_id = album.id();
             let hidden = library_view.hidden_folders();
