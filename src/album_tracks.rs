@@ -1069,10 +1069,23 @@ fn tracks_caption(n_tracks: u32, seconds: u64) -> String {
         if minutes == 0 {
             hours_text
         } else {
-            format!("{hours_text} {minutes_text}")
+            i18n_k(
+                // Translators: `{hours}` and `{minutes}` must be left
+                // unmodified; they are expanded to "1 hour" and "5 minutes"
+                // in "1 hour 5 minutes", how long the tracks of a playlist
+                // last
+                "{hours} {minutes}",
+                &[("hours", &hours_text), ("minutes", &minutes_text)],
+            )
         }
     };
-    format!("{count} · {length}")
+    i18n_k(
+        // Translators: `{count}` and `{length}` must be left unmodified;
+        // they are expanded to how many tracks a playlist has and how long
+        // they last, e.g. "12 tracks" and "1 hour 5 minutes"
+        "{count} · {length}",
+        &[("count", &count), ("length", &length)],
+    )
 }
 
 #[cfg(test)]
