@@ -834,21 +834,30 @@ mod tests {
     fn a_reader_that_runs_too_long_is_ended() {
         use std::os::unix::fs::PermissionsExt;
 
+        // By its path, as the reader gets no PATH, and the shell's own can
+        // leave it out, which would end the reader at once
+        let sleep = std::env::var_os("PATH")
+            .iter()
+            .flat_map(std::env::split_paths)
+            .map(|dir| dir.join("sleep"))
+            .find(|path| path.is_file())
+            .expect("sleep is on the PATH");
         let dir = test_dir("late");
         let helper = dir.join("reader.sh");
         // The shell becomes sleep, which keeps the pipe open
-        std::fs::write(&helper, "#!/bin/sh\nexec sleep 60\n").unwrap();
+        let script = format!("#!/bin/sh\nexec '{}' 60\n", sleep.display());
+        std::fs::write(&helper, script).unwrap();
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let time = Duration::from_millis(300);
         let started = Instant::now();
-        let read = run_child_for(
-            &helper,
-            Path::new("Nimrod.oga"),
-            true,
-            Duration::from_millis(300),
-        );
+        let read = run_child_for(&helper, Path::new("Nimrod.oga"), true, time);
+        let elapsed = started.elapsed();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(read, None);
-        assert!(started.elapsed() < Duration::from_secs(30));
+        // Ended by the watchdog: not before its time, nor at the end of
+        // the sleep
+        assert!(elapsed >= time, "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(30), "{elapsed:?}");
     }
 
     // The variable that names the file `probe` reads
