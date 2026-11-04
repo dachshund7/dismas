@@ -40,7 +40,7 @@ cargo deny check advisories                 # the dependencies against the RustS
 
 Every source file needs SPDX headers (`SPDX-FileCopyrightText` / `SPDX-License-Identifier`). REUSE.toml covers files that can't carry headers.
 
-Some ignored tests are tools for checking changes on real data: `print_palettes` (cover colors of a music folder), `print_work_splits` (recordings split on the albums of `DISMAS_LIBRARY_DB`), `time_scan` and `time_library_searches`. Tests never read the user's music or `plays.db` (the library's tests take their play stats from `TEST_SEARCH_STATS`).
+Some ignored tests are tools for checking changes on real data: `print_palettes` (cover colors of a music folder), `print_work_splits` (recordings split on the albums of `DISMAS_LIBRARY_DB`), `time_scan`, `time_library_searches` and `time_performers` (opening the Performers picker). Tests never read the user's music or `plays.db` (the library's tests take their play stats from `TEST_SEARCH_STATS`).
 
 GitHub Actions (`.github/workflows/`):
 

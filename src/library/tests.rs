@@ -1541,6 +1541,58 @@ fn time_library_searches() {
     assert!(words.as_secs_f64() <= before.as_secs_f64() * 1.5);
 }
 
+// Times listing the performers of a library of 50,000 tracks, as the
+// Performers picker does each time it opens, tagged as Picard tags
+// classical music: each track credits its conductor, and gives its two
+// composers, of three names each, for the track and again for its work:
+//   cargo test --release time_performers -- --ignored --nocapture
+#[test]
+#[ignore]
+fn time_performers() {
+    let conn = test_db();
+    let tx = conn.unchecked_transaction().unwrap();
+    for i in 0..50_000 {
+        let album = i / 10;
+        let conductor = format!("Conductor {}", album % 1000);
+        let performers = format!(
+            "\nc\t{}\t{conductor}\t{conductor}\t\n",
+            conductor.to_lowercase()
+        );
+        let composers = format!(
+            "\njohann composer {a}\tJohann Composer {a}\t\njohann composer {b}\tJohann Composer {b}\t\n",
+            a = album % 700,
+            b = album % 900
+        );
+        tx.execute(
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, performers,
+                                 composers, work_composers, work_key, search)
+             VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4, ?4, ?5, '')",
+            rusqlite::params![
+                format!("/music/{i}.flac").as_bytes(),
+                album.to_string(),
+                performers,
+                composers,
+                format!("w{}", i / 4)
+            ],
+        )
+        .unwrap();
+    }
+    tx.commit().unwrap();
+
+    let all = super::TrackFilter::default();
+    let mut times: Vec<std::time::Duration> = (0..7)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            let performers =
+                super::query_performers(&conn, &[], &all, super::Counted::Albums).unwrap();
+            assert_eq!(performers.len(), 1000);
+            start.elapsed()
+        })
+        .collect();
+    times.sort();
+    println!("performers: {:.1} ms", times[3].as_secs_f64() * 1000.0);
+}
+
 #[test]
 fn folders_inside_others_are_left_out() {
     use super::outermost;

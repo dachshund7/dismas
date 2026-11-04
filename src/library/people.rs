@@ -360,6 +360,14 @@ pub(super) fn query_performers(
     // The albums of each composer with a track that others are credited
     // with performing
     let mut composed: HashMap<String, HashSet<String>> = HashMap::new();
+    // Those composers of the album read last. An album's tracks come one
+    // after the other and mostly have the same composers, given for the
+    // track and again for its work, so each goes into `composed` once an
+    // album rather than up to four times a track, which took most of the
+    // time in a classical library. The tracks of an album that come apart
+    // only put them in again
+    let mut last_album = String::new();
+    let mut album_composed: Vec<String> = Vec::new();
     let mut short = String::new();
     read_entries_with(
         conn,
@@ -416,6 +424,11 @@ pub(super) fn query_performers(
             if !credited && (work.is_none() || by_artist) {
                 return;
             }
+            if album != last_album {
+                add_composed(&mut composed, &last_album, &mut album_composed);
+                last_album.clear();
+                last_album.push_str(album);
+            }
             // A composer performs a track that a performer whose name has
             // theirs plays, as a singer fronts a band named after them, e.g.
             // "Tom Petty and the Heartbreakers". The composer is also counted
@@ -439,13 +452,14 @@ pub(super) fn query_performers(
                     .into_iter()
                     .flatten()
                 {
-                    if !performs(key) {
-                        insert_str(entry_of(&mut composed, key), album);
+                    if !album_composed.iter().any(|k| k == key) && !performs(key) {
+                        album_composed.push(key.to_owned());
                     }
                 }
             }
         },
     )?;
+    add_composed(&mut composed, &last_album, &mut album_composed);
 
     // Whether an artist's name, or a name in it, is a composer's rather
     // than a performer's: whether the library has more albums of music
@@ -534,6 +548,18 @@ pub(super) fn query_performers(
             .then_with(|| a.1.key.cmp(&b.1.key))
     });
     Ok(performers.into_iter().map(|(_, info)| info).collect())
+}
+
+// Adds the composers of an album to those of the library, see
+// `query_performers()`
+fn add_composed(
+    composed: &mut HashMap<String, HashSet<String>>,
+    album: &str,
+    keys: &mut Vec<String>,
+) {
+    for key in keys.drain(..) {
+        insert_str(composed.entry(key).or_default(), album);
+    }
 }
 
 // The composers a track's work is listed under, as the queue's headers
