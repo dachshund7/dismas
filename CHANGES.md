@@ -105,6 +105,9 @@ All notable changes to this project will be documented in this file.
 - Programs that read the position and length of a track over MPRIS got
   whole seconds, so synced lyrics or a progress bar could be up to a
   second off
+- Seeking only moved in whole seconds from the last whole second, so a
+  program seeking half a second over MPRIS moved nothing, and the seek
+  keys jumped back a moment as well
 
 ### Removed
 

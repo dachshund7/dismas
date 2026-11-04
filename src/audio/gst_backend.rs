@@ -262,19 +262,19 @@ fn clock_time(duration: Duration) -> gst::ClockTime {
     gst::ClockTime::try_from(duration).unwrap_or(gst::ClockTime::MAX)
 }
 
-// Where a seek of `offset` seconds from `position` goes, in seconds from
-// the start of the track: back no further than the start, and forward no
-// further than the end. Without a known length, there's no seeking forward
+// Where a seek of `offset` from `position` goes, from the start of the
+// track: back no further than the start, and forward no further than the
+// end. Without a known length, there's no seeking forward
 fn seek_destination(
-    position: u64,
-    duration: u64,
-    offset: u64,
+    position: Duration,
+    length: Duration,
+    offset: Duration,
     direction: SeekDirection,
-) -> Option<u64> {
+) -> Option<Duration> {
     match direction {
         SeekDirection::Backwards => Some(position.saturating_sub(offset)),
-        SeekDirection::Forward if duration > 0 => {
-            Some(position.saturating_add(offset).min(duration))
+        SeekDirection::Forward if !length.is_zero() => {
+            Some(position.saturating_add(offset).min(length))
         }
         SeekDirection::Forward => None,
     }
@@ -826,13 +826,13 @@ impl GstBackend {
     // positions once the track is ready
     pub(crate) fn seek(
         &self,
-        position: u64,
-        duration: u64,
-        offset: u64,
+        position: Duration,
+        length: Duration,
+        offset: Duration,
         direction: SeekDirection,
     ) -> Option<Duration> {
-        let destination = seek_destination(position, duration, offset, direction)?;
-        self.seek_to(clock_time(Duration::from_secs(destination)))
+        let destination = seek_destination(position, length, offset, direction)?;
+        self.seek_to(clock_time(destination))
     }
 
     pub(crate) fn seek_position(&self, position: Duration) -> Option<Duration> {
@@ -1213,19 +1213,49 @@ mod tests {
     fn seeks_stay_within_the_track() {
         use SeekDirection::{Backwards, Forward};
 
-        assert_eq!(seek_destination(30, 200, 10, Backwards), Some(20));
-        assert_eq!(seek_destination(5, 200, 10, Backwards), Some(0));
-        assert_eq!(seek_destination(30, 200, 10, Forward), Some(40));
-        assert_eq!(seek_destination(195, 200, 10, Forward), Some(200));
+        let s = Duration::from_secs;
+        let destination = |position, length, offset, direction| {
+            seek_destination(s(position), s(length), s(offset), direction).map(|d| d.as_secs())
+        };
+        assert_eq!(destination(30, 200, 10, Backwards), Some(20));
+        assert_eq!(destination(5, 200, 10, Backwards), Some(0));
+        assert_eq!(destination(30, 200, 10, Forward), Some(40));
+        assert_eq!(destination(195, 200, 10, Forward), Some(200));
         // A length that isn't known yet
-        assert_eq!(seek_destination(30, 0, 10, Forward), None);
+        assert_eq!(destination(30, 0, 10, Forward), None);
 
         // Offsets as large as an MPRIS client can send
-        assert_eq!(seek_destination(30, 200, u64::MAX, Backwards), Some(0));
-        assert_eq!(seek_destination(30, 200, u64::MAX, Forward), Some(200));
+        let largest = Duration::from_micros(i64::MIN.unsigned_abs());
         assert_eq!(
-            seek_destination(u64::MAX, u64::MAX, u64::MAX, Forward),
-            Some(u64::MAX)
+            seek_destination(s(30), s(200), largest, Backwards),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(
+            seek_destination(s(30), s(200), largest, Forward),
+            Some(s(200))
+        );
+        assert_eq!(
+            seek_destination(Duration::MAX, Duration::MAX, Duration::MAX, Forward),
+            Some(Duration::MAX)
+        );
+    }
+
+    #[test]
+    fn seeks_keep_the_parts_of_a_second() {
+        use SeekDirection::{Backwards, Forward};
+
+        let ms = Duration::from_millis;
+        assert_eq!(
+            seek_destination(ms(12_700), ms(200_000), ms(500), Forward),
+            Some(ms(13_200))
+        );
+        assert_eq!(
+            seek_destination(ms(12_700), ms(200_000), ms(2_500), Backwards),
+            Some(ms(10_200))
+        );
+        assert_eq!(
+            seek_destination(ms(199_900), ms(200_500), ms(10_000), Forward),
+            Some(ms(200_500))
         );
     }
 

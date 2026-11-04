@@ -542,7 +542,7 @@ fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Pl
             return;
         }
 
-        let offset = offset.as_secs();
+        let offset = offset.as_micros();
         if let Err(e) = sender.try_send(PlaybackAction::Seek(offset)) {
             error!("Unable to send Seek({offset}): {e}");
         }

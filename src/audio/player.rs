@@ -30,6 +30,9 @@ use crate::{
 // One step of the volume, by the slider, the keyboard or the tray
 pub(crate) const VOLUME_STEP: f64 = 0.05;
 
+// How far the seek keys go
+const SEEK_STEP: Duration = Duration::from_secs(10);
+
 // From this many seconds into a track, Previous starts it over rather
 // than going to the track before
 const PREVIOUS_RESTARTS_AFTER: u64 = 10;
@@ -70,6 +73,7 @@ pub(crate) enum PlaybackAction {
     // A number of volume steps, negative to lower it
     StepVolume(i32),
     Repeat(RepeatMode),
+    // In microseconds, negative to go back
     Seek(i64),
     SeekTo(Duration),
     PlayNext,
@@ -788,11 +792,11 @@ impl AudioPlayer {
         }
     }
 
-    fn seek(&self, offset: u64, direction: SeekDirection) {
+    fn seek(&self, offset: Duration, direction: SeekDirection) {
         self.finished.set(false);
         self.show_start(self.backend.seek(
-            self.state.position(),
-            self.state.duration(),
+            self.state.position_time(),
+            self.state.length(),
             offset,
             direction,
         ));
@@ -807,20 +811,21 @@ impl AudioPlayer {
     }
 
     pub(crate) fn seek_backwards(&self) {
-        self.seek(10, SeekDirection::Backwards);
+        self.seek(SEEK_STEP, SeekDirection::Backwards);
     }
 
     pub(crate) fn seek_forward(&self) {
-        self.seek(10, SeekDirection::Forward);
+        self.seek(SEEK_STEP, SeekDirection::Forward);
     }
 
+    // By a number of microseconds, negative to go back
     pub(crate) fn seek_offset(&self, offset: i64) {
         let direction = if offset < 0 {
             SeekDirection::Backwards
         } else {
             SeekDirection::Forward
         };
-        self.seek(offset.unsigned_abs(), direction);
+        self.seek(Duration::from_micros(offset.unsigned_abs()), direction);
     }
 
     // Seeks to a share of the track, between seconds too, as a click on the
@@ -841,11 +846,11 @@ impl AudioPlayer {
     // track whose length isn't known, as far as it goes, rather than to its
     // start
     pub(crate) fn seek_position_abs(&self, position: Duration) {
-        let duration = self.state.duration();
-        let pos = if duration > 0 {
-            position.min(Duration::from_secs(duration))
-        } else {
+        let length = self.state.length();
+        let pos = if length.is_zero() {
             position
+        } else {
+            position.min(length)
         };
         self.finished.set(false);
         self.show_start(self.backend.seek_position(pos));
