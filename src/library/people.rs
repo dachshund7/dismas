@@ -437,22 +437,30 @@ pub(super) fn query_performers(
         },
     )?;
 
-    // Whether a name is a composer's rather than a performer's
-    let performed_on = |key: &str| seen.get(key).map_or(0, |seen| seen.albums.len());
-    let is_composer = |key: &str| {
-        composed
-            .get(key)
-            .is_some_and(|albums| albums.len() > performed_on(key))
+    // Whether an artist's name, or a name in it, is a composer's rather
+    // than a performer's: whether the library has more albums of music
+    // they wrote that others perform than albums they perform on. The
+    // artist's own `albums` count as theirs, as a composer performs the
+    // tracks of a performer whose name has theirs (above): otherwise a
+    // single cover of a song of Nick Cave's would leave out "Nick Cave &
+    // the Bad Seeds", whose albums are all under that name
+    let is_composer = |key: &str, albums: &HashSet<String>| {
+        composed.get(key).is_some_and(|composed| {
+            let own = seen
+                .get(key)
+                .map_or(0, |seen| seen.albums.difference(albums).count());
+            composed.len() > albums.len() + own
+        })
     };
     let composer_artists: HashSet<String> = seen
         .iter()
         .filter(|(_, seen)| seen.is_artist() && seen.kinds.is_empty() && !seen.guessed)
         .filter(|(key, seen)| {
-            is_composer(key)
+            is_composer(key, &seen.albums)
                 || seen.names.keys().any(|name| {
                     name.split([',', '&', '/', ':'])
                         .map(composer_key)
-                        .any(|part| !part.is_empty() && is_composer(&part))
+                        .any(|part| !part.is_empty() && is_composer(&part, &seen.albums))
                 })
         })
         .map(|(key, _)| key.clone())

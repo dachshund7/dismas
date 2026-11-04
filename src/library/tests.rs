@@ -2863,7 +2863,7 @@ fn artists_are_listed_when_nothing_else_names_them() {
             composer("Jan Dismas Zelenka"),
             Some("w3"),
         ),
-        // and one named with a group, recorded by others once
+        // and one named with a group, recorded by others twice
         (
             "/m/BZ/01.opus",
             "bz",
@@ -2877,6 +2877,13 @@ fn artists_are_listed_when_nothing_else_names_them() {
         (
             "/m/L3/01.opus",
             "l3",
+            entries(&[&luks]),
+            composer("Ludwig van Beethoven"),
+            Some("w4"),
+        ),
+        (
+            "/m/L7/01.opus",
+            "l7",
             entries(&[&luks]),
             composer("Ludwig van Beethoven"),
             Some("w4"),
@@ -2980,6 +2987,25 @@ fn artists_are_listed_when_nothing_else_names_them() {
             composer("Tom Petty"),
             None,
         ),
+        // A band named after its singer, whose songs another singer
+        // recorded once: he performs on the band's albums, so it stays
+        (
+            "/m/NC/01.opus",
+            "nc",
+            entries(&[&artist(
+                "Nick Cave & the Bad Seeds",
+                "Nick Cave & the Bad Seeds",
+            )]),
+            composer("Nick Cave"),
+            None,
+        ),
+        (
+            "/m/JC/01.opus",
+            "jc",
+            entries(&[&"s\tjohnny cash\tJohnny Cash\tCash, Johnny\tvocals".to_string()]),
+            composer("Nick Cave"),
+            None,
+        ),
         // A songwriter whose band's albums, tagged with only their artist
         // and composers, as iTunes tags them, outnumber their own
         (
@@ -3023,8 +3049,9 @@ fn artists_are_listed_when_nothing_else_names_them() {
     assert_eq!(
         listed,
         [
-            (PerformerKind::Conductor, "Luks, Václav", 6),
+            (PerformerKind::Conductor, "Luks, Václav", 7),
             (PerformerKind::Ensemble, "Ensemble Zefiro", 2),
+            (PerformerKind::Soloist, "Cash, Johnny", 1),
             (PerformerKind::Soloist, "Davies, Ray", 1),
             (PerformerKind::Soloist, "Dylan, Bob", 2),
             (PerformerKind::Soloist, "Rostropovich, Mstislav", 3),
@@ -3034,6 +3061,7 @@ fn artists_are_listed_when_nothing_else_names_them() {
             (PerformerKind::Artist, "Johann Joachim Quantz", 2),
             (PerformerKind::Artist, "Kinks, The", 2),
             (PerformerKind::Artist, "McCartney, Paul", 1),
+            (PerformerKind::Artist, "Nick Cave & the Bad Seeds", 1),
             (PerformerKind::Artist, "Tom Petty", 1),
             (PerformerKind::Artist, "Tom Petty and the Heartbreakers", 2),
         ]
