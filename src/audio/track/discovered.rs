@@ -229,6 +229,30 @@ fn with_reader_environment(command: &mut Command) -> &mut Command {
         .env("GST_REGISTRY_FORK", "no")
 }
 
+// Waits for a child to end without reaping it, so that its pid stays its
+// own; what ended it, or none if it couldn't be waited for
+fn wait_without_reaping(pid: u32) -> Option<libc::siginfo_t> {
+    let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    loop {
+        // SAFETY: waitid only writes `info`, which is large enough
+        let waited = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                info.as_mut_ptr(),
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if waited == 0 {
+            // SAFETY: `info` was zeroed, and waitid wrote it
+            return Some(unsafe { info.assume_init() });
+        }
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return None;
+        }
+    }
+}
+
 // Ends a child that runs for longer than it's given, whatever it does.
 // Discoverer's timeout and the child's alarm end a hang, but a file that
 // took over the child could block the alarm's signal and keep the child
@@ -261,27 +285,19 @@ impl Watchdog {
 
     // Waits for the child to end, without reaping it, so that its pid stays
     // its own while the watchdog could still end it, then stops the
-    // watchdog; true if the watchdog ended the child
+    // watchdog; true if the watchdog ended the child. Its time can be up
+    // just as the child ends on its own, before it's stopped: it then ends
+    // what's left of the child, which ended as it would have, so it only
+    // ended the child when its signal is what the child died of
     fn stop(self) -> bool {
-        let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
-        loop {
-            // SAFETY: waitid only writes `info`, which is large enough
-            let waited = unsafe {
-                libc::waitid(
-                    libc::P_PID,
-                    self.pid as libc::id_t,
-                    info.as_mut_ptr(),
-                    libc::WEXITED | libc::WNOWAIT,
-                )
-            };
-            if waited == 0
-                || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
-            {
-                break;
-            }
-        }
+        let ended = wait_without_reaping(self.pid);
         let _ = self.stop.send(());
-        self.thread.join().unwrap_or(false)
+        let fired = self.thread.join().unwrap_or(false);
+        let killed = ended.as_ref().is_none_or(|info| {
+            // SAFETY: waitid wrote a child's status, which si_status reads
+            info.si_code == libc::CLD_KILLED && unsafe { info.si_status() } == libc::SIGKILL
+        });
+        fired && killed
     }
 }
 
@@ -858,6 +874,24 @@ mod tests {
         // the sleep
         assert!(elapsed >= time, "{elapsed:?}");
         assert!(elapsed < Duration::from_secs(30), "{elapsed:?}");
+    }
+
+    // A watchdog whose time is up just as the child ends on its own, after
+    // the parent saw it end, didn't end it, so the child's report is read
+    #[cfg(unix)]
+    #[test]
+    fn a_watchdog_late_for_a_child_that_ended_didnt_end_it() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        // The child has ended, and isn't reaped
+        assert!(wait_without_reaping(child.id()).is_some());
+        let watchdog = Watchdog::start(&child, Duration::ZERO);
+        // Its time is up at once, and it ends what's left of the child
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!watchdog.stop());
+        assert!(child.wait().unwrap().success());
     }
 
     // The variable that names the file `probe` reads
