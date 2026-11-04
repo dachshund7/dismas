@@ -456,6 +456,16 @@ impl AlbumTracks {
             .unwrap_or_default()
     }
 
+    // The track at `pos` among them
+    pub(crate) fn track(&self, pos: u32) -> Option<Track> {
+        self.imp()
+            .tracks
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.item(pos))
+            .and_downcast()
+    }
+
     // Shows the new tags of a track that was updated: its row and the
     // section of its work are made again
     pub(crate) fn track_changed(&self, track: &Track) {

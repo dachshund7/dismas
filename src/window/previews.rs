@@ -121,7 +121,7 @@ impl Window {
                 // The track clicked is among the ones that could be read,
                 // so its place among the files can differ
                 let start = clicked
-                    .then(|| album_tracks.tracks().into_iter().nth(pos as usize))
+                    .then(|| album_tracks.track(pos))
                     .flatten()
                     .and_then(|track| files.iter().position(|f| f.equal(&track.file())))
                     .unwrap_or(0);
@@ -133,17 +133,21 @@ impl Window {
                 // the files that aren't there; in selection mode, the Play
                 // button takes the first selected track
                 let start = if clicked {
-                    Some(pos as usize)
+                    Some(pos)
                 } else if album_tracks.selection_mode() {
-                    album_tracks.tracks().iter().position(Track::selected)
+                    album_tracks
+                        .tracks()
+                        .iter()
+                        .position(Track::selected)
+                        .map(|index| index as u32)
                 } else {
                     None
                 };
                 let start = start.and_then(|index| {
-                    let track = album_tracks.tracks().into_iter().nth(index)?;
+                    let track = album_tracks.track(index)?;
                     Some(ResumePoint {
                         uri: track.uri(),
-                        index: index as u32,
+                        index,
                         position: 0,
                     })
                 });
