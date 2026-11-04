@@ -366,7 +366,7 @@ Keyboard shortcuts
 | Ctrl+← / Ctrl+→                  | Seek backward / forward                        |
 | Ctrl+↑ / Ctrl+↓                  | Volume up / down                               |
 | Ctrl+M                           | Mute or unmute                                 |
-| Ctrl+T                           | Change the repeat mode                         |
+| Ctrl+R                           | Change the repeat mode                         |
 | Ctrl+S                           | Shuffle, or put back the order from before     |
 | Ctrl+D                           | Mark or unmark the playing track as a favorite |
 | Ctrl+I                           | Track information                              |
@@ -375,7 +375,7 @@ Keyboard shortcuts
 | Ctrl+1 to Ctrl+4                 | Player / albums / tracks / works               |
 | Ctrl+P                           | Playlists                                      |
 | Ctrl+F                           | Search where the focus is: the albums, tracks or works, or the playlist |
-| Ctrl+R or F5                     | Scan the music folders for changes             |
+| F5                               | Scan the music folders for changes             |
 | Ctrl+O / Ctrl+Shift+O            | Add tracks / a folder to the playlist          |
 | Ctrl+L                           | Remove all the tracks of the playlist          |
 | Ctrl+A                           | Select all the tracks or albums                |

@@ -96,15 +96,15 @@ mod imp {
             obj.set_accels_for_action("win.find", &["<primary>F"]);
             // Ctrl+S, as in other music players: Dismas has nothing to save
             obj.set_accels_for_action("queue.shuffle", &["<primary>s"]);
-            // The HIG's Reload, and F5, as in file managers and browsers
-            obj.set_accels_for_action("win.rescan-library", &["<primary>r", "F5"]);
+            // F5, as in file managers and browsers; Ctrl+R changes the repeat mode
+            obj.set_accels_for_action("win.rescan-library", &["F5"]);
 
             // Ctrl+Left and Ctrl+Right seek, see `Window::setup_key_shortcuts()`
             obj.set_accels_for_action("win.volume-up", &["<primary>Up"]);
             obj.set_accels_for_action("win.volume-down", &["<primary>Down"]);
             obj.set_accels_for_action("win.toggle-mute", &["<primary>m"]);
-            // Ctrl+R scans the music folders
-            obj.set_accels_for_action("queue.repeat-mode", &["<primary>t"]);
+            // Ctrl+R, as in Spotify and Rhythmbox, beside Ctrl+S for shuffling
+            obj.set_accels_for_action("queue.repeat-mode", &["<primary>r"]);
             obj.set_accels_for_action("win.previous", &["<Alt>Left"]);
             obj.set_accels_for_action("win.next", &["<Alt>Right"]);
             obj.set_accels_for_action("win.add-tracks", &["<primary>o"]);

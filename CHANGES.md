@@ -48,6 +48,9 @@ All notable changes to this project will be documented in this file.
   settings GStreamer needs from Dismas's environment, not tokens or the
   like. It's made with Landlock and seccomp, which the Flatpak can use
   too
+- Ctrl+R changes the repeat mode, as in Spotify and Rhythmbox, next to
+  Ctrl+S for shuffling, rather than Ctrl+T; F5 alone scans the music
+  folders for changes
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
   later
 
