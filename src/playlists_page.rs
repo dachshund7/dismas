@@ -126,24 +126,17 @@ impl PlaylistsPage {
 // button, but on the row, so that the focus comes back to the row once it
 // closes, as from the menus of the other lists; the button's own popover
 // would leave it on the button. The popover goes once the item's action ran,
-// as it can take the row away (Delete…), see `albums::popup_menu()`
+// as it can take the row away (Switch To), see `utils::menu_popover()`
 fn open_row_menu(row: &adw::ActionRow, button: &gtk::MenuButton, model: &gio::MenuModel) {
-    let popover = gtk::PopoverMenu::from_model(Some(model));
-    popover.set_parent(row);
-    popover.set_has_arrow(false);
-    if let Some(bounds) = button.compute_bounds(row) {
-        popover.set_pointing_to(Some(&gdk::Rectangle::new(
+    let bounds = button.compute_bounds(row).map(|bounds| {
+        gdk::Rectangle::new(
             bounds.x() as i32,
             bounds.y() as i32,
             bounds.width() as i32,
             bounds.height() as i32,
-        )));
-    }
-    popover.connect_closed(|popover| {
-        let popover = popover.clone();
-        glib::idle_add_local_once(move || popover.unparent());
+        )
     });
-    popover.popup();
+    crate::utils::menu_popover(model, row, bounds.as_ref()).popup();
 }
 
 // The ⋯ button among the suffixes of a row

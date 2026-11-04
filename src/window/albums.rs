@@ -641,30 +641,9 @@ pub(super) fn popup_menu(
     x: f64,
     y: f64,
 ) {
-    let popover = gtk::PopoverMenu::from_model(Some(menu));
+    let point = gdk::Rectangle::new(x as i32, y as i32, 1, 1);
+    let popover = utils::menu_popover(menu, parent, Some(&point));
     popover.insert_action_group(group, Some(actions));
-    popover.set_parent(parent);
-    popover.set_has_arrow(false);
     popover.set_halign(gtk::Align::Start);
-    popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-    // The menu item is activated after the popover closes, so it can only
-    // go once the action ran. The widget it's on is kept until then, as the
-    // action can take it away: unmarking a work while only the favorites
-    // show does with its row. A button freed with the popover still on it leaves the
-    // popover with a parent that's gone, and letting go of it then crashed
-    popover.connect_closed(|popover| {
-        let popover = popover.clone();
-        let parent = popover.parent();
-        glib::idle_add_local_once(move || {
-            popover.unparent();
-            // The focus doesn't come back to the row or the cell when the
-            // action took it away, or the album it was on, so the list item
-            // would keep it as its focus child, and refuse the focus
-            if let Some(parent) = parent {
-                let focus = parent.root().and_then(|root| root.focus());
-                utils::forget_focus_above(&parent, focus.as_ref());
-            }
-        });
-    });
     popover.popup();
 }

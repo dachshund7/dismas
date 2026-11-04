@@ -329,6 +329,45 @@ pub(crate) fn scroll_to_top_when_laid_out(
     });
 }
 
+// A menu on `parent`, pointing to `rect` in it, or else to all of it, to
+// open with `popup()`; it goes once it's closed
+pub(crate) fn menu_popover(
+    model: &impl IsA<gio::MenuModel>,
+    parent: &impl IsA<gtk::Widget>,
+    rect: Option<&gdk::Rectangle>,
+) -> gtk::PopoverMenu {
+    let popover = gtk::PopoverMenu::from_model(Some(model));
+    popover.set_parent(parent);
+    popover.set_has_arrow(false);
+    popover.set_pointing_to(rect);
+    unparent_once_closed(&popover);
+    popover
+}
+
+// Takes the popover of a menu off the widget it was opened on once it
+// closes. The menu item is activated after the popover closes, so it can
+// only go once the action ran. The widget it's on is kept until then, as
+// the action can take it away: unmarking a work while only the favorites
+// show does with its row, and Switch To with the rows of the playlists. A
+// widget freed with the popover still on it leaves the popover with a
+// parent that's gone, and letting go of it then crashed
+fn unparent_once_closed(popover: &impl IsA<gtk::Popover>) {
+    popover.as_ref().connect_closed(|popover| {
+        let popover = popover.clone();
+        let parent = popover.parent();
+        glib::idle_add_local_once(move || {
+            popover.unparent();
+            // The focus doesn't come back to the row or the cell when the
+            // action took it away, or the album it was on, so the list item
+            // would keep it as its focus child, and refuse the focus
+            if let Some(parent) = parent {
+                let focus = parent.root().and_then(|root| root.focus());
+                forget_focus_above(&parent, focus.as_ref());
+            }
+        });
+    });
+}
+
 // When the focus is lost rather than moved, as when the album or the work
 // that had it goes from a list, or a menu closes whose item was taken away,
 // GTK keeps the chain of focus children that led to it. A list item whose
