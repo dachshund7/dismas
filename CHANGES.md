@@ -100,6 +100,8 @@ All notable changes to this project will be documented in this file.
   Dismas on to the next track
 - Stop from the desktop's media controls left the position where it was,
   though playing again started the track over
+- The desktop's media controls were told that a track whose length isn't
+  known lasted 0 seconds
 - Programs that read the position and length of a track over MPRIS got
   whole seconds, so synced lyrics or a progress bar could be up to a
   second off

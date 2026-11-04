@@ -133,6 +133,12 @@ fn time(duration: Duration) -> Time {
     Time::from_micros(i64::try_from(duration.as_micros()).unwrap_or(i64::MAX))
 }
 
+// The length of a track for MPRIS, left out when it isn't known, which a
+// length of 0 would say it is
+fn track_length(length: Duration) -> Option<Time> {
+    (!length.is_zero()).then(|| time(length))
+}
+
 // Whether a client's position is one to go to. MPRIS asks to do nothing
 // past the end of the track; in a track whose length isn't known, the
 // player goes as far as it can
@@ -236,7 +242,7 @@ impl MprisController {
         metadata.set_album(Some(track.album()));
         metadata.set_url(Some(track.audio_uri()));
 
-        metadata.set_length(Some(time(track.length())));
+        metadata.set_length(track_length(track.length()));
 
         // For the bars and widgets that can show more
         let credits = track.credit_details();
@@ -557,6 +563,13 @@ mod tests {
     fn times_keep_the_parts_of_a_second() {
         let time = time(Duration::from_millis(1500));
         assert_eq!(time, Time::from_micros(1_500_000));
+    }
+
+    #[test]
+    fn an_unknown_length_is_left_out() {
+        assert_eq!(track_length(Duration::ZERO), None);
+        let length = Duration::from_millis(90_500);
+        assert_eq!(track_length(length), Some(time(length)));
     }
 
     #[test]
