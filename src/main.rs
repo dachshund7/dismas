@@ -34,6 +34,7 @@ mod push_bin;
 mod queue_row;
 mod resume_point;
 mod reveal_bin;
+mod sandbox;
 mod search;
 mod search_query;
 mod search_syntax;

@@ -10,13 +10,16 @@
 //! process, Dismas itself started with `--discover-file`, which writes what
 //! it found as JSON: a crash or a hang only leaves that one file unread.
 //! GApplication would pass the arguments on to the Dismas already running,
-//! so `main` looks for the child's before it makes the application.
+//! so `main` looks for the child's before it makes the application. The
+//! child confines itself before it starts GStreamer (`crate::sandbox`), so a
+//! file that exploits a plugin can't reach anything else either.
 
 use std::{
     collections::HashSet,
     ffi::OsString,
     io::{Read, Write},
     process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use glib::translate::IntoGlib;
@@ -30,6 +33,7 @@ use lofty::{
 use serde::Serialize;
 
 use super::*;
+use crate::sandbox::{self, EXIT_NO_SANDBOX};
 
 // The argument that starts Dismas as the child that reads a file
 pub(crate) const CHILD_ARG: &str = "--discover-file";
@@ -49,6 +53,10 @@ const MAX_PICTURES_SIZE: usize = 32 * 1024 * 1024;
 // larger in base64, and the tags; a child that writes more is ended, and
 // the file is left unread
 const MAX_REPORT_SIZE: u64 = 64 * 1024 * 1024;
+
+// The most characters of why a child couldn't set up its sandbox that the
+// parent logs
+const MAX_REASON_CHARS: usize = 500;
 
 // The program started as the child, Dismas itself, which `main` sets
 static HELPER: OnceLock<PathBuf> = OnceLock::new();
@@ -126,10 +134,24 @@ pub(super) fn discover(path: &Path, options: ReadOptions) -> Option<FileTags> {
 }
 
 fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        static SAID: std::sync::Once = std::sync::Once::new();
+        SAID.call_once(|| {
+            warn!("Files that only GStreamer can read are read without a sandbox on this system");
+        });
+    }
     let spawned = Command::new(helper)
         .arg(CHILD_ARG)
         .arg(if covers { "covers" } else { "no-covers" })
         .arg(path)
+        // Dismas brought GStreamer's registry up to date as it started, and
+        // the child, which can't write it, reads it as it is: it neither
+        // looks at every plugin again nor starts GStreamer's plugin scanner,
+        // which it couldn't. Without a registry, GStreamer reads the plugins
+        // in the child, which is slower but works
+        .env("GST_REGISTRY_UPDATE", "no")
+        .env("GST_REGISTRY_FORK", "no")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -166,6 +188,12 @@ fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
                 None
             }
         },
+        Ok(status) if status.code() == Some(EXIT_NO_SANDBOX.into()) => {
+            without_sandbox(path, &report);
+            None
+        }
+        // A child that made a system call the sandbox ends it for, like one
+        // to run a program, ends with SIGSYS
         Ok(status) => {
             warn!("GStreamer couldn't read {path:?}: its reader ended with {status}");
             None
@@ -175,6 +203,26 @@ fn run_child(helper: &Path, path: &Path, covers: bool) -> Option<Discovered> {
             None
         }
     }
+}
+
+// Says that a file was left unread, as the child couldn't set up its
+// sandbox: once a run, with why, which the child wrote in place of its
+// report, as every other child will fail in the same way
+fn without_sandbox(path: &Path, report: &[u8]) {
+    static SAID: AtomicBool = AtomicBool::new(false);
+    if SAID.swap(true, Ordering::Relaxed) {
+        debug!("Left {path:?} unread, as GStreamer's reader has no sandbox");
+        return;
+    }
+    let reason: String = String::from_utf8_lossy(report)
+        .chars()
+        .take(MAX_REASON_CHARS)
+        .collect();
+    warn!(
+        "The sandbox of the reader that reads files with GStreamer can't be set up on this \
+         system, so the files that only GStreamer can read, such as {path:?}, are left unread: \
+         {reason}"
+    );
 }
 
 // The child: reads a file, and writes what it found as JSON, or null
@@ -189,7 +237,21 @@ pub(crate) fn child_main(args: &[OsString]) -> glib::ExitCode {
     let [covers, path] = args else {
         return glib::ExitCode::FAILURE;
     };
-    let discovered = discover_file(Path::new(path), covers.to_str() == Some("covers"));
+    let path = Path::new(path);
+    // GStreamer's initialization has GLib read the program's name from
+    // /proc/self/cmdline, which the sandbox doesn't let the child read
+    glib::set_prgname(Some("dismas"));
+    // Before GStreamer starts, and with it the threads the sandbox wouldn't
+    // cover; a child that can't confine itself doesn't read the file
+    match sandbox::restrict_to_reading(path) {
+        Ok(status) => debug!("Reading {path:?} in a sandbox: {status}"),
+        Err(reason) => {
+            let mut stdout = std::io::stdout().lock();
+            let _ = write!(stdout, "{reason}").and_then(|()| stdout.flush());
+            return EXIT_NO_SANDBOX.into();
+        }
+    }
+    let discovered = discover_file(path, covers.to_str() == Some("covers"));
     let mut stdout = std::io::stdout().lock();
     match serde_json::to_writer(&mut stdout, &discovered) {
         Ok(()) if stdout.flush().is_ok() => glib::ExitCode::SUCCESS,
@@ -683,6 +745,106 @@ mod tests {
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(run_child(&helper, Path::new("Nimrod.oga"), true), None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The variable that names the file `probe` reads
+    const PROBE_FILE: &str = "DISMAS_SANDBOX_PROBE";
+
+    // The sandbox, tried in a process of its own, as it can't be undone: the
+    // test binary started again to run only `probe`, which confines itself
+    // as the child does
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_sandbox_holds() {
+        // Brings GStreamer's registry up to date, which `probe` can't write
+        gst::init().unwrap();
+        let dir = test_dir("sandbox");
+        let path = dir.join("Nimrod.oga");
+        let mut tags = gst::TagList::new();
+        tags.get_mut()
+            .unwrap()
+            .add::<gst::tags::Title>(&"Nimrod", gst::TagMergeMode::Append);
+        // flacenc and oggmux come with the good and base plugins
+        if !write_with_gstreamer(&path, "flacenc name=tags ! oggmux", &tags) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        std::fs::write(dir.join("other.txt"), "Enigma").unwrap();
+
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "audio::track::discovered::tests::probe",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(PROBE_FILE, &path)
+            .env("GST_REGISTRY_UPDATE", "no")
+            .env("GST_REGISTRY_FORK", "no")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // What the probe found, which says how confined it was
+        println!("{stdout}");
+        assert!(output.status.success(), "{}: {stderr}", output.status);
+        // A filter that matches no test succeeds too
+        assert!(stdout.contains("test result: ok. 1 passed"), "{stderr}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "the_sandbox_holds runs it, in a process of its own"]
+    fn probe() {
+        use std::{net::TcpStream, os::unix::net::UnixStream};
+
+        let Some(path) = std::env::var_os(PROBE_FILE).map(PathBuf::from) else {
+            return;
+        };
+        let other = path.with_file_name("other.txt");
+        let status = sandbox::restrict_to_reading(&path).unwrap();
+        println!("Probing a sandbox of {status}");
+        // The error of what failed, which says what refused it: Landlock
+        // (EACCES) or seccomp (ENOSYS), rather than the call failing for a
+        // reason of its own, like a socket that nothing listens on
+        fn error<T>(result: std::io::Result<T>) -> Option<i32> {
+            result.err().and_then(|e| e.raw_os_error())
+        }
+
+        // Its file, and no other file but the system's
+        assert!(std::fs::read(&path).is_ok());
+        if status.confines_files() {
+            assert_eq!(error(std::fs::read(&other)), Some(libc::EACCES));
+        } else {
+            println!("Not checked: reading other files, as the kernel has no Landlock");
+        }
+        assert!(
+            std::fs::read("/etc/ld.so.cache").is_ok() || !Path::new("/etc/ld.so.cache").exists()
+        );
+        // No writing, whether to a file that's there or a new one
+        let append = std::fs::OpenOptions::new().append(true).open(&other);
+        assert_eq!(error(append), Some(libc::ENOSYS));
+        let create = std::fs::File::create(path.with_file_name("new.txt"));
+        assert_eq!(error(create), Some(libc::ENOSYS));
+        // No sockets, no programs
+        let unix = UnixStream::connect("/run/dbus/system_bus_socket");
+        assert_eq!(error(unix), Some(libc::ENOSYS));
+        let tcp = TcpStream::connect(("127.0.0.1", 9));
+        assert_eq!(error(tcp), Some(libc::ENOSYS));
+        let program = Command::new("/bin/sh").arg("-c").arg("true").status();
+        assert_eq!(error(program), Some(libc::ENOSYS));
+        // And GStreamer still reads its file
+        let discovered = discover_file(&path, false).unwrap();
+        assert!(
+            discovered
+                .comments
+                .contains(&("TITLE".to_string(), "Nimrod".to_string())),
+            "{:?}",
+            discovered.comments
+        );
     }
 
     #[test]

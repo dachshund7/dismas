@@ -20,7 +20,8 @@ dependency('gstreamer-bad-audio-1.0', version: '>= 1.20')
 # supports 3.45.3 or later
 dependency('sqlite3', version: '>= 3.45.3')
 # glycin, which decodes the covers in sandboxed loaders, links against these;
-# the loaders themselves (glycin-loaders) are only needed at runtime
+# the loaders themselves (glycin-loaders) are only needed at runtime. The
+# sandbox of the child that reads files with GStreamer uses libseccomp too
 if host_machine.system() == 'linux'
   dependency('libseccomp')
   dependency('fontconfig')

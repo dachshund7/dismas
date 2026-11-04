@@ -40,6 +40,12 @@ gdk-x11 = { package = "gdk4-x11", version = "0.11" }
 ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
 x11rb = "0.14"
 
+# Confine the child that reads files with GStreamer (src/sandbox.rs);
+# libseccomp is glycin's too, and links the system's libseccomp
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"
+libseccomp = "0.4"
+
 [dependencies.adw]
 package = "libadwaita"
 version = "0.9"

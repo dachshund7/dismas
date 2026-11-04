@@ -164,7 +164,11 @@ What Dismas adds
 - **Other file types:** files in a format whose tags Dismas can't read
   itself, such as Ogg FLAC, Matroska, WebM, WMA, TrueAudio and AC-3, are
   read through GStreamer, as long as it has the plugins to play them (for
-  WMA, the ugly plugins and gst-libav). GStreamer reads fewer of their tags.
+  WMA, the ugly plugins and gst-libav). Each file is read in a sandboxed
+  process of its own, which can only read the system's files and that one
+  file, with Landlock and seccomp on Linux, so a crafted file that crashed
+  or exploited a GStreamer plugin only leaves that file unread. GStreamer
+  reads fewer of their tags.
   In WMA files, it loses the composer and the genre, takes the album
   artist for a second artist, and only reads a track number written as a
   number alone ("3", not "3/24"), and a year written as `WM/Year`, as
