@@ -88,6 +88,8 @@ All notable changes to this project will be documented in this file.
   dozens deep, which only a crafted file does, crashed Dismas, and at
   every start, as the library reads its files then. Such a tag is now
   refused, and GStreamer reads the file instead
+- After a program changed the repeat mode over MPRIS, the desktop's media
+  controls could go on showing the mode before
 
 ### Removed
 

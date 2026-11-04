@@ -8,6 +8,7 @@ use std::{
 };
 
 use async_channel::Sender;
+use futures::FutureExt;
 use glib::clone;
 use gtk::{gio, glib, prelude::*};
 use log::error;
@@ -72,6 +73,26 @@ impl Shared {
             error!("Unable to set MPRIS loop status: {err:?}");
         }
     }
+
+    fn store_requested_loop_status(self: &Rc<Self>, status: LoopStatus) {
+        self.loop_status.set(status);
+        let shared = self.clone();
+        publish_at_once(async move { shared.publish_loop_status().await });
+    }
+}
+
+// Stores a property that a client set before its call returns. zbus
+// announces a property as soon as its setter returns, with the value the
+// server has by then, and the player only applies the change later:
+// announcing the old value would send clients back to it. The setters of
+// `Player` store the value before they first wait, so one poll is enough
+// for that. The rest is left to finish, as dropping it could cut off a
+// message that's being sent
+fn publish_at_once(publish: impl Future<Output = ()> + 'static) {
+    let mut publish = Box::pin(publish);
+    if publish.as_mut().now_or_never().is_none() {
+        glib::spawn_future_local(publish);
+    }
 }
 
 // A number of seconds as an MPRIS time, which counts microseconds in an
@@ -117,7 +138,7 @@ impl MprisController {
                 match builder.build().await {
                     Err(err) => error!("Failed to create MPRIS server: {err:?}"),
                     Ok(player) => {
-                        setup_signals(sender, &player);
+                        setup_signals(sender, &shared, &player);
                         let mpris_task = player.run();
                         // Not published, as it changes too often: read when asked
                         player.set_position(shared.position.get());
@@ -295,7 +316,7 @@ impl Controller for MprisController {
     }
 }
 
-fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
+fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Player) {
     mpris.connect_play_pause(clone!(
         #[strong]
         sender,
@@ -378,7 +399,10 @@ fn setup_signals(sender: Sender<PlaybackAction>, mpris: &Player) {
     mpris.connect_set_loop_status(clone!(
         #[strong]
         sender,
+        #[weak]
+        shared,
         move |_, status| {
+            shared.store_requested_loop_status(status);
             let mode = match status {
                 LoopStatus::None => RepeatMode::Consecutive,
                 LoopStatus::Track => RepeatMode::RepeatOne,
