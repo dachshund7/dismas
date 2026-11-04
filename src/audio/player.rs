@@ -528,7 +528,7 @@ impl AudioPlayer {
         if self.state.track().is_some() && self.queue.peek_next_track().is_none() {
             self.end_listen();
             self.set_playback_state(PlaybackState::Stopped);
-            self.update_position(Duration::from_secs(self.state.duration()), true);
+            self.update_position(self.state.length(), true);
             self.finished.set(true);
             return;
         }
@@ -950,7 +950,7 @@ impl AudioPlayer {
         }
     }
 
-    // The listens and the controllers go by whole seconds
+    // The listens go by whole seconds
     fn update_position(&self, position: Duration, notify: bool) {
         self.state.set_position(position);
         let seconds = position.as_secs();
@@ -963,7 +963,7 @@ impl AudioPlayer {
             .advance(seconds, self.state.playing());
 
         for c in &self.controllers {
-            c.set_position(seconds, notify);
+            c.set_position(position, notify);
         }
         self.update_can_go_previous();
     }

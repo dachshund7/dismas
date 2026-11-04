@@ -60,7 +60,7 @@ use credits::is_composer;
 pub(crate) use credits::{
     ListedPerformer, MusicBrainzIds, PerformerKind, TrackCredits, first_and_last_names, has_name,
 };
-use fields::sane_duration;
+use fields::sane_length;
 pub(crate) use fields::{AudioProperties, FieldCode, FieldParts, Flag, field_values};
 pub(crate) use file_name::title_from_file_name;
 use file_name::{fallback_album, title_from_name};
@@ -89,7 +89,8 @@ pub(crate) struct TrackData {
     fields: String,
     cover: Option<AlbumCover>,
     uuid: Option<String>,
-    duration: u64,
+    // How long it plays, zero if that's unknown
+    length: Duration,
     details: FileDetails,
     // Where the track is; for a track of a CUE sheet, a path under the
     // sheet, which is not a file
@@ -381,8 +382,13 @@ impl TrackData {
         self.cover.as_ref().map(AlbumCover::uuid)
     }
 
+    // In whole seconds, as the window shows it
     pub(crate) fn duration(&self) -> u64 {
-        self.duration
+        self.length.as_secs()
+    }
+
+    pub(crate) fn length(&self) -> Duration {
+        self.length
     }
 
     pub(crate) fn details(&self) -> &FileDetails {
@@ -445,7 +451,7 @@ impl TrackData {
             fields: String::new(),
             cover: None,
             uuid: None,
-            duration: 0,
+            length: Duration::ZERO,
             details: FileDetails::default(),
             file,
             audio: None,
@@ -512,7 +518,7 @@ impl Default for TrackData {
             fields: String::new(),
             cover: None,
             uuid: None,
-            duration: 0,
+            length: Duration::ZERO,
             details: FileDetails::default(),
             file: gio::File::for_path("/does-not-exist"),
             audio: None,
@@ -1114,6 +1120,10 @@ impl Track {
 
     pub(crate) fn audio_file(&self) -> gio::File {
         self.imp().data.borrow().audio_file()
+    }
+
+    pub(crate) fn length(&self) -> Duration {
+        self.imp().data.borrow().length()
     }
 
     pub(crate) fn audio_uri(&self) -> String {

@@ -24,7 +24,7 @@ mod imp {
         #[property(name = "playing", get = Self::playing, type = bool)]
         pub(crate) playback_state: Cell<PlaybackState>,
         // Where the track is; the property is in whole seconds, as the
-        // labels and the controllers show it, see `position_time()`
+        // labels show it, see `position_time()`
         #[property(name = "position", get = Self::position, type = u64)]
         pub(crate) position: Cell<Duration>,
         // These are proxies for Track properties
@@ -237,6 +237,12 @@ impl PlayerState {
     // The position to the millisecond
     pub(crate) fn position_time(&self) -> Duration {
         self.imp().position.get()
+    }
+
+    // The length of the current track, zero if it's unknown; the `duration`
+    // property is in whole seconds
+    pub(crate) fn length(&self) -> Duration {
+        self.track().map_or(Duration::ZERO, |track| track.length())
     }
 
     pub(crate) fn set_volume(&self, volume: f64) {

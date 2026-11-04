@@ -128,11 +128,9 @@ fn publish_at_once(publish: impl Future<Output = ()> + 'static) {
     }
 }
 
-// A number of seconds as an MPRIS time, which counts microseconds in an
-// i64: `Time::from_secs` panics past about 292,000 years
-fn time(seconds: u64) -> Time {
-    let seconds = i64::try_from(seconds).unwrap_or(i64::MAX);
-    Time::from_micros(seconds.saturating_mul(1_000_000))
+// An MPRIS time, which counts microseconds in an i64
+fn time(duration: Duration) -> Time {
+    Time::from_micros(i64::try_from(duration.as_micros()).unwrap_or(i64::MAX))
 }
 
 // The volume a client asks for, within what the volume slider shows. A
@@ -231,8 +229,7 @@ impl MprisController {
         metadata.set_album(Some(track.album()));
         metadata.set_url(Some(track.audio_uri()));
 
-        let length = time(track.duration());
-        metadata.set_length(Some(length));
+        metadata.set_length(Some(time(track.length())));
 
         // For the bars and widgets that can show more
         let credits = track.credit_details();
@@ -303,7 +300,7 @@ impl Controller for MprisController {
     fn clear_track(&self) {
         self.shared.metadata.replace(Metadata::new());
         self.shared.has_track.set(false);
-        self.set_position(0, false);
+        self.set_position(Duration::ZERO, false);
         self.publish_track();
     }
 
@@ -317,7 +314,7 @@ impl Controller for MprisController {
         ));
     }
 
-    fn set_position(&self, position: u64, notify: bool) {
+    fn set_position(&self, position: Duration, notify: bool) {
         let pos = time(position);
         self.shared.position.set(pos);
         if let Some(player) = self.shared.player.get() {
@@ -542,8 +539,14 @@ mod tests {
 
     #[test]
     fn large_times_saturate() {
-        assert_eq!(time(90), Time::from_secs(90));
-        assert_eq!(time(u64::MAX), Time::from_micros(i64::MAX));
+        assert_eq!(time(Duration::from_secs(90)), Time::from_secs(90));
+        assert_eq!(time(Duration::MAX), Time::from_micros(i64::MAX));
+    }
+
+    #[test]
+    fn times_keep_the_parts_of_a_second() {
+        let time = time(Duration::from_millis(1500));
+        assert_eq!(time, Time::from_micros(1_500_000));
     }
 
     #[test]

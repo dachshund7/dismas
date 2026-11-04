@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Duration};
 
 use glib::clone;
 use gst::prelude::*;
@@ -156,7 +156,7 @@ impl Controller for WaveformGenerator {
         self.load_peaks();
     }
 
-    fn set_position(&self, _position: u64, _notify: bool) {}
+    fn set_position(&self, _position: Duration, _notify: bool) {}
     fn set_repeat_mode(&self, _mode: RepeatMode) {}
 }
 
@@ -321,8 +321,7 @@ impl WaveformGenerator {
         // seeks to once it's ready
         let (start, end) = track.segment();
         let segment = (!start.is_zero() || end.is_some()).then(|| {
-            let clock_time =
-                |d: std::time::Duration| gst::ClockTime::from_nseconds(d.as_nanos() as u64);
+            let clock_time = |d: Duration| gst::ClockTime::from_nseconds(d.as_nanos() as u64);
             (clock_time(start), end.map(clock_time))
         });
         let mut seeked = segment.is_none();

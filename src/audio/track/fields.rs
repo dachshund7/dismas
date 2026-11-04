@@ -23,14 +23,19 @@ use crate::catalogue;
 // as unknown. Audiobooks in a single file run to some tens of hours
 const MAX_DURATION: Duration = Duration::from_secs(1000 * 60 * 60);
 
-// The length of a track in seconds, 0 if it's unknown
-pub(super) fn sane_duration(duration: Duration) -> u64 {
-    if duration > MAX_DURATION {
-        warn!("Ignoring a length of {} s", duration.as_secs());
-        0
+// The length of a track, zero if it's unknown
+pub(super) fn sane_length(length: Duration) -> Duration {
+    if length > MAX_DURATION {
+        warn!("Ignoring a length of {} s", length.as_secs());
+        Duration::ZERO
     } else {
-        duration.as_secs()
+        length
     }
+}
+
+// The length of a track in seconds, 0 if it's unknown
+fn sane_duration(duration: Duration) -> u64 {
+    sane_length(duration).as_secs()
 }
 
 // What each line of the fields holds. The codes are kept in the library,

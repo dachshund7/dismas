@@ -349,7 +349,7 @@ impl Controller for TrayController {
         self.set_track_text(None);
     }
 
-    fn set_position(&self, _position: u64, _notify: bool) {}
+    fn set_position(&self, _position: Duration, _notify: bool) {}
 
     fn set_repeat_mode(&self, _repeat: RepeatMode) {}
 

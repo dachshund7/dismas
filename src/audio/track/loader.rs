@@ -402,7 +402,7 @@ impl TrackData {
             credits,
             cover: Some(CoverCache::cover_art(path, tag)),
             uuid,
-            duration: sane_duration(read.tags.properties.duration()),
+            length: sane_length(read.tags.properties.duration()),
             details: read.details(replay_gain),
             file,
             audio: None,
@@ -455,7 +455,7 @@ impl TrackData {
             credits,
             cover: Some(cue_file.cover.clone()),
             uuid,
-            duration: sane_duration(length),
+            length: sane_length(length),
             details,
             file: gio::File::for_path(sheet.location(track)),
             audio: Some(CueAudio {
@@ -560,11 +560,12 @@ mod tests {
 
     #[test]
     fn absurd_lengths_count_as_unknown() {
-        assert_eq!(sane_duration(Duration::from_secs(185)), 185);
+        let sane = |length| sane_length(length) == length;
+        assert!(sane(Duration::from_millis(185_400)));
         // An audiobook in a single file
-        assert_eq!(sane_duration(Duration::from_secs(60 * 3600)), 60 * 3600);
+        assert!(sane(Duration::from_secs(60 * 3600)));
         // A granule position of -1 at the end of an Ogg file, at 44.1 kHz
-        assert_eq!(sane_duration(Duration::from_secs(u64::MAX / 44_100)), 0);
-        assert_eq!(sane_duration(Duration::MAX), 0);
+        assert!(!sane(Duration::from_secs(u64::MAX / 44_100)));
+        assert_eq!(sane_length(Duration::MAX), Duration::ZERO);
     }
 }
