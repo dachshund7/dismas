@@ -7,14 +7,15 @@ QA Plan
 1. First run
   - Copying Amberol's library, queue, playlists and settings
   - Scanning the Music folder
-2. Albums, tracks and works
+2. Albums and works
   - Sorting: artist, title, year, date added
   - Search, with fields such as `composer:` and `year:<1970`, and a
     mistake, which says why it finds nothing
   - The Composers and Performers lists, and the heart beside the search
   - Open an album; play it; add it to the queue; its menu: Play Next, Add
     to Playlist, Open Booklet
-  - The Tracks page: an album opened there lists only the tracks that match
+  - The Tracks toggle (Ctrl+T): an album opened with it on lists only the
+    tracks that match, and the covers say how many do
   - The Works page: open a work, play one of its recordings; Go to Work
     from a track
   - Select albums and tracks, with Shift+click and Ctrl+A

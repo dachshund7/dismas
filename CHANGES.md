@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
 - The smart playlists show the tracks they pick in the pane in the same
   way, before playing them, and Play plays those tracks in place of the
   queue, with an Undo
+- A Tracks toggle on the Albums page, beside Sort and Select (Ctrl+T),
+  takes only the tracks that the search, the composer and the performer
+  picked, and the heart match from an album you open, play, add or drag,
+  as the Tracks page did; from another page, Ctrl+T shows the albums with
+  it on. It's off at each start
+- The covers of the albums that a search matches only partly say how
+  many of their tracks it does, whether or not the toggle is on, rather
+  than only on the Tracks page
 
 ### Changed
 
@@ -51,6 +59,7 @@ All notable changes to this project will be documented in this file.
 - Ctrl+R changes the repeat mode, as in Spotify and Rhythmbox, next to
   Ctrl+S for shuffling, rather than Ctrl+T; F5 alone scans the music
   folders for changes
+- Ctrl+3 shows the works, rather than Ctrl+4, as the Tracks page is gone
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
   later
 
@@ -75,6 +84,8 @@ All notable changes to this project will be documented in this file.
   Playlists page, as they do on the rows of other lists
 
 ### Removed
+
+- The Tracks page; the Tracks toggle on the Albums page takes its place
 
 ## [2026.11] - 2026-11-02
 

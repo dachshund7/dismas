@@ -231,6 +231,11 @@ mod imp {
         // library view, whose own page says which
         #[property(name = "page", get = Self::page, set = Self::set_page, explicit_notify, type = String)]
         page: std::marker::PhantomData<String>,
+        // The Tracks toggle of the Albums page as shown: off on the other
+        // pages, so that Ctrl+T, which toggles it, shows the albums with it
+        // on. The library view keeps it while other pages are shown
+        #[property(name = "tracks-only", get = Self::tracks_only, set = Self::set_tracks_only, explicit_notify, type = bool)]
+        tracks_only: std::marker::PhantomData<bool>,
         // Whether there is anything to play, to go to the player
         #[property(get)]
         pub(crate) player_available: Cell<bool>,
@@ -614,6 +619,7 @@ mod imp {
             klass.install_property_action("queue.select", "queue-selection");
             klass.install_property_action("queue.search", "queue-search");
             klass.install_property_action("win.page", "page");
+            klass.install_property_action("win.tracks-only", "tracks-only");
             klass.install_property_action("win.replaygain", "replaygain-mode");
         }
 
@@ -671,6 +677,7 @@ mod imp {
                 library_visible: Cell::new(false),
                 playlists_visible: Cell::new(false),
                 page: std::marker::PhantomData,
+                tracks_only: std::marker::PhantomData,
                 player_available: Cell::new(false),
                 library_scanning: Cell::new(false),
                 works_available: Cell::new(false),
@@ -732,6 +739,14 @@ mod imp {
                 #[weak(rename_to = obj)]
                 self.obj(),
                 move |_| obj.notify_page()
+            ));
+            // The toggle as shown follows the page, and the view's toggle
+            self.obj()
+                .connect_page_notify(super::Window::notify_tracks_only);
+            self.library_view.connect_tracks_only_notify(clone!(
+                #[weak(rename_to = obj)]
+                self.obj(),
+                move |_| obj.notify_tracks_only()
             ));
 
             // Only in selection mode
@@ -1054,6 +1069,20 @@ mod imp {
             // A page that can't be shown, like the player with nothing to
             // play, leaves the buttons as they were
             obj.notify_page();
+        }
+
+        fn tracks_only(&self) -> bool {
+            self.page() == LibraryPage::Albums.name() && self.library_view.tracks_only()
+        }
+
+        // Asked for on another page, the toggle shows the albums with it on
+        fn set_tracks_only(&self, tracks_only: bool) {
+            let obj = self.obj();
+            if tracks_only && self.page() != LibraryPage::Albums.name() {
+                obj.set_page(LibraryPage::Albums.name());
+            }
+            self.library_view.set_tracks_only(tracks_only);
+            obj.notify_tracks_only();
         }
 
         fn update_content_page(&self) {

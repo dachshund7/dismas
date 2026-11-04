@@ -49,16 +49,14 @@ use crate::{
 const DRAG_COVER_SIZE: i32 = 64;
 
 // The pages of the window that this view shows: the albums of the music
-// folders, which are taken whole, the same albums, of which only the tracks
-// the search matches are taken, or their works. They're one widget, which
-// keeps the search, the composer and the performer picked from one page to
+// folders, or their works. They're one widget, which keeps the search, the
+// composer and the performer picked, and the Tracks toggle from one page to
 // the other
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, glib::Enum)]
 #[enum_type(name = "DismasLibraryPage")]
 pub(crate) enum LibraryPage {
     #[default]
     Albums,
-    Tracks,
     Works,
 }
 
@@ -67,37 +65,48 @@ impl LibraryPage {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Albums => "albums",
-            Self::Tracks => "tracks",
             Self::Works => "works",
         }
     }
 
     // The page with the name of a window's page, if it's one of these
     pub(crate) fn named(name: &str) -> Option<Self> {
-        [Self::Albums, Self::Tracks, Self::Works]
+        [Self::Albums, Self::Works]
             .into_iter()
             .find(|page| page.name() == name)
     }
+}
 
-    // Whether the page shows the grid of the albums
-    pub(crate) fn shows_grid(self) -> bool {
-        self != Self::Works
-    }
+// What the page shows and takes: whole albums; the albums of which only the
+// tracks the search matches are taken, with the Tracks toggle on; or the
+// works. The title, the heart, Play a Random … and the selection's label
+// name it
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LibraryItems {
+    Albums,
+    Tracks,
+    Works,
+}
 
-    // Whether taking an album from the grid takes only the tracks the
-    // search matches, rather than the whole album
-    fn takes_matches(self) -> bool {
-        self == Self::Tracks
+impl LibraryItems {
+    // What `page` shows, with the Tracks toggle on or off; the toggle only
+    // changes the albums, as the works are taken by their recordings
+    pub(crate) fn of(page: LibraryPage, tracks_only: bool) -> Self {
+        match (page, tracks_only) {
+            (LibraryPage::Albums, false) => Self::Albums,
+            (LibraryPage::Albums, true) => Self::Tracks,
+            (LibraryPage::Works, _) => Self::Works,
+        }
     }
 }
 
 // What Play a Random … picks from on the page shown, see
 // `LibraryView::random_pool()`: on the Albums page, the albums with a track
-// the filter matches, which play whole; on the Tracks page, the tracks the
-// filter matches; on the Works page, the works listed for the filter, and
-// the recordings of them that it matches
+// the filter matches, which play whole, or with the Tracks toggle on, the
+// tracks the filter matches; on the Works page, the works listed for the
+// filter, and the recordings of them that it matches
 pub(crate) struct RandomPool {
-    pub(crate) page: LibraryPage,
+    pub(crate) items: LibraryItems,
     pub(crate) filter: TrackFilter,
     // Whether the heart is on, which only the Works page leaves out of the
     // filter, as it shows only the favorite works
@@ -127,6 +136,8 @@ mod imp {
         pub(crate) sort_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
         pub(crate) select_button: TemplateChild<gtk::ToggleButton>,
+        #[template_child]
+        pub(crate) tracks_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
         pub(crate) favorites_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
@@ -181,6 +192,12 @@ mod imp {
         // Whether clicking an album selects it, instead of showing it
         #[property(get, set = Self::set_selection_mode)]
         pub(crate) selection_mode: Cell<bool>,
+        // Whether an album taken from the grid gives only the tracks the
+        // search, the composer and the performer picked, and the heart
+        // match, rather than the whole album; the Tracks toggle of the
+        // header, off at each start
+        #[property(get, set = Self::set_tracks_only, explicit_notify)]
+        pub(crate) tracks_only: Cell<bool>,
         // The page shown; the works are only shown while a track is part
         // of one
         #[property(get, set = Self::set_page, explicit_notify, builder(LibraryPage::default()))]
@@ -345,19 +362,35 @@ mod imp {
             }
             // A work to go to is for the page it was asked for on
             self.pending_work.take();
-            // The Albums and Tracks pages share the grid and its selection,
-            // and the Works page selects among the covers of a work
-            if before.shows_grid() != page.shows_grid() {
-                self.obj().set_selection_mode(false);
-            }
-            self.obj().update_view();
-            // The heart beside the search shows the favorites of each page,
-            // so the albums it shows are searched for again
-            if self.favorites_button.is_active() {
-                self.obj().update_album_matches();
-            }
-            self.obj().update_random_item();
+            // The grid selects albums, and the Works page among the covers
+            // of a work
+            self.obj().set_selection_mode(false);
+            self.items_changed();
             self.obj().notify_page();
+        }
+
+        // The same albums are shown either way, so the selection is kept,
+        // and its label counts what's taken from them
+        fn set_tracks_only(&self, tracks_only: bool) {
+            if self.tracks_only.replace(tracks_only) == tracks_only {
+                return;
+            }
+            self.items_changed();
+            self.obj().notify_tracks_only();
+        }
+
+        // The page or the toggle changed what's shown (`items()`)
+        fn items_changed(&self) {
+            let obj = self.obj();
+            obj.update_view();
+            // The heart beside the search shows the favorites of what's
+            // shown: the favorite albums, the albums with favorite tracks
+            // with the toggle on, or the favorite works, so the albums it
+            // shows are searched for again
+            if self.favorites_button.is_active() {
+                obj.update_album_matches();
+            }
+            obj.update_random_item();
         }
     }
 
@@ -741,7 +774,7 @@ impl LibraryView {
                 item.set_child(Some(&content));
 
                 // The covers of the albums the search matches only partly
-                // say how many of their tracks it does, on the Tracks page
+                // say how many of their tracks it does
                 let album = item.property_expression("item");
                 album.chain_property::<Album>("selected").bind(
                     &content,
@@ -1052,6 +1085,11 @@ impl LibraryView {
         self.imp().page.get() == LibraryPage::Works
     }
 
+    // What the page shows and takes, with the Tracks toggle
+    pub(crate) fn items(&self) -> LibraryItems {
+        LibraryItems::of(self.page(), self.tracks_only())
+    }
+
     // The Works page is only there while a track is part of a work, and
     // goes back to the albums once none is
     fn set_works_available(&self, available: bool) {
@@ -1065,28 +1103,35 @@ impl LibraryView {
         self.update_view();
     }
 
-    // The works take the place of the grid, without its sorting, and its
-    // title; the albums and the tracks share the grid, whose covers only
-    // say how many of their tracks the search matches on the Tracks page,
-    // as only those are taken there
+    // The works take the place of the grid, without its sorting and its
+    // Tracks toggle, and its title; with the toggle on, the title and the
+    // search name the tracks, as only those the search matches are taken
     fn update_view(&self) {
         let imp = self.imp();
         let works = self.shows_works();
-        let (title, search) = match imp.page.get() {
-            LibraryPage::Albums => (i18n("Albums"), i18n("Search albums")),
-            LibraryPage::Tracks => (i18n("Tracks"), i18n("Search tracks")),
-            LibraryPage::Works => (i18n("Works"), i18n("Search works")),
+        let (title, search) = match self.items() {
+            LibraryItems::Albums => (i18n("Albums"), i18n("Search albums")),
+            LibraryItems::Tracks => (i18n("Tracks"), i18n("Search tracks")),
+            LibraryItems::Works => (i18n("Works"), i18n("Search works")),
         };
         imp.page_title.set_title(&title);
         imp.search_entry.set_placeholder_text(Some(&search));
         imp.search_entry
             .update_property(&[gtk::accessible::Property::Label(&search)]);
         imp.sort_button.set_visible(!works);
+        imp.tracks_button.set_visible(!works);
+        // What a click does, as the heart over an album's tracks says
+        imp.tracks_button
+            .set_tooltip_text(Some(&if self.tracks_only() {
+                i18n("Take Whole Albums")
+            } else {
+                i18n("Take Only the Matching Tracks")
+            }));
         // It names what it shows, for screen readers too
-        let favorites = match imp.page.get() {
-            LibraryPage::Albums => i18n("Show Only Favorite Albums"),
-            LibraryPage::Tracks => i18n("Show Only Favorite Tracks"),
-            LibraryPage::Works => i18n("Show Only Favorite Works"),
+        let favorites = match self.items() {
+            LibraryItems::Albums => i18n("Show Only Favorite Albums"),
+            LibraryItems::Tracks => i18n("Show Only Favorite Tracks"),
+            LibraryItems::Works => i18n("Show Only Favorite Works"),
         };
         imp.favorites_button.set_tooltip_text(Some(&favorites));
         // So does the select button: the covers of a work are its recordings
@@ -1103,8 +1148,8 @@ impl LibraryView {
     }
 
     // The heart beside the search shows only the favorites: the albums on
-    // the Albums page, the albums with favorite tracks on the Tracks page,
-    // and the works on the Works page. It's filled and highlighted while it
+    // the Albums page, or the albums with favorite tracks with the Tracks
+    // toggle on, and the works on the Works page. It's filled and highlighted while it
     // does
     fn setup_favorites_filter(&self) {
         let button = &self.imp().favorites_button;
@@ -1173,11 +1218,11 @@ impl LibraryView {
     // read, see `update_works`
     fn wanted_filter(&self) -> TrackFilter {
         let imp = self.imp();
-        let favorites = if self.heart_filters(LibraryPage::Albums) {
+        let favorites = if self.heart_filters(LibraryItems::Albums) {
             Some(Favorites::Albums(
                 imp.favorite_albums.borrow().iter().cloned().collect(),
             ))
-        } else if self.heart_filters(LibraryPage::Tracks) {
+        } else if self.heart_filters(LibraryItems::Tracks) {
             Some(Favorites::Tracks(self.favorite_tracks()))
         } else {
             None
@@ -1208,11 +1253,10 @@ impl LibraryView {
         }
     }
 
-    // Whether the heart shows only the favorites of `page`, which is the
-    // one shown
-    fn heart_filters(&self, page: LibraryPage) -> bool {
-        let imp = self.imp();
-        imp.favorites_button.is_active() && imp.page.get() == page
+    // Whether the heart shows only the favorite `items`, which are the
+    // ones shown
+    fn heart_filters(&self, items: LibraryItems) -> bool {
+        self.imp().favorites_button.is_active() && self.items() == items
     }
 
     // The paths of the favorite tracks. They're read on the main thread,
@@ -1227,8 +1271,8 @@ impl LibraryView {
     }
 
     // Follows tracks marked as favorites or unmarked, from their menu or
-    // with the player's heart: the albums the heart shows on the Tracks
-    // page change. An album's tracks open in the pane stay as they were,
+    // with the player's heart: the albums the heart shows with the Tracks
+    // toggle on change. An album's tracks open in the pane stay as they were,
     // as they do for a new search
     pub(crate) fn favorite_tracks_changed(&self) {
         self.imp().favorite_tracks.replace(None);
@@ -1237,7 +1281,7 @@ impl LibraryView {
             .is_some_and(|query| query.needs().favorites);
         if searched {
             self.update_search();
-        } else if self.heart_filters(LibraryPage::Tracks) {
+        } else if self.heart_filters(LibraryItems::Tracks) {
             self.update_album_matches();
         }
     }
@@ -1299,11 +1343,12 @@ impl LibraryView {
     }
 
     // The covers of the albums the search matches only partly say how many
-    // of their tracks it does, on the page that takes only those
+    // of their tracks it does, whether the Tracks toggle takes only those
+    // or not, as it's the same albums either way
     fn update_match_counts(&self) {
         let imp = self.imp();
         let matches = imp.search_matches.borrow();
-        let matches = matches.as_ref().filter(|_| imp.page.get().takes_matches());
+        let matches = matches.as_ref();
         let Some(model) = imp.model.borrow().clone() else {
             return;
         };
@@ -1323,14 +1368,14 @@ impl LibraryView {
 
     // What the tracks taken from an album of the grid have to match, to be
     // added, played, dragged or shown, and the names of the composer and the
-    // performer it picks: on the Tracks page, the words of the search and
-    // the composer and the performer picked; on the Albums page, nothing,
-    // as they're taken whole. The covers of the Works page take the tracks
+    // performer it picks: with the Tracks toggle on, the words of the
+    // search and the composer and the performer picked; off, nothing, as
+    // the albums are taken whole. The covers of the Works page take the tracks
     // of their recordings, see `taken_by()`, and the grid isn't there
     pub(crate) fn taken(&self) -> (TrackFilter, PickNames) {
-        match self.imp().page.get() {
-            LibraryPage::Albums | LibraryPage::Works => Default::default(),
-            LibraryPage::Tracks => (self.search_filter(), self.search_pick_names()),
+        match self.items() {
+            LibraryItems::Albums | LibraryItems::Works => Default::default(),
+            LibraryItems::Tracks => (self.search_filter(), self.search_pick_names()),
         }
     }
 
@@ -1340,7 +1385,7 @@ impl LibraryView {
     // page shows, which is still the other page's just after a page switch
     pub(crate) fn random_pool(&self) -> RandomPool {
         RandomPool {
-            page: self.page(),
+            items: self.items(),
             filter: self.wanted_filter(),
             favorites_only: self.imp().favorites_button.is_active(),
         }
@@ -1348,10 +1393,10 @@ impl LibraryView {
 
     // Names what Play a Random … plays on the page shown
     fn update_random_item(&self) {
-        let label = match self.page() {
-            LibraryPage::Albums => i18n("Play a _Random Album"),
-            LibraryPage::Tracks => i18n("Play a _Random Track"),
-            LibraryPage::Works => i18n("Play a _Random Work"),
+        let label = match self.items() {
+            LibraryItems::Albums => i18n("Play a _Random Album"),
+            LibraryItems::Tracks => i18n("Play a _Random Track"),
+            LibraryItems::Works => i18n("Play a _Random Work"),
         };
         let menu = &self.imp().random_menu;
         menu.remove_all();
@@ -1430,7 +1475,7 @@ impl LibraryView {
         }
         self.apply_favorite_albums();
         // The albums the heart shows changed
-        if self.heart_filters(LibraryPage::Albums) {
+        if self.heart_filters(LibraryItems::Albums) {
             self.update_album_matches();
         }
         if !favorite {
@@ -1479,16 +1524,16 @@ impl LibraryView {
         let album = self.album(album_id)?;
 
         // The heart hides the albums that aren't favorites, whose matches
-        // can still be read, as when it's gone to from the Works page. Gone
-        // to from the Tracks page, the matches are still those of its
-        // favorite tracks, so a favorite album without one clears the heart,
-        // though the Albums page would show it
+        // can still be read, as when it's gone to from the Works page. With
+        // the Tracks toggle on, the matches are those of the favorite
+        // tracks, so a favorite album without one clears the heart, though
+        // the albums taken whole would show it
         let hidden = imp
             .search_matches
             .borrow()
             .as_ref()
             .is_some_and(|m| !m.contains_key(album_id))
-            || (self.heart_filters(LibraryPage::Albums) && !self.is_favorite_album(album_id));
+            || (self.heart_filters(LibraryItems::Albums) && !self.is_favorite_album(album_id));
         if hidden {
             self.clear_search();
         }
@@ -1580,8 +1625,8 @@ impl LibraryView {
 
     // Whether the heart beside the search finds nothing on the page, once
     // what it finds is read: there are no favorites, or none that the rest
-    // of the search matches. Just after the Albums and Tracks pages switch,
-    // the matches are still those of the other page's favorites
+    // of the search matches. Just after the page switches or the Tracks
+    // toggle flips, the matches are still those of the other's favorites
     fn finds_no_favorites(&self) -> bool {
         let imp = self.imp();
         if !imp.favorites_button.is_active() {
@@ -1627,29 +1672,29 @@ impl LibraryView {
         let imp = self.imp();
         let searched =
             !imp.search_entry.text().trim().is_empty() || self.has_composer_or_performer();
-        let (title, description) = match (imp.page.get(), searched) {
-            (LibraryPage::Albums, false) => (
+        let (title, description) = match (self.items(), searched) {
+            (LibraryItems::Albums, false) => (
                 i18n("No Favorite Albums"),
                 i18n(
                     "Mark an album as a favorite from its menu, or with the heart over its tracks",
                 ),
             ),
-            (LibraryPage::Tracks, false) => (
+            (LibraryItems::Tracks, false) => (
                 i18n("No Favorite Tracks"),
                 i18n(
                     "Mark a track as a favorite from its menu, or with the heart next to the sleep timer",
                 ),
             ),
-            (LibraryPage::Works, false) => (
+            (LibraryItems::Works, false) => (
                 i18n("No Favorite Works"),
                 i18n("Mark a work or one of its recordings as a favorite from its menu"),
             ),
             (_, true) => (
                 i18n("No Results Found"),
-                match imp.page.get() {
-                    LibraryPage::Albums => i18n("None of the favorite albums match the search"),
-                    LibraryPage::Tracks => i18n("None of the favorite tracks match the search"),
-                    LibraryPage::Works => i18n("None of the favorite works match the search"),
+                match self.items() {
+                    LibraryItems::Albums => i18n("None of the favorite albums match the search"),
+                    LibraryItems::Tracks => i18n("None of the favorite tracks match the search"),
+                    LibraryItems::Works => i18n("None of the favorite works match the search"),
                 },
             ),
         };
@@ -1772,6 +1817,26 @@ fn empty_page_text(folders: &[PathBuf], albums_unavailable: bool) -> (String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_toggle_takes_only_tracks_from_the_albums() {
+        assert_eq!(
+            LibraryItems::of(LibraryPage::Albums, false),
+            LibraryItems::Albums
+        );
+        assert_eq!(
+            LibraryItems::of(LibraryPage::Albums, true),
+            LibraryItems::Tracks
+        );
+        // The works are taken by their recordings either way
+        assert_eq!(
+            LibraryItems::of(LibraryPage::Works, true),
+            LibraryItems::Works
+        );
+        // The Tracks page is gone
+        assert_eq!(LibraryPage::named("tracks"), None);
+        assert_eq!(LibraryPage::named("works"), Some(LibraryPage::Works));
+    }
 
     #[test]
     fn each_zoom_step_changes_the_size_of_the_covers() {

@@ -36,6 +36,10 @@ impl Window {
     pub(super) fn go_to_album(&self, album_id: &str, track: Option<&gio::File>) {
         self.set_page(LibraryPage::Albums.name());
         let library_view = &self.imp().library_view;
+        // The whole album opens, so the Tracks toggle goes off: left on,
+        // the pane would list the whole album while a click on its cover
+        // took only the tracks that match
+        library_view.set_tracks_only(false);
         let Some(track) = track else {
             library_view.open_album(album_id);
             return;
@@ -247,8 +251,9 @@ impl Window {
     // The menu of an album, at a point of its cell. On an album selected in
     // selection mode, its items take all the selected ones, and leave
     // selection mode like the buttons of its bar; on another, only that
-    // one. On the Tracks page, a search takes only the tracks that match it,
-    // as elsewhere, and on the Works page a cover takes its recording's
+    // one. With the Tracks toggle on, a search takes only the tracks that
+    // match it, as elsewhere, and on the Works page a cover takes its
+    // recording's
     fn show_album_menu(&self, cell: &AlbumCell, x: f64, y: f64) {
         let Some(album) = cell.album() else {
             return;

@@ -54,23 +54,23 @@ What Dismas adds
   and combine them: "Karajan Brahms" finds the tracks with both. Case and
   accents don't matter, so "dvorak" finds Dvořák. With the Work Hierarchy
   plugin, a work is also found by its other names on MusicBrainz, such as
-  "Trout" for Schubert's "Forellenquintett". Searching the albums shows
-  the albums with a track that matches, and adding or playing one takes the
-  whole album. The Tracks page shows the same albums, with how many of their
-  tracks match, and adding or playing one there takes only those. The button
-  next to the queue's search plays only the tracks it found, in place of the
-  queue, with an Undo. The Composers button next to the album search lists
-  the composers of your albums, sorted by their last names; pick one to see
-  only their albums, with only the tracks that are theirs. The Performers
-  button next to it does the same for the conductors, the ensembles and the
-  soloists, with what they play or sing, and for the artists, such as
-  bands, by the album artist of their albums, and picking a composer and a
-  performer shows the albums where they meet; once one is picked, the
-  other list has only the names that go with it. The Works page, next to the
-  tracks, lists the works instead, by composer and in the order of their
-  catalogue numbers, with the number of their recordings, and keeps the
-  search and what you picked; open one to see the covers of the albums it's
-  recorded on, with their performers and years, and play, add or select
+  "Trout" for Schubert's "Forellenquintett". Searching the albums shows the
+  albums with a track that matches, and the cover of each says how many of
+  its tracks match. Adding or playing one takes the whole album, or only
+  those tracks while the Tracks toggle beside the Sort button is on
+  (Ctrl+T). The button next to the queue's search plays only the tracks it
+  found, in place of the queue, with an Undo. The Composers button next to
+  the album search lists the composers of your albums, sorted by their last
+  names; pick one to see only their albums, with only the tracks that are
+  theirs. The Performers button next to it does the same for the conductors,
+  the ensembles and the soloists, with what they play or sing, and for the
+  artists, such as bands, by the album artist of their albums, and picking a
+  composer and a performer shows the albums where they meet; once one is
+  picked, the other list has only the names that go with it. The Works page,
+  next to the albums, lists the works instead, by composer and in the order
+  of their catalogue numbers, with the number of their recordings, and keeps
+  the search and what you picked; open one to see the covers of the albums
+  it's recorded on, with their performers and years, and play, add or select
   its recordings. Go to Work, in the menu of a movement, opens its work
   there, with the movement's album pointed out.
 - **Search syntax:** both searches also take fields, comparisons and
@@ -116,15 +116,15 @@ What Dismas adds
   in the music folders, whatever the case of their names.
 - **Smart playlists and favorites:** mark tracks as favorites with the heart
   next to the sleep timer, or with Ctrl+D; the heart beside the album search
-  shows them on the Tracks page, and the favorite albums on the Albums page,
-  and Select All and Play there play them. On the Playlists page, Recently
+  shows the favorite albums, or the albums with favorite tracks while the
+  Tracks toggle is on, and Select All and Play there play them. On the Playlists page, Recently
   Played plays the last 100 tracks you heard, Most Played plays the tracks
   you played the most in the last 6 months, and Not Heard Lately plays the
   tracks you played the most but haven't heard in the last 2 months. Works
   and particular recordings can be favorites too, from their menus: the
   Works page marks them with a heart and can show only them. Play a Random
-  Album, Track or Work, in the menu of the album pages, plays one of the
-  albums, tracks or works the page shows, picked at random, more likely one
+  Album, or Track with the Tracks toggle on, or Work, in the menu of the
+  album pages, plays one of the albums, tracks or works the page shows, picked at random, more likely one
   you haven't heard lately, in place of the queue, with an Undo.
 - **Queue editing and drag and drop:** drag tracks by their handle, or
   move them with Alt+Up and Alt+Down, to reorder them, and select ranges
@@ -372,9 +372,10 @@ Keyboard shortcuts
 | Ctrl+I                           | Track information                              |
 | Ctrl+Shift+L                     | Show or hide the lyrics                        |
 | Ctrl+C                           | Copy the details of the track with the focus, or else of the playing track |
-| Ctrl+1 to Ctrl+4                 | Player / albums / tracks / works               |
+| Ctrl+1 to Ctrl+3                 | Player / albums / works                        |
+| Ctrl+T                           | Take only the matching tracks, or whole albums |
 | Ctrl+P                           | Playlists                                      |
-| Ctrl+F                           | Search where the focus is: the albums, tracks or works, or the playlist |
+| Ctrl+F                           | Search where the focus is: the albums or works, or the playlist |
 | F5                               | Scan the music folders for changes             |
 | Ctrl+O / Ctrl+Shift+O            | Add tracks / a folder to the playlist          |
 | Ctrl+L                           | Remove all the tracks of the playlist          |

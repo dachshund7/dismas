@@ -12,9 +12,9 @@ impl Window {
     }
 
     // The search that Ctrl+F and typing go to: the album search on the
-    // albums, the tracks and the works, unless the focus is in the playlist
-    // pane, and the queue's otherwise, as the player and the playlists have
-    // no search of their own
+    // albums and the works, unless the focus is in the playlist pane, and
+    // the queue's otherwise, as the player and the playlists have no search
+    // of their own
     fn focused_search(&self) -> gtk::SearchEntry {
         let imp = self.imp();
         if !self.focus_in_pane() && LibraryPage::named(&self.page()).is_some() {

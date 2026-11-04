@@ -139,10 +139,11 @@ mod imp {
             // In the order of the buttons of the pages
             obj.set_accels_for_action("win.page::player", &["<primary>1"]);
             obj.set_accels_for_action("win.page::albums", &["<primary>2"]);
-            obj.set_accels_for_action("win.page::tracks", &["<primary>3"]);
-            obj.set_accels_for_action("win.page::works", &["<primary>4"]);
+            obj.set_accels_for_action("win.page::works", &["<primary>3"]);
             // Not a number, so that none is missing while there are no works
             obj.set_accels_for_action("win.page::playlists", &["<primary>p"]);
+            // Ctrl+T takes only the tracks that match from the albums
+            obj.set_accels_for_action("win.tracks-only", &["<primary>t"]);
         }
     }
 

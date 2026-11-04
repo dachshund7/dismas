@@ -4,7 +4,7 @@
 // The Works page: the list of the works the search finds, under the names
 // of their composers, which takes the place of the grid. A work opens, one
 // at a time, to show a cover for each of its recordings, which takes the
-// recording's tracks from its album, as the Tracks page takes those a
+// recording's tracks from its album, as the Tracks toggle takes those a
 // search matches
 
 use super::{work_row::WorkRow, *};

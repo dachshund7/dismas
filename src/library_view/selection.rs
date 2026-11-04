@@ -143,22 +143,22 @@ impl LibraryView {
         let imp = self.imp();
         let selected = imp.selected.borrow();
         let n_selected = selected.len() as u32;
-        // During a search on the Tracks page, and on the Works page, the
-        // number of tracks the buttons take, as they take only some of each
-        // album
-        let matching = match imp.page.get() {
-            LibraryPage::Albums => None,
-            LibraryPage::Tracks => imp.search_matches.borrow().as_ref().map(|matches| {
+        // During a search with the Tracks toggle on, and on the Works page,
+        // the number of tracks the buttons take, as they take only some of
+        // each album
+        let matching = match self.items() {
+            LibraryItems::Albums => None,
+            LibraryItems::Tracks => imp.search_matches.borrow().as_ref().map(|matches| {
                 selected
                     .iter()
                     .filter_map(|key| matches.get(&key.album))
                     .map(|(matching, _)| matching)
                     .sum()
             }),
-            LibraryPage::Works => self.open_work_tracks(&selected),
+            LibraryItems::Works => self.open_work_tracks(&selected),
         };
         drop(selected);
-        let recordings = imp.page.get() == LibraryPage::Works;
+        let recordings = self.shows_works();
         let label = if n_selected == 0 && recordings {
             i18n("No recording selected")
         } else if n_selected == 0 {

@@ -309,7 +309,7 @@ pub(crate) fn has_albums(hidden: &[PathBuf]) -> bool {
     })
 }
 
-// The tracks the filter matches, as the Tracks page takes them from the
+// The tracks the filter matches, as the Tracks toggle takes them from the
 // albums, each with its title, if its tags give one; the tracks in the
 // `hidden` folders are left out
 pub(crate) fn matching_tracks(

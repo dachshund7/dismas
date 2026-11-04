@@ -12,7 +12,7 @@ use super::*;
 use crate::{
     audio::shuffle,
     library::{RecordingCandidate, WorkCandidate},
-    library_view::RandomPool,
+    library_view::{LibraryItems, RandomPool},
     play_stats::{FavoriteRecording, TrackStats},
 };
 
@@ -47,9 +47,9 @@ impl Window {
         self.player().save_listen();
         let view = &self.imp().library_view;
         let pool = view.random_pool();
-        let page = pool.page;
+        let items = pool.items;
         let hidden = view.hidden_folders();
-        let last = last_random(self, page).borrow().clone();
+        let last = last_random(self, items).borrow().clone();
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
@@ -60,11 +60,11 @@ impl Window {
                     .ok()
                     .flatten();
                 let Some(picked) = picked else {
-                    win.add_toast(none_found(page));
+                    win.add_toast(none_found(items));
                     return;
                 };
-                let message = announce(page, &picked.name, picked.part.as_ref());
-                last_random(&win, page).replace(Some(picked.id));
+                let message = announce(items, &picked.name, picked.part.as_ref());
+                last_random(&win, items).replace(Some(picked.id));
                 let files = picked.paths.into_iter().map(gio::File::for_path).collect();
                 win.play_announced_in_place_of_queue(files, Some(message));
             }
@@ -215,47 +215,47 @@ impl Part {
     }
 }
 
-// The id of the one Play a Random … played last on the page
-fn last_random(win: &Window, page: LibraryPage) -> &RefCell<Option<String>> {
+// The id of the one Play a Random … played last for `items`
+fn last_random(win: &Window, items: LibraryItems) -> &RefCell<Option<String>> {
     let imp = win.imp();
-    match page {
-        LibraryPage::Albums => &imp.last_random_album,
-        LibraryPage::Tracks => &imp.last_random_track,
-        LibraryPage::Works => &imp.last_random_work,
+    match items {
+        LibraryItems::Albums => &imp.last_random_album,
+        LibraryItems::Tracks => &imp.last_random_track,
+        LibraryItems::Works => &imp.last_random_work,
     }
 }
 
-fn none_found(page: LibraryPage) -> String {
-    match page {
-        LibraryPage::Albums => i18n("No albums found"),
-        LibraryPage::Tracks => i18n("No tracks found"),
-        LibraryPage::Works => i18n("No works found"),
+fn none_found(items: LibraryItems) -> String {
+    match items {
+        LibraryItems::Albums => i18n("No albums found"),
+        LibraryItems::Tracks => i18n("No tracks found"),
+        LibraryItems::Works => i18n("No works found"),
     }
 }
 
 // The toast that names the one picked, as it plays
-fn announce(page: LibraryPage, name: &str, part: Option<&Part>) -> String {
-    match (page, part) {
+fn announce(items: LibraryItems, name: &str, part: Option<&Part>) -> String {
+    match (items, part) {
         // Translators: `{album}` must be left unmodified; it is
         // expanded to the title of an album
-        (LibraryPage::Albums, _) => i18n_k("Playing “{album}”", &[("album", name)]),
+        (LibraryItems::Albums, _) => i18n_k("Playing “{album}”", &[("album", name)]),
         // Translators: `{track}` must be left unmodified; it is
         // expanded to the title of a track
-        (LibraryPage::Tracks, _) => i18n_k("Playing “{track}”", &[("track", name)]),
+        (LibraryItems::Tracks, _) => i18n_k("Playing “{track}”", &[("track", name)]),
         // Translators: `{work}` must be left unmodified; it is expanded
         // to the name of a musical work, such as “Goldberg Variations”
-        (LibraryPage::Works, None) => i18n_k("Playing “{work}”", &[("work", name)]),
+        (LibraryItems::Works, None) => i18n_k("Playing “{work}”", &[("work", name)]),
         // Translators: `{work}` must be left unmodified; it is expanded
         // to the name of a musical work, such as “Don Giovanni”, of
         // which a single movement plays, such as an aria
-        (LibraryPage::Works, Some(Part::Movement)) => {
+        (LibraryItems::Works, Some(Part::Movement)) => {
             i18n_k("Playing part of “{work}”", &[("work", name)])
         }
         // Translators: `{work}` and `{arrangement}` must be left
         // unmodified; they are expanded to the name of a musical work and
         // to what the arrangement of it that plays is, such as “for
         // piano, Busoni”, or “arrangement”
-        (LibraryPage::Works, Some(Part::Arrangement(arrangement))) => i18n_k(
+        (LibraryItems::Works, Some(Part::Arrangement(arrangement))) => i18n_k(
             "Playing “{work}”, {arrangement}",
             &[("work", name), ("arrangement", arrangement)],
         ),
@@ -269,14 +269,14 @@ fn pick(pool: RandomPool, hidden: &[PathBuf], last: Option<&str>) -> Option<Pick
     let now = play_stats::now();
     let mut rng = rand::rng();
     let RandomPool {
-        page,
+        items,
         filter,
         favorites_only,
     } = pool;
-    match page {
-        LibraryPage::Albums => pick_album(&filter, hidden, last, now, &mut rng),
-        LibraryPage::Tracks => pick_track(&filter, hidden, last, now, &mut rng),
-        LibraryPage::Works => pick_work(&filter, favorites_only, hidden, last, now, &mut rng),
+    match items {
+        LibraryItems::Albums => pick_album(&filter, hidden, last, now, &mut rng),
+        LibraryItems::Tracks => pick_track(&filter, hidden, last, now, &mut rng),
+        LibraryItems::Works => pick_work(&filter, favorites_only, hidden, last, now, &mut rng),
     }
 }
 

@@ -19,7 +19,7 @@ impl Window {
 
     // Marks any track, from its menu or with the heart button; the heart
     // button follows when it's the playing one, and so does the heart beside
-    // the search on the Tracks page
+    // the search with the Tracks toggle on
     pub(super) fn mark_favorite(&self, track: &Track, favorite: bool) {
         let uri = track.uri();
         play_stats::set_favorite(&uri, favorite);

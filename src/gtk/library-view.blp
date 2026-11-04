@@ -43,6 +43,22 @@ template $DismasLibraryView: Widget {
         active: bind template.selection-mode bidirectional;
         tooltip-text: _("Select Albums");
       }
+
+      // Takes only the tracks the search, the lists and the heart match
+      // from an album, rather than the whole album, see
+      // `Window::set_tracks_only()`. Its tooltip says what a click does,
+      // see `LibraryView::update_view()`; screen readers get one name, and
+      // whether it's pressed
+      [end]
+      ToggleButton tracks_button {
+        icon-name: "tracks-symbolic";
+        action-name: "win.tracks-only";
+        tooltip-text: _("Take Only the Matching Tracks");
+
+        accessibility {
+          label: _("Take Only the Matching Tracks");
+        }
+      }
     }
 
     // An open search bar, so that the entry has the same spacing as the
