@@ -228,15 +228,20 @@ mod linux {
     // version adds: a right the child takes and isn't granted would be denied
     const LANDLOCK_ABI: ABI = ABI::V9;
 
+    const GIB: libc::rlim_t = 1 << 30;
     // The most memory the child takes for its data, its heap and its
     // threads' stacks: Discoverer takes tens of MB, and the video decoder of
     // a WebM a few hundred as it decodes the first frames of a 4K video
-    const MAX_DATA: libc::rlim_t = 1 << 30;
+    const MAX_DATA: libc::rlim_t = GIB;
     // The most address space, for the memory that the data limit doesn't
     // count, like shared mappings; the libraries and glibc's arenas, which
     // reserve more than they use, take a few hundred MB more of it than of
-    // memory
-    const MAX_ADDRESS_SPACE: libc::rlim_t = 4 << 30;
+    // memory. A 32-bit system, whose address space is smaller anyway, has no
+    // such limit: its limits are 32 bits wide, so the product saturates to
+    // RLIM_INFINITY there, where `4 << 30` would wrap to 0, and the child
+    // couldn't take any memory
+    const MAX_ADDRESS_SPACE: libc::rlim_t = GIB.saturating_mul(4);
+    const _: () = assert!(MAX_ADDRESS_SPACE > MAX_DATA);
     // The largest stack of a thread
     const MAX_STACK: libc::rlim_t = 8 << 20;
 
