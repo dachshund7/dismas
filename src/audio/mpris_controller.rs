@@ -133,6 +133,13 @@ fn time(duration: Duration) -> Time {
     Time::from_micros(i64::try_from(duration.as_micros()).unwrap_or(i64::MAX))
 }
 
+// Whether a client's position is one to go to. MPRIS asks to do nothing
+// past the end of the track; in a track whose length isn't known, the
+// player goes as far as it can
+fn is_within_track(position: Time, length: Option<Time>) -> bool {
+    !position.is_negative() && length.is_none_or(|length| position <= length)
+}
+
 // The volume a client asks for, within what the volume slider shows. A
 // program can send anything over D-Bus, and NaN gets through `clamp`
 fn requested_volume(volume: Volume) -> Option<f64> {
@@ -510,7 +517,10 @@ fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Pl
         move |player, track_id, position| {
             // The position is for the track the client last saw, which
             // might not be playing anymore
-            if player.metadata().trackid().as_ref() != Some(track_id) || position.is_negative() {
+            let metadata = player.metadata();
+            if metadata.trackid().as_ref() != Some(track_id)
+                || !is_within_track(position, metadata.length())
+            {
                 return;
             }
 
@@ -547,6 +557,18 @@ mod tests {
     fn times_keep_the_parts_of_a_second() {
         let time = time(Duration::from_millis(1500));
         assert_eq!(time, Time::from_micros(1_500_000));
+    }
+
+    #[test]
+    fn positions_past_the_end_of_a_track_are_left_alone() {
+        let seconds = |seconds| time(Duration::from_secs(seconds));
+        let length = Some(seconds(40));
+        assert!(is_within_track(seconds(30), length));
+        assert!(is_within_track(seconds(40), length));
+        assert!(!is_within_track(seconds(41), length));
+        assert!(!is_within_track(Time::from_micros(-1), length));
+        assert!(is_within_track(seconds(9000), None));
+        assert!(!is_within_track(Time::from_micros(-1), None));
     }
 
     #[test]
