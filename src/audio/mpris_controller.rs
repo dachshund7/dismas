@@ -30,6 +30,7 @@ struct Shared {
     loop_status: Cell<LoopStatus>,
     has_track: Cell<bool>,
     can_go_next: Cell<bool>,
+    can_go_previous: Cell<bool>,
     position: Cell<Time>,
     volume: Cell<Volume>,
 }
@@ -67,8 +68,18 @@ impl Shared {
         if let Err(err) = player.set_can_play(can_play).await {
             error!("Unable to set MPRIS play capability: {err:?}");
         }
+        if let Err(err) = player.set_can_pause(self.has_track.get()).await {
+            error!("Unable to set MPRIS pause capability: {err:?}");
+        }
+        if let Err(err) = player.set_can_seek(self.has_track.get()).await {
+            error!("Unable to set MPRIS seek capability: {err:?}");
+        }
         if let Err(err) = player.set_can_go_next(self.can_go_next.get()).await {
             error!("Unable to set MPRIS next capability: {err:?}");
+        }
+        let can_go_previous = self.can_go_previous.get();
+        if let Err(err) = player.set_can_go_previous(can_go_previous).await {
+            error!("Unable to set MPRIS previous capability: {err:?}");
         }
     }
 
@@ -143,10 +154,10 @@ impl MprisController {
             .desktop_entry(APPLICATION_ID)
             .can_raise(true)
             .can_play(false)
-            .can_pause(true)
-            .can_seek(true)
+            .can_pause(false)
+            .can_seek(false)
             .can_go_next(false)
-            .can_go_previous(true)
+            .can_go_previous(false)
             .can_set_fullscreen(false);
 
         let shared = Rc::new(Shared {
@@ -156,6 +167,7 @@ impl MprisController {
             loop_status: Cell::new(LoopStatus::None),
             has_track: Cell::new(false),
             can_go_next: Cell::new(false),
+            can_go_previous: Cell::new(false),
             position: Cell::new(Time::ZERO),
             volume: Cell::new(1.0),
         });
@@ -339,6 +351,19 @@ impl Controller for MprisController {
         ));
     }
 
+    fn set_can_go_previous(&self, can_go_previous: bool) {
+        // Asked at every update of the position
+        if self.shared.can_go_previous.replace(can_go_previous) == can_go_previous {
+            return;
+        }
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_capabilities().await }
+        ));
+    }
+
     fn set_repeat_mode(&self, repeat: RepeatMode) {
         let status = match repeat {
             RepeatMode::Consecutive => LoopStatus::None,
@@ -408,8 +433,10 @@ fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Pl
     mpris.connect_pause(clone!(
         #[strong]
         sender,
-        move |_| {
-            if let Err(e) = sender.try_send(PlaybackAction::Pause) {
+        move |player| {
+            if player.can_pause()
+                && let Err(e) = sender.try_send(PlaybackAction::Pause)
+            {
                 error!("Unable to send Pause: {e}");
             }
         }
@@ -497,7 +524,11 @@ fn setup_signals(sender: Sender<PlaybackAction>, shared: &Rc<Shared>, mpris: &Pl
         }
     ));
 
-    mpris.connect_seek(move |_, offset| {
+    mpris.connect_seek(move |player, offset| {
+        if !player.can_seek() {
+            return;
+        }
+
         let offset = offset.as_secs();
         if let Err(e) = sender.try_send(PlaybackAction::Seek(offset)) {
             error!("Unable to send Seek({offset}): {e}");

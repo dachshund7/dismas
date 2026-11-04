@@ -94,6 +94,8 @@ All notable changes to this project will be documented in this file.
   controls could go on showing the mode before
 - After the queue was cleared, the desktop's media controls went on
   showing the last track, with Play on
+- The desktop's media controls offered Pause and seeking with no track,
+  and Previous on the first track, where it did nothing
 
 ### Removed
 

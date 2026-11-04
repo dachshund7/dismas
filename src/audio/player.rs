@@ -30,6 +30,10 @@ use crate::{
 // One step of the volume, by the slider, the keyboard or the tray
 pub(crate) const VOLUME_STEP: f64 = 0.05;
 
+// From this many seconds into a track, Previous starts it over rather
+// than going to the track before
+const PREVIOUS_RESTARTS_AFTER: u64 = 10;
+
 // How long a new volume waits to be saved, so that dragging the slider,
 // which changes it many times, saves it a few times
 const VOLUME_SAVE_DELAY: Duration = Duration::from_millis(500);
@@ -383,9 +387,21 @@ impl AudioPlayer {
             c.set_can_go_next(next_track.is_some());
         }
 
+        self.update_can_go_previous();
+
         let next_track = next_track.filter(|_| !self.stops_at_track_end());
         self.backend
             .set_next(next_track.map(|t| self.source_of(&t)));
+    }
+
+    // Tells the controllers whether Previous would do anything, which goes
+    // by the position too, as it can start the first track over
+    fn update_can_go_previous(&self) {
+        let can_go_previous = self.state.track().is_some()
+            && (self.state.position() >= PREVIOUS_RESTARTS_AFTER || !self.queue.is_first_track());
+        for c in &self.controllers {
+            c.set_can_go_previous(can_go_previous);
+        }
     }
 
     // Whether the music stops at the end of the current track, for the
@@ -698,7 +714,7 @@ impl AudioPlayer {
             // We only skip to the previous track if we are
             // within a seek backward step, otherwise we just
             // restart the track
-            if self.state.position() >= 10 {
+            if self.state.position() >= PREVIOUS_RESTARTS_AFTER {
                 self.show_start(self.backend.seek_start());
                 return;
             }
@@ -880,6 +896,7 @@ impl AudioPlayer {
         for c in &self.controllers {
             c.clear_track();
         }
+        self.update_can_go_previous();
     }
 
     // Logs the listen to the current track, if it was heard long enough,
@@ -948,6 +965,7 @@ impl AudioPlayer {
         for c in &self.controllers {
             c.set_position(seconds, notify);
         }
+        self.update_can_go_previous();
     }
 
     // Shows the volume the backend reports, and saves it once it stops
