@@ -809,6 +809,8 @@ impl TrackCredits {
         listed: &[ListedPerformer],
         artist: Option<&str>,
     ) -> Vec<ListedPerformer> {
+        // `library::query_performers()` counts a track of a work without
+        // an artist against its composers, as it's a movement
         if self.is_movement() {
             return Vec::new();
         }

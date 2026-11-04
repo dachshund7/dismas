@@ -320,10 +320,11 @@ pub(crate) fn performers(
 // releases give the composer as the album artist, without crediting them
 // as the composer, e.g. "Jan Dismas Zelenka" or "Ludwig van Beethoven,
 // Ensemble Zefiro", a name in which is one. Only an album whose tracks
-// credit conductors or performers, or are works, counts against them, so
-// that a songwriter stays when all their library has is the albums of
+// credit conductors or performers, or are movements, counts against them,
+// so that a songwriter stays when all their library has is the albums of
 // their band, tagged with the artist and the composers, as iTunes tags
-// them, e.g. "Paul McCartney" with those of The Beatles
+// them, or with works too, as Picard does, e.g. "Paul McCartney" with
+// those of The Beatles
 pub(super) fn query_performers(
     conn: &Connection,
     hidden: &[PathBuf],
@@ -370,6 +371,7 @@ pub(super) fn query_performers(
         |album, counts_for, entries, [composers, work_composers, work]| {
             let entries = entries.unwrap_or_default();
             let mut credited = false;
+            let mut by_artist = false;
             for line in entries.lines() {
                 let mut fields = line.split('\t');
                 let (Some(kind), Some(key), Some(name), Some(sort), Some(role)) = (
@@ -382,6 +384,7 @@ pub(super) fn query_performers(
                     continue;
                 };
                 credited |= kind != PerformerKind::Artist;
+                by_artist |= kind == PerformerKind::Artist;
                 let performer = entry_of(&mut seen, key);
                 if let Some(counts_for) = counts_for {
                     insert_str(&mut performer.counted, counts_for);
@@ -403,7 +406,14 @@ pub(super) fn query_performers(
                     count(&mut performer.roles, role);
                 }
             }
-            if !credited && work.is_none() {
+            // Only a track that credits conductors or performers counts
+            // against its composers, or a track of a work that has no artist
+            // line, as a movement, which is never given its artist
+            // (`TrackCredits::listed_artists()`), or a track whose album
+            // artist is "Composer; Performers". A song, which Picard gives a
+            // work too, is by its band, which isn't evidence that others
+            // perform the music of the songwriters in it
+            if !credited && (work.is_none() || by_artist) {
                 return;
             }
             // A composer performs a track that a performer whose name has

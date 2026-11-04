@@ -3007,7 +3007,8 @@ fn artists_are_listed_when_nothing_else_names_them() {
             None,
         ),
         // A songwriter whose band's albums, tagged with only their artist
-        // and composers, as iTunes tags them, outnumber their own
+        // and composers, outnumber their own, whether they're tagged as
+        // iTunes tags them, or as Picard does, with a work for each song
         (
             "/m/PM/01.opus",
             "pm",
@@ -3027,7 +3028,38 @@ fn artists_are_listed_when_nothing_else_names_them() {
             "b2",
             entries(&[&beatles]),
             composer("Paul McCartney"),
+            Some("w7"),
+        ),
+        (
+            "/m/B3/01.opus",
+            "b3",
+            entries(&[&beatles]),
+            composer("Paul McCartney"),
+            Some("w8"),
+        ),
+        // A composer as the album artist, whose movements others record
+        // on albums whose tags credit nobody, which are never given their
+        // artist
+        (
+            "/m/AV/01.opus",
+            "av",
+            entries(&[&artist("Antonio Vivaldi", "Antonio Vivaldi")]),
             None,
+            None,
+        ),
+        (
+            "/m/M1/01.opus",
+            "m1",
+            None,
+            composer("Antonio Vivaldi"),
+            Some("w9"),
+        ),
+        (
+            "/m/M2/01.opus",
+            "m2",
+            None,
+            composer("Antonio Vivaldi"),
+            Some("w9"),
         ),
     ];
     for (path, album, performers, composers, work_key) in rows {
@@ -3055,7 +3087,7 @@ fn artists_are_listed_when_nothing_else_names_them() {
             (PerformerKind::Soloist, "Davies, Ray", 1),
             (PerformerKind::Soloist, "Dylan, Bob", 2),
             (PerformerKind::Soloist, "Rostropovich, Mstislav", 3),
-            (PerformerKind::Artist, "Beatles, The", 2),
+            (PerformerKind::Artist, "Beatles, The", 3),
             (PerformerKind::Artist, "Bob Dylan & The Band", 1),
             (PerformerKind::Artist, "Jimi Hendrix Experience", 1),
             (PerformerKind::Artist, "Johann Joachim Quantz", 2),
@@ -3079,9 +3111,15 @@ fn artists_are_listed_when_nothing_else_names_them() {
     albums.sort();
     assert_eq!(albums, ["k1", "k2"]);
 
-    // On the Works page, only those of works
+    // On the Works page, only those of works: the artists of the songs
+    // that Picard gives works, by the number of the works
     let works = super::query_performers(&conn, &[], &all, super::Counted::Works).unwrap();
-    assert!(works.iter().all(|p| p.kind != PerformerKind::Artist));
+    let artists: Vec<(&str, u32)> = works
+        .iter()
+        .filter(|p| p.kind == PerformerKind::Artist)
+        .map(|p| (p.sort.as_str(), p.count))
+        .collect();
+    assert_eq!(artists, [("Beatles, The", 2)]);
 
     // A library with only artists has performers
     let conn = test_db();
