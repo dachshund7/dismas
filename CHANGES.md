@@ -44,8 +44,10 @@ All notable changes to this project will be documented in this file.
   WMA files, are read in a sandbox: the process that reads each one can
   only read the system's files and that file, and can't write files,
   reach the network or start a program, so a crafted file that took over
-  a GStreamer plugin can't do anything else either. It's made with
-  Landlock and seccomp, which the Flatpak can use too
+  a GStreamer plugin can't do anything else either. It only gets the
+  settings GStreamer needs from Dismas's environment, not tokens or the
+  like. It's made with Landlock and seccomp, which the Flatpak can use
+  too
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
   later
 

@@ -53,6 +53,38 @@ use std::path::Path;
 // file unread; it writes why on its stdout, in place of the report
 pub(crate) const EXIT_NO_SANDBOX: u8 = 3;
 
+// The variables of the parent's environment that the child gets: the home
+// folder, and the cache and data folders, where GStreamer keeps its registry
+// and the user's plugins; the language and time zone; GStreamer's and GLib's
+// settings and folders; the library path, which the Flatpak sets; and the
+// log's settings. The others are left out, as an exploit could read them
+// and pass them on in its report: tokens exported in the shell that started
+// Dismas, the address of the session bus
+const PASSED_ON: &[&str] = &[
+    "HOME",
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "RUST_LOG",
+    "RUST_BACKTRACE",
+];
+const PASSED_ON_PREFIXES: &[&str] = &["LC_", "XDG_", "GST_", "G_", "LD_", "ORC_"];
+
+fn is_passed_on(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        PASSED_ON.contains(&name)
+            || PASSED_ON_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+    })
+}
+
+// The environment the child is started with
+pub(crate) fn child_environment() -> impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>
+{
+    std::env::vars_os().filter(|(name, _)| is_passed_on(name))
+}
+
 // How confined the child is
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
@@ -581,7 +613,37 @@ mod linux {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+
     use super::*;
+
+    #[test]
+    fn the_child_gets_only_the_variables_it_needs() {
+        for name in [
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "XDG_CACHE_HOME",
+            "GST_PLUGIN_SYSTEM_PATH",
+            "G_MESSAGES_DEBUG",
+            "LD_LIBRARY_PATH",
+            "RUST_LOG",
+        ] {
+            assert!(is_passed_on(OsStr::new(name)), "{name}");
+        }
+        for name in [
+            "DBUS_SESSION_BUS_ADDRESS",
+            "GITHUB_TOKEN",
+            "SSH_AUTH_SOCK",
+            "DISPLAY",
+            "WAYLAND_DISPLAY",
+            "PATH",
+            "PULSE_PROP_media.role",
+            "GLOBAL",
+        ] {
+            assert!(!is_passed_on(OsStr::new(name)), "{name}");
+        }
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

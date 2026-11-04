@@ -149,21 +149,16 @@ fn run_child_for(helper: &Path, path: &Path, covers: bool, time: Duration) -> Op
             warn!("Files that only GStreamer can read are read without a sandbox on this system");
         });
     }
-    let spawned = Command::new(helper)
-        .arg(CHILD_ARG)
-        .arg(if covers { "covers" } else { "no-covers" })
-        .arg(path)
-        // Dismas brought GStreamer's registry up to date as it started, and
-        // the child, which can't write it, reads it as it is: it neither
-        // looks at every plugin again nor starts GStreamer's plugin scanner,
-        // which it couldn't. Without a registry, GStreamer reads the plugins
-        // in the child, which is slower but works
-        .env("GST_REGISTRY_UPDATE", "no")
-        .env("GST_REGISTRY_FORK", "no")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn();
+    let spawned = with_reader_environment(
+        Command::new(helper)
+            .arg(CHILD_ARG)
+            .arg(if covers { "covers" } else { "no-covers" })
+            .arg(path),
+    )
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::inherit())
+    .spawn();
     let mut child = match spawned {
         Ok(child) => child,
         Err(e) => {
@@ -217,6 +212,21 @@ fn run_child_for(helper: &Path, path: &Path, covers: bool, time: Duration) -> Op
             None
         }
     }
+}
+
+// The environment a reader starts with, which `the_sandbox_holds` gives its
+// probe too: only the variables GStreamer and GLib need, not those an
+// exploit could pass on, like tokens. Dismas brought GStreamer's registry
+// up to date as it started, and the child, which can't write it, reads it
+// as it is: it neither looks at every plugin again nor starts GStreamer's
+// plugin scanner, which it couldn't. Without a registry, GStreamer reads
+// the plugins in the child, which is slower but works
+fn with_reader_environment(command: &mut Command) -> &mut Command {
+    command
+        .env_clear()
+        .envs(sandbox::child_environment())
+        .env("GST_REGISTRY_UPDATE", "no")
+        .env("GST_REGISTRY_FORK", "no")
 }
 
 // Ends a child that runs for longer than it's given, whatever it does.
@@ -865,17 +875,15 @@ mod tests {
         }
         std::fs::write(dir.join("other.txt"), "Enigma").unwrap();
 
-        let output = Command::new(std::env::current_exe().unwrap())
-            .args([
+        let output =
+            with_reader_environment(Command::new(std::env::current_exe().unwrap()).args([
                 "audio::track::discovered::tests::probe",
                 "--exact",
                 "--ignored",
                 "--nocapture",
                 "--test-threads=1",
-            ])
+            ]))
             .env(PROBE_FILE, &path)
-            .env("GST_REGISTRY_UPDATE", "no")
-            .env("GST_REGISTRY_FORK", "no")
             .stdin(Stdio::null())
             .output()
             .unwrap();
