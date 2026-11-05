@@ -24,10 +24,13 @@ QA Plan
   - Music folders in Preferences: add one, remove one and undo, and
     unplug or rename one, whose albums are hidden until it's back
   - Add, change and remove a file in the music folders while Dismas runs
+  - Files that only GStreamer reads, such as Ogg FLAC, Matroska and WMA, in
+    the Flatpak and the tarball, as they're read in a sandbox
 3. Player
   - Play/pause, with Space too
   - Previous/next
   - Scrubbing
+  - Volume; mute and unmute, also after quitting while muted
   - Sleep timer, stopping right away and finishing the track; Stop After
     This Track and This Work
   - Lyrics, plain and synchronized; click a line to play from it
@@ -45,12 +48,15 @@ QA Plan
 5. Playlists
   - Save the queue as a playlist; create, rename, delete
   - Switch between playlists
+  - Click a playlist or a smart playlist: its tracks show in the pane while
+    what plays goes on; Play there, and Play Next and Add
   - Import and export M3U
   - Restore the queue at startup, resuming paused at the same track and
     position
   - Smart playlists; Play a Random Album, Track or Work; favorites
 6. Desktop
-  - Media keys and the media controls of the desktop (MPRIS)
+  - Media keys and the media controls of the desktop (MPRIS), with the
+    volume, Shuffle and seeking
   - Playing in the background, and the tray icon
   - The menus of tracks and albums with the Menu key, and the names that
     a screen reader reads
