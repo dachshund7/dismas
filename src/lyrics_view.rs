@@ -37,6 +37,16 @@ const BACK_TOLERANCE: Duration = Duration::from_millis(300);
 // the music again
 const FOLLOW_PAUSE: Duration = Duration::from_secs(4);
 
+// Why the lines aren't following the music for now
+#[derive(Debug)]
+pub(crate) enum FollowPause {
+    // A finger is down on the lines or the scrollbar, or a button on the
+    // scrollbar, for as long as it takes
+    Held,
+    // Until this timer ends, `FOLLOW_PAUSE` after the user last scrolled
+    Timed(glib::SourceId),
+}
+
 // The sizes of the text, in percent of the normal size, at each step of the
 // zoom from the smallest (`LYRICS_ZOOM`, with 0 for the normal size); each but the normal size has a style class
 // `zoom-{percent}` in style.css
@@ -88,8 +98,8 @@ mod imp {
         // When the line sung changes next, while the track plays, between
         // the positions the player reports
         pub(crate) next_change: RefCell<Option<glib::SourceId>>,
-        // While the lines stay where the user scrolled them
-        pub(crate) follow_pause: RefCell<Option<glib::SourceId>>,
+        // While the lines stay where they are
+        pub(crate) follow_pause: RefCell<Option<FollowPause>>,
         pub(crate) glide: RefCell<Option<adw::TimedAnimation>>,
         // Where the text's zoom is kept, which is kept, as its signals stop
         // once it's dropped
@@ -720,29 +730,64 @@ impl LyricsView {
     }
 
     // The lines stay where the user scrolls them for a while, see
-    // `FOLLOW_PAUSE`, and then glide back to the line sung
+    // `FOLLOW_PAUSE`, and then glide back to the line sung. While they're
+    // held that waits for the release, see `hold_following()`
     fn pause_following(&self) {
-        let imp = self.imp();
         self.stop_glide();
-        if let Some(source) = imp.follow_pause.take() {
-            source.remove();
+        if !matches!(*self.imp().follow_pause.borrow(), Some(FollowPause::Held)) {
+            self.start_follow_timer();
         }
+    }
+
+    fn start_follow_timer(&self) {
         let source = glib::timeout_add_local_once(
             FOLLOW_PAUSE,
             clone!(
                 #[weak(rename_to = view)]
                 self,
                 move || {
+                    // This timer has ended, so it's not there to be removed
                     view.imp().follow_pause.take();
+                    view.resume_following();
                     view.center_current(true);
                 }
             ),
         );
-        imp.follow_pause.replace(Some(source));
+        self.set_follow_pause(Some(FollowPause::Timed(source)));
     }
 
+    // The same, with no time limit, while a finger or a button is down: the
+    // glide back would pull the lines from under it. Its release starts the
+    // timer, see `hold_during_press()`
+    fn hold_following(&self) {
+        self.stop_glide();
+        self.set_follow_pause(Some(FollowPause::Held));
+    }
+
+    // The `following` class hides the scrollbar, as GTK shows it whenever
+    // the lines move, which they do by themselves with the music
     fn resume_following(&self) {
-        if let Some(source) = self.imp().follow_pause.take() {
+        self.set_follow_pause(None);
+        self.imp()
+            .synced_scrolled
+            .vscrollbar()
+            .add_css_class("following");
+    }
+
+    // The scrollbar shows once the lines have really moved in a pause, not
+    // at its start: a tap on a line and an arrow key that stays on the page
+    // pause them too, and would flash it over the lines
+    fn lines_moved(&self) {
+        let imp = self.imp();
+        if imp.follow_pause.borrow().is_some() {
+            imp.synced_scrolled
+                .vscrollbar()
+                .remove_css_class("following");
+        }
+    }
+
+    fn set_follow_pause(&self, pause: Option<FollowPause>) {
+        if let Some(FollowPause::Timed(source)) = self.imp().follow_pause.replace(pause) {
             source.remove();
         }
     }
@@ -804,6 +849,16 @@ impl LyricsView {
             }
         ));
 
+        // The lines start out following the music
+        self.resume_following();
+        imp.synced_scrolled
+            .vadjustment()
+            .connect_value_changed(clone!(
+                #[weak(rename_to = view)]
+                self,
+                move |_| view.lines_moved()
+            ));
+
         // What the user does to scroll the lines, rather than their value
         // changing, which it also does with new lines and a new size: the
         // wheel and the touchpad, whose scrolling goes on after the fingers
@@ -829,53 +884,26 @@ impl LyricsView {
         ));
         imp.synced_scrolled.add_controller(scroll);
 
-        // A finger dragging the lines, which the list goes on scrolling
-        // after it lets go, and which never claims the touch, as a tap
-        // activates a line
-        let drag = gtk::GestureDrag::new();
-        drag.set_touch_only(true);
-        drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+        // A finger on the lines or on the scrollbar, and a button on the
+        // scrollbar
+        self.hold_during_press(
+            &*imp.synced_scrolled,
+            gdk::EventType::TouchBegin,
+            &[gdk::EventType::TouchEnd, gdk::EventType::TouchCancel],
+        );
+        self.hold_during_press(
+            &imp.synced_scrolled.vscrollbar(),
+            gdk::EventType::ButtonPress,
+            &[gdk::EventType::ButtonRelease, gdk::EventType::GrabBroken],
+        );
+
+        // Page Up, Page Down, Home and End, which the window gives the
+        // list, and the arrows, which move the focus from line to line
         let pause = clone!(
             #[weak(rename_to = view)]
             self,
             move || view.pause_following()
         );
-        drag.connect_drag_begin(clone!(
-            #[strong]
-            pause,
-            move |_, _, _| pause()
-        ));
-        drag.connect_drag_end(clone!(
-            #[strong]
-            pause,
-            move |_, _, _| pause()
-        ));
-        drag.connect_cancel(clone!(
-            #[strong]
-            pause,
-            move |_, _| pause()
-        ));
-        imp.synced_scrolled.add_controller(drag);
-
-        // The scrollbar
-        let scrollbar_drag = gtk::GestureDrag::new();
-        scrollbar_drag.set_propagation_phase(gtk::PropagationPhase::Capture);
-        scrollbar_drag.connect_drag_begin(clone!(
-            #[strong]
-            pause,
-            move |_, _, _| pause()
-        ));
-        scrollbar_drag.connect_drag_end(clone!(
-            #[strong]
-            pause,
-            move |_, _, _| pause()
-        ));
-        imp.synced_scrolled
-            .vscrollbar()
-            .add_controller(scrollbar_drag);
-
-        // Page Up, Page Down, Home and End, which the window gives the
-        // list, and the arrows, which move the focus from line to line
         imp.synced_scrolled.connect_scroll_child(clone!(
             #[strong]
             pause,
@@ -896,6 +924,35 @@ impl LyricsView {
             move |_| view.focus_current_line()
         ));
         imp.lines_box.add_controller(focus);
+    }
+
+    // The lines are held from a press until its release. These are raw
+    // events as a gesture wouldn't see that far: GTK cancels it as soon as
+    // the list or the scrollbar claims the press, which they do to scroll
+    fn hold_during_press(
+        &self,
+        widget: &impl IsA<gtk::Widget>,
+        press: gdk::EventType,
+        releases: &'static [gdk::EventType],
+    ) {
+        let controller = gtk::EventControllerLegacy::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.connect_event(clone!(
+            #[weak(rename_to = view)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, event| {
+                let event_type = event.event_type();
+                if event_type == press {
+                    view.hold_following();
+                } else if releases.contains(&event_type) {
+                    view.start_follow_timer();
+                }
+                glib::Propagation::Proceed
+            }
+        ));
+        widget.add_controller(controller);
     }
 
     // Only for the keys, which show the focus: a click on a line keeps the

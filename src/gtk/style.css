@@ -397,6 +397,21 @@ list.synced-lyrics > row.current > label {
   }
 }
 
+/* While the lines follow the music, the scrollbar that GTK fades in as they
+ * move would come and go at the side of the list. The pointer still finds
+ * it, as a widget without opacity keeps its events, and it's back once the
+ * user has scrolled, see LyricsView::resume_following(). Only an overlay
+ * scrollbar does that: one that's always there has its own room, and the user
+ * chose it. GTK fades the overlay one through the widget's opacity property,
+ * not the CSS one, so the class needs a transition of its own */
+lyricsview scrollbar.overlay-indicator {
+  transition: opacity 200ms ease;
+}
+
+lyricsview scrollbar.overlay-indicator.following:not(:hover) {
+  opacity: 0;
+}
+
 /* A track dropped on the header of a work at the top of the queue goes
  * above it */
 listview.track-list > header box.drop-above {

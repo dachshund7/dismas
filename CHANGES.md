@@ -71,6 +71,9 @@ All notable changes to this project will be documented in this file.
 - The line being sung in synchronized lyrics stands out with any cover or
   accent color, as plain text on a tint of the accent color, where the
   accent color on its own was about as light as the dimmed lines
+- The overlay scrollbar of synchronized lyrics no longer appears each time
+  the lines scroll with the music, only when they're scrolled by hand or the
+  pointer is on it
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
   later
 
