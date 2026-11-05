@@ -112,6 +112,10 @@ All notable changes to this project will be documented in this file.
   keys jumped back a moment as well
 - When the tags of the playing track were read again, the desktop's media
   controls were told that another track had started
+- A music file with a NUL character in its artist, composer, genre or
+  album artist tag, which only a crafted file has, cut off the desktop's
+  media controls when it became the current track, until Dismas was
+  started again
 
 ### Removed
 

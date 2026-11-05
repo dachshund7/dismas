@@ -3,6 +3,7 @@
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
+    collections::HashMap,
     rc::Rc,
     time::Duration,
 };
@@ -12,12 +13,16 @@ use futures::FutureExt;
 use glib::clone;
 use gtk::{gio, glib, prelude::*};
 use log::error;
-use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId, Volume};
+use mpris_server::{
+    LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId, Volume,
+    zbus::zvariant::{Dict, Value},
+};
 
 use crate::{
     application::ApplicationAction,
     audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Track},
     config::APPLICATION_ID,
+    utils,
 };
 
 // What the desktop is told about the player. The server starts after the
@@ -45,7 +50,7 @@ impl Shared {
         let Some(player) = self.player.get() else {
             return;
         };
-        let metadata = self.metadata.borrow().clone();
+        let metadata = without_nuls(self.metadata.borrow().clone());
         if let Err(err) = player.set_metadata(metadata).await {
             error!("Unable to set MPRIS metadata: {err:?}");
         }
@@ -158,6 +163,40 @@ fn publish_at_once(publish: impl Future<Output = ()> + 'static) {
     let mut publish = Box::pin(publish);
     if publish.as_mut().now_or_never().is_none() {
         glib::spawn_future_local(publish);
+    }
+}
+
+// The metadata with no NUL in its texts, see `utils::without_nul()`. All of
+// the metadata passes through here on its way to the bus, so a new field is
+// covered without anyone having to remember it. The texts come from tags,
+// CUE sheets and the JSON of the Work Hierarchy tag, so stripping them where
+// they're read would take several places instead of this one
+fn without_nuls(metadata: Metadata) -> Metadata {
+    let values = Value::from(metadata)
+        .downcast::<Dict>()
+        .and_then(HashMap::<String, Value>::try_from)
+        .unwrap_or_default();
+    let mut clean = Metadata::new();
+    for (key, value) in values {
+        clean.set_value(&key, value_without_nuls(value));
+    }
+    clean
+}
+
+// A value that's neither a text nor a list of texts is left as it is. Every
+// list in the metadata is one of texts; another one would be dropped rather
+// than sent unchecked
+fn value_without_nuls(value: Value<'static>) -> Option<Value<'static>> {
+    match value {
+        Value::Str(text) if text.contains('\0') => {
+            Some(Value::from(utils::without_nul(text.as_str())))
+        }
+        Value::Array(texts) => {
+            let texts = Vec::<String>::try_from(texts).ok()?;
+            let texts: Vec<String> = texts.into_iter().map(utils::without_nul).collect();
+            Some(Value::from(texts))
+        }
+        value => Some(value),
     }
 }
 
@@ -293,7 +332,7 @@ impl MprisController {
         let credits = track.credit_details();
         // The start of a recording made over several months
         let date = credits.year_date().and_then(|d| d.split('/').next());
-        metadata.set_content_created(date.map(ToString::to_string));
+        metadata.set_content_created(date);
         let names = |names: Vec<String>| Some(names).filter(|n| !n.is_empty());
         metadata.set_composer(names(credits.composers));
         metadata.set_lyricist(names(credits.lyricists));
@@ -701,6 +740,40 @@ mod tests {
         assert!(!is_within_track(Time::from_micros(-1), length));
         assert!(is_within_track(seconds(9000), None));
         assert!(!is_within_track(Time::from_micros(-1), None));
+    }
+
+    // Whichever field gets a text, as a text or in a list of them
+    #[test]
+    fn no_nul_reaches_the_bus() {
+        let mut metadata = Metadata::new();
+        metadata.set_title(Some("Die\0 Forelle"));
+        metadata.set_lyrics(Some("In einem Bächlein\0"));
+        metadata.set_content_created(Some("1817\0"));
+        metadata.set_artist(Some(["Fischer\0-Dieskau", "Moore"]));
+        metadata.set_composer(Some(["\0Schubert"]));
+        metadata.set_genre(Some(["Lied\0", "Klassik\0"]));
+
+        let clean = without_nuls(metadata);
+        assert_eq!(clean.title(), Some("Die Forelle"));
+        assert_eq!(clean.lyrics(), Some("In einem Bächlein"));
+        assert_eq!(clean.content_created().as_deref(), Some("1817"));
+        let artists = ["Fischer-Dieskau".to_string(), "Moore".to_string()];
+        assert_eq!(clean.artist().as_deref(), Some(&artists[..]));
+        assert_eq!(clean.composer(), Some(vec!["Schubert".to_string()]));
+        let genres = ["Lied".to_string(), "Klassik".to_string()];
+        assert_eq!(clean.genre().as_deref(), Some(&genres[..]));
+    }
+
+    #[test]
+    fn metadata_without_nuls_stays_the_same() {
+        let mut metadata = Metadata::new();
+        metadata.set_trackid(TrackId::try_from("/io/github/dachshund7/Dismas/Track/7").ok());
+        metadata.set_title(Some("Die Forelle"));
+        metadata.set_artist(Some(["Fischer-Dieskau", "Moore"]));
+        metadata.set_length(Some(Time::from_secs(90)));
+        metadata.set_track_number(Some(4));
+        metadata.set_user_rating(Some(1.0));
+        assert_eq!(without_nuls(metadata.clone()), metadata);
     }
 
     #[test]

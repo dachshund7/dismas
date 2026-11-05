@@ -321,11 +321,11 @@ impl TrayController {
 
     fn set_track_text(&self, track: Option<&Track>) {
         self.shared.snapshot.borrow_mut().track = track.map(|track| {
-            format!(
+            utils::without_nul(format!(
                 "{} - {}",
                 track.credited_artists().join(", "),
                 track.title()
-            )
+            ))
         });
         self.shared.publish();
     }

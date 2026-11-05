@@ -162,8 +162,27 @@ pub(crate) fn write_test_id3v2(
     tag.save_to_path(path, options).unwrap();
 }
 
+// Text from a file without NUL characters, which a tag can hold, and a
+// D-Bus string can't: the bus takes such a message as invalid, and ends the
+// connection that sent it, so that a single file would cut off the desktop's
+// media controls until Dismas is started again
+pub(crate) fn without_nul(text: impl Into<String>) -> String {
+    let text = text.into();
+    if text.contains('\0') {
+        text.replace('\0', "")
+    } else {
+        text
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nul_characters_are_taken_out() {
+        assert_eq!(without_nul("Die\0 Forelle\0"), "Die Forelle");
+        assert_eq!(without_nul("Die Forelle"), "Die Forelle");
+    }
+
     #[test]
     fn every_item_is_worked_on_once_in_threads() {
         let items: Vec<u32> = (0..100).collect();
