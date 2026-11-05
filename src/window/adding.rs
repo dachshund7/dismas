@@ -150,7 +150,10 @@ impl Window {
             return;
         }
         match playlists::append(name, files) {
-            Ok(()) => self.add_added_to_playlist_toast(name, files.len()),
+            Ok(()) => {
+                self.shown_playlist_added_to(name, files);
+                self.add_added_to_playlist_toast(name, files.len());
+            }
             Err(e) => {
                 log::warn!("Unable to add tracks to the playlist '{name}': {e}");
                 self.add_toast(i18n("Unable to add to the playlist"));

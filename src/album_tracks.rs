@@ -680,6 +680,17 @@ impl AlbumTracks {
         ));
     }
 
+    // Adds files at the end of the playlist that is showing, whose tracks
+    // are read again, as a track's place among them is its place in the
+    // playlist
+    pub(crate) fn add_files(&self, added: &[gio::File]) {
+        let imp = self.imp();
+        let title = imp.album_title.label();
+        let mut files = imp.files.borrow().clone();
+        files.extend_from_slice(added);
+        self.show_files(&title, "", files, true);
+    }
+
     // The title of the album or the playlist that is showing, which can be
     // renamed
     pub(crate) fn set_title(&self, title: &str) {

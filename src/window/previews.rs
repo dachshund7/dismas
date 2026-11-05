@@ -166,6 +166,17 @@ impl Window {
         }
     }
 
+    // Tracks were added at the end of a playlist's file: if it's the one
+    // shown, they're added there too, for the Play and Add buttons as well.
+    // A read going on could have missed them, so it starts over
+    pub(super) fn shown_playlist_added_to(&self, name: &str, files: &[gio::File]) {
+        if self.reading_preview_of(name) {
+            self.show_playlist_preview(name);
+        } else if self.shown_playlist().as_deref() == Some(name) {
+            self.imp().album_tracks.add_files(files);
+        }
+    }
+
     // A playlist was renamed: if it's the one shown, its tracks stay, under
     // the new name. A read of it going on starts over under that name
     pub(super) fn shown_playlist_renamed(&self, name: &str, new_name: &str) {
