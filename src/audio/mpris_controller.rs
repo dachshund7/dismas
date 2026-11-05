@@ -184,6 +184,7 @@ impl MprisController {
         let builder = Player::builder(APPLICATION_ID)
             .identity("Dismas")
             .desktop_entry(APPLICATION_ID)
+            .can_quit(true)
             .can_raise(true)
             .can_play(false)
             .can_pause(false)
@@ -521,6 +522,16 @@ fn setup_signals(
         move |_| {
             if let Err(e) = sender.try_send(PlaybackAction::Raise) {
                 error!("Unable to send Raise: {e}");
+            }
+        }
+    ));
+
+    mpris.connect_quit(clone!(
+        #[strong]
+        app_sender,
+        move |_| {
+            if let Err(e) = app_sender.try_send(ApplicationAction::Quit) {
+                error!("Unable to send Quit: {e}");
             }
         }
     ));
