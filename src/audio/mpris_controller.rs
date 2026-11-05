@@ -265,18 +265,20 @@ impl MprisController {
         }
     }
 
-    fn track_metadata(&self, track: &Track) -> Metadata {
-        let mut metadata = Metadata::new();
-
-        // Clients pass the id back when setting the position; a new one
-        // for each track, as the same track can be in the queue more than
-        // once
+    // Clients pass the id back when setting the position, and tell tracks
+    // apart by it: a new one each time a track becomes current, as the same
+    // track can be in the queue more than once
+    fn new_track_id(&self) -> Option<TrackId> {
         let track_id = self.next_track_id.get();
         self.next_track_id.set(track_id + 1);
-        match TrackId::try_from(format!("/io/github/dachshund7/Dismas/Track/{track_id}")) {
-            Ok(id) => metadata.set_trackid(Some(id)),
-            Err(e) => error!("Invalid MPRIS track id: {e}"),
-        }
+        TrackId::try_from(format!("/io/github/dachshund7/Dismas/Track/{track_id}"))
+            .inspect_err(|e| error!("Invalid MPRIS track id: {e}"))
+            .ok()
+    }
+
+    fn track_metadata(&self, track: &Track, id: Option<TrackId>) -> Metadata {
+        let mut metadata = Metadata::new();
+        metadata.set_trackid(id);
 
         // Desktop widgets show the title and the artists, so the artists
         // name the composer or the performers too, as the player does
@@ -348,7 +350,8 @@ impl Controller for MprisController {
     }
 
     fn set_track(&self, track: &Track) {
-        self.shared.metadata.replace(self.track_metadata(track));
+        let id = self.new_track_id();
+        self.shared.metadata.replace(self.track_metadata(track, id));
         self.shared.has_track.set(true);
         self.publish_track();
     }
@@ -361,7 +364,9 @@ impl Controller for MprisController {
     }
 
     fn update_track(&self, track: &Track) {
-        self.shared.metadata.replace(self.track_metadata(track));
+        // It's still the same track, whose tags were read again
+        let id = self.shared.metadata.borrow().trackid();
+        self.shared.metadata.replace(self.track_metadata(track, id));
 
         glib::spawn_future_local(clone!(
             #[weak(rename_to = shared)]

@@ -110,6 +110,8 @@ All notable changes to this project will be documented in this file.
 - Seeking only moved in whole seconds from the last whole second, so a
   program seeking half a second over MPRIS moved nothing, and the seek
   keys jumped back a moment as well
+- When the tags of the playing track were read again, the desktop's media
+  controls were told that another track had started
 
 ### Removed
 
