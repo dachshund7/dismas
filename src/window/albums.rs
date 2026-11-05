@@ -18,7 +18,6 @@ impl Window {
         reveal: Option<&gio::File>,
     ) {
         let imp = self.imp();
-        self.request_shown();
         self.set_shown_playlist(None);
         let hidden = imp.library_view.hidden_folders();
         imp.album_tracks

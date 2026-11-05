@@ -88,6 +88,7 @@ impl Window {
     // Shows a page of the pane over the one that shows, opening the pane
     // if it's closed
     pub(super) fn open_pane_page(&self, page: PanePage) {
+        self.request_shown();
         let imp = self.imp();
         imp.pane_history
             .borrow_mut()
@@ -99,6 +100,7 @@ impl Window {
     // Goes back from the tracks of an album or from the lyrics to the page
     // under them, closing the pane if it was opened for them
     pub(super) fn show_pane_back(&self) {
+        self.request_shown();
         let imp = self.imp();
         let back = imp.pane_history.borrow_mut().back();
         match back {
@@ -120,6 +122,7 @@ impl Window {
     // Shows the queue in the pane, under every other page, e.g. once tracks
     // are added to it
     pub(super) fn show_playlist_view(&self) {
+        self.request_shown();
         let imp = self.imp();
         imp.pane_history.borrow_mut().clear();
         imp.sidebar_stack.set_visible_child_name("playlist");

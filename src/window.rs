@@ -265,6 +265,8 @@ mod imp {
         // Bumped each time the tracks page is asked for other tracks, so
         // that a playlist read meanwhile doesn't take their place
         pub(crate) shown_request: Cell<u32>,
+        // The playlist being read for the tracks page, if any
+        pub(crate) shown_reading: RefCell<Option<String>>,
         // Scrolling the queue to the playing track, once it's laid out
         pub(crate) queue_scroll_tick: RefCell<Option<gtk::TickCallbackId>>,
         // The length of the tracks after the current one, in seconds, so
@@ -686,6 +688,7 @@ mod imp {
                 pending_playlist: RefCell::default(),
                 shown_playlist: RefCell::default(),
                 shown_request: Cell::default(),
+                shown_reading: RefCell::default(),
                 queue_scroll_tick: RefCell::default(),
                 queue_time_after_current: Cell::new(0),
                 queue_time_idle: Cell::new(false),
@@ -827,6 +830,10 @@ mod imp {
     impl Window {
         fn set_playlist_visible(&self, visible: bool) {
             if visible != self.playlist_visible.replace(visible) {
+                // A playlist still being read would open the pane again
+                if !visible {
+                    self.obj().request_shown();
+                }
                 self.split_view.set_show_sidebar(visible);
                 // The split view moves the focus out of a pane it hides:
                 // beside the content, to the first widget of the page that

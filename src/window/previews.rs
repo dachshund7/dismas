@@ -13,9 +13,12 @@ use super::*;
 
 impl Window {
     // Asks for other tracks on the tracks page, so that a playlist still
-    // being read for it no longer is wanted
+    // being read for it no longer is wanted. Going anywhere else in the pane
+    // does this too, or the playlist would cover what was asked for once
+    // it's read
     pub(super) fn request_shown(&self) -> u32 {
         let imp = self.imp();
+        imp.shown_reading.take();
         let request = imp.shown_request.get().wrapping_add(1);
         imp.shown_request.set(request);
         request
@@ -43,11 +46,17 @@ impl Window {
         self.imp().shown_request.get() == request
     }
 
+    // Whether this playlist is being read for the tracks page
+    fn reading_preview_of(&self, name: &str) -> bool {
+        self.imp().shown_reading.borrow().as_deref() == Some(name)
+    }
+
     // Shows the tracks of a playlist in the pane, without switching to it.
     // The selected one shows as the queue, where it's loaded, and so does
     // the one being switched to, whose tracks are being read for the queue.
     // Its file is read in a separate thread, as it can be on a slow drive
     pub(super) fn show_playlist_preview(&self, name: &str) {
+        let request = self.request_shown();
         let pending = self.imp().pending_playlist.borrow().clone();
         if name == self.selected_playlist() || pending.as_deref() == Some(name) {
             self.show_playlist_view();
@@ -59,8 +68,8 @@ impl Window {
             return;
         }
 
-        let request = self.request_shown();
         let name = name.to_string();
+        self.imp().shown_reading.replace(Some(name.clone()));
         glib::spawn_future_local(clone!(
             #[weak(rename_to = win)]
             self,
@@ -72,6 +81,7 @@ impl Window {
                 if !win.shown_is_current(request) {
                     return;
                 }
+                win.imp().shown_reading.take();
                 let Ok(Some(files)) = read else {
                     win.add_toast(i18n("Unable to open the playlist"));
                     return;
@@ -156,8 +166,12 @@ impl Window {
         }
     }
 
-    // The playlist shown was renamed: its tracks stay, under the new name
+    // A playlist was renamed: if it's the one shown, its tracks stay, under
+    // the new name. A read of it going on starts over under that name
     pub(super) fn shown_playlist_renamed(&self, name: &str, new_name: &str) {
+        if self.reading_preview_of(name) {
+            self.show_playlist_preview(new_name);
+        }
         if self.shown_playlist().as_deref() != Some(name) {
             return;
         }
@@ -165,13 +179,16 @@ impl Window {
         self.imp().album_tracks.set_title(new_name);
     }
 
-    // The playlist shown was deleted: the pane goes back from its tracks,
-    // or leaves them out of the pages under the one that shows
+    // A playlist was deleted: if it's the one shown, the pane goes back from
+    // its tracks, or leaves them out of the pages under the one that shows.
+    // A read of it going on is no longer wanted
     pub(super) fn shown_playlist_deleted(&self, name: &str) {
+        if self.reading_preview_of(name) {
+            self.request_shown();
+        }
         if self.shown_playlist().as_deref() != Some(name) {
             return;
         }
-        self.request_shown();
         self.set_shown_playlist(None);
         if self.shown_pane_page() == Some(pane::PanePage::Tracks) {
             self.show_pane_back();
