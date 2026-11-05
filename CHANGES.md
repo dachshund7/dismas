@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
   and change the volume, and see it change when the volume slider moves
 - They can turn Shuffle on and off too, as the Shuffle button does, and
   see when it changes, and they can quit Dismas and make it fullscreen
+- They get the lyrics of the track too, without their times
 
 ### Changed
 

@@ -22,8 +22,19 @@ use crate::{
     application::ApplicationAction,
     audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Track},
     config::APPLICATION_ID,
+    lyrics::{self, Lyrics},
     utils,
 };
+
+// The longest lyrics that clients get: they come with every change to the
+// metadata, and clients read it often. This is more than a long libretto
+const MAX_LYRICS_TEXT: usize = 256 * 1024;
+
+// How long a track stays the current one before its lyrics are read. No
+// client says whether it wants them, and skipping through the queue would
+// read every file on the way, each in a process of its own if it's one
+// that lofty can't read
+const LYRICS_READ_DELAY: Duration = Duration::from_secs(1);
 
 // What the desktop is told about the player. The server starts after the
 // player, which can already have a track by then, so it's kept to be
@@ -43,6 +54,7 @@ struct Shared {
     can_go_previous: Cell<bool>,
     position: Cell<Time>,
     volume: Cell<Volume>,
+    lyrics_read: Cell<u64>,
 }
 
 impl Shared {
@@ -200,6 +212,14 @@ fn value_without_nuls(value: Value<'static>) -> Option<Value<'static>> {
     }
 }
 
+// The number of a new read of lyrics, which takes the place of the
+// one going on, if any
+fn next_read(reads: &Cell<u64>) -> u64 {
+    let read = reads.get() + 1;
+    reads.set(read);
+    read
+}
+
 // An MPRIS time, which counts microseconds in an i64
 fn time(duration: Duration) -> Time {
     Time::from_micros(i64::try_from(duration.as_micros()).unwrap_or(i64::MAX))
@@ -209,6 +229,12 @@ fn time(duration: Duration) -> Time {
 // length of 0 would say it is
 fn track_length(length: Duration) -> Option<Time> {
     (!length.is_zero()).then(|| time(length))
+}
+
+// The text of lyrics for MPRIS, if it isn't empty or too long to send
+fn lyrics_text(lyrics: &Lyrics) -> Option<String> {
+    let text = lyrics.text();
+    (!text.trim().is_empty() && text.len() <= MAX_LYRICS_TEXT).then_some(text)
 }
 
 // Whether a client's position is one to go to. MPRIS asks to do nothing
@@ -261,6 +287,7 @@ impl MprisController {
             can_go_previous: Cell::new(false),
             position: Cell::new(Time::ZERO),
             volume: Cell::new(1.0),
+            lyrics_read: Cell::new(0),
         });
 
         glib::spawn_future_local(clone!(
@@ -360,6 +387,43 @@ impl MprisController {
         metadata
     }
 
+    // Adds the lyrics of the track, which are read in another thread after
+    // `delay`, once there are any, unless they were read again or the track
+    // went since
+    fn publish_lyrics(&self, track: &Track, delay: Duration) {
+        let read = next_read(&self.shared.lyrics_read);
+        let Some(path) = track.audio_file().path() else {
+            return;
+        };
+        let part = track.part();
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move {
+                glib::timeout_future(delay).await;
+                if shared.lyrics_read.get() != read {
+                    return;
+                }
+                let found = gio::spawn_blocking(move || {
+                    utils::guarded(
+                        format_args!("the lyrics of {}", path.display()),
+                        || lyrics::find(&path, part),
+                        || None,
+                    )
+                })
+                .await
+                .unwrap_or_default();
+                let Some(text) = found.as_ref().and_then(lyrics_text) else {
+                    return;
+                };
+                if shared.lyrics_read.get() == read {
+                    shared.metadata.borrow_mut().set_lyrics(Some(text));
+                    shared.publish_metadata().await;
+                }
+            }
+        ));
+    }
+
     fn publish_track(&self) {
         glib::spawn_future_local(clone!(
             #[weak(rename_to = shared)]
@@ -393,9 +457,11 @@ impl Controller for MprisController {
         self.shared.metadata.replace(self.track_metadata(track, id));
         self.shared.has_track.set(true);
         self.publish_track();
+        self.publish_lyrics(track, LYRICS_READ_DELAY);
     }
 
     fn clear_track(&self) {
+        next_read(&self.shared.lyrics_read);
         self.shared.metadata.replace(Metadata::new());
         self.shared.has_track.set(false);
         self.set_position(Duration::ZERO, false);
@@ -412,6 +478,9 @@ impl Controller for MprisController {
             self.shared,
             async move { shared.publish_metadata().await }
         ));
+        // Right away: no track is being skipped, and clients have no lyrics
+        // to show until they're read
+        self.publish_lyrics(track, Duration::ZERO);
     }
 
     fn set_position(&self, position: Duration, notify: bool) {
@@ -774,6 +843,14 @@ mod tests {
         metadata.set_track_number(Some(4));
         metadata.set_user_rating(Some(1.0));
         assert_eq!(without_nuls(metadata.clone()), metadata);
+    }
+
+    #[test]
+    fn lyrics_are_left_out_when_empty_or_too_long() {
+        let text = |text: String| lyrics_text(&Lyrics::Plain(text));
+        assert_eq!(text(" \n".into()), None);
+        assert!(text("a".repeat(MAX_LYRICS_TEXT)).is_some());
+        assert_eq!(text("a".repeat(MAX_LYRICS_TEXT + 1)), None);
     }
 
     #[test]

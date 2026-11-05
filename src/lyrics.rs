@@ -60,6 +60,19 @@ pub(crate) enum Lyrics {
     Synced(Vec<Line>),
 }
 
+impl Lyrics {
+    // The words by themselves
+    pub(crate) fn text(&self) -> String {
+        match self {
+            Lyrics::Plain(text) => text.clone(),
+            Lyrics::Synced(lines) => {
+                let lines: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
+                lines.join("\n")
+            }
+        }
+    }
+}
+
 // A line of synchronized lyrics: when it's sung, from the start of the
 // track, until when if a pause follows it, and its text, which can be on
 // more than one line, e.g. with its translation
@@ -842,6 +855,19 @@ mod tests {
         let found = find(&audio, None);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(found, None);
+    }
+
+    #[test]
+    fn the_text_of_lyrics_has_no_times() {
+        assert_eq!(Lyrics::Plain("Hello\nthere".into()).text(), "Hello\nthere");
+
+        let line = |seconds, text: &str| Line {
+            time: Duration::from_secs(seconds),
+            end: None,
+            text: text.to_string(),
+        };
+        let lines = vec![line(1, "Hello"), line(3, "there")];
+        assert_eq!(Lyrics::Synced(lines).text(), "Hello\nthere");
     }
 
     #[test]
