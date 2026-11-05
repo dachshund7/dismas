@@ -101,30 +101,34 @@ What Dismas adds
   matches, so `-live` keeps an album with a track that isn't live;
   `-releasetype:live` leaves out live albums.
 - **Playlists:** save the queue as a playlist, and create, rename and delete
-  playlists. Switch between them from the title of the playlist pane or on
-  the Playlists page. Add to Playlist, in the menu of a track, adds it to
-  another playlist without switching to it, so the music goes on. Each
-  playlist resumes where it was, paused at the same track and position, when
-  you switch back to it and when Dismas starts. Tracks whose files are
-  missing, such as on a drive that isn't plugged in, or can't be read, stay
-  in their places in the playlist, greyed out, and playback skips them until
-  their files are back. Import and export M3U playlists. Exported paths are
-  relative to the playlist's folder, so you can copy a playlist along with
-  the music to another device. Importing also finds the tracks of a
-  playlist made on another computer or on Windows, like
+  playlists. Switch between them from the title of the playlist pane. On the
+  Playlists page, a click on a playlist lists its tracks in the pane without
+  switching to it, so the music goes on; Play there, or Switch To in its
+  menu, switches to it. Add to Playlist, in the menu of a track, adds it to
+  another playlist without switching to it too. Each playlist resumes where
+  it was, paused at the same track and position, when you switch back to it
+  and when Dismas starts. Tracks whose files are missing, such as on a drive
+  that isn't plugged in, or can't be read, stay in their places in the
+  playlist, greyed out, and playback skips them until their files are back.
+  Import and export M3U playlists. Exported paths are relative to the
+  playlist's folder, so you can copy a playlist along with the music to
+  another device. Importing also finds the tracks of a playlist made on
+  another computer or on Windows, like
   `C:\Users\…\Music\Artist\Album\01.flac`, in the playlist's folder or
   in the music folders, whatever the case of their names.
 - **Smart playlists and favorites:** mark tracks as favorites with the heart
   next to the sleep timer, or with Ctrl+D; the heart beside the album search
   shows the favorite albums, or the albums with favorite tracks while the
-  Tracks toggle is on, and Select All and Play there play them. On the Playlists page, Recently
-  Played plays the last 100 tracks you heard, Most Played plays the tracks
-  you played the most in the last 6 months, and Not Heard Lately plays the
-  tracks you played the most but haven't heard in the last 2 months. Works
-  and particular recordings can be favorites too, from their menus: the
-  Works page marks them with a heart and can show only them. Play a Random
-  Album, or Track with the Tracks toggle on, or Work, in the menu of the
-  album pages, plays one of the albums, tracks or works the page shows, picked at random, more likely one
+  Tracks toggle is on, and Select All and Play there play them. On the
+  Playlists page, Recently Played shows the last 100 tracks you heard, Most
+  Played the tracks you played the most in the last 6 months, and Not Heard
+  Lately the tracks you played the most but haven't heard in the last 2
+  months: a click lists them in the pane, and Play there plays them in place
+  of the queue, with an Undo. Works and particular recordings can be
+  favorites too, from their menus: the Works page marks them with a heart
+  and can show only them. Play a Random Album, or Track with the Tracks
+  toggle on, or Work, in the menu of the album pages, plays one of the
+  albums, tracks or works the page shows, picked at random, more likely one
   you haven't heard lately, in place of the queue, with an Undo.
 - **Queue editing and drag and drop:** drag tracks by their handle, or
   move them with Alt+Up and Alt+Down, to reorder them, and select ranges

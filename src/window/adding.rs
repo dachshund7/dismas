@@ -104,7 +104,7 @@ impl Window {
     // Adds the tracks at the end of a playlist, the queue for an empty
     // name. The selected one gets them through the queue, which saves it;
     // another one in its file, so that what plays goes on. The toast can
-    // open it
+    // show its tracks in the pane
     pub(super) fn add_to_playlist(&self, tracks: Tracks, name: &str) {
         if self.imp().loads.get() > 0 {
             return;
