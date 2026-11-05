@@ -23,6 +23,7 @@ use crate::{
     audio::{Controller, PlaybackAction, PlaybackState, RepeatMode, Track},
     config::APPLICATION_ID,
     lyrics::{self, Lyrics},
+    play_stats::{self, TrackStats},
     utils,
 };
 
@@ -55,6 +56,7 @@ struct Shared {
     position: Cell<Time>,
     volume: Cell<Volume>,
     lyrics_read: Cell<u64>,
+    stats_read: Cell<u64>,
 }
 
 impl Shared {
@@ -212,7 +214,7 @@ fn value_without_nuls(value: Value<'static>) -> Option<Value<'static>> {
     }
 }
 
-// The number of a new read of lyrics, which takes the place of the
+// The number of a new read of lyrics or stats, which takes the place of the
 // one going on, if any
 fn next_read(reads: &Cell<u64>) -> u64 {
     let read = reads.get() + 1;
@@ -229,6 +231,31 @@ fn time(duration: Duration) -> Time {
 // length of 0 would say it is
 fn track_length(length: Duration) -> Option<Time> {
     (!length.is_zero()).then(|| time(length))
+}
+
+// A time in seconds since the epoch, as MPRIS has them
+fn iso_date(seconds: i64) -> Option<String> {
+    let date = glib::DateTime::from_unix_utc(seconds).ok()?;
+    date.format_iso8601().ok().map(Into::into)
+}
+
+// What Dismas knows of a track from it being played. A favorite is the
+// highest rating, the only one there is. A track that was never heard, as
+// one is with the play history off, has no count: 0 would say it's known
+fn set_stats(metadata: &mut Metadata, favorite: bool, stats: Option<TrackStats>) {
+    metadata.set_user_rating(favorite.then_some(1.0));
+
+    let plays = stats.map(|stats| i32::try_from(stats.plays).unwrap_or(i32::MAX));
+    metadata.set_use_count(plays);
+    metadata.set_last_used(stats.and_then(|stats| iso_date(stats.last_heard)));
+}
+
+// Whether a track is a favorite, and what was heard of it, from `plays.db`
+fn read_stats(uri: String) -> (bool, Option<TrackStats>) {
+    let favorite = play_stats::is_favorite(&uri);
+    let uris = [uri];
+    let stats = play_stats::track_stats(&uris).remove(&uris[0]);
+    (favorite, stats)
 }
 
 // The text of lyrics for MPRIS, if it isn't empty or too long to send
@@ -288,6 +315,7 @@ impl MprisController {
             position: Cell::new(Time::ZERO),
             volume: Cell::new(1.0),
             lyrics_read: Cell::new(0),
+            stats_read: Cell::new(0),
         });
 
         glib::spawn_future_local(clone!(
@@ -424,6 +452,28 @@ impl MprisController {
         ));
     }
 
+    // Adds what's known of the track from it being played, which is read
+    // in another thread, as tracks change while the music plays and `plays.db`
+    // can be on a slow disk, unless it was read again or the track went since
+    fn publish_stats(&self, track: &Track) {
+        let read = next_read(&self.shared.stats_read);
+        let uri = track.uri();
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move {
+                let Ok((favorite, stats)) = gio::spawn_blocking(move || read_stats(uri)).await
+                else {
+                    return;
+                };
+                if shared.stats_read.get() == read {
+                    set_stats(&mut shared.metadata.borrow_mut(), favorite, stats);
+                    shared.publish_metadata().await;
+                }
+            }
+        ));
+    }
+
     fn publish_track(&self) {
         glib::spawn_future_local(clone!(
             #[weak(rename_to = shared)]
@@ -457,11 +507,17 @@ impl Controller for MprisController {
         self.shared.metadata.replace(self.track_metadata(track, id));
         self.shared.has_track.set(true);
         self.publish_track();
+        self.publish_stats(track);
         self.publish_lyrics(track, LYRICS_READ_DELAY);
+    }
+
+    fn update_stats(&self, track: &Track) {
+        self.publish_stats(track);
     }
 
     fn clear_track(&self) {
         next_read(&self.shared.lyrics_read);
+        next_read(&self.shared.stats_read);
         self.shared.metadata.replace(Metadata::new());
         self.shared.has_track.set(false);
         self.set_position(Duration::ZERO, false);
@@ -478,6 +534,7 @@ impl Controller for MprisController {
             self.shared,
             async move { shared.publish_metadata().await }
         ));
+        self.publish_stats(track);
         // Right away: no track is being skipped, and clients have no lyrics
         // to show until they're read
         self.publish_lyrics(track, Duration::ZERO);
@@ -811,6 +868,12 @@ mod tests {
         assert!(!is_within_track(Time::from_micros(-1), None));
     }
 
+    #[test]
+    fn dates_are_in_the_iso_8601_format() {
+        assert_eq!(iso_date(0).as_deref(), Some("1970-01-01T00:00:00Z"));
+        assert_eq!(iso_date(i64::MAX), None);
+    }
+
     // Whichever field gets a text, as a text or in a list of them
     #[test]
     fn no_nul_reaches_the_bus() {
@@ -843,6 +906,33 @@ mod tests {
         metadata.set_track_number(Some(4));
         metadata.set_user_rating(Some(1.0));
         assert_eq!(without_nuls(metadata.clone()), metadata);
+    }
+
+    #[test]
+    fn stats_say_only_what_is_known() {
+        let mut metadata = Metadata::new();
+        set_stats(&mut metadata, false, None);
+        assert_eq!(metadata.user_rating(), None);
+        assert_eq!(metadata.use_count(), None);
+        assert_eq!(metadata.last_used(), None);
+
+        let stats = TrackStats {
+            plays: 3,
+            last_heard: 0,
+        };
+        set_stats(&mut metadata, true, Some(stats));
+        assert_eq!(metadata.user_rating(), Some(1.0));
+        assert_eq!(metadata.use_count(), Some(3));
+        assert_eq!(
+            metadata.last_used().as_deref(),
+            Some("1970-01-01T00:00:00Z")
+        );
+
+        // As when a track stops being a favorite, or the history is cleared
+        set_stats(&mut metadata, false, None);
+        assert_eq!(metadata.user_rating(), None);
+        assert_eq!(metadata.use_count(), None);
+        assert_eq!(metadata.last_used(), None);
     }
 
     #[test]

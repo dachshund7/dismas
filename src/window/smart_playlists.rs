@@ -112,7 +112,10 @@ impl Window {
     fn clear_play_history(&self) -> String {
         self.player().forget_listen();
         match play_stats::clear_history() {
-            Ok(()) => i18n("Play history cleared"),
+            Ok(()) => {
+                self.player().current_track_stats_changed();
+                i18n("Play history cleared")
+            }
             Err(e) => {
                 log::warn!("Unable to clear the play history: {e}");
                 i18n("Unable to clear the play history")

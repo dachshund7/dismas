@@ -86,6 +86,8 @@ pub(crate) enum PlaybackAction {
     // handed over without a gap if it was that one, before it started
     TrackFailed(u64, Option<String>),
     SleepTimerExpired,
+    // The listen to the track with this URI was saved
+    ListenRecorded(String),
 
     Raise,
 }
@@ -223,6 +225,7 @@ fn after_failure(
 
 pub(crate) struct AudioPlayer {
     app_sender: Sender<ApplicationAction>,
+    sender: Sender<PlaybackAction>,
     receiver: RefCell<Option<Receiver<PlaybackAction>>>,
     backend: GstBackend,
     controllers: Vec<Box<dyn Controller>>,
@@ -273,7 +276,7 @@ impl AudioPlayer {
 
         let sleep_timer = SleepTimer::new(sender.clone());
 
-        let backend = GstBackend::new(sender);
+        let backend = GstBackend::new(sender.clone());
 
         let queue = Queue::default();
         let state = PlayerState::default();
@@ -296,6 +299,7 @@ impl AudioPlayer {
 
         let res = Rc::new(Self {
             app_sender,
+            sender,
             receiver,
             backend,
             controllers,
@@ -460,6 +464,7 @@ impl AudioPlayer {
                 self.track_failed(generation, handed);
             }
             PlaybackAction::SleepTimerExpired => self.sleep_timer_expired(),
+            PlaybackAction::ListenRecorded(uri) => self.listen_recorded(&uri),
             PlaybackAction::Raise => self.present(),
             PlaybackAction::Repeat(mode) => self.update_repeat_mode(mode),
             PlaybackAction::Seek(offset) => self.seek_offset(offset),
@@ -912,7 +917,23 @@ impl AudioPlayer {
     fn end_listen(&self) {
         if let Some(listen) = self.finish_listen() {
             let generation = play_stats::history_generation();
-            gio::spawn_blocking(move || play_stats::record(&listen, generation));
+            let sender = self.sender.clone();
+            gio::spawn_blocking(move || {
+                if play_stats::record(&listen, generation).is_some()
+                    && let Err(e) = sender.try_send(PlaybackAction::ListenRecorded(listen.uri))
+                {
+                    error!("Failed to send ListenRecorded: {e}");
+                }
+            });
+        }
+    }
+
+    // The track can still be the current one, as it is when it repeats or
+    // when the queue ended, and what was heard of it just changed; the stats
+    // read as it became current can be from before the listen was saved
+    fn listen_recorded(&self, uri: &str) {
+        if self.state.track().is_some_and(|track| track.uri() == uri) {
+            self.current_track_stats_changed();
         }
     }
 
@@ -932,6 +953,7 @@ impl AudioPlayer {
         };
         if let Some(row) = play_stats::record(&listen, play_stats::history_generation()) {
             self.listens.borrow_mut().saved_as(row);
+            self.current_track_stats_changed();
         }
     }
 
@@ -945,6 +967,16 @@ impl AudioPlayer {
     fn finish_listen(&self) -> Option<Listen> {
         let listen = self.listens.borrow_mut().finish(play_stats::now())?;
         self.settings.boolean("keep-play-history").then_some(listen)
+    }
+
+    // Tells the controllers that the current track was marked or unmarked
+    // as a favorite, or that what was heard of it changed
+    pub(crate) fn current_track_stats_changed(&self) {
+        if let Some(track) = self.state.track() {
+            for c in &self.controllers {
+                c.update_stats(&track);
+            }
+        }
     }
 
     // Shows the new tags of the current track, after they were read again

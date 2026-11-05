@@ -28,8 +28,11 @@ impl Window {
             .state()
             .track()
             .is_some_and(|t| t.uri() == uri);
-        if playing && favorite != self.imp().track_favorite.replace(favorite) {
-            self.notify_track_favorite();
+        if playing {
+            if favorite != self.imp().track_favorite.replace(favorite) {
+                self.notify_track_favorite();
+            }
+            self.player().current_track_stats_changed();
         }
         self.imp().library_view.favorite_tracks_changed();
         self.imp().queue_filter.favorites_changed();

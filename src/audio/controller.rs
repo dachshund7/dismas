@@ -11,6 +11,9 @@ pub(crate) trait Controller {
     fn set_track(&self, track: &Track);
     // The tags of the current track were read again
     fn update_track(&self, _track: &Track) {}
+    // Whether the current track is a favorite, or what was heard of it,
+    // changed
+    fn update_stats(&self, _track: &Track) {}
     // No track is current anymore
     fn clear_track(&self) {}
     fn set_position(&self, position: Duration, notify: bool);
