@@ -22,6 +22,9 @@ pub(crate) trait Controller {
     // Whether the selected playlist is shuffled, and whether that can be
     // changed now
     fn set_shuffle(&self, _shuffled: bool, _can_change: bool) {}
+    // Whether the window is fullscreen, and whether it can be changed,
+    // which takes a window that shows
+    fn set_fullscreen(&self, _fullscreen: bool, _can_change: bool) {}
     // The volume as the volume slider shows it, not as GStreamer takes it
     fn set_volume(&self, _volume: f64) {}
 }

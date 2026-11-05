@@ -33,7 +33,7 @@ All notable changes to this project will be documented in this file.
 - The desktop's media controls and other programs that use MPRIS can read
   and change the volume, and see it change when the volume slider moves
 - They can turn Shuffle on and off too, as the Shuffle button does, and
-  see when it changes, and they can quit Dismas
+  see when it changes, and they can quit Dismas and make it fullscreen
 
 ### Changed
 

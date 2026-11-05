@@ -37,6 +37,7 @@ pub(crate) enum ApplicationAction {
     ToggleWindow(Option<String>),
     // What the shuffle button does, asked for from outside
     SetQueueShuffled(bool),
+    SetFullscreen(bool),
     Quit,
 }
 
@@ -474,6 +475,15 @@ impl Application {
                 // While playing in the background, the window is only hidden
                 if let Some(window) = self.active_window().and_downcast::<Window>() {
                     window.set_queue_shuffled(shuffled);
+                }
+            }
+            ApplicationAction::SetFullscreen(fullscreen) => {
+                if let Some(window) = self.active_window().filter(WidgetExt::is_visible) {
+                    if fullscreen {
+                        window.fullscreen();
+                    } else {
+                        window.unfullscreen();
+                    }
                 }
             }
             ApplicationAction::Quit => self.quit(),

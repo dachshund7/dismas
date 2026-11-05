@@ -1039,6 +1039,12 @@ impl AudioPlayer {
         }
     }
 
+    pub(crate) fn update_fullscreen(&self, fullscreen: bool, can_change: bool) {
+        for c in &self.controllers {
+            c.set_fullscreen(fullscreen, can_change);
+        }
+    }
+
     pub(crate) fn toggle_repeat_mode(&self) {
         let cur_mode = self.queue.repeat_mode();
         let new_mode = match cur_mode {

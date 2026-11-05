@@ -21,7 +21,14 @@ impl Window {
             }
             win.update_backdrop();
             win.update_lyrics_action();
+            win.tell_fullscreen();
         });
+        self.connect_visible_notify(Self::tell_fullscreen);
+    }
+
+    fn tell_fullscreen(&self) {
+        self.player()
+            .update_fullscreen(self.is_fullscreen(), self.is_visible());
     }
 
     fn enter_fullscreen(&self) {

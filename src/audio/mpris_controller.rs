@@ -31,6 +31,8 @@ struct Shared {
     loop_status: Cell<LoopStatus>,
     shuffle: Cell<bool>,
     can_shuffle: Cell<bool>,
+    fullscreen: Cell<bool>,
+    can_set_fullscreen: Cell<bool>,
     has_track: Cell<bool>,
     can_go_next: Cell<bool>,
     can_go_previous: Cell<bool>,
@@ -101,6 +103,19 @@ impl Shared {
         };
         if let Err(err) = player.set_shuffle(self.shuffle.get()).await {
             error!("Unable to set MPRIS shuffle: {err:?}");
+        }
+    }
+
+    async fn publish_fullscreen(&self) {
+        let Some(player) = self.player.get() else {
+            return;
+        };
+        let can_set_fullscreen = self.can_set_fullscreen.get();
+        if let Err(err) = player.set_can_set_fullscreen(can_set_fullscreen).await {
+            error!("Unable to set MPRIS fullscreen capability: {err:?}");
+        }
+        if let Err(err) = player.set_fullscreen(self.fullscreen.get()).await {
+            error!("Unable to set MPRIS fullscreen: {err:?}");
         }
     }
 
@@ -200,6 +215,8 @@ impl MprisController {
             loop_status: Cell::new(LoopStatus::None),
             shuffle: Cell::new(false),
             can_shuffle: Cell::new(false),
+            fullscreen: Cell::new(false),
+            can_set_fullscreen: Cell::new(false),
             has_track: Cell::new(false),
             can_go_next: Cell::new(false),
             can_go_previous: Cell::new(false),
@@ -230,6 +247,7 @@ impl MprisController {
                                 shared.publish_playback_status().await;
                                 shared.publish_loop_status().await;
                                 shared.publish_shuffle().await;
+                                shared.publish_fullscreen().await;
                                 shared.publish_capabilities().await;
                                 shared.publish_volume().await;
                             }
@@ -428,6 +446,17 @@ impl Controller for MprisController {
         ));
     }
 
+    fn set_fullscreen(&self, fullscreen: bool, can_change: bool) {
+        self.shared.fullscreen.set(fullscreen);
+        self.shared.can_set_fullscreen.set(can_change);
+
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = shared)]
+            self.shared,
+            async move { shared.publish_fullscreen().await }
+        ));
+    }
+
     fn set_volume(&self, volume: f64) {
         self.shared.volume.set(volume);
 
@@ -551,6 +580,20 @@ fn setup_signals(
 
             if let Err(e) = sender.try_send(PlaybackAction::Repeat(mode)) {
                 error!("Unable to send Repeat({mode}): {e}");
+            }
+        }
+    ));
+
+    // Not stored, unlike what the player changes by itself: the window
+    // manager can refuse, and the window says when it's done
+    mpris.connect_set_fullscreen(clone!(
+        #[strong]
+        app_sender,
+        move |player, fullscreen| {
+            if player.can_set_fullscreen()
+                && let Err(e) = app_sender.try_send(ApplicationAction::SetFullscreen(fullscreen))
+            {
+                error!("Unable to send SetFullscreen({fullscreen}): {e}");
             }
         }
     ));
