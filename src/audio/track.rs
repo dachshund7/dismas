@@ -1308,6 +1308,40 @@ mod tests {
         assert_eq!(credits.artist_sort, None);
     }
 
+    // A crafted file can have a name megabytes long, which every row of the
+    // lists of composers and performers would lay out
+    #[test]
+    fn the_names_in_the_tags_have_a_limit() {
+        // Two bytes each, so that the limit can fall inside a character
+        let long = "é".repeat(4000) + "é";
+        let mut tag = Tag::new(TagType::Id3v2);
+        for key in [
+            ItemKey::Composer,
+            ItemKey::ComposerSortOrder,
+            ItemKey::Conductor,
+            ItemKey::TrackArtistSortOrder,
+            ItemKey::AlbumArtistSortOrder,
+        ] {
+            assert!(tag.insert_text(key, long.clone()));
+        }
+        let credits = TrackCredits::from_tag(&tag, &Default::default());
+        for name in [
+            Some(&credits.composers[0]),
+            Some(&credits.composer_sorts[0]),
+            Some(&credits.conductors[0]),
+            credits.artist_sort.as_ref(),
+            credits.album_artist_sort.as_ref(),
+        ] {
+            let name = name.unwrap();
+            assert!(!name.is_empty());
+            assert!(
+                name.len() <= super::credits::MAX_NAMES_LEN,
+                "{}",
+                name.len()
+            );
+        }
+    }
+
     // A crafted file can name tens of thousands of performers, and the
     // credits line looks for each name among the others
     #[test]

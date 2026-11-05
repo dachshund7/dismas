@@ -122,6 +122,8 @@ All notable changes to this project will be documented in this file.
   one that couldn't play, and was skipped, though nothing was wrong with it
 - Quick changes to the volume from the tray or over MPRIS could freeze
   Dismas, with the volume flipping between two values
+- A music file with a name megabytes long in its tags, which only a
+  crafted file has, slowed down the lists of composers and performers
 
 ### Removed
 

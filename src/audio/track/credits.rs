@@ -13,10 +13,12 @@ use super::*;
 // each row and the player take seconds to show
 pub(super) const MAX_CREDITS: usize = 500;
 
-// How much of an artist, or an album artist, names are looked for in: the
-// start of a longer one, which no list of names is, as for the catalogue
-// numbers of a name
-const MAX_NAMES_LEN: usize = 4096;
+// How much of a name in the tags is kept, far more than any has: a crafted
+// file could otherwise have rows of the lists of composers and performers
+// lay out megabytes of text. An artist or an album artist is kept whole, and
+// this is how much of it names are looked for in: the start of a longer one,
+// which no list of names is, as for the catalogue numbers of a name
+pub(super) const MAX_NAMES_LEN: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Credit {
@@ -345,11 +347,7 @@ impl TrackCredits {
             movement_levels: None,
             composers: split_composers(tag.get_strings(ItemKey::Composer)),
             composer_sorts: split_composers(tag.get_strings(ItemKey::ComposerSortOrder)),
-            artist_sort: tag
-                .get_string(ItemKey::TrackArtistSortOrder)
-                .map(str::trim)
-                .filter(|sort| !sort.is_empty())
-                .map(ToString::to_string),
+            artist_sort: sort_name(tag, ItemKey::TrackArtistSortOrder),
             work_composers: Vec::new(),
             lyricists: tag_strings(tag, ItemKey::Lyricist),
             arrangers: tag_strings(tag, ItemKey::Arranger),
@@ -363,9 +361,7 @@ impl TrackCredits {
             remixers: tag_strings(tag, ItemKey::Remixer),
             dj_mixers: tag_strings(tag, ItemKey::MixDj),
             album_artist: tag.get_string(ItemKey::AlbumArtist).map(plain_commas),
-            album_artist_sort: tag
-                .get_string(ItemKey::AlbumArtistSortOrder)
-                .map(ToString::to_string),
+            album_artist_sort: sort_name(tag, ItemKey::AlbumArtistSortOrder),
             disc_number: tag.disk(),
             disc_total: tag.disk_total(),
             disc_subtitle: tag
@@ -577,7 +573,7 @@ impl TrackCredits {
                 ids.iter().all(|id| self.musicbrainz.artists.contains(id))
             }
             _ => {
-                let artist = super::search::text_start(artist, MAX_NAMES_LEN);
+                let artist = name_start(artist);
                 self.composers.iter().all(|c| names_composer(artist, c))
             }
         }
@@ -585,9 +581,7 @@ impl TrackCredits {
 
     // The album artist, as far as names are looked for in it
     fn album_artist(&self) -> Option<&str> {
-        self.album_artist
-            .as_deref()
-            .map(|a| super::search::text_start(a, MAX_NAMES_LEN))
+        self.album_artist.as_deref().map(name_start)
     }
 
     // Whether the album artist names someone, as a release credits there
@@ -825,7 +819,7 @@ impl TrackCredits {
             .any(|id| id == VARIOUS_ARTISTS_ID);
         let (name, sort) = match named(self.album_artist()).filter(|_| !various) {
             Some(name) => (name, self.album_artist_sort.as_deref()),
-            None => match named(artist.map(|a| super::search::text_start(a, MAX_NAMES_LEN))) {
+            None => match named(artist.map(name_start)) {
                 Some(name) => (name, self.artist_sort.as_deref()),
                 None => return Vec::new(),
             },
@@ -943,10 +937,24 @@ pub(crate) fn split_composers<'a>(values: impl Iterator<Item = &'a str>) -> Vec<
         .flat_map(|value| value.split(" / "))
         .map(str::trim)
         .filter(|name| !name.is_empty())
+        .map(name_start)
         .unique()
         .take(MAX_CREDITS)
         .map(ToString::to_string)
         .collect()
+}
+
+// As much of a name as is kept, see `MAX_NAMES_LEN`
+fn name_start(name: &str) -> &str {
+    super::search::text_start(name, MAX_NAMES_LEN)
+}
+
+// The sort name of a key, if the tags have one
+fn sort_name(tag: &Tag, key: ItemKey) -> Option<String> {
+    tag.get_string(key)
+        .map(str::trim)
+        .filter(|sort| !sort.is_empty())
+        .map(|sort| name_start(sort).to_string())
 }
 
 // All the values for a key, including the ones that were stored as a
@@ -960,6 +968,7 @@ fn tag_strs(tag: &Tag, key: ItemKey) -> impl Iterator<Item = &str> {
         .flat_map(|s| s.split(';'))
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(name_start)
         .unique()
         .take(MAX_CREDITS)
 }

@@ -722,7 +722,6 @@ impl TrackTags {
         // singer as an artist of their own
         let artists = track_artist(tag);
         let artists = artists.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let artist_sort = get(ItemKey::AlbumArtistSortOrder).filter(|s| !s.is_empty());
 
         // The release id from MusicBrainz tells apart albums with the same
         // name; without it, we use the album artist, so the discs of an
@@ -782,7 +781,7 @@ impl TrackTags {
             // After the id, which must not change
             album_artist: album_artist.map(plain_commas),
             artist: artist.map(plain_commas),
-            artist_sort,
+            artist_sort: credits.album_artist_sort.clone(),
             year: credits.year(),
             disc: tag.disk(),
             track: tag.track(),
