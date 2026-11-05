@@ -120,6 +120,8 @@ All notable changes to this project will be documented in this file.
   started again
 - When a track failed partway through, the next track was said to be the
   one that couldn't play, and was skipped, though nothing was wrong with it
+- Quick changes to the volume from the tray or over MPRIS could freeze
+  Dismas, with the volume flipping between two values
 
 ### Removed
 

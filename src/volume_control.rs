@@ -28,7 +28,7 @@ mod imp {
         #[property(
             name = "volume",
             get = |imp: &Self| imp.volume_scale.value(),
-            set = |imp: &Self, volume: f64| imp.volume_scale.set_value(volume),
+            set = Self::show_volume,
             explicit_notify,
             minimum = 0.0,
             maximum = 1.0,
@@ -42,6 +42,8 @@ mod imp {
         #[property(get, set = Self::set_toggle_mute, explicit_notify)]
         pub(crate) toggle_mute: Cell<bool>,
         pub(crate) prev_volume: Cell<f64>,
+        // Whether the slider is following the player, see `show_volume()`
+        pub(crate) showing_volume: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -96,6 +98,18 @@ mod imp {
     impl WidgetImpl for VolumeControl {}
 
     impl VolumeControl {
+        // Shows the volume of the player, which it doesn't need to be told
+        // back. GStreamer reports each volume it's given, later: a report
+        // sent back would be a new request, so that two reports that are
+        // behind, as after quick changes over MPRIS or from the tray, would
+        // go round for ever, and the main thread would never get to anything
+        // else
+        fn show_volume(&self, volume: f64) {
+            self.showing_volume.set(true);
+            self.volume_scale.set_value(volume);
+            self.showing_volume.set(false);
+        }
+
         fn set_toggle_mute(&self, muted: bool) {
             if muted != self.toggle_mute.replace(muted) {
                 if muted {
@@ -148,7 +162,9 @@ impl VolumeControl {
                             .set_icon_name("audio-volume-low-symbolic");
                     }
                     this.notify_volume();
-                    this.emit_by_name::<()>("volume-changed", &[&value]);
+                    if !this.imp().showing_volume.get() {
+                        this.emit_by_name::<()>("volume-changed", &[&value]);
+                    }
                 }
             ),
         );
@@ -189,6 +205,8 @@ impl VolumeControl {
         adj.set_value(value.clamp(adj.lower(), adj.upper()));
     }
 
+    // The user changed the volume here; the `volume` property also follows
+    // the changes that come from elsewhere
     pub(crate) fn connect_volume_changed<F: Fn(&Self, f64) + 'static>(
         &self,
         f: F,
