@@ -110,7 +110,7 @@ It needs, from your distribution:
 - GTK 4.20 or later and libadwaita 1.8 or later, as in GNOME 49 or later
 - GStreamer 1.20 or later, with the base, good and bad plugins
 - the glycin loaders and bwrap, to read the covers
-- SQLite, libseccomp and fontconfig
+- SQLite 3.45.3 or later, libseccomp and fontconfig
 
 It shares its settings, library and playlists with any other Dismas you
 install for your account, as they're the same app.
