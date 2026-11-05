@@ -376,12 +376,9 @@ mod imp {
                 debug!("Window::win.volume-down()");
                 win.imp().playback_control.volume_control().step(-1.0);
             });
-            // The volume control's own action, `volume.toggle-mute`, is
-            // only found from inside it, where an accel isn't looked for
             klass.install_action("win.toggle-mute", None, move |win, _, _| {
                 debug!("Window::win.toggle-mute()");
-                let volume = win.imp().playback_control.volume_control();
-                volume.set_toggle_mute(!volume.toggle_mute());
+                win.player().toggle_mute();
             });
             klass.install_action("win.previous", None, move |win, _, _| {
                 debug!("Window::win.previous()");

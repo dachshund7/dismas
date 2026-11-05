@@ -72,7 +72,7 @@ pub(crate) use player::{
 pub(crate) use queue::{Queue, RemovedRun};
 pub(crate) use sleep_timer::{SleepTimer, TimerEnd};
 pub(crate) use sort::SortKey;
-pub(crate) use state::PlayerState;
+pub(crate) use state::{PlayerState, is_muted, same_volume};
 pub(crate) use track::{
     Arrangement, AudioProperties, ExtraComments, FieldCode, FieldParts, FileDetails, FileTags,
     Flag, Gains, ListedPerformer, Missing, MusicBrainzIds, PerformerKind, ReadOptions, Track,

@@ -61,6 +61,12 @@
 	    <summary>The volume</summary>
 	    <description>The playback volume, as the volume slider shows it</description>
 	  </key>
+	  <key name="unmuted-volume" type="d">
+	    <range min="0" max="1"/>
+	    <default>0.5</default>
+	    <summary>The volume to unmute to</summary>
+	    <description>The volume from before muting, which the mute button goes back to, as the volume slider shows it. The default is for when no such volume is known, so it isn't the full volume</description>
+	  </key>
 	  <key name="repeat-mode" enum="io.github.dachshund7.Dismas.RepeatMode">
 	    <default>'consecutive'</default>
 	    <summary>The repeat mode</summary>

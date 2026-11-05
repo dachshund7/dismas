@@ -254,11 +254,26 @@ impl PlayerState {
         // We only care about two digits of precision, to avoid
         // notification cycles when we update the volume with a
         // similar value coming from the volume control
-        let hundredths = |volume: f64| (volume * 100.0).round();
-        if hundredths(old_volume) != hundredths(volume) {
+        if !same_volume(old_volume, volume) {
             self.notify_volume();
         }
     }
+}
+
+// Whether two volumes are the same to two digits, which is all that the
+// slider and the controllers go by
+pub(crate) fn same_volume(a: f64, b: f64) -> bool {
+    let hundredths = |volume: f64| (volume * 100.0).round();
+    hundredths(a) == hundredths(b)
+}
+
+// Whether a volume is as good as none. This is the one test of being muted,
+// so that the icon, the mute button and what's saved can't disagree. It takes
+// in all that the slider shows as empty, not only 0: steps of 0.05 on the way
+// down can add up to about 1e-17, and a drag, MPRIS or a mixer can each leave
+// a volume under a hundredth
+pub(crate) fn is_muted(volume: f64) -> bool {
+    same_volume(volume, 0.0)
 }
 
 impl Default for PlayerState {
@@ -281,6 +296,15 @@ mod tests {
             recorded.borrow_mut().push(pspec.name().to_string());
         });
         notified
+    }
+
+    #[test]
+    fn a_volume_under_a_hundredth_is_muted() {
+        assert!(is_muted(0.0));
+        assert!(is_muted(1e-17));
+        assert!(is_muted(0.004));
+        assert!(!is_muted(0.01));
+        assert!(!is_muted(0.05));
     }
 
     #[test]

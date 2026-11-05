@@ -8,7 +8,7 @@ use glib::clone;
 use gtk::{CompositeTemplate, gdk, glib, prelude::*};
 use log::debug;
 
-use crate::audio::VOLUME_STEP;
+use crate::audio::{VOLUME_STEP, is_muted};
 
 mod imp {
     use glib::subclass::Signal;
@@ -39,9 +39,6 @@ mod imp {
         #[template_child]
         pub(crate) volume_high_image: TemplateChild<gtk::Image>,
 
-        #[property(get, set = Self::set_toggle_mute, explicit_notify)]
-        pub(crate) toggle_mute: Cell<bool>,
-        pub(crate) prev_volume: Cell<f64>,
         // Whether the slider is following the player, see `show_volume()`
         pub(crate) showing_volume: Cell<bool>,
     }
@@ -58,8 +55,6 @@ mod imp {
             klass.set_layout_manager_type::<gtk::BoxLayout>();
             klass.set_css_name("volume");
             klass.set_accessible_role(gtk::AccessibleRole::Group);
-
-            klass.install_property_action("volume.toggle-mute", "toggle-mute");
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -109,18 +104,6 @@ mod imp {
             self.volume_scale.set_value(volume);
             self.showing_volume.set(false);
         }
-
-        fn set_toggle_mute(&self, muted: bool) {
-            if muted != self.toggle_mute.replace(muted) {
-                if muted {
-                    self.prev_volume.replace(self.volume_scale.value());
-                    self.volume_scale.set_value(0.0);
-                } else {
-                    self.volume_scale.set_value(self.prev_volume.get());
-                }
-                self.obj().notify_toggle_mute();
-            }
-        }
     }
 }
 
@@ -152,7 +135,7 @@ impl VolumeControl {
                 self,
                 move |adj, _| {
                     let value = adj.value();
-                    if value == adj.lower() {
+                    if is_muted(value) {
                         this.imp()
                             .volume_low_button
                             .set_icon_name("audio-volume-muted-symbolic");

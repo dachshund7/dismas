@@ -130,6 +130,11 @@ All notable changes to this project will be documented in this file.
   Dismas, with the volume flipping between two values
 - A music file with a name megabytes long in its tags, which only a
   crafted file has, slowed down the lists of composers and performers
+- The mute button did nothing after Dismas was closed while muted, or once
+  the volume was dragged or stepped down to nothing; it now goes back to the
+  volume from before, which is kept for the next start
+- With the volume raised again after muting, the mute button went back to
+  the volume from before muting, rather than muting
 
 ### Removed
 

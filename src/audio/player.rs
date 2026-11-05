@@ -6,7 +6,7 @@ use std::{
     collections::HashSet,
     fmt::{self, Display, Formatter},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use async_channel::{Receiver, Sender};
@@ -20,7 +20,7 @@ use crate::{
     application::ApplicationAction,
     audio::{
         Controller, GstBackend, InhibitController, MprisController, PlayerState, Queue, RemovedRun,
-        SleepTimer, TimerEnd, Track, TrackSource, WaveformGenerator,
+        SleepTimer, TimerEnd, Track, TrackSource, WaveformGenerator, is_muted, same_volume,
     },
     play_stats::{self, Listen, ListenTracker},
     utils,
@@ -37,24 +37,91 @@ const SEEK_STEP: Duration = Duration::from_secs(10);
 // than going to the track before
 const PREVIOUS_RESTARTS_AFTER: u64 = 10;
 
-// How long a new volume waits to be saved, so that dragging the slider,
-// which changes it many times, saves it a few times
+// How long the volume has to stay the same to be saved, so that dragging
+// the slider, which changes it many times, saves it once
 const VOLUME_SAVE_DELAY: Duration = Duration::from_millis(500);
 
-// The volume waiting to be saved, and the timeout that saves it
+// How long a volume has to stay to be the one the mute button goes back to:
+// longer than the pauses between the steps of a key or a wheel
+const UNMUTED_VOLUME_DELAY: Duration = Duration::from_secs(5);
+
+// Follows the volume for the one the mute button goes back to: the last one
+// that stayed, so that coming down to 0 with pauses doesn't leave the last
+// step before 0, which can't be heard. A volume only counts once it's known,
+// from the settings, the backend or the user: until the first report, the
+// player's own is a placeholder
 #[derive(Default)]
-struct PendingVolume {
-    volume: Cell<Option<f64>>,
-    source: RefCell<Option<glib::SourceId>>,
+struct UnmutedVolume {
+    stayed: Option<f64>,
+    // The volume now, unless it's muted, and since when
+    latest: Option<(f64, Instant)>,
 }
 
-impl PendingVolume {
-    fn save(&self, settings: &gio::Settings) {
-        if let Some(volume) = self.volume.take()
-            && let Err(e) = settings.set_double("volume", volume)
-        {
-            error!("Unable to save the volume: {e}");
+impl UnmutedVolume {
+    // A saved volume has stayed already
+    fn starting_at(volume: f64, now: Instant) -> Self {
+        let mut unmuted = Self::default();
+        unmuted.follow(volume, now);
+        unmuted.keep_latest();
+        unmuted
+    }
+
+    fn follow(&mut self, volume: f64, now: Instant) {
+        if let Some((latest, since)) = self.latest {
+            // The backend's report of a volume it was given
+            if same_volume(latest, volume) {
+                return;
+            }
+            if now.duration_since(since) >= UNMUTED_VOLUME_DELAY {
+                self.stayed = Some(latest);
+            }
         }
+        self.latest = (!is_muted(volume)).then_some((volume, now));
+    }
+
+    // The mute button was pressed at the volume now, however new it is
+    fn keep_latest(&mut self) {
+        if let Some((latest, _)) = self.latest {
+            self.stayed = Some(latest);
+        }
+    }
+}
+
+// The volume waiting to be saved, the timeout that saves it, and the volume
+// to go back to
+#[derive(Default)]
+struct KeptVolume {
+    volume: Cell<Option<f64>>,
+    source: RefCell<Option<glib::SourceId>>,
+    unmuted: RefCell<UnmutedVolume>,
+}
+
+impl KeptVolume {
+    fn save(&self, settings: &gio::Settings) {
+        let Some(volume) = self.volume.take() else {
+            return;
+        };
+        save_volume_setting(settings, "volume", volume);
+        // The saved volume of a muted player is 0, so the one to go back to
+        // has to outlast a restart as well
+        if is_muted(volume)
+            && let Some(unmuted) = self.unmuted.borrow().stayed
+        {
+            save_volume_setting(settings, "unmuted-volume", unmuted);
+        }
+    }
+}
+
+// Saves a volume, unless it's there already: each start reports the saved
+// volume back, and each change of a setting writes the whole database of
+// dconf
+fn save_volume_setting(settings: &gio::Settings, key: &str, volume: f64) {
+    let saved = settings.user_value(key).and_then(|saved| saved.get());
+    if saved.is_some_and(|saved| same_volume(saved, volume)) {
+        return;
+    }
+    if let Err(e) = settings.set_double(key, volume) {
+        error!("Unable to save {key}: {e}");
     }
 }
 
@@ -243,7 +310,7 @@ pub(crate) struct AudioPlayer {
     // than go round a queue none of whose tracks plays, or go on through
     // one whose every track fails
     failed: RefCell<HashSet<Track>>,
-    pending_volume: Rc<PendingVolume>,
+    kept_volume: Rc<KeptVolume>,
 }
 
 impl fmt::Debug for AudioPlayer {
@@ -285,10 +352,14 @@ impl AudioPlayer {
         // given one, it keeps it. Until a volume is saved, PulseAudio's
         // stays, rather than the default
         let settings = utils::settings_manager();
+        let kept_volume = KeptVolume::default();
         if settings.user_value("volume").is_some() {
             let volume = settings.double("volume");
             state.set_volume(volume);
             backend.set_volume(volume);
+            kept_volume
+                .unmuted
+                .replace(UnmutedVolume::starting_at(volume, Instant::now()));
         }
 
         let repeat_mode = RepeatMode::from(settings.enum_("repeat-mode"));
@@ -311,7 +382,7 @@ impl AudioPlayer {
             finished: Cell::new(false),
             listens: RefCell::default(),
             failed: RefCell::default(),
-            pending_volume: Rc::default(),
+            kept_volume: Rc::new(kept_volume),
         });
 
         res.setup_channel();
@@ -1018,46 +1089,62 @@ impl AudioPlayer {
         self.update_can_go_previous();
     }
 
-    // Shows the volume the backend reports, and saves it once it stops
-    // changing: each change of a setting writes the whole database of dconf
+    // Takes in a volume from the backend or the user: shows it, saves it once
+    // it stops changing, and follows it for the mute button
     fn update_volume(&self, volume: f64) {
         debug!("Updating volume to: {volume}");
         self.state.set_volume(volume);
 
-        let pending = &self.pending_volume;
-        pending.volume.set(Some(volume.clamp(0.0, 1.0)));
-        if pending.source.borrow().is_some() {
-            return;
+        let volume = volume.clamp(0.0, 1.0);
+        let kept = &self.kept_volume;
+        kept.volume.set(Some(volume));
+        kept.unmuted.borrow_mut().follow(volume, Instant::now());
+        if let Some(source) = kept.source.take() {
+            source.remove();
         }
         let source = glib::timeout_add_local_once(
             VOLUME_SAVE_DELAY,
             clone!(
                 #[weak]
-                pending,
+                kept,
                 #[strong(rename_to = settings)]
                 self.settings,
                 move || {
-                    pending.source.take();
-                    pending.save(&settings);
+                    kept.source.take();
+                    kept.save(&settings);
                 }
             ),
         );
-        pending.source.replace(Some(source));
+        kept.source.replace(Some(source));
     }
 
     // Saves the volume right away, when quitting
     pub(crate) fn save_volume(&self) {
-        if let Some(source) = self.pending_volume.source.take() {
+        if let Some(source) = self.kept_volume.source.take() {
             source.remove();
         }
-        self.pending_volume.save(&self.settings);
+        self.kept_volume.save(&self.settings);
     }
 
     // Shown right away, so that quick steps add up before the backend
-    // reports the volume
+    // reports the volume, and kept right away, as Dismas can quit before that
     pub(crate) fn set_volume(&self, volume: f64) {
-        self.state.set_volume(volume);
+        self.update_volume(volume);
         self.backend.set_volume(volume);
+    }
+
+    // Mutes, or goes back to the volume from before. Being muted only depends
+    // on the volume, however it got there, so nothing can go out of step with
+    // the slider, with MPRIS or with the volume saved at the last quit
+    pub(crate) fn toggle_mute(&self) {
+        let unmuted = &self.kept_volume.unmuted;
+        if is_muted(self.state.volume()) {
+            let stayed = unmuted.borrow().stayed;
+            self.set_volume(stayed.unwrap_or_else(|| self.settings.double("unmuted-volume")));
+        } else {
+            unmuted.borrow_mut().keep_latest();
+            self.set_volume(0.0);
+        }
     }
 
     fn step_volume(&self, steps: i32) {
@@ -1187,6 +1274,62 @@ pub(super) fn plays_in_album_order(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stepping_down_with_pauses_goes_back_to_the_volume_from_before() {
+        let start = Instant::now();
+        let mut unmuted = UnmutedVolume::starting_at(0.6, start);
+        let mut now = start + Duration::from_secs(60);
+        for volume in [0.55, 0.3, 0.05, 1e-17] {
+            unmuted.follow(volume, now);
+            now += Duration::from_secs(1);
+        }
+        assert_eq!(unmuted.stayed, Some(0.6));
+    }
+
+    #[test]
+    fn a_volume_that_stayed_is_the_one_to_go_back_to() {
+        let start = Instant::now();
+        let mut unmuted = UnmutedVolume::starting_at(0.6, start);
+        unmuted.follow(0.3, start);
+        // The backend's report of it doesn't start the wait again
+        unmuted.follow(0.300_000_1, start + Duration::from_secs(1));
+        unmuted.follow(0.0, start + UNMUTED_VOLUME_DELAY);
+        assert_eq!(unmuted.stayed, Some(0.3));
+    }
+
+    #[test]
+    fn the_mute_button_keeps_the_volume_it_is_pressed_at() {
+        let start = Instant::now();
+        let mut unmuted = UnmutedVolume::starting_at(0.6, start);
+        unmuted.follow(0.8, start);
+        unmuted.keep_latest();
+        unmuted.follow(0.0, start);
+        assert_eq!(unmuted.stayed, Some(0.8));
+    }
+
+    #[test]
+    fn a_muted_start_leaves_the_saved_volume_to_go_back_to() {
+        let start = Instant::now();
+        let mut unmuted = UnmutedVolume::starting_at(0.0, start);
+        assert_eq!(unmuted.stayed, None);
+
+        // A slider raised and lowered at once doesn't replace it
+        unmuted.follow(0.3, start);
+        unmuted.follow(0.0, start + Duration::from_secs(1));
+        assert_eq!(unmuted.stayed, None);
+    }
+
+    #[test]
+    fn no_volume_is_kept_before_one_is_known() {
+        let mut unmuted = UnmutedVolume::default();
+        unmuted.keep_latest();
+        assert_eq!(unmuted.stayed, None);
+
+        unmuted.follow(1.0, Instant::now());
+        unmuted.keep_latest();
+        assert_eq!(unmuted.stayed, Some(1.0));
+    }
 
     #[test]
     fn repeat_mode_round_trips_through_the_setting() {
