@@ -350,25 +350,50 @@ lyricsview.zoom-200 list.synced-lyrics {
   font-size: 200%;
 }
 
-/* The lines of synchronized lyrics: the one sung is in the accent color,
- * and the others are dimmed, which leaves the height of the rows alone */
+/* The lines of synchronized lyrics: the others are dimmed, and the one sung
+ * is plain text on a tint of the accent color, which leaves the height of
+ * the rows alone. The text isn't in the accent color: that's about as light
+ * as a dimmed line, whatever the cover or the system's accent, so only the
+ * hue told them apart, and a muted cover has too little of it to see in thin
+ * letters. The tint and the padding are the label's, so that the tint fills
+ * the row, whose own background still shows through it on hover and when
+ * pressed. The rows end short of the thin scrollbar, which goes over the
+ * list; only its wider form, under the pointer, reaches the tint. The left
+ * is the same, so that the tint sits evenly, and the text is as far in as
+ * the plain lyrics */
 list.synced-lyrics > row {
-  padding: 6px 18px;
+  margin: 0 9px;
+  padding: 0;
+  border-radius: 9px;
 }
 
 list.synced-lyrics > row > label {
+  padding: 6px 9px;
+  border-radius: 9px;
   opacity: 0.55;
-  transition: opacity 200ms ease, color 200ms ease;
+  transition: opacity 200ms ease, background-color 200ms ease, box-shadow 200ms ease;
 }
 
 list.synced-lyrics > row.current > label {
   opacity: 1;
-  color: var(--accent-color);
+  background-color: color-mix(in srgb, var(--accent-bg-color) 25%, transparent);
 }
 
+/* The other lines are hardly dimmed here, so the line sung also gets a solid
+ * bar at its start. A fill of the accent color would leave the text with
+ * less contrast than the dimmed lines, and a frame would hide the focus
+ * ring, which is the same color in the same place */
 @media (prefers-contrast: more) {
   list.synced-lyrics > row > label {
     opacity: 0.8;
+  }
+
+  list.synced-lyrics > row.current > label {
+    box-shadow: inset 4px 0 var(--accent-color);
+  }
+
+  list.synced-lyrics > row.current > label:dir(rtl) {
+    box-shadow: inset -4px 0 var(--accent-color);
   }
 }
 

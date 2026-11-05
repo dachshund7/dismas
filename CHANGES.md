@@ -68,6 +68,9 @@ All notable changes to this project will be documented in this file.
 - Ctrl+3 shows the works, rather than Ctrl+4, as the Tracks page is gone
 - Open Directory, in the menus of tracks and albums, is Open Folder, the
   word the rest of Dismas uses
+- The line being sung in synchronized lyrics stands out with any cover or
+  accent color, as plain text on a tint of the accent color, where the
+  accent color on its own was about as light as the dimmed lines
 - Update dependencies, including rusqlite 0.41, which needs SQLite 3.45.3 or
   later
 
