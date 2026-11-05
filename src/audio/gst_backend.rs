@@ -110,9 +110,19 @@ struct Gapless {
     // Whether ReplayGain takes the album gain or the track gain of each
     // track by whether it plays as part of its album (`album_order`)
     auto_gain: bool,
+    // Whether the pipeline had an error since the last track was loaded
+    failed: bool,
 }
 
 impl Gapless {
+    // Whether the next track can be handed over now. A track that failed
+    // ends as well, which asks for the next one, and the error would then
+    // be taken for that track's, as it would have been handed over by the
+    // time GstPlay passes the error on
+    fn can_hand_over(&self) -> bool {
+        self.pending_loads == 0 && self.handed.is_none() && !self.failed
+    }
+
     // The track the pipeline plays
     fn playing(&self) -> Option<&TrackSource> {
         self.advanced.as_ref().or(self.current.as_ref())
@@ -612,7 +622,10 @@ impl GstBackend {
             };
             let next = {
                 let mut gapless = gapless.lock().unwrap();
-                if gapless.pending_loads > 0 || gapless.handed.is_some() {
+                if !gapless.can_hand_over() {
+                    if gapless.failed {
+                        debug!("Not handing over the next track after an error");
+                    }
                     return None;
                 }
                 // playbin plays the next file from its start, after the end
@@ -660,6 +673,11 @@ impl GstBackend {
         bus.enable_sync_message_emission();
         let gapless = self.gapless.clone();
         let sender = self.sender.clone();
+        // Right when it happens: GstPlay passes errors on later
+        let failed = self.gapless.clone();
+        bus.connect_sync_message(Some("error"), move |_, _| {
+            failed.lock().unwrap().failed = true;
+        });
         bus.connect_sync_message(Some("stream-start"), move |_, _| {
             let mut gapless = gapless.lock().unwrap();
             if gapless.started {
@@ -715,6 +733,7 @@ impl GstBackend {
                         let mut gapless = gapless.lock().unwrap();
                         gapless.handed = None;
                         gapless.started = false;
+                        gapless.failed = false;
                         gapless.pending_loads = gapless.pending_loads.saturating_sub(1);
                         let loaded = gapless.pending_loads == 0;
                         drop(gapless);
@@ -1257,6 +1276,14 @@ mod tests {
             seek_destination(ms(199_900), ms(200_500), ms(10_000), Forward),
             Some(ms(200_500))
         );
+    }
+
+    #[test]
+    fn a_track_that_failed_hands_nothing_over() {
+        let mut gapless = Gapless::default();
+        assert!(gapless.can_hand_over());
+        gapless.failed = true;
+        assert!(!gapless.can_hand_over());
     }
 
     #[test]

@@ -118,6 +118,8 @@ All notable changes to this project will be documented in this file.
   album artist tag, which only a crafted file has, cut off the desktop's
   media controls when it became the current track, until Dismas was
   started again
+- When a track failed partway through, the next track was said to be the
+  one that couldn't play, and was skipped, though nothing was wrong with it
 
 ### Removed
 
