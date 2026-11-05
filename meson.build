@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 project('dismas', 'rust',
-  version: '2026.11',
+  version: '2026.11.1',
   license: ['GPL-3.0'],
   meson_version: '>= 0.60.0',
   default_options: [ 'warning_level=2', ],

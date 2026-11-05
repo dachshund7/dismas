@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.11.1] - 2026-11-05
+
+### Added
+
 - The Performers list has an Artists section, with the album artists of
   albums that aren't classical works, such as bands, even when the tags
   credit the band's members, or the artists of the tracks of a
@@ -94,7 +104,7 @@ All notable changes to this project will be documented in this file.
 - Once a dialog had closed, Enter on a row of the Playlists page, or of
   any list on a page other than the player, played or paused instead of
   opening the row
-- The Menu key and Shift+F10 open the menu of a playlist on the
+- The Menu key and Shift+F10 didn't open the menu of a playlist on the
   Playlists page, as they do on the rows of other lists
 - A music file whose ID3v2 tag held chapters nested inside each other
   dozens deep, which only a crafted file does, crashed Dismas, and at
@@ -126,8 +136,8 @@ All notable changes to this project will be documented in this file.
   started again
 - When a track failed partway through, the next track was said to be the
   one that couldn't play, and was skipped, though nothing was wrong with it
-- Quick changes to the volume from the tray or over MPRIS could freeze
-  Dismas, with the volume flipping between two values
+- Quick changes to the volume from the tray could freeze Dismas, with the
+  volume flipping between two values
 - A music file with a name megabytes long in its tags, which only a
   crafted file has, slowed down the lists of composers and performers
 - The mute button did nothing after Dismas was closed while muted, or once
