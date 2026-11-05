@@ -3,217 +3,125 @@ Dismas
 
 ![Application icon](./data/icons/hicolor/scalable/apps/io.github.dachshund7.Dismas.svg)
 
-A player for the music on your computer, written in Rust with GTK4 and
-libadwaita. It fits in well on GNOME desktops.
+A player for the music on your computer, with an album grid, a powerful
+search, playlists, and the works, movements and performers that classical
+music needs. It's written in Rust with GTK4 and libadwaita, and fits in well
+on GNOME desktops.
 
 Dismas is a fork of [Amberol](https://gitlab.gnome.org/World/amberol) by
-Emmanuele Bassi. Amberol sets out to play music and nothing else: it doesn't
-manage a collection or playlists. Dismas keeps Amberol's look and its
-GStreamer core, and adds the album grid and the playlists that Amberol leaves
-out on purpose. Whatever it adds, Dismas holds to these rules:
+Emmanuele Bassi. It holds to these rules:
 
 - **It only reads your music.** Dismas never changes your music files or
-  folders. It doesn't edit tags, rename or move files, or save covers next to
-  your tracks. Its library, playlists, play history and caches are kept in
-  folders of its own, `~/.local/share/dismas` and `~/.cache/dismas`. The only
-  file it writes anywhere else is a playlist that you export, where you choose
-  to save it. The Flatpak can read the Music folder, but can't write to it.
-- **It doesn't need the network.** Dismas doesn't download covers, lyrics or
-  artist biographies, and it has no accounts, no streaming and no telemetry.
-  Everything it shows comes from your files: their tags, their covers, and
-  the cover files next to them. The Flatpak has no network access at all. The
-  MusicBrainz links in Track Information open in your web browser.
-- **What you listen to stays on your computer.** Dismas keeps a history of
-  the tracks you play, for the smart playlists and the shuffle, in a
-  database of its own, and doesn't send it anywhere. You can stop keeping
-  it, or clear it, in Preferences.
+  folders: it doesn't edit tags, rename or move files, or save covers next
+  to your tracks. Its library, playlists, play history and caches stay in
+  `~/.local/share/dismas` and `~/.cache/dismas`, and the only file it writes
+  anywhere else is a playlist you export.
+- **It doesn't need the network.** It has no accounts, no streaming and no
+  telemetry, and it doesn't download covers, lyrics or biographies: everything
+  it shows comes from your files. The Flatpak has no network access at all.
+  The MusicBrainz links in Track Information open in your web browser.
+- **What you listen to stays on your computer.** The play history, which the
+  smart playlists and the shuffle use, is never sent anywhere. You can stop
+  keeping it, or clear it, in Preferences.
 - **It's a GNOME app.** It's built with libadwaita, follows the light or dark
   style of the desktop, and fits in a window as narrow as 360 pixels, as on a
   phone.
 
-Dismas is not affiliated with the upstream project. Please don't report its
-bugs upstream or send its changes there. Upstream doesn't accept
-contributions made with AI tools, and much of Dismas was written with Claude.
-
-What Dismas adds
-----------------
+Features
+--------
 
 - **Album grid:** browse the albums in your music folders, sorted by artist,
-  title, year or date added, and select albums or tracks to play or to add
-  to a playlist. Right-click an album, or long-press it, to play it, play it
-  next, or add it to a playlist. The Music folder is the default. Other
-  folders, like one on a second drive, can be added in Preferences, where
-  each folder can also leave out folders inside it, such as audiobooks or
-  podcasts. While a folder isn't there, as when its drive isn't plugged in,
-  its albums are hidden, and they come back without being read again. New,
-  changed and removed tracks show up by themselves, a couple of seconds
-  after their files stop changing.
-- **Search by any tag:** searching the albums or the queue looks in every
-  tag of the tracks, not just the title, artist and album. Find a recording
-  by its conductor, soloist, orchestra, ensemble, composer, work or label,
-  and combine them: "Karajan Brahms" finds the tracks with both. Case and
-  accents don't matter, so "dvorak" finds Dvořák. With the Work Hierarchy
-  plugin, a work is also found by its other names on MusicBrainz, such as
-  "Trout" for Schubert's "Forellenquintett". Searching the albums shows the
-  albums with a track that matches, and the cover of each says how many of
-  its tracks match. Adding or playing one takes the whole album, or only
-  those tracks while the Tracks toggle beside the Sort button is on
-  (Ctrl+T). The button next to the queue's search plays only the tracks it
-  found, in place of the queue, with an Undo. The Composers button next to
-  the album search lists the composers of your albums, sorted by their last
-  names; pick one to see only their albums, with only the tracks that are
-  theirs. The Performers button next to it does the same for the conductors,
-  the ensembles and the soloists, with what they play or sing, and for the
-  artists, such as bands, by the album artist of their albums, and picking a
-  composer and a performer shows the albums where they meet; once one is
-  picked, the other list has only the names that go with it. The Works page,
-  next to the albums, lists the works instead, by composer and in the order
-  of their catalogue numbers, with the number of their recordings, and keeps
-  the search and what you picked; open one to see the covers of the albums
-  it's recorded on, with their performers and years, and play, add or select
-  its recordings. Go to Work, in the menu of a movement, opens its work
-  there, with the movement's album pointed out.
-- **Search syntax:** both searches also take fields, comparisons and
-  ranges, as in `composer:bach year:<1970`, `catalogue:bwv1046..1051`,
-  `released:-30d` (in the last 30 days) or `length:>10min`. Words next to
-  each other must all match; `OR` takes either, and goes after them, so
-  `(bach OR handel) cantata` needs its parentheses; `-live` or `NOT live`
-  leaves tracks out; quotes keep a phrase together. `composer:bach` finds
-  "bach" in the composers, and `composer:="johann sebastian bach"` only that
-  whole name; `composer:(bach OR handel)` looks for either in that field;
-  `has:composer` finds the tracks with a composer, and `-has:composer`
-  those without one. Classical fields find what MusicBrainz knows of a
-  track: `work:`, `movement:`, `form:cantata` (the kind of work, with the
-  Work Hierarchy plugin), `catalogue:` (BWV, K., op. and others, however
-  they're spaced), `conductor:`, `ensemble:`, `soloist:`, `role:piano` and
-  `people:` (anyone credited). Flags such as `is:live`, `is:movement`,
-  `is:lossless` and `is:favorite` find the tracks they name, and the play
-  history and the hearts are searched too: `plays:10.. played:<-2m` finds
-  the tracks played often but not in the last two months, and `added:-30d`,
-  `favorited:2026`, `is:favorite-album` and `is:favorite-work` what they
-  say; `played:` is the last time a track was listened to for 30 seconds
-  or more. Dates are a year, a month or a day (`2026-10`), or a time ago,
-  `-30d`, `-2w`, `-6m` or `-1y`; `path:bach/cantatas` looks for folders
-  from the start of their names, and `disc:` is the disc number in the
-  tags. A search with a mistake, like `year:abc`, finds nothing, and a
-  line under it says why. Search Syntax, in the main menu, lists every
-  field. In the album search, an album shows when any of its tracks
-  matches, so `-live` keeps an album with a track that isn't live;
-  `-releasetype:live` leaves out live albums.
-- **Playlists:** save the queue as a playlist, and create, rename and delete
-  playlists. Switch between them from the title of the playlist pane. On the
-  Playlists page, a click on a playlist lists its tracks in the pane without
-  switching to it, so the music goes on; Play there, or Switch To in its
-  menu, switches to it. Add to Playlist, in the menu of a track, adds it to
-  another playlist without switching to it too. Each playlist resumes where
-  it was, paused at the same track and position, when you switch back to it
-  and when Dismas starts. Tracks whose files are missing, such as on a drive
-  that isn't plugged in, or can't be read, stay in their places in the
-  playlist, greyed out, and playback skips them until their files are back.
-  Import and export M3U playlists. Exported paths are relative to the
-  playlist's folder, so you can copy a playlist along with the music to
-  another device. Importing also finds the tracks of a playlist made on
-  another computer or on Windows, like
-  `C:\Users\…\Music\Artist\Album\01.flac`, in the playlist's folder or
-  in the music folders, whatever the case of their names.
-- **Smart playlists and favorites:** mark tracks as favorites with the heart
-  next to the sleep timer, or with Ctrl+D; the heart beside the album search
-  shows the favorite albums, or the albums with favorite tracks while the
-  Tracks toggle is on, and Select All and Play there play them. On the
-  Playlists page, Recently Played shows the last 100 tracks you heard, Most
-  Played the tracks you played the most in the last 6 months, and Not Heard
-  Lately the tracks you played the most but haven't heard in the last 2
-  months: a click lists them in the pane, and Play there plays them in place
-  of the queue, with an Undo. Works and particular recordings can be
-  favorites too, from their menus: the Works page marks them with a heart
-  and can show only them. Play a Random Album, or Track with the Tracks
-  toggle on, or Work, in the menu of the album pages, plays one of the
-  albums, tracks or works the page shows, picked at random, more likely one
-  you haven't heard lately, in place of the queue, with an Undo.
-- **Queue editing and drag and drop:** drag tracks by their handle, or
-  move them with Alt+Up and Alt+Down, to reorder them, and select ranges
-  with Shift+click. Play Next, in the menu of a track, puts it after the
-  playing track, or after the last movement of the work that's playing.
-  The sort button puts the playlist in order once, by album, artist,
-  composer, title, year or file name, keeping the movements of a work
-  together. Sorting, removing tracks and Remove All can be undone with
-  the toast's Undo or Ctrl+Z. Drop files between the tracks of the
-  playlist pane, or drag albums from the grid into place there. Elsewhere
-  on the window, files go to one of two zones: the large one adds them to
-  the selected playlist, and the one below it plays them in place of the
-  queue, with an Undo.
-- **Classical music:** the queue and the album view show the name of each
-  work above its movements, the album view shows where each disc starts,
-  and the player and the queue show the composers and the performers,
-  naming an orchestra or a choir and its soloists rather than every
-  player. Track Information shows the work, the performers and the
-  production credits. Albums and recordings go by the year they were
-  recorded, or else first released, rather than the year of a reissue,
-  and the tracks of an album show it with the record label and catalogue
-  number. Open Booklet, in the menus of an album and of a track and over
-  an album's tracks, opens any PDF in the album's folder, such as the
-  booklet that comes with a download. Dismas reads the tags written by the
-  [Work Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin
-  for Picard, in FLAC, Ogg, Opus, MP3, M4A, AIFF, WAV, Monkey's Audio,
-  WavPack and Musepack files; from version 0.4, it also writes when each
-  recording was made, and from version 0.5, which works are arrangements
-  of others, which the Works page marks. MusicBrainz names some composers
-  in the script of their language, such as Валентин Сильвестров; to have
-  their names in Latin letters, turn on "Translate artist names" and "Use
-  artist sort name for translation" in Picard's Metadata options before
-  tagging.
+  title, year or date added. Add folders in Preferences, such as one on a
+  second drive, and leave out folders inside them. New, changed and removed
+  tracks show up by themselves, and the albums of a drive that's unplugged
+  come back with it.
+- **Search by any tag:** the album search and the queue search look in every
+  tag, not just the title, artist and album, so "Karajan Brahms" finds a
+  recording by its conductor and its composer. Case and accents don't matter,
+  so "dvorak" finds Dvořák. An album that only partly matches says how many
+  of its tracks do, and the Tracks toggle (Ctrl+T) plays or adds only those.
+- **Search syntax:** both searches take fields, ranges, dates, `OR` and `NOT`,
+  and know what you've listened to:
+  - `catalogue:bwv1046..1051 year:<1970` finds the Brandenburg Concertos in
+    recordings from before 1970
+  - `(beatles OR kinks) year:1966 -is:live` finds the tracks of either band
+    from 1966, leaving out live recordings
+  - `plays:10.. played:<-2m` finds what you've played ten times or more, but
+    not in the last two months
+
+  Search Syntax, in the main menu, lists every field, and the
+  [wiki](https://github.com/dachshund7/dismas/wiki/Search-syntax-examples)
+  has many more examples.
+- **Composers and performers:** the buttons beside the album search list the
+  composers of your albums, and their conductors, ensembles, soloists and
+  bands. Pick one to see their albums, or one of each to see where they meet.
+- **Works:** the Works page lists the works by composer, in the order of their
+  catalogue numbers, with how many recordings each has. Open one to compare
+  the albums it's recorded on, or go there from a movement with Go to Work.
+- **Classical music:** the queue and the album view show each work above its
+  movements, and the player names the composers and the performers. Albums
+  and recordings go by the year they were recorded, or else first released,
+  rather than the year of a reissue. Track Information shows the work, the
+  performers and the production credits, and Open Booklet opens any PDF in an
+  album's folder. Dismas reads the tags written by the
+  [Work Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for
+  Picard, and the wiki lists the
+  [Picard settings](https://github.com/dachshund7/dismas/wiki/Picard-settings)
+  that give it the most to show.
+- **Playlists:** save the queue as a playlist, and import and export M3U
+  files. A click on the Playlists page shows a playlist's tracks in the pane
+  while the music goes on. Each playlist resumes where it was, when you switch
+  back to it and when Dismas starts, and tracks whose files are missing stay
+  in their places, greyed out, until they're back.
+- **Smart playlists and favorites:** Recently Played, Most Played and Not
+  Heard Lately pick tracks from what you've listened to. Mark tracks, albums,
+  works and recordings as favorites, and play a random album, track or work,
+  more likely one you haven't heard lately.
+- **Queue:** drag tracks to reorder them, or use Alt+Up and Alt+Down. Play
+  Next puts a track after the playing one, or after the last movement of the
+  work that's playing. Sort the playlist once by album, artist, composer,
+  title, year or file name, and undo sorting or removing tracks with Ctrl+Z.
+  Drop files and albums between the tracks, where you want them.
+- **Gapless playback:** tracks play back to back, so movements and live
+  recordings that run into each other aren't cut by a gap.
+- **Shuffle:** it goes by what you've heard. Tracks heard in the last few days
+  tend to go toward the end, and tracks played often but not heard for a while
+  tend to come early. The movements of a work stay together and in order, the
+  same artist doesn't come twice in a row, and turning shuffle off puts back
+  the order from before.
+- **ReplayGain:** choose Album, Track, or Automatic, which takes the album gain
+  while an album plays in order and the track gain otherwise, and set a
+  pre-amp. Dismas reads ReplayGain tags and the R128 gains of Opus files. It
+  doesn't measure tracks itself, as it never changes your files; a tool such
+  as [rsgain](https://github.com/complexlogic/rsgain) can tag them.
 - **CUE sheets:** an album ripped to a single file is split into its tracks
-  by its CUE sheet, a `.cue` file next to it or a `CUESHEET` tag, in the
-  album grid, the queue and playlists. Each track gets its own ReplayGain.
-- **Other file types:** files in a format whose tags Dismas can't read
-  itself, such as Ogg FLAC, Matroska, WebM, WMA, TrueAudio and AC-3, are
-  read through GStreamer, as long as it has the plugins to play them (for
-  WMA, the ugly plugins and gst-libav). Each file is read in a sandboxed
-  process of its own, which can only read the system's files and that one
-  file, with Landlock and seccomp on Linux, so a crafted file that crashed
-  or exploited a GStreamer plugin only leaves that file unread. GStreamer
-  reads fewer of their tags.
-  In WMA files, it loses the composer and the genre, takes the album
-  artist for a second artist, and only reads a track number written as a
-  number alone ("3", not "3/24"), and a year written as `WM/Year`, as
-  Windows Media Player writes them. In Matroska files written by FFmpeg, it
-  loses the track number and the date, and it takes a conductor for a
-  performer.
-- **Lyrics:** Lyrics, in the More menu of the player (Ctrl+Shift+L), shows
-  the lyrics of the playing track in the playlist pane: those of an LRC
-  file next to it with the same name, as lyrics downloaders write them, or
-  of a text file (`.txt`), or else those in its tags. Synchronized lyrics,
-  in the LRC format or in an MP3's SYLT frame, follow the music, with the
-  line sung in the middle; a click on a line, or Enter, plays from it, and
-  scrolling them lets them be for a few seconds. A track of a CUE sheet
-  shows the part of its file's synchronized lyrics that it plays. In the
-  Flatpak, a track opened or dropped from outside the Music folder comes
-  without its lyrics files.
-- **Sleep timer:** stops the music after a set number of minutes. It can
-  stop right away, or let the track that's playing when time runs out finish
-  first. It can also stop the music at the end of the playing track, or at
-  the end of the work that's playing, once its last movement ends.
-- **Tray icon:** while Background Playback is on (it's off until turned on in
-  Preferences), Dismas shows an icon in the tray. Click it to show or close
-  the window, middle-click it to play or pause, scroll over it to change the
-  volume, or use its menu. It needs a tray that supports StatusNotifierItem:
-  KDE Plasma; the Xfce, Cinnamon, LXQt and Budgie panels; waybar and swaybar;
-  and Ubuntu's GNOME. Bars with only an XEmbed tray (i3bar, polybar, tint2,
-  stalonetray) need [snixembed](https://git.sr.ht/~steef/snixembed), which
-  doesn't pass on middle clicks or which way the wheel turns, and stock GNOME
-  needs the AppIndicator extension. Without a tray, the music still plays in
-  the background, and the media controls or opening Dismas again bring it
-  back.
-- **Layout:** the player fits itself to the window, and the cover and
-  waveform grow into any spare room. Turn off Show Waveform in Preferences
-  for a plain seek bar instead. With Zen Mode on, the controls fade out once
-  the pointer leaves the window, leaving the cover and the track details in
-  the middle, and the cover grows into the room the controls leave. In
-  fullscreen (F11), the player is by itself, larger, over a blurred copy of
-  the cover, and its controls fade out the same way while the pointer stays
-  still. The album covers, and the text of the lyrics, can be made larger
-  or smaller with Ctrl+plus and Ctrl+minus, with Ctrl and the mouse wheel,
-  or with a pinch; Ctrl+0 puts them back to their normal size.
+  by a `.cue` file next to it or a `CUESHEET` tag, each with its own
+  ReplayGain.
+- **Lyrics:** Ctrl+Shift+L shows the lyrics of the playing track in the pane,
+  from an LRC or text file next to it, or from its tags. Synchronized lyrics
+  follow the music, and a click on a line plays from it.
+- **Other file types:** formats whose tags Dismas can't read itself, such as
+  Ogg FLAC, Matroska, WMA, TrueAudio and AC-3, are read through GStreamer, as
+  long as it has the plugins to play them, though it reads fewer of their
+  tags. Each file is read in a sandboxed process of its own, so a crafted file
+  that crashed or exploited a plugin only leaves that file unread. Covers are
+  decoded in sandboxed
+  [glycin](https://gitlab.gnome.org/GNOME/glycin) loaders.
+- **Sleep timer:** stop the music after a set number of minutes, at the end of
+  the playing track, or at the end of the work that's playing.
+- **Background playback:** turned on in Preferences, it keeps the music going
+  with the window closed, and adds a tray icon to control it. The icon needs
+  a tray that supports StatusNotifierItem: stock GNOME needs the AppIndicator
+  extension, and bars with only an XEmbed tray need
+  [snixembed](https://git.sr.ht/~steef/snixembed).
+- **Media controls:** the desktop's media controls (MPRIS) can play, seek, and
+  change the volume and Shuffle, and they get each track's lyrics, rating and
+  play count.
+- **Layout:** the cover and the waveform grow into any spare room, and Match
+  Cover Art tints the window with the cover's colors. With Zen Mode on, the
+  controls fade out once the pointer leaves the window, and in fullscreen
+  (F11) the player sits by itself over a blurred copy of the cover. Ctrl+plus
+  and Ctrl+minus make the album covers and the lyrics larger or smaller.
 
 Screenshots
 -----------
@@ -230,135 +138,6 @@ Screenshots
 
 ![The player in a narrow window, in the colors of the cover](./data/screenshots/dismas3.png)
 ![The Playlists page in a narrow window, with the smart playlists](./data/screenshots/dismas2.png)
-
-Fixes and improvements over Amberol
------------------------------------
-
-Besides what it adds, Dismas changes some of what Amberol already does:
-
-- **Gapless playback:** tracks play back to back, so movements and live
-  recordings that run into each other aren't cut by a gap.
-- **Shuffle:** shuffling mixes up the whole playlist, with the playing track
-  at the top, where Amberol only mixed up the tracks after the playing one.
-  The order from before is kept, even when Dismas is restarted, until turning
-  shuffle off puts it back. It goes by what you've heard: tracks heard in the
-  last few days tend to go toward the end, and tracks played often but not
-  heard for a while tend to come early. The movements of a work stay together
-  and in order, and the same artist doesn't come twice in a row.
-- **ReplayGain:** besides Album and Track, Automatic takes the album gain
-  while the tracks of an album play in their order, and the track gain in
-  a shuffled queue or a playlist of tracks from many albums. A pre-amp
-  plays every track louder or quieter, but never past its peak. Dismas
-  reads the gains from the tags, both ReplayGain tags and the R128 gains
-  of Opus files, and doesn't measure tracks itself, as it never changes
-  your files; to tag music that has neither, scan it with a tool such as
-  [rsgain](https://github.com/complexlogic/rsgain).
-- **Searching the queue** looks for every word in every tag, rather than
-  fuzzy matching, keeps the order of the queue, and says so when it finds
-  nothing, rather than leaving the pane blank.
-- **Match Cover Art** tints the window with the cover's colors while keeping
-  the contrast of the text, takes the accent color from the cover, and turns
-  itself off in high contrast.
-- **Remembering:** Dismas remembers the volume, the repeat mode and whether
-  the playlist pane is open.
-- **Background playback:** closing the window while the music plays in the
-  background hides it, so it comes back as it was, rather than being made
-  again.
-- **The end of the queue:** once the queue has played to its end, the last
-  track stays shown, and playing again starts over from the first one.
-- **Covers:** tags and covers are read in parallel worker threads, and the
-  covers are decoded in sandboxed [glycin](https://gitlab.gnome.org/GNOME/glycin)
-  loaders, as a crafted image in a tag could otherwise attack the player. The
-  player shows the cover at full size, rather than scaled up from a small
-  copy. Cover files are found whatever their case or image type, such as
-  `Cover.JPG`, `folder.webp`, `front.png` or Windows Media Player's
-  `AlbumArt` files, in the album's folder for the tracks in a disc folder
-  like `CD1`, and a folder's only image is taken whatever its name.
-- **Missing tags:** a track without a title tag shows its file name, and a
-  track without an album tag shows the name of its folder, rather than
-  "Unknown title" and "Unknown album".
-- **Copy** (Ctrl+C) puts only the title and the artist of the playing track
-  on the clipboard, rather than a sentence in the language of the interface.
-- **Times** of an hour or more show the hours, as 1:15:00 rather than 75:00.
-- **Long names:** a title, artist or album too long for the player scrolls
-  through once, rather than over and over for as long as the track is shown,
-  which kept the processor busy.
-- **The cache:** the waveforms kept in the cache take a tenth of the room,
-  and the waveforms and covers in the cache that haven't been used for 90
-  days are removed, rather than kept for good.
-
-And it fixes these bugs of Amberol's:
-
-- Crashes on paths that aren't valid UTF-8, on files without a local path, on
-  tags that made the tag reader panic, and on a malformed saved queue.
-- A file whose header gave an impossible length, such as an Ogg file cut off
-  in the middle of a page, crashed the player when it played or was seeked.
-- A track that couldn't be played, such as one whose file was gone or with
-  no decoder for its format, left the player showing it as playing, with
-  nothing heard. Dismas says so and goes on to the next track.
-- Where an administrator had locked its settings with dconf, closing the
-  window, changing ReplayGain or turning Background Playback on or off
-  crashed the player.
-- A crafted MusicBrainz release ID could make Amberol write cover thumbnails
-  outside its cache directory.
-- A file named as an audio file but holding an HLS, DASH or Smooth
-  Streaming playlist made the player fetch the addresses in it, sending
-  requests to the servers that the file names.
-- Other users of the computer could read the folders made for the covers,
-  the waveforms and the saved queue, which lists the files in it. The folders
-  Dismas makes are private.
-- Without a Background portal, as in many window manager sessions, closing
-  the window quit even with Background Playback on.
-- The desktop's media controls (MPRIS) couldn't set the position, showed an
-  old cover, and kept the previous track's position after skipping while
-  paused. They didn't show the track at startup, the play/pause media key
-  didn't start playback when stopped, and Next on the last track went back
-  to the first. A program asking them for a seek of a few centuries, as
-  `playerctl position 99999999999+` does, left the player unable to take
-  playback commands until it was restarted.
-- Waveforms: the previous track's waveform stayed until the new one was
-  ready, or was drawn over it, and a waveform that couldn't be read whole was
-  cached. When a track repeated, its cover and waveform were loaded again,
-  and a track that decodes slower than it plays never got a waveform.
-- Seeking in a track that hadn't played yet didn't show, and a click on
-  the waveform went to the whole second before it.
-- Scrolling over the volume slider with a touchpad on Wayland moved it a
-  step for each pixel, so that a light scroll sent the volume to 0 or to
-  100%.
-- Screen readers found no name for the volume slider, and read the time
-  played as "Elapsed time" rather than the time.
-- With PulseAudio, a track paused before it had started playing, such as by a
-  Pause from the desktop's media controls just after startup, stayed silent
-  when played a few seconds later, or played with its time and waveform stuck
-  where it started.
-- Removing a track above the playing one made playback go on to the wrong
-  track, removing tracks until one was left stopped the music, and removing
-  the playing track with Repeat One kept it playing.
-- The time left under the playlist's title counted all of the playing
-  track, however much of it had played, and stayed as it was when turning
-  shuffle off changed the tracks after it.
-- The Play button of the "Added a new track" toast didn't play that track.
-- Symbolic links to tracks and folders that were opened or dropped weren't
-  followed, nor those inside a folder that was.
-- Ctrl+Left and Ctrl+Right seeked instead of moving the cursor in the search
-  entry, and Ctrl+C there copied the playing track's details rather than
-  the text selected.
-- Searching the queue for "unknown" found every track missing an artist,
-  album or title tag, by the words shown in their place.
-- A title with braces in it, such as "Hymn to {artist}", came out changed
-  in the text that Copy put on the clipboard.
-- No cover for a track whose extension doesn't match its type, such as Opus
-  in an `.ogg` file. GTK themes made for libadwaita apps, like Colloid, drew
-  the outlines of their cards on the covers in the queue.
-- The window's size wasn't saved when quitting with Ctrl+Q, only when closing
-  the window.
-- On X11 without a compositor, files dragged over the part of the window
-  gained by widening it went to the window below.
-- In the Flatpak, Open Folder failed for tracks opened or dropped from
-  outside the Music folder.
-- GLib warnings when nothing was left to play.
-- `RUST_LOG` didn't change what was logged, so a release build couldn't give
-  a debug log.
 
 Keyboard shortcuts
 ------------------
@@ -473,10 +252,9 @@ regular Flatpak, with its own library, playlists, play history and settings.
 Each CI run on GitHub also makes one, as `dismas-devel.flatpak` in the run's
 artifacts; install it with `flatpak install --user dismas-devel.flatpak`.
 
-Dismas has its own application ID, `io.github.dachshund7.Dismas`, so it can be
-installed alongside Amberol. On its first run, it copies Amberol's library,
-queue, playlists and settings, if it finds them; Amberol's own copies are left
-alone.
+Dismas can be installed next to Amberol. On its first run, it copies Amberol's
+library, queue, playlists and settings, if it finds them, and leaves Amberol's
+own copies alone.
 
 For a full debug log, run:
 
@@ -506,8 +284,8 @@ Dismas installed without Flatpak can:
   Music folder that point outside it don't work in the sandbox.
 - Files opened or dropped from outside the music folders reach Dismas one at
   a time, through the document portal, without the files next to them. A
-  `.cue` sheet then can't reach its audio file, and cover files next to the
-  tracks aren't found.
+  `.cue` sheet then can't reach its audio file, and cover and lyrics files
+  next to the tracks aren't found.
 - On the command line, only files in the Music folder can be opened.
 - WMA Pro and WMA Lossless files aren't read, as the GNOME runtime has no
   decoder for them. Other WMA files play.
@@ -525,15 +303,8 @@ Contributing
 ------------
 
 See the [contribution guide](./CONTRIBUTING.md). Contributions made with AI
-tools are welcome.
-
-Translations
-------------
-
-Strings inherited from upstream Amberol come with its translations. Strings
-added in Dismas appear in English until someone translates them here, and so do
-translations that spelled or declined the name "Amberol" in a way that couldn't
-simply be swapped for "Dismas".
+tools are welcome, and so are translations: strings added in Dismas appear in
+English until someone translates them.
 
 Why is it called "Dismas"?
 --------------------------

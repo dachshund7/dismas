@@ -5,10 +5,10 @@ Thank you for considering contributing to Dismas, a fork of Amberol!
 You can help by reporting bugs, suggesting features, improving the
 documentation, translating the strings added in Dismas, or writing code.
 
-Dismas is separate from [upstream Amberol](https://gitlab.gnome.org/World/amberol).
-Report problems with Dismas here, not to the upstream project, and don't send
-its changes upstream: upstream has its own contribution policy, which doesn't
-allow AI-generated work.
+Dismas is a fork of [Amberol](https://gitlab.gnome.org/World/amberol), and is
+not affiliated with the upstream project. Please don't report its bugs upstream
+or send its changes there. Upstream doesn't accept contributions made with AI
+tools, and much of Dismas was written with Claude.
 
 ## Reporting bugs
 
@@ -80,7 +80,7 @@ You will need:
  - the Rust compiler and Cargo
  - `blueprint-compiler` and gettext
  - the development files for gtk4 ≥ 4.19.5, libadwaita ≥ 1.8, GStreamer ≥ 1.20
-   (including plugins-bad), SQLite, libseccomp and fontconfig
+   (including plugins-bad), SQLite ≥ 3.45.3, libseccomp and fontconfig
  - the glycin loaders, plus `bwrap` outside Flatpak, to decode cover art
 
 GNOME Builder can also build the project from the Flatpak manifest of the
@@ -139,8 +139,10 @@ headers.
 ### Translations
 
 The `po/*.po` files come from upstream Amberol's translators, so leave the
-existing translations alone. If you add translatable files, list them in
-`po/POTFILES.in`.
+existing translations alone. Strings added in Dismas appear in English until
+someone translates them here, and so do translations that spelled or declined
+the name "Amberol" in a way that couldn't simply be swapped for "Dismas". If
+you add translatable files, list them in `po/POTFILES.in`.
 
 ### Commit messages
 
