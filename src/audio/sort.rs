@@ -148,10 +148,7 @@ pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
             by_keys(&firsts, keys)
         }
         SortKey::FileName => {
-            let keys = firsts
-                .iter()
-                .map(|entry| file_name_order(&entry.path))
-                .collect();
+            let keys = firsts.iter().map(|entry| path_order(&entry.path)).collect();
             by_keys(&firsts, keys)
         }
     };
@@ -213,19 +210,23 @@ fn album_order(entry: &Entry) -> AlbumOrder {
     }
 }
 
-// Where a track goes by its file name: the name of its sheet, then its
-// number in it, for a track of a CUE sheet, so that the tracks of a sheet
-// stay together and in order. Only the path is looked at, not the disk
-fn file_name_order(path: &Path) -> ((bool, glib::FilenameCollationKey), Option<u32>) {
+// Where a track goes by its file: by the folders of its path, one after
+// the other, and then its name, each in the order of a file manager, so
+// that the tracks of an album stay together, in the order of their folder,
+// even when every album's files are named "01 …", "02 …". A track of a CUE
+// sheet goes by the sheet's path, then its number in the sheet, so that the
+// tracks of a sheet stay together and in order. Only the path is looked at,
+// not the disk
+fn path_order(path: &Path) -> (Vec<(bool, glib::FilenameCollationKey)>, Option<u32>) {
     let (file, number) = match cue_sheet::missing_location_parts(path) {
         Some((sheet, number)) => (sheet, Some(number)),
         None => (path, None),
     };
-    let name = file
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-    (utils::file_name_key(&name), number)
+    let parts = file
+        .components()
+        .map(|part| utils::file_name_key(&part.as_os_str().to_string_lossy()))
+        .collect();
+    (parts, number)
 }
 
 // A value, with the missing ones last
@@ -648,17 +649,36 @@ mod tests {
     fn the_tracks_of_a_cue_sheet_go_by_the_sheet_then_their_number() {
         let cue = |sheet: &str, number: u32| {
             with(track("A", number), |e| {
-                e.path = PathBuf::from(format!("/music/{sheet}.cue/track{number:02}"));
+                e.path = PathBuf::from(format!("/music/a/{sheet}.cue/track{number:02}"));
             })
         };
         let file = |name: &str| with(track("B", 1), |e| e.path = PathBuf::from(name));
         let entries = [
             cue("Zeta", 2),
-            file("/music/b/Alpha.flac"),
+            file("/music/a/Alpha.flac"),
             cue("Zeta", 1),
-            file("/music/b/Omega.flac"),
+            file("/music/a/Omega.flac"),
         ];
         assert_eq!(sorted_order(&entries, SortKey::FileName), [1, 3, 2, 0]);
+    }
+
+    #[test]
+    fn files_go_by_their_folders_then_their_names() {
+        let file = |path: &str| with(track("A", 1), |e| e.path = PathBuf::from(path));
+        // Two albums whose files have the same names, which stay together,
+        // and folders and names in natural order
+        let entries = [
+            file("/music/Kinks/02 Two.flac"),
+            file("/music/Beatles/10 Ten.flac"),
+            file("/music/Kinks/01 One.flac"),
+            file("/music/Beatles/2 Two.flac"),
+            file("/music/Album 10/01.flac"),
+            file("/music/Album 2/01.flac"),
+        ];
+        assert_eq!(
+            sorted_order(&entries, SortKey::FileName),
+            [5, 4, 3, 1, 2, 0]
+        );
     }
 
     #[test]
