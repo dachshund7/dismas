@@ -42,7 +42,9 @@ impl TagDate {
             day: None,
         };
         // A month and a day only after dashes, of one or two digits, which
-        // a time ("12T20:00") or anything else can follow
+        // only a time can follow ("12T20:00", or "12 20:00"): a part with
+        // anything else after its digits, "3x", is garbage, and the date
+        // ends before it
         let Some(rest) = text[4..].strip_prefix('-') else {
             return Some(date);
         };
@@ -52,10 +54,10 @@ impl TagDate {
             let end = part
                 .find(|c: char| !c.is_ascii_digit())
                 .unwrap_or(part.len());
-            (1..=2)
-                .contains(&end)
-                .then(|| part[..end].parse::<u8>().ok())
-                .flatten()
+            let (digits, after) = part.split_at(end);
+            let whole =
+                (1..=2).contains(&end) && (after.is_empty() || after.starts_with(['T', ' ']));
+            whole.then(|| digits.parse::<u8>().ok()).flatten()
         };
         let Some(month) = number().filter(|m| (1..=12).contains(m)) else {
             return Some(date);
@@ -218,11 +220,16 @@ mod tests {
         assert_eq!(read("1965-").as_deref(), Some("1965"));
         assert_eq!(read("1965-031").as_deref(), Some("1965"));
         assert_eq!(read("1965 (reissue)").as_deref(), Some("1965"));
+        // A part with anything but a time after its digits is garbage
+        assert_eq!(read("1965-3x").as_deref(), Some("1965"));
+        assert_eq!(read("1965-03-1a").as_deref(), Some("1965-03"));
+        assert_eq!(read("1965-03-12Z").as_deref(), Some("1965-03"));
     }
 
     #[test]
     fn times_and_intervals_give_their_start() {
         assert_eq!(read("1965-03-12T20:00:00").as_deref(), Some("1965-03-12"));
+        assert_eq!(read("1965-03-12 20:00").as_deref(), Some("1965-03-12"));
         assert_eq!(read("1937-11-08/1938-03-08").as_deref(), Some("1937-11-08"));
         assert_eq!(read("1937-11/1938-03").as_deref(), Some("1937-11"));
         assert_eq!(read("1965/1966").as_deref(), Some("1965"));
