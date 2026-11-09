@@ -73,13 +73,13 @@ Features
   files. Exported into the music folder, as phones and servers such as
   Navidrome read them, a playlist names its tracks by paths relative to it;
   for Plex and Jellyfin, a preference writes absolute paths, and a music
-  folder can be given the path that a server, a phone or Windows knows it
-  by. A click on the
-  Playlists page shows a playlist's tracks in the pane
-  while the music goes on. Each playlist resumes where it was, when you switch
-  back to it and when Dismas starts, and tracks whose files are missing stay
-  in their places, greyed out, until they're back, or until Find Missing
-  Tracks finds where they moved in the music folders.
+  folder can be given the path that a server, a phone or Windows knows it by.
+  Keep a Copy in the Export Folder keeps such a copy of a playlist up to date,
+  there or anywhere. A click on the Playlists page shows a playlist's tracks
+  in the pane while the music goes on. Each playlist resumes where it was,
+  when you switch back to it and when Dismas starts, and tracks whose files
+  are missing stay in their places, greyed out, until they're back, or until
+  Find Missing Tracks finds where they moved in the music folders.
 - **Smart playlists and favorites:** Recently Played, Most Played and Not
   Heard Lately pick tracks from what you've listened to. Mark tracks, albums,
   works and recordings as favorites, and play a random album, track or work,

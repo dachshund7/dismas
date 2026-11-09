@@ -14,6 +14,7 @@ use gtk::{CompositeTemplate, gdk, gio, glib};
 use crate::{
     application::Application,
     i18n::{i18n, i18n_k, ni18n_k},
+    kept_copies,
     library::{self, MusicFolder},
     utils,
 };
@@ -34,6 +35,12 @@ mod imp {
         pub(crate) restore_playlist_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub(crate) play_history_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub(crate) export_folder_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub(crate) clear_export_folder_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub(crate) choose_export_folder_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub(crate) absolute_paths_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
@@ -111,6 +118,7 @@ mod imp {
                 .build();
 
             obj.setup_folders();
+            obj.setup_export_folder();
         }
     }
 
@@ -159,6 +167,69 @@ impl PreferencesDialog {
 
     fn store_folders(&self) {
         library::store_music_folders(self.settings(), &self.folder_list());
+    }
+
+    // The folder the copies of playlists are kept in, and the button that
+    // stops keeping them, which forgets the folder
+    fn setup_export_folder(&self) {
+        let imp = self.imp();
+        self.update_export_folder();
+        self.settings().connect_changed(
+            Some("export-folder"),
+            clone!(
+                #[weak(rename_to = dialog)]
+                self,
+                move |_, _| dialog.update_export_folder()
+            ),
+        );
+        imp.choose_export_folder_button.connect_clicked(clone!(
+            #[weak(rename_to = dialog)]
+            self,
+            move |_| {
+                glib::spawn_future_local(clone!(
+                    #[weak]
+                    dialog,
+                    async move {
+                        let parent = dialog.root().and_downcast::<gtk::Window>();
+                        let chosen =
+                            kept_copies::choose_export_folder(parent.as_ref(), dialog.settings())
+                                .await;
+                        if let Err(message) = chosen {
+                            dialog.toast(&message);
+                        }
+                    }
+                ));
+            }
+        ));
+        imp.clear_export_folder_button.connect_clicked(clone!(
+            #[weak(rename_to = dialog)]
+            self,
+            move |_| {
+                let settings = dialog.settings();
+                let kept = !kept_copies::kept_playlists(settings).is_empty();
+                kept_copies::update_kept_playlists(settings, Vec::clear);
+                kept_copies::store_export_folder(settings, None);
+                if kept {
+                    dialog.toast(&i18n("Copies of playlists are no longer kept up to date"));
+                }
+                // The button goes, so the focus goes to the one next to it
+                adw::prelude::AdwDialogExt::set_focus(
+                    &dialog,
+                    Some(&*dialog.imp().choose_export_folder_button),
+                );
+            }
+        ));
+    }
+
+    fn update_export_folder(&self) {
+        let imp = self.imp();
+        let folder = kept_copies::export_folder(self.settings());
+        let subtitle = folder.as_ref().map_or_else(
+            || i18n("None chosen"),
+            |folder| utils::home_path(folder.shown_path()),
+        );
+        imp.export_folder_row.set_subtitle(&subtitle);
+        imp.clear_export_folder_button.set_visible(folder.is_some());
     }
 
     fn setup_folders(&self) {

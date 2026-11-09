@@ -9,6 +9,7 @@ mod favorites;
 mod find;
 mod find_missing;
 mod fullscreen;
+mod kept_copies;
 mod loading;
 mod now_playing;
 mod pane;
@@ -286,6 +287,7 @@ mod imp {
         pub(crate) last_random_work: RefCell<Option<String>>,
         // The pages of the pane to go back to, see `PaneHistory`
         pub(crate) pane_history: RefCell<PaneHistory>,
+        pub(crate) kept_copies: kept_copies::KeptCopies,
         // Whether the sidebar was showing before the split view collapsed
         pub(crate) sidebar_visible_uncollapsed: Cell<bool>,
 
@@ -539,6 +541,17 @@ mod imp {
                     }
                 },
             );
+            // On the class, so that other programs can't write files
+            klass.install_action_async(
+                "win.keep-playlist-copy",
+                Some(glib::VariantTy::new("(sb)").expect("A valid type")),
+                async move |win, _, param| {
+                    debug!("Window::win.keep-playlist-copy()");
+                    if let Some((name, keep)) = param.and_then(|p| p.get::<(String, bool)>()) {
+                        win.set_keep_copy(&name, keep).await;
+                    }
+                },
+            );
             // On the class, so that other programs can't change playlists
             klass.install_action(
                 "win.find-missing-tracks",
@@ -709,6 +722,7 @@ mod imp {
                 last_random_work: RefCell::default(),
                 hide_focus_after_transition: Cell::new(false),
                 pane_history: RefCell::default(),
+                kept_copies: kept_copies::KeptCopies::default(),
                 sidebar_visible_uncollapsed: Cell::new(true),
                 zen_timeout: RefCell::default(),
                 zen_animation: RefCell::default(),
@@ -1180,6 +1194,7 @@ impl Window {
         win.setup_more_button();
         win.setup_library();
         win.setup_playlists();
+        win.setup_kept_copies();
         win.setup_lyrics();
         win.setup_provider();
         win.bind_state();

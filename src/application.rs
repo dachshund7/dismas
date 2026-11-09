@@ -175,6 +175,7 @@ mod imp {
             for window in self.obj().windows() {
                 if let Ok(window) = window.downcast::<Window>() {
                     window.save_window_state();
+                    window.flush_kept_copies();
                 }
             }
             self.obj().save_resume_point();

@@ -15,6 +15,14 @@ All notable changes to this project will be documented in this file.
   first released, and by Recorded, when it was recorded. Each falls back
   to the other dates when an album lacks its own, so both work in a
   library with only the Date tag
+- Keep a Copy in the Export Folder, in a saved playlist's menu on the
+  Playlists page, writes the playlist to a folder chosen in Preferences,
+  such as a Playlists folder in the music folder, as phones, servers and
+  other players read them, and again a few seconds after each change.
+  The copy is written as an export is, takes the playlist's new name when
+  it's renamed, and goes when it's deleted. Dismas never writes over a
+  copy that another program changed since, unless asked to: it says so,
+  with a Replace button
 - Find Missing Tracks, in a playlist's menu on the Playlists page, looks
   for the tracks whose files are gone: in the music folders, as an
   imported playlist's tracks are looked for, as when the music moved to

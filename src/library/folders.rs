@@ -115,20 +115,7 @@ pub(super) fn folders_from_entries(
     let mut folders: Vec<MusicFolder> = if entries.is_empty() {
         vec![MusicFolder::new(default_music_dir())]
     } else {
-        entries
-            .into_iter()
-            .filter_map(|(uri, host)| {
-                let path = gio::File::for_uri(&uri).path()?;
-                let host = Some(host)
-                    .filter(|host| !host.is_empty())
-                    .and_then(|host| gio::File::for_uri(&host).path());
-                Some(MusicFolder {
-                    path,
-                    host,
-                    excluded: Vec::new(),
-                })
-            })
-            .collect()
+        entries.into_iter().filter_map(folder_from_entry).collect()
     };
 
     // A folder that's left out belongs to the music folder it's in; one
@@ -154,19 +141,36 @@ pub(super) fn folders_from_entries(
     folders
 }
 
+// A folder as the settings keep it: the URI of the path that's read, and
+// the URI of its path outside the sandbox, or an empty one. The folders
+// it leaves out are kept apart
+pub(crate) fn folder_from_entry((uri, host): (String, String)) -> Option<MusicFolder> {
+    let path = gio::File::for_uri(&uri).path()?;
+    let host = Some(host)
+        .filter(|host| !host.is_empty())
+        .and_then(|host| gio::File::for_uri(&host).path());
+    Some(MusicFolder {
+        path,
+        host,
+        excluded: Vec::new(),
+    })
+}
+
+pub(crate) fn folder_entry(folder: &MusicFolder) -> (String, String) {
+    let host = folder.host.as_deref().map(path_uri).unwrap_or_default();
+    (path_uri(&folder.path), host)
+}
+
+fn path_uri(path: &Path) -> String {
+    gio::File::for_path(path).uri().to_string()
+}
+
 pub(crate) fn store_music_folders(settings: &gio::Settings, folders: &[MusicFolder]) {
-    let uri = |path: &Path| gio::File::for_path(path).uri().to_string();
-    let entries: Vec<(String, String)> = folders
-        .iter()
-        .map(|folder| {
-            let host = folder.host.as_deref().map(uri).unwrap_or_default();
-            (uri(&folder.path), host)
-        })
-        .collect();
+    let entries: Vec<(String, String)> = folders.iter().map(folder_entry).collect();
     let excluded: Vec<String> = folders
         .iter()
         .flat_map(MusicFolder::excluded_paths)
-        .map(|path| uri(&path))
+        .map(|path| path_uri(&path))
         .collect();
     if let Err(e) = settings
         .set("music-folders", entries.to_variant())

@@ -28,6 +28,7 @@ src/album_cell.rs
 src/album_tracks.rs
 src/booklets.rs
 src/cover_picture.rs
+src/kept_copies.rs
 src/library.rs
 src/library_view.rs
 src/library_view/pickers.rs
@@ -51,6 +52,7 @@ src/window/albums.rs
 src/window/booklets.rs
 src/window/favorites.rs
 src/window/find_missing.rs
+src/window/kept_copies.rs
 src/window/loading.rs
 src/window/now_playing.rs
 src/window/playlist.rs

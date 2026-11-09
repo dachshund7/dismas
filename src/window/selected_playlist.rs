@@ -26,6 +26,7 @@ impl Window {
             points.retain_playlists(&names);
         });
         playlists::retain_unshuffled(&names);
+        self.retain_kept_playlists(&names);
         self.update_playlist_labels();
         self.update_playlists_menu();
     }
@@ -50,9 +51,11 @@ impl Window {
     }
 
     pub(super) fn update_playlists_page(&self) {
-        self.imp()
-            .playlists_page
-            .set_playlists(&playlists::names(), &self.selected_playlist());
+        self.imp().playlists_page.set_playlists(
+            &playlists::names(),
+            &self.selected_playlist(),
+            &crate::kept_copies::kept_playlists(&self.imp().settings),
+        );
     }
 
     // The menu of the playlist pane's title, to switch playlists without
@@ -159,6 +162,7 @@ impl Window {
             return;
         }
         playlists::save(&name, &player.queue().files());
+        self.playlist_saved(&name);
     }
 
     // Whether the tracks of the selected playlist, `name`, can be put in
@@ -662,6 +666,7 @@ impl Window {
         ResumePoints::update(&self.imp().settings, |points| {
             points.rename(name, new_name);
         });
+        self.kept_playlist_renamed(name, new_name);
         self.shown_playlist_renamed(name, new_name);
 
         if self.selected_playlist() == name {
@@ -708,6 +713,7 @@ impl Window {
             return;
         }
         ResumePoints::update(&self.imp().settings, |points| points.remove(name));
+        self.kept_playlist_deleted(name);
         self.shown_playlist_deleted(name);
 
         if self.selected_playlist() == name {

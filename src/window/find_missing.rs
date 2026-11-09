@@ -156,6 +156,7 @@ impl Window {
                 return None;
             }
             ResumePoints::update(&self.imp().settings, |points| points.relocate(name, &uris));
+            self.playlist_saved(name);
             self.shown_playlist_changed(name, &uris).await;
         }
         Some(Found {

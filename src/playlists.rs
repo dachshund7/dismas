@@ -45,7 +45,8 @@ fn playlists_dir() -> PathBuf {
     data_dir().join("playlists")
 }
 
-fn playlist_path(name: &str) -> Option<PathBuf> {
+// The file of a playlist, empty for the queue
+pub(crate) fn playlist_path(name: &str) -> Option<PathBuf> {
     path_in(&data_dir(), name)
 }
 
@@ -409,7 +410,7 @@ pub(crate) fn read_m3u(path: &Path) -> Option<Vec<gio::File>> {
 // a file of short lines, such as "a", would make 16 million entries, each
 // a `gio::File` and then a track. Dismas's own playlists aren't limited, as
 // one that couldn't be read would be saved again without its tracks
-const MAX_PLAYLIST_SIZE: u64 = 32 * 1024 * 1024;
+pub(crate) const MAX_PLAYLIST_SIZE: u64 = 32 * 1024 * 1024;
 const MAX_PLAYLIST_ENTRIES: usize = 200_000;
 
 // The tracks of an M3U playlist from elsewhere, like one to import: an
@@ -685,23 +686,46 @@ pub(crate) fn export(
     options: &ExportOptions,
 ) -> Result<ExportReport, glib::Error> {
     let files = load(name).unwrap_or_default();
-    let local: Vec<PathBuf> = files.iter().filter_map(gio::File::path).collect();
-    let infos = library::export_infos(&local);
-    let mut paths = ExportPaths::new(export_dir(path), options);
-    let (text, report) = format_export(&files, &mut paths, &infos);
-    glib::file_set_contents(path, text.as_bytes())?;
-    if paths.dir.is_some() {
-        return Ok(report);
+    let infos = export_infos(&files);
+    let write = |dir: Option<PathBuf>| {
+        let (text, report) = format_export(&files, &mut ExportPaths::new(dir, options), &infos);
+        glib::file_set_contents(path, text.as_bytes()).map(|()| report)
+    };
+    if let Some(dir) = export_dir(path) {
+        return write(Some(dir));
     }
     // The document portal may only say where a file it saves is once
     // the file is there
-    paths.dir = export_dir(path);
-    if paths.dir.is_none() {
-        return Ok(report);
-    }
-    let (text, report) = format_export(&files, &mut paths, &infos);
-    glib::file_set_contents(path, text.as_bytes())?;
-    Ok(report)
+    let report = write(None)?;
+    export_dir(path).map_or(Ok(report), |dir| write(Some(dir)))
+}
+
+// The text of a playlist for other players, to be saved in `dir`, which
+// is outside the sandbox and without symbolic links, see `ExportPaths`.
+// This blocks
+pub(crate) fn export_text(
+    files: &[gio::File],
+    dir: Option<PathBuf>,
+    options: &ExportOptions,
+) -> (String, ExportReport) {
+    format_export(
+        files,
+        &mut ExportPaths::new(dir, options),
+        &export_infos(files),
+    )
+}
+
+// What the library knows of the tracks of an export. This blocks
+fn export_infos(files: &[gio::File]) -> HashMap<PathBuf, ExportInfo> {
+    let local: Vec<PathBuf> = files.iter().filter_map(gio::File::path).collect();
+    library::export_infos(&local)
+}
+
+// Whether a folder is in Dismas's own data, where its playlists are.
+// This blocks
+pub(crate) fn is_in_data_dir(path: &Path) -> bool {
+    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    real(path).starts_with(real(&data_dir()))
 }
 
 // The folder of an exported playlist, outside the sandbox and without

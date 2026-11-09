@@ -6,7 +6,11 @@
 // `win.show-playlist` and `win.show-smart-playlist` actions, without
 // switching to it; its menu's Switch To switches, through
 // `win.select-playlist`, as the menu of the pane's title does. The radio
-// only shows which one is selected
+// only shows which one is selected. Whether a saved playlist's copy is
+// kept in the export folder is a check item of its menu, through an action
+// of its row, which `win.keep-playlist-copy` changes
+
+use std::{cell::RefCell, collections::HashMap};
 
 use adw::{prelude::*, subclass::prelude::*};
 use gtk::{CompositeTemplate, gdk, gio, glib};
@@ -28,6 +32,9 @@ mod imp {
         pub(crate) playlists_list: TemplateChild<gtk::ListBox>,
         #[template_child]
         pub(crate) smart_group: TemplateChild<adw::PreferencesGroup>,
+        // The action of each saved playlist's row, whose state is whether
+        // its copy is kept
+        pub(crate) keep_copy_actions: RefCell<HashMap<String, gio::SimpleAction>>,
     }
 
     #[glib::object_subclass]
@@ -100,10 +107,13 @@ impl Default for PlaylistsPage {
 
 impl PlaylistsPage {
     // Shows the queue, then the saved playlists; `selected` is the name
-    // of the selected one, empty for the queue
-    pub(crate) fn set_playlists(&self, names: &[String], selected: &str) {
+    // of the selected one, empty for the queue, and `kept` those whose
+    // copies are kept
+    pub(crate) fn set_playlists(&self, names: &[String], selected: &str, kept: &[String]) {
         let list = self.imp().playlists_list.get();
         list.remove_all();
+        let mut actions = self.imp().keep_copy_actions.borrow_mut();
+        actions.clear();
 
         // Radio buttons, since exactly one playlist is selected
         let group = gtk::CheckButton::new();
@@ -117,7 +127,19 @@ impl PlaylistsPage {
         for name in names {
             let row = playlist_row(name, name, name == selected, &group);
             row.add_suffix(&playlist_menu_button(name, name, name == selected));
+            actions.insert(
+                name.clone(),
+                keep_copy_action(&row, name, kept.contains(name)),
+            );
             list.append(&row);
+        }
+    }
+
+    // Shows which playlists' copies are kept, in place, without the rows
+    // made again, which would take the focus from them
+    pub(crate) fn set_kept_playlists(&self, kept: &[String]) {
+        for (name, action) in self.imp().keep_copy_actions.borrow().iter() {
+            action.set_state(&kept.contains(name).to_variant());
         }
     }
 }
@@ -175,6 +197,12 @@ fn playlist_menu_button(title: &str, name: &str, selected: bool) -> gtk::MenuBut
     let export = gio::MenuItem::new(Some(&i18n("_Export…")), None);
     export.set_action_and_target_value(Some("win.export-playlist"), Some(&target));
     menu.append_item(&export);
+    if !name.is_empty() {
+        menu.append(
+            Some(&i18n("_Keep a Copy in the Export Folder")),
+            Some("playlist.keep-copy"),
+        );
+    }
     let find_missing = gio::MenuItem::new(Some(&i18n("Find _Missing Tracks")), None);
     find_missing.set_action_and_target_value(Some("win.find-missing-tracks"), Some(&target));
     menu.append_item(&find_missing);
@@ -198,6 +226,36 @@ fn playlist_menu_button(title: &str, name: &str, selected: bool) -> gtk::MenuBut
         &[("playlist", title)],
     ))]);
     button
+}
+
+// The check item of a saved playlist's menu, on its row, where the menus
+// that the ⋯ button and the Menu key open find it. The window decides,
+// as it can ask for a folder first, and shows the new state through
+// `set_kept_playlists()`
+fn keep_copy_action(row: &adw::ActionRow, name: &str, kept: bool) -> gio::SimpleAction {
+    let action = gio::SimpleAction::new_stateful("keep-copy", None, &kept.to_variant());
+    action.connect_activate(glib::clone!(
+        #[weak]
+        row,
+        #[strong(rename_to = name)]
+        name.to_string(),
+        move |action, _| {
+            let kept = action
+                .state()
+                .and_then(|state| state.get::<bool>())
+                .unwrap_or(false);
+            if let Err(e) = row.activate_action(
+                "win.keep-playlist-copy",
+                Some(&(name.as_str(), !kept).to_variant()),
+            ) {
+                log::warn!("Unable to change whether a copy of '{name}' is kept: {e}");
+            }
+        }
+    ));
+    let group = gio::SimpleActionGroup::new();
+    group.add_action(&action);
+    row.insert_action_group("playlist", Some(&group));
+    action
 }
 
 fn playlist_row(

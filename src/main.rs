@@ -15,6 +15,7 @@ mod cue_sheet;
 mod drag_overlay;
 mod fit_bin;
 mod i18n;
+mod kept_copies;
 mod library;
 mod library_view;
 mod list_scroll;

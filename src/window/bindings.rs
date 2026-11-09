@@ -387,6 +387,9 @@ impl Window {
                 return glib::Propagation::Stop;
             }
 
+            // The window is gone by the time the app shuts down, and the
+            // copies waiting to be written with it
+            window.flush_kept_copies();
             for (object, id) in window.imp().handlers.take() {
                 object.disconnect(id);
             }

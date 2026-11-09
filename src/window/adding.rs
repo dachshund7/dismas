@@ -152,6 +152,7 @@ impl Window {
         match playlists::append(name, files) {
             Ok(()) => {
                 self.shown_playlist_added_to(name, files);
+                self.playlist_saved(name);
                 self.add_added_to_playlist_toast(name, files.len());
             }
             Err(e) => {

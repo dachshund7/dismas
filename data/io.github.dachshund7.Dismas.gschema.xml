@@ -162,6 +162,16 @@
 	    <summary>The paths of the music folders in exported playlists</summary>
 	    <description>The path each music folder has in exported playlists, by the URI of the folder, for the tracks that are written with absolute paths: as a server that mounts the folder, another device or Windows names it, such as /music, /storage/emulated/0/Music or D:\Music. A Windows path gives the tracks backslashes</description>
 	  </key>
+	  <key name="export-folder" type="(ss)">
+	    <default>("", "")</default>
+	    <summary>The folder copies of playlists are kept in</summary>
+	    <description>The URI of the folder that the playlists set to keep a copy are written to after each change, for phones, servers and other players, and the URI of its path outside the sandbox if it came through the document portal, or empty strings for none</description>
+	  </key>
+	  <key name="kept-playlists" type="as">
+	    <default>[]</default>
+	    <summary>The playlists whose copies are kept</summary>
+	    <description>The names of the playlists that are written to the export folder after each change</description>
+	  </key>
 	  <key name="amberol-migrated" type="b">
 	    <default>false</default>
 	    <summary>Whether the data of Amberol was looked for</summary>
