@@ -349,7 +349,7 @@ fn import_m3u_within(
                     file
                 } else {
                     finder
-                        .find(entry.line, dir, music_folders)
+                        .find(entry.line, Some(dir), music_folders)
                         .map_or(file, gio::File::for_path)
                 };
                 with_cue_track(file, entry.cue_track, &mut sheets)
@@ -362,7 +362,9 @@ fn import_m3u_within(
 // in case, as one written on Windows can, or the end of an absolute path,
 // as in "C:\Users\…\Music\Artist\Album\01.flac", in the folder of
 // the playlist and then in the music folders, where the end must have a
-// folder and a file, as a file name alone could be found anywhere. The
+// folder and a file, as a file name alone could be found anywhere. Names
+// are compared in one Unicode form too, as macOS keeps names decomposed
+// and the playlists that Apple Music writes have them composed. The
 // folders read are kept, as the tracks of a playlist share them
 // The longest path the system opens (Linux's PATH_MAX, with the NUL that
 // ends it)
@@ -395,7 +397,14 @@ struct Finder {
 }
 
 impl Finder {
-    fn find(&mut self, line: &str, dir: &Path, music_folders: &[PathBuf]) -> Option<PathBuf> {
+    // Without the playlist's folder, as for a playlist of Dismas's own,
+    // only the music folders are looked in
+    fn find(
+        &mut self,
+        line: &str,
+        dir: Option<&Path>,
+        music_folders: &[PathBuf],
+    ) -> Option<PathBuf> {
         let (absolute, path) = if let Some(uri) = line.strip_prefix("file://") {
             (
                 true,
@@ -420,34 +429,43 @@ impl Finder {
         if parts.is_empty() || parts.contains(&"..") {
             return None;
         }
-        if !absolute {
-            return self.find_in(dir, &parts);
+        // A track of a CUE sheet is looked for as its sheet, so that the
+        // sheet alone doesn't count as a folder and a file
+        let mut parts = parts;
+        let cue_track = cue_sheet::missing_location_parts(Path::new(&parts.join("/")))
+            .map(|(_, number)| number);
+        if cue_track.is_some() {
+            parts.pop();
         }
-        let parts = &parts[parts.len().saturating_sub(MAX_TRIED_PARTS)..];
-        (0..parts.len()).find_map(|start| {
-            let end = &parts[start..];
-            self.find_in(dir, end).or_else(|| {
-                (end.len() >= 2)
-                    .then(|| {
-                        music_folders
-                            .iter()
-                            .find_map(|folder| self.find_in(folder, end))
-                    })
-                    .flatten()
+        let found = if absolute {
+            let parts = &parts[parts.len().saturating_sub(MAX_TRIED_PARTS)..];
+            (0..parts.len()).find_map(|start| {
+                let end = &parts[start..];
+                dir.and_then(|dir| self.find_in(dir, end)).or_else(|| {
+                    (end.len() >= 2)
+                        .then(|| {
+                            music_folders
+                                .iter()
+                                .find_map(|folder| self.find_in(folder, end))
+                        })
+                        .flatten()
+                })
             })
+        } else {
+            self.find_in(dir?, &parts)
+        }?;
+        Some(match cue_track {
+            Some(number) => cue_sheet::track_location(&found, number),
+            None => found,
         })
     }
 
-    // The path of `parts` in `dir`, matching a part ignoring case when it
-    // isn't there as it's written, if one entry of its folder matches it.
-    // A track of a CUE sheet is a path under the sheet, which is a file
+    // The path of `parts` in `dir`, matching a part ignoring case and
+    // Unicode form when it isn't there as it's written, if one entry of its
+    // folder matches it
     fn find_in(&mut self, dir: &Path, parts: &[&str]) -> Option<PathBuf> {
         let mut path = dir.to_path_buf();
-        for (i, part) in parts.iter().enumerate() {
-            if path.is_file() {
-                path.extend(&parts[i..]);
-                break;
-            }
+        for part in parts {
             let exact = path.join(part);
             if exact.exists() {
                 path = exact;
@@ -458,16 +476,11 @@ impl Finder {
                     .into_iter()
                     .flatten()
                     .flatten()
-                    .map(|entry| {
-                        (
-                            entry.file_name().to_string_lossy().to_lowercase(),
-                            entry.path(),
-                        )
-                    })
+                    .map(|entry| (folded(&entry.file_name().to_string_lossy()), entry.path()))
                     .collect()
             });
-            let lower = part.to_lowercase();
-            let mut matching = listing.iter().filter(|(name, _)| *name == lower);
+            let folded = folded(part);
+            let mut matching = listing.iter().filter(|(name, _)| *name == folded);
             let (_, found) = matching.next()?;
             if matching.next().is_some() {
                 return None;
@@ -476,6 +489,12 @@ impl Finder {
         }
         cue_sheet::location_exists(&path).then_some(path)
     }
+}
+
+// A name as the Finder compares it: composed, as most systems keep names,
+// and ignoring case
+fn folded(name: &str) -> String {
+    glib::normalize(name, glib::NormalizeMode::DefaultCompose).to_lowercase()
 }
 
 // A name for a new playlist, from the name of a file: without the
@@ -1118,6 +1137,109 @@ mod tests {
         )
         .is_none()));
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn imported_names_match_in_either_unicode_form() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Ensemble")).unwrap();
+        let composed = "M\u{fc}ller.flac";
+        let decomposed = "Mu\u{308}ller.flac";
+        let folders = [music.clone()];
+        for (on_disk, in_playlist) in [(decomposed, composed), (composed, decomposed)] {
+            let file = music.join("Ensemble").join(on_disk);
+            std::fs::write(&file, b"").unwrap();
+            let line = format!("/Users/me/Music/Ensemble/{in_playlist}");
+            let found = Finder::default().find(&line, None, &folders);
+            assert_eq!(found.as_deref(), Some(file.as_path()), "{in_playlist:?}");
+            std::fs::remove_file(&file).unwrap();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn names_that_differ_only_in_unicode_form_are_ambiguous() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let album = dir.join("Album");
+        std::fs::create_dir_all(&album).unwrap();
+        std::fs::write(album.join("M\u{fc}ller.flac"), b"").unwrap();
+        std::fs::write(album.join("Mu\u{308}ller.flac"), b"").unwrap();
+        let found = Finder::default().find("C:\\Album\\M\u{dc}LLER.flac", Some(&dir), &[]);
+        assert_eq!(found, None);
+        // As it's written, it's one of them
+        let found = Finder::default().find("C:\\Album\\M\u{fc}ller.flac", Some(&dir), &[]);
+        assert_eq!(found, Some(album.join("M\u{fc}ller.flac")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_cue_track_path_needs_a_folder_and_its_sheet() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Album")).unwrap();
+        std::fs::write(music.join("Live.cue"), b"").unwrap();
+        std::fs::write(music.join("Album/Album.cue"), b"").unwrap();
+        let folders = [music.clone()];
+        let mut finder = Finder::default();
+        // A sheet alone is a file name, which could be anywhere
+        assert_eq!(finder.find("/old/Live.cue/track02", None, &folders), None);
+        assert_eq!(
+            finder.find("/old/Album/Album.cue/track02", None, &folders),
+            Some(music.join("Album/Album.cue/track02"))
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn tracks_of_cue_sheets_are_found_where_they_moved() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Artist/Album")).unwrap();
+        std::fs::write(music.join("Artist/Album/Album.cue"), b"").unwrap();
+        std::fs::write(music.join("Artist/Album/Live.flac"), b"").unwrap();
+        let folders = [music.clone()];
+        let mut finder = Finder::default();
+        assert_eq!(
+            finder.find(
+                "D:\\music\\artist\\ALBUM\\album.CUE\\track02",
+                None,
+                &folders
+            ),
+            Some(music.join("Artist/Album/Album.cue/track02"))
+        );
+        // A sheet in the tags of an audio file
+        assert_eq!(
+            finder.find(
+                "/home/me/Musik/Artist/Album/Live.flac/track11",
+                None,
+                &folders
+            ),
+            Some(music.join("Artist/Album/Live.flac/track11"))
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn without_a_playlist_folder_only_the_music_folders_are_tried() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Album")).unwrap();
+        std::fs::write(dir.join("01.flac"), b"").unwrap();
+        std::fs::write(music.join("Album/02.flac"), b"").unwrap();
+        let folders = [music.clone()];
+        let mut finder = Finder::default();
+        assert_eq!(
+            finder.find("/old/01.flac", Some(&dir), &folders),
+            Some(dir.join("01.flac"))
+        );
+        assert_eq!(finder.find("/old/01.flac", None, &folders), None);
+        assert_eq!(finder.find("01.flac", None, &folders), None);
+        assert_eq!(
+            finder.find("/old/Album/02.flac", None, &folders),
+            Some(music.join("Album/02.flac"))
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

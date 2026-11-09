@@ -71,6 +71,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Importing a playlist finds the tracks whose names it writes in another
+  Unicode form than the files have, as playlists from Apple Music do with
+  accented letters, and the tracks of CUE sheets that moved: a sheet
+  alone, named by its file name, was taken for a folder and a file
 - A date that the tags wrote loosely, such as 1965-3, or with parts a
   ripper didn't know, such as 2005-00-00, wasn't found by `recorded:`,
   `original:` or `released:`
