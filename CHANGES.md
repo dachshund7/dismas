@@ -15,6 +15,9 @@ All notable changes to this project will be documented in this file.
   first released, and by Recorded, when it was recorded. Each falls back
   to the other dates when an album lacks its own, so both work in a
   library with only the Date tag
+- Playlists from Strawberry keep their tracks of CUE sheets: Strawberry
+  names one by its audio file, after a line with the track's number,
+  which Dismas took for the whole file
 
 ### Changed
 

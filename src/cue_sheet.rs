@@ -45,7 +45,7 @@ const MAX_SHEET_SIZE: u64 = 1024 * 1024;
 // The format numbers the tracks of a CD up to 99, but sheets that split
 // audiobooks into chapters can go on. Every track takes the tags of the
 // whole file, so a sheet with any number of tracks could fill the memory
-const MAX_TRACK_NUMBER: u32 = 999;
+pub(crate) const MAX_TRACK_NUMBER: u32 = 999;
 
 // CD-Text fields are at most 80 characters, so a longer value in a sheet
 // is something else. Every track keeps a copy of the album's values, so
@@ -548,6 +548,33 @@ pub(crate) fn folder_sheets(dir: &Path) -> Vec<Arc<SplitSheet>> {
         .filter_map(|cue| SplitSheet::read(cue))
         .map(Arc::new)
         .collect()
+}
+
+// The ".cue" files of folders that split audio files, read once for each
+// folder
+#[derive(Debug, Default)]
+pub(crate) struct FolderSheets(HashMap<PathBuf, Vec<Arc<SplitSheet>>>);
+
+// The track of a sheet that a playlist names by a file and the track's
+// number, as Strawberry writes them: by the audio file that a ".cue" file
+// splits, the way Dismas finds the tracks of the file, by the first sheet
+// in its folder that splits it. A ".cue" file names its own track, and an
+// audio file that no sheet next to it splits has one in its tags, or the
+// track can't be read
+pub(crate) fn track_of_file(path: &Path, number: u32, folders: &mut FolderSheets) -> PathBuf {
+    if is_cue_path(path) {
+        return track_location(path, number);
+    }
+    let sheet = path.parent().and_then(|dir| {
+        folders
+            .0
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| utils::guarded(dir.display(), || folder_sheets(dir), Vec::new))
+            .iter()
+            .find(|sheet| sheet.splits(path))
+            .map(|sheet| sheet.path.clone())
+    });
+    track_location(sheet.as_deref().unwrap_or(path), number)
 }
 
 // The ".cue" files among some files, and which one splits each audio file:

@@ -340,16 +340,19 @@ fn import_m3u_within(
     let dir = path.parent()?;
     let base = gio::File::for_path(dir);
     let mut finder = Finder::default();
+    let mut sheets = cue_sheet::FolderSheets::default();
     Some(
         m3u_entries(&text)
-            .map(|line| {
-                let file = m3u_entry(line, &base);
-                if file.path().is_some_and(|p| cue_sheet::location_exists(&p)) {
-                    return file;
-                }
-                finder
-                    .find(line, dir, music_folders)
-                    .map_or(file, gio::File::for_path)
+            .map(|entry| {
+                let file = m3u_entry(entry.line, &base);
+                let file = if file.path().is_some_and(|p| cue_sheet::location_exists(&p)) {
+                    file
+                } else {
+                    finder
+                        .find(entry.line, dir, music_folders)
+                        .map_or(file, gio::File::for_path)
+                };
+                with_cue_track(file, entry.cue_track, &mut sheets)
             })
             .collect(),
     )
@@ -592,19 +595,71 @@ fn format_m3u(files: &[gio::File], relative_to: Option<&Path>) -> (String, usize
 // The entries of an M3U playlist, which can be URIs, or paths; relative
 // paths are relative to `base`, the directory of the playlist
 fn parse_m3u(text: &str, base: &gio::File) -> Vec<gio::File> {
+    // Only read for a playlist with Strawberry's lines, which Dismas
+    // doesn't write in its own
+    let mut sheets = cue_sheet::FolderSheets::default();
     m3u_entries(text)
-        .map(|line| m3u_entry(line, base))
+        .map(|entry| with_cue_track(m3u_entry(entry.line, base), entry.cue_track, &mut sheets))
         .collect()
 }
 
-// The lines of an M3U playlist that name tracks. Old Macs ended lines
-// with a carriage return alone
-fn m3u_entries(text: &str) -> impl Iterator<Item = &str> {
+// The line Strawberry writes before a track of a CUE sheet, with its
+// number, as it names the track by the audio file the sheet splits
+const CUE_TRACK_LINE: &str = "#EXTSTRAWBERRYTRACK:";
+
+// An entry of an M3U playlist, and the number of the track of a CUE sheet
+// that a line before it gave
+struct M3uEntry<'a> {
+    line: &'a str,
+    cue_track: Option<u32>,
+}
+
+// The entries of an M3U playlist, the lines that name tracks. A number
+// Strawberry gave holds until the next entry, across the other lines that
+// start with "#", such as #EXTINF, which Strawberry writes before it or
+// after it. Old Macs ended lines with a carriage return alone
+fn m3u_entries(text: &str) -> impl Iterator<Item = M3uEntry<'_>> {
+    let mut cue_track = None;
     text.split(['\n', '\r'])
         .map(|line| line.trim_start_matches('\u{feff}').trim())
         // GLib can't take a path with a NUL byte, as in a UTF-16 playlist
         // without a byte order mark, or a file with a block of zeros
-        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.contains('\0'))
+        .filter(|line| !line.is_empty() && !line.contains('\0'))
+        .filter_map(move |line| {
+            if let Some(number) = line.strip_prefix(CUE_TRACK_LINE) {
+                cue_track = number
+                    .trim()
+                    .parse()
+                    .ok()
+                    .filter(|number| (1..=cue_sheet::MAX_TRACK_NUMBER).contains(number));
+                None
+            } else if line.starts_with('#') {
+                None
+            } else {
+                Some(M3uEntry {
+                    line,
+                    cue_track: cue_track.take(),
+                })
+            }
+        })
+}
+
+// The track of a CUE sheet that an entry names with Strawberry's number,
+// if it does, and the file is local and isn't already a track of a sheet
+fn with_cue_track(
+    file: gio::File,
+    cue_track: Option<u32>,
+    sheets: &mut cue_sheet::FolderSheets,
+) -> gio::File {
+    let Some(number) = cue_track else {
+        return file;
+    };
+    match file.path() {
+        Some(path) if cue_sheet::missing_location_parts(&path).is_none() => {
+            gio::File::for_path(cue_sheet::track_of_file(&path, number, sheets))
+        }
+        _ => file,
+    }
 }
 
 fn m3u_entry(line: &str, base: &gio::File) -> gio::File {
@@ -726,6 +781,131 @@ mod tests {
         assert_eq!(n_outside, 0);
         let parsed = parse_m3u(&text, &gio::File::for_path("/home/me/Music"));
         assert_eq!(paths(&parsed), paths(&files));
+    }
+
+    // A folder with "Album.cue", which splits "Album.flac" into two tracks
+    fn folder_with_a_sheet() -> PathBuf {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        std::fs::write(dir.join("Album.flac"), b"").unwrap();
+        std::fs::write(
+            dir.join("Album.cue"),
+            "FILE \"Album.flac\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n  \
+             TRACK 02 AUDIO\n    INDEX 01 01:00:00\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn parse_reads_strawberry_cue_tracks() {
+        let dir = folder_with_a_sheet();
+        let base = gio::File::for_path(&dir);
+        // Strawberry writes #EXTINF first, and reads either order
+        let text = "#EXTM3U\n#EXTINF:60,A - Two\n#EXTSTRAWBERRYTRACK:2\nAlbum.flac\n\
+                    #EXTSTRAWBERRYTRACK:1\n#EXTINF:60,A - One\nAlbum.flac\n";
+        let files = parse_m3u(text, &base);
+        assert_eq!(
+            paths(&files),
+            [dir.join("Album.cue/track02"), dir.join("Album.cue/track01")]
+                .map(|path| path.to_str().unwrap().to_string())
+        );
+
+        // A sheet names its own track
+        let files = parse_m3u("#EXTSTRAWBERRYTRACK:3\n/music/Live.cue\n", &base);
+        assert_eq!(paths(&files), ["/music/Live.cue/track03"]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_cue_track_line_applies_to_the_next_entry_only() {
+        let dir = folder_with_a_sheet();
+        let text = "#EXTSTRAWBERRYTRACK:2\nAlbum.flac\nAlbum.flac\n";
+        let files = parse_m3u(text, &gio::File::for_path(&dir));
+        assert_eq!(
+            paths(&files),
+            [dir.join("Album.cue/track02"), dir.join("Album.flac")]
+                .map(|path| path.to_str().unwrap().to_string())
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cue_track_lines_with_bad_numbers_are_ignored() {
+        for number in ["0", "-1", "1000", "x", "", "2 3"] {
+            let text = format!("#EXTSTRAWBERRYTRACK:{number}\n/music/Album.flac\n");
+            let files = parse_m3u(&text, &gio::File::for_path("/music"));
+            assert_eq!(paths(&files), ["/music/Album.flac"], "{number:?}");
+        }
+        // The last of two holds
+        let text = "#EXTSTRAWBERRYTRACK:1\n#EXTSTRAWBERRYTRACK:4\n/music/Live.cue\n";
+        let files = parse_m3u(text, &gio::File::for_path("/music"));
+        assert_eq!(paths(&files), ["/music/Live.cue/track04"]);
+        // An entry that's already a track of a sheet keeps its number
+        let text = "#EXTSTRAWBERRYTRACK:1\n/music/Live.cue/track02\n";
+        let files = parse_m3u(text, &gio::File::for_path("/music"));
+        assert_eq!(paths(&files), ["/music/Live.cue/track02"]);
+    }
+
+    #[test]
+    fn strawberry_tracks_of_audio_files_go_to_the_sheet_that_splits_them() {
+        let dir = folder_with_a_sheet();
+        // Imported from elsewhere, where the album was in another folder
+        let playlist = dir.join("list.m3u8");
+        std::fs::write(
+            &playlist,
+            "#EXTSTRAWBERRYTRACK:2\nC:\\Music\\Old\\Album.flac\n",
+        )
+        .unwrap();
+        let moved = dir.join("Music");
+        std::fs::create_dir_all(moved.join("Old")).unwrap();
+        std::fs::rename(dir.join("Album.flac"), moved.join("Old/Album.flac")).unwrap();
+        std::fs::rename(dir.join("Album.cue"), moved.join("Old/Album.cue")).unwrap();
+        let files = import_m3u(&playlist, std::slice::from_ref(&moved)).unwrap();
+        assert_eq!(
+            paths(&files),
+            [moved.join("Old/Album.cue/track02").to_str().unwrap()]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The fallback a sheet in the tags needs: an audio file that no ".cue"
+    // file splits names the track of a sheet in its tags, and a file
+    // without one gives a track that can't be read, rather than the whole
+    // file once for each of its tracks
+    #[test]
+    fn a_cue_track_line_for_a_file_without_a_sheet_names_a_sheet_in_its_tags() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        std::fs::write(dir.join("Live.flac"), b"").unwrap();
+        let files = parse_m3u(
+            "#EXTSTRAWBERRYTRACK:2\nLive.flac\n",
+            &gio::File::for_path(&dir),
+        );
+        assert_eq!(
+            paths(&files),
+            [dir.join("Live.flac/track02").to_str().unwrap()]
+        );
+        assert!(cue_sheet::location_exists(&dir.join("Live.flac/track02")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_limit_on_entries_does_not_count_cue_track_lines() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let playlist = dir.join("list.m3u");
+        std::fs::write(&playlist, "#EXTSTRAWBERRYTRACK:1\na.cue\n").unwrap();
+        let files = import_m3u_within(&playlist, &[], 1024, 1).unwrap();
+        assert_eq!(paths(&files), [dir.join("a.cue/track01").to_str().unwrap()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // Dismas can only play a part of a file as the track of a CUE sheet, so
+    // VLC's times are left out, and the whole file plays
+    #[test]
+    fn vlc_options_are_ignored() {
+        let text = "#EXTVLCOPT:start-time=10\n#EXTVLCOPT:stop-time=20\n/music/a.flac\n";
+        let files = parse_m3u(text, &gio::File::for_path("/music"));
+        assert_eq!(paths(&files), ["/music/a.flac"]);
     }
 
     #[test]
