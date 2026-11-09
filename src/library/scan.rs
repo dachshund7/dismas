@@ -61,7 +61,6 @@ pub(super) struct TrackTags {
     album_artist: Option<String>,
     artist: Option<String>,
     artist_sort: Option<String>,
-    pub(super) year: Option<String>,
     pub(super) sort_dates: SortDates,
     disc: Option<u32>,
     track: Option<u32>,
@@ -414,14 +413,14 @@ pub(super) fn scan_with(
             let mut insert = tx.prepare(
                 "INSERT OR REPLACE INTO tracks
                  (path, file, mtime, ctime, size, album_id, album, album_artist, artist,
-                  artist_sort, year, disc, track, title, search, added, composers, work_key,
-                  work, work_title, work_collection, work_composers, movement_order, performers,
+                  artist_sort, disc, track, title, search, added, composers, work_key, work,
+                  work_title, work_collection, work_composers, movement_order, performers,
                   label, catalog_number, work_arrangement_of, work_arrangement,
                   work_arrangement_of_id, work_part_ids, fields, sort_date,
                   original_sort_date, recorded_sort_date)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                          ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
-                         ?31, ?32, ?33, ?34)",
+                         ?31, ?32, ?33)",
             )?;
             // The files are read a few at a time, and written here, in the
             // transaction, as they come
@@ -481,7 +480,6 @@ pub(super) fn scan_with(
                         tags.album_artist,
                         tags.artist,
                         tags.artist_sort,
-                        tags.year,
                         tags.disc,
                         tags.track,
                         tags.title,
@@ -788,7 +786,6 @@ impl TrackTags {
             album_artist: album_artist.map(plain_commas),
             artist: artist.map(plain_commas),
             artist_sort: credits.album_artist_sort.clone(),
-            year: credits.year(),
             sort_dates: credits.sort_dates(),
             disc: tag.disk(),
             track: tag.track(),

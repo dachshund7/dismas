@@ -4062,14 +4062,15 @@ fn works_are_listed_with_their_recordings() {
     ];
     for (path, album, year, disc, track, key, name, composers, order, performers, search) in rows {
         conn.execute(
-            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album, year,
-                                     disc, track, search, work_key, work, work_composers,
-                                     movement_order, performers)
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                     recorded_sort_date, disc, track, search, work_key, work,
+                                     work_composers, movement_order, performers)
                  VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 path.as_bytes(),
                 album,
-                year,
+                year.and_then(crate::tag_date::TagDate::parse)
+                    .map(crate::tag_date::TagDate::sort_text),
                 disc,
                 track,
                 search,
@@ -4683,22 +4684,23 @@ fn albums_have_the_year_they_were_made_and_their_label() {
         &ExtraComments::default(),
         (None, None),
     );
-    assert_eq!(tags.year.as_deref(), Some("1961"));
+    let year = |tags: &super::TrackTags| tags.sort_dates.recorded.map(|date| date.year);
+    assert_eq!(year(&tags), Some(1961));
     assert_eq!(tags.label.as_deref(), Some("Hyperion"));
     assert_eq!(tags.catalog_number.as_deref(), Some("CDA67100"));
     let extra = ExtraComments::with_recording_date("1960-05/1960-06");
     let tags = super::TrackTags::from_tag(&tag, path, Some(path), &extra, (None, None));
-    assert_eq!(tags.year.as_deref(), Some("1960"));
+    assert_eq!(year(&tags), Some(1960));
 
     // The album has the earliest year of its tracks, and its label
     let conn = test_db();
     for (path, year, label) in [
-        ("/m/A/01", "1961", Some("Hyperion")),
-        ("/m/A/02", "1960", None),
+        ("/m/A/01", "1961-~~-~~", Some("Hyperion")),
+        ("/m/A/02", "1960-05-~~", None),
     ] {
         conn.execute(
-            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album, year,
-                                     label, catalog_number)
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                     recorded_sort_date, label, catalog_number)
                  VALUES (?1, ?1, 0, 0, 0, 0, 'a', 'Cello Suites', ?2, ?3, 'CDA67100')",
             rusqlite::params![path.as_bytes(), year, label],
         )
@@ -4756,6 +4758,55 @@ fn albums_have_the_earliest_date_of_each_kind() {
     assert_eq!(text(dates.date).as_deref(), Some("2007-02"));
     assert_eq!(text(dates.original).as_deref(), Some("1965-03"));
     assert_eq!(text(dates.recorded).as_deref(), Some("1960-05-02"));
+}
+
+#[test]
+fn the_recordings_of_a_work_are_in_the_order_they_were_recorded() {
+    use crate::tag_date::TagDate;
+
+    // Three albums of one year, whose titles are in the other order, and
+    // one undated
+    let conn = test_db();
+    for (path, album, recorded) in [
+        ("/m/A/01", "a", Some("1965")),
+        ("/m/B/01", "b", Some("1965-11")),
+        ("/m/C/01", "c", None),
+        ("/m/D/01", "d", Some("1965-03-12")),
+    ] {
+        conn.execute(
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                 recorded_sort_date, work_key, work, work_composers)
+             VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2, ?3, 'w', 'Work', 'Composer')",
+            rusqlite::params![
+                path.as_bytes(),
+                album,
+                recorded.and_then(TagDate::parse).map(TagDate::sort_text)
+            ],
+        )
+        .unwrap();
+    }
+    let recordings = super::query_work_recordings(
+        &conn,
+        &["w".to_string()],
+        &super::TrackFilter::default(),
+        &[],
+    )
+    .unwrap();
+    // As the Recorded sort of the albums: a date with only a year after
+    // the months of its year
+    let order: Vec<_> = recordings
+        .iter()
+        .map(|recording| (recording.album_id.as_str(), recording.year.as_deref()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ("d", Some("1965")),
+            ("b", Some("1965")),
+            ("a", Some("1965")),
+            ("c", None)
+        ]
+    );
 }
 
 #[test]

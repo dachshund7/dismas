@@ -35,6 +35,10 @@ All notable changes to this project will be documented in this file.
 - The playlist's File Name sort goes by the folders, then the file
   names, so that albums whose files have the same names, such as
   "01 …", stay together, each in the order of its folder
+- A work's recordings on the Works page are in the order they were
+  recorded, to the day where the tags say, as the Recorded sort orders
+  the albums; recordings of the same year were in the order of their
+  albums' titles
 - `year:` in the search takes a month or a day too, as `year:1965-03`,
   and finds a recording made over several months in each year it spans.
   A date still being typed at the end of the search, as `year:19`, is left

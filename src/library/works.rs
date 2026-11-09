@@ -103,7 +103,8 @@ pub(super) struct WorkRow {
     collection: Option<String>,
     composers: Option<String>,
     pub(super) album: Option<String>,
-    year: Option<String>,
+    // When it was recorded, see `SortDates::recorded`
+    recorded: Option<TagDate>,
     performers: Option<String>,
     arrangement_of: Option<String>,
     arrangement: Option<String>,
@@ -625,8 +626,8 @@ pub(super) fn query_track_work(
 // The recordings of a work that the filter matches, and those of the
 // arrangements listed under it, `keys` being its key and theirs, see
 // `WorkInfo::keys()`, with all their tracks, see `recordings_of_works()`,
-// by the year of their albums, those without one last, and then by the
-// albums' titles. The tracks in the `hidden` folders are left out
+// in the order they were recorded, as the Recorded sort of the albums,
+// those without a date last, and then by the albums' titles. The tracks in the `hidden` folders are left out
 pub(crate) fn work_recordings(
     keys: &[String],
     filter: &TrackFilter,
@@ -662,13 +663,14 @@ pub(super) fn query_work_recordings(
             .map(|rows| {
                 let album = rows.iter().find_map(|row| row.album.as_deref());
                 let collation = glib::CollationKey::from(album.unwrap_or_default());
+                let recorded = rows
+                    .iter()
+                    .map(|row| Earliest(row.recorded))
+                    .min()
+                    .unwrap_or(Earliest(None));
                 let recording = WorkRecording {
                     album_id: rows[0].album_id.clone(),
-                    year: rows
-                        .iter()
-                        .filter_map(|row| row.year.as_deref())
-                        .min()
-                        .map(str::to_owned),
+                    year: recorded.0.map(|date| format!("{:04}", date.year)),
                     performers: performers_line(
                         rows.iter().filter_map(|row| row.performers.as_deref()),
                     ),
@@ -676,17 +678,13 @@ pub(super) fn query_work_recordings(
                     work_key: rows[0].work.clone(),
                     arrangement: recording_arrangement(&rows, |work| listed.contains_key(work)),
                 };
-                (collation, recording)
+                ((recorded, collation), recording)
             })
             .collect();
-    // By year, those without one last, then by album
-    recordings.sort_by(|(a_album, a), (b_album, b)| {
-        (a.year.is_none(), &a.year, a_album, &a.album_id).cmp(&(
-            b.year.is_none(),
-            &b.year,
-            b_album,
-            &b.album_id,
-        ))
+    // In the order they were recorded, to the day where the tags say, those
+    // without a date last, then by album
+    recordings.sort_by(|((a_recorded, a_album), a), ((b_recorded, b_album), b)| {
+        (a_recorded, a_album, &a.album_id).cmp(&(b_recorded, b_album, &b.album_id))
     });
     Ok(recordings
         .into_iter()
@@ -720,7 +718,8 @@ pub(super) fn query_work_rows(
     };
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, path, work_key, movement_order, {},
-                work, work_title, work_collection, work_composers, album, year, performers,
+                work, work_title, work_collection, work_composers, album, recorded_sort_date,
+                performers,
                 disc, track, work_arrangement_of, work_arrangement, work_arrangement_of_id,
                 work_part_ids, {}
          FROM tracks
@@ -758,7 +757,10 @@ pub(super) fn query_work_rows(
             collection: row.get(7)?,
             composers: row.get(8)?,
             album: row.get(9)?,
-            year: row.get(10)?,
+            recorded: row
+                .get::<_, Option<String>>(10)?
+                .as_deref()
+                .and_then(TagDate::from_sort_text),
             performers: row.get(11)?,
             arrangement_of: row.get(14)?,
             arrangement: row.get(15)?,

@@ -63,7 +63,7 @@ use crate::{
     i18n::i18n,
     play_stats,
     search_query::{Candidate, Context, Mode, Needs, Query, tagged_span},
-    tag_date::{SortDates, TagDate},
+    tag_date::{Earliest, SortDates, TagDate},
     utils,
 };
 
@@ -74,7 +74,8 @@ pub(crate) struct AlbumInfo {
     pub(crate) artist: String,
     // The key the artist is sorted by
     pub(crate) artist_sort: String,
-    // The year its tracks were made, the earliest, see `TrackCredits::year()`
+    // The year of its Recorded date, which is shown with it, see
+    // `TrackCredits::year()`
     pub(crate) year: Option<String>,
     // The earliest of its tracks' dates of each kind, see `SortDates`. The
     // date of each track is the first of its chain that it has, so in an
@@ -91,9 +92,9 @@ pub(crate) struct AlbumInfo {
     pub(crate) catalog_number: Option<String>,
 }
 
-// The albums, sorted by artist, then year and title; the grid sorts them
-// again in the order the user picked. The tracks in the `hidden` folders,
-// which aren't there, are left out
+// The albums, sorted by artist, then when they were recorded and by title;
+// the grid sorts them again in the order the user picked. The tracks in
+// the `hidden` folders, which aren't there, are left out
 pub(crate) fn albums(hidden: &[PathBuf]) -> Vec<AlbumInfo> {
     query_or_default("load the albums", |conn| query_albums(conn, hidden))
 }
@@ -105,9 +106,9 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
                 COALESCE(MAX(t.album_artist),
                          CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
                               ELSE MAX(t.artist) END),
-                MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added),
+                MIN(t.recorded_sort_date), c.path, MAX(t.artist_sort), MIN(t.added),
                 COUNT(DISTINCT t.artist), MAX(t.label), MAX(t.catalog_number),
-                MIN(t.sort_date), MIN(t.original_sort_date), MIN(t.recorded_sort_date)
+                MIN(t.sort_date), MIN(t.original_sort_date)
          FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
          WHERE t.album_id IS NOT NULL{hidden_sql}
          GROUP BY t.album_id"
@@ -135,16 +136,17 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
             row.get::<_, Option<String>>(i)
                 .map(|date| date.as_deref().and_then(TagDate::from_sort_text))
         };
+        let recorded = date(3)?;
         let info = AlbumInfo {
             id: row.get(0)?,
             title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
             artist,
             artist_sort: sort_key,
-            year: row.get(3)?,
+            year: recorded.map(|date| format!("{:04}", date.year)),
             dates: SortDates {
                 date: date(10)?,
                 original: date(11)?,
-                recorded: date(12)?,
+                recorded,
             },
             added: row.get(6)?,
             cover: row.get(4)?,
@@ -155,11 +157,12 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
         Ok((key, info))
     })?;
 
-    // Sorted by artist, then year and title, in the order of the
-    // current locale
+    // Sorted by artist, then when they were recorded and by title, in the
+    // order of the current locale
     let mut albums = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     albums.sort_by(|((a_artist, a_title), a), ((b_artist, b_title), b)| {
-        (a_artist, &a.year, a_title).cmp(&(b_artist, &b.year, b_title))
+        let recorded = |info: &AlbumInfo| Earliest(info.dates.recorded);
+        (a_artist, recorded(a), a_title).cmp(&(b_artist, recorded(b), b_title))
     });
 
     Ok(albums.into_iter().map(|(_, info)| info).collect())
