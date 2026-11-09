@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::tag_date::{DateKind, TagDate, TagDates};
+
 use super::{
     MusicFolder, Roots, ThumbnailSizes, ThumbnailUpdate, is_mbid, path_bytes, path_from_bytes,
     shrink_thumbnail, thumbnail_name, thumbnail_size,
@@ -4684,7 +4686,7 @@ fn albums_have_the_year_they_were_made_and_their_label() {
         &ExtraComments::default(),
         (None, None),
     );
-    let year = |tags: &super::TrackTags| tags.sort_dates.recorded.map(|date| date.year);
+    let year = |tags: &super::TrackTags| tags.tag_dates.sort_dates().recorded.map(|date| date.year);
     assert_eq!(year(&tags), Some(1961));
     assert_eq!(tags.label.as_deref(), Some("Hyperion"));
     assert_eq!(tags.catalog_number.as_deref(), Some("CDA67100"));
@@ -4718,7 +4720,6 @@ fn albums_have_the_earliest_date_of_each_kind() {
     use lofty::tag::{ItemKey, Tag, TagType};
 
     use super::ExtraComments;
-    use crate::tag_date::TagDate;
 
     // A reissue: the Date tag is the reissue's, and the dates are kept as
     // the album sorts compare them
@@ -4729,29 +4730,25 @@ fn albums_have_the_earliest_date_of_each_kind() {
     let extra = ExtraComments::with_recording_date("1960-05-02/1960-06-30");
     let tags = super::TrackTags::from_tag(&tag, path, Some(path), &extra, (None, None));
     let text = |date: Option<TagDate>| date.map(|date| date.to_string());
-    assert_eq!(text(tags.sort_dates.date).as_deref(), Some("2007-03-01"));
-    assert_eq!(text(tags.sort_dates.original).as_deref(), Some("1961"));
-    assert_eq!(
-        text(tags.sort_dates.recorded).as_deref(),
-        Some("1960-05-02")
-    );
+    let sort_dates = tags.tag_dates.sort_dates();
+    assert_eq!(text(sort_dates.date).as_deref(), Some("2007-03-01"));
+    assert_eq!(text(sort_dates.original).as_deref(), Some("1961"));
+    assert_eq!(text(sort_dates.recorded).as_deref(), Some("1960-05-02"));
 
     // The album has the earliest of each, whichever tracks they come from,
     // in the order of the sorts: a date with only a year, here on the first
     // track, goes after the months of its year, here on the second
     let conn = test_db();
-    let kept = |date: &str| TagDate::parse(date).map(TagDate::sort_text);
     for (path, date, original, recorded) in [
         ("/m/A/01", "2007-03-01", "1965", "1960-05-02"),
         ("/m/A/02", "2007-02", "1965-03", ""),
     ] {
-        conn.execute(
-            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
-                                 sort_date, original_sort_date, recorded_sort_date)
-             VALUES (?1, ?1, 0, 0, 0, 0, 'a', 'Cello Suites', ?2, ?3, ?4)",
-            rusqlite::params![path.as_bytes(), kept(date), kept(original), kept(recorded)],
-        )
-        .unwrap();
+        insert_dated_track(
+            &conn,
+            path,
+            "a",
+            TagDates::parse("", date, original, recorded),
+        );
     }
     let albums = super::query_albums(&conn, &[]).unwrap();
     let dates = albums[0].dates;
@@ -4760,10 +4757,87 @@ fn albums_have_the_earliest_date_of_each_kind() {
     assert_eq!(text(dates.recorded).as_deref(), Some("1960-05-02"));
 }
 
+// A track of `album_id` with its dates as the tags have them
+fn insert_dated_track(conn: &rusqlite::Connection, path: &str, album_id: &str, dates: TagDates) {
+    let text = |date: Option<TagDate>| date.map(TagDate::sort_text);
+    conn.execute(
+        "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                             release_sort_date, date_tag_sort_date, original_sort_date,
+                             recorded_sort_date)
+         VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![
+            path.as_bytes(),
+            album_id,
+            text(dates.release),
+            text(dates.date),
+            text(dates.original),
+            text(dates.recorded),
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
+fn an_album_goes_on_to_another_date_only_where_no_track_has_its_own() {
+    // A reissue whose tracks have the reissue's Date tag and the original
+    // date, but one track lacks the Date tag: it doesn't count under
+    // Released with its original date, which would put the reissue among
+    // the albums of 1965
+    let conn = test_db();
+    let dated = TagDates::parse("", "2015-04-28", "1965-01", "");
+    let undated = TagDates::parse("", "", "1965-01", "");
+    for (path, dates) in [("/m/A/01", dated), ("/m/A/02", undated), ("/m/A/03", dated)] {
+        insert_dated_track(&conn, path, "a", dates);
+    }
+    // An album with a recording date on one track and nothing else: the
+    // other sorts go on to it, as every track lacks their own
+    insert_dated_track(&conn, "/m/B/01", "b", TagDates::default());
+    insert_dated_track(
+        &conn,
+        "/m/B/02",
+        "b",
+        TagDates::parse("", "", "", "1960-05-02/1960-06-30"),
+    );
+    let albums = super::query_albums(&conn, &[]).unwrap();
+    let text = |date: Option<TagDate>| date.map(|date| date.to_string());
+    let dates = |id: &str| albums.iter().find(|album| album.id == id).unwrap().dates;
+    let a = dates("a");
+    assert_eq!(text(a.date).as_deref(), Some("2015-04-28"));
+    assert_eq!(text(a.original).as_deref(), Some("1965-01"));
+    assert_eq!(text(a.recorded).as_deref(), Some("1965-01"));
+    let b = dates("b");
+    assert_eq!(text(b.date).as_deref(), Some("1960-05-02"));
+    assert_eq!(text(b.original).as_deref(), Some("1960-05-02"));
+    assert_eq!(text(b.recorded).as_deref(), Some("1960-05-02"));
+
+    // The SQL works the dates out as `TagDates::earliest()` does
+    for (id, tracks) in [
+        ("a", vec![dated, undated, dated]),
+        (
+            "b",
+            vec![
+                TagDates::default(),
+                TagDates::parse("", "", "", "1960-05-02"),
+            ],
+        ),
+    ] {
+        let expected = [
+            DateKind::Released,
+            DateKind::OriginalRelease,
+            DateKind::Recorded,
+        ]
+        .map(|kind| TagDates::earliest(&tracks, kind));
+        let dates = dates(id);
+        assert_eq!(
+            [dates.date, dates.original, dates.recorded],
+            expected,
+            "{id}"
+        );
+    }
+}
+
 #[test]
 fn the_recordings_of_a_work_are_in_the_order_they_were_recorded() {
-    use crate::tag_date::TagDate;
-
     // Three albums of one year, whose titles are in the other order, and
     // one undated
     let conn = test_db();
@@ -4807,6 +4881,42 @@ fn the_recordings_of_a_work_are_in_the_order_they_were_recorded() {
             ("c", None)
         ]
     );
+}
+
+#[test]
+fn a_recording_goes_on_to_another_date_only_where_no_track_has_its_own() {
+    // A reissue of a recording made in 1965, with the original date on
+    // every track and the recording date on all but one: the recording
+    // was made in 1965, not in 1950, the original date the track without
+    // a recording date would go on to
+    let conn = test_db();
+    for (path, original, recorded) in [
+        ("/m/A/01", "1950", "1965-03"),
+        ("/m/A/02", "1950", ""),
+        ("/m/A/03", "1950", "1965-04"),
+    ] {
+        conn.execute(
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                 original_sort_date, recorded_sort_date, work_key, work,
+                                 work_composers)
+             VALUES (?1, ?1, 0, 0, 0, 0, 'a', 'a', ?2, ?3, 'w', 'Work', 'Composer')",
+            rusqlite::params![
+                path.as_bytes(),
+                TagDate::parse(original).map(TagDate::sort_text),
+                TagDate::parse(recorded).map(TagDate::sort_text),
+            ],
+        )
+        .unwrap();
+    }
+    let recordings = super::query_work_recordings(
+        &conn,
+        &["w".to_string()],
+        &super::TrackFilter::default(),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(recordings.len(), 1);
+    assert_eq!(recordings[0].year.as_deref(), Some("1965"));
 }
 
 #[test]

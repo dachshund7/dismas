@@ -103,8 +103,9 @@ pub(super) struct WorkRow {
     collection: Option<String>,
     composers: Option<String>,
     pub(super) album: Option<String>,
-    // When it was recorded, see `SortDates::recorded`
-    recorded: Option<TagDate>,
+    // Its dates as the tags have them, which the recording's Recorded
+    // date is taken from
+    dates: TagDates,
     performers: Option<String>,
     arrangement_of: Option<String>,
     arrangement: Option<String>,
@@ -664,11 +665,10 @@ pub(super) fn query_work_recordings(
             .map(|rows| {
                 let album = rows.iter().find_map(|row| row.album.as_deref());
                 let collation = glib::CollationKey::from(album.unwrap_or_default());
-                let recorded = rows
-                    .iter()
-                    .map(|row| Earliest(row.recorded))
-                    .min()
-                    .unwrap_or(Earliest(None));
+                // As an album's Recorded date, from the tracks that have
+                // a recording date
+                let dates: Vec<TagDates> = rows.iter().map(|row| row.dates).collect();
+                let recorded = Earliest(TagDates::earliest(&dates, DateKind::Recorded));
                 let recording = WorkRecording {
                     album_id: rows[0].album_id.clone(),
                     year: recorded.0.map(|date| format!("{:04}", date.year)),
@@ -719,8 +719,8 @@ pub(super) fn query_work_rows(
     };
     let mut stmt = conn.prepare(&format!(
         "SELECT album_id, path, work_key, movement_order, {},
-                work, work_title, work_collection, work_composers, album, recorded_sort_date,
-                performers,
+                work, work_title, work_collection, work_composers, album, release_sort_date,
+                date_tag_sort_date, original_sort_date, recorded_sort_date, performers,
                 disc, track, work_arrangement_of, work_arrangement, work_arrangement_of_id,
                 work_part_ids, {}
          FROM tracks
@@ -746,7 +746,11 @@ pub(super) fn query_work_rows(
                 .unwrap_or_default()
         });
         let path = path_from_bytes(row.get(1)?);
-        let track_order = TrackOrder::new(&path, row.get(12)?, row.get(13)?);
+        let track_order = TrackOrder::new(&path, row.get(15)?, row.get(16)?);
+        let date = |i| {
+            row.get::<_, Option<String>>(i)
+                .map(|date| date.as_deref().and_then(TagDate::from_sort_text))
+        };
         let row = WorkRow {
             album_id: row.get(0)?,
             path,
@@ -758,20 +762,22 @@ pub(super) fn query_work_rows(
             collection: row.get(7)?,
             composers: row.get(8)?,
             album: row.get(9)?,
-            recorded: row
-                .get::<_, Option<String>>(10)?
-                .as_deref()
-                .and_then(TagDate::from_sort_text),
-            performers: row.get(11)?,
-            arrangement_of: row.get(14)?,
-            arrangement: row.get(15)?,
-            arrangement_of_id: row.get(16)?,
+            dates: TagDates {
+                release: date(10)?,
+                date: date(11)?,
+                original: date(12)?,
+                recorded: date(13)?,
+            },
+            performers: row.get(14)?,
+            arrangement_of: row.get(17)?,
+            arrangement: row.get(18)?,
+            arrangement_of_id: row.get(19)?,
             part_ids: row
-                .get::<_, Option<String>>(17)?
+                .get::<_, Option<String>>(20)?
                 .map(|ids| ids.lines().map(ToString::to_string).collect())
                 .unwrap_or_default(),
             length: row
-                .get::<_, Option<i64>>(18)?
+                .get::<_, Option<i64>>(21)?
                 .and_then(|length| u64::try_from(length).ok()),
         };
         Ok((track_order, row))

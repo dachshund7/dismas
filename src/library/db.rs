@@ -5,7 +5,7 @@ use super::*;
 
 // Bump when the schema or the way the tags are read changes, so that
 // the whole library is read again
-pub(super) const SCHEMA_VERSION: i32 = 39;
+pub(super) const SCHEMA_VERSION: i32 = 40;
 
 // The paths of the tracks are kept as bytes, as they are not always valid
 // UTF-8. The path of a track of a CUE sheet is under its sheet, which is
@@ -26,9 +26,12 @@ pub(super) const SCHEMA: &str = "DROP TABLE IF EXISTS tracks;
         album_artist TEXT,
         artist TEXT,
         artist_sort TEXT,
-        -- The dates the albums are sorted by, see `SortDates`, written as
-        -- `TagDate::sort_text()`, so that MIN() takes the earliest
-        sort_date TEXT,
+        -- The dates as the tags have them, see `TagDates`, NULL for a tag
+        -- the track lacks, written as `TagDate::sort_text()`, so that
+        -- MIN() takes the earliest of an album's. An album goes on to its
+        -- other dates only where no track has one, see `earliest_sql()`
+        release_sort_date TEXT,
+        date_tag_sort_date TEXT,
         original_sort_date TEXT,
         recorded_sort_date TEXT,
         disc INTEGER,

@@ -61,7 +61,7 @@ pub(super) struct TrackTags {
     album_artist: Option<String>,
     artist: Option<String>,
     artist_sort: Option<String>,
-    pub(super) sort_dates: SortDates,
+    pub(super) tag_dates: TagDates,
     disc: Option<u32>,
     track: Option<u32>,
     pub(super) title: Option<String>,
@@ -416,11 +416,11 @@ pub(super) fn scan_with(
                   artist_sort, disc, track, title, search, added, composers, work_key, work,
                   work_title, work_collection, work_composers, movement_order, performers,
                   label, catalog_number, work_arrangement_of, work_arrangement,
-                  work_arrangement_of_id, work_part_ids, fields, sort_date,
-                  original_sort_date, recorded_sort_date)
+                  work_arrangement_of_id, work_part_ids, fields, release_sort_date,
+                  date_tag_sort_date, original_sort_date, recorded_sort_date)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                          ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
-                         ?31, ?32, ?33)",
+                         ?31, ?32, ?33, ?34)",
             )?;
             // The files are read a few at a time, and written here, in the
             // transaction, as they come
@@ -500,9 +500,10 @@ pub(super) fn scan_with(
                         work.and_then(|w| w.arrangement_of_id.as_ref()),
                         work.and_then(|w| w.part_ids.as_ref()),
                         tags.fields,
-                        text(tags.sort_dates.date),
-                        text(tags.sort_dates.original),
-                        text(tags.sort_dates.recorded),
+                        text(tags.tag_dates.release),
+                        text(tags.tag_dates.date),
+                        text(tags.tag_dates.original),
+                        text(tags.tag_dates.recorded),
                     ])?;
                     n_changed += 1;
                     // A changed track might have new cover art; new tracks
@@ -786,7 +787,7 @@ impl TrackTags {
             album_artist: album_artist.map(plain_commas),
             artist: artist.map(plain_commas),
             artist_sort: credits.album_artist_sort.clone(),
-            sort_dates: credits.sort_dates(),
+            tag_dates: credits.tag_dates(),
             disc: tag.disk(),
             track: tag.track(),
             title,

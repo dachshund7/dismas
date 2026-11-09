@@ -135,11 +135,37 @@ impl PartialOrd for Earliest {
     }
 }
 
-// The dates the albums and the tracks of a playlist can be sorted by, see
-// `TrackCredits::sort_dates()`
+// The dates of a track as its tags have them, see
+// `TrackCredits::tag_dates()`, which the dates it's sorted by come from,
+// see `sort_dates()`
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TagDates {
+    // The release date under a tag of its own, which few taggers write,
+    // see `TrackCredits::released_date()`
+    pub(crate) release: Option<TagDate>,
+    // The Date tag
+    pub(crate) date: Option<TagDate>,
+    pub(crate) original: Option<TagDate>,
+    pub(crate) recorded: Option<TagDate>,
+}
+
+// One of the dates of `TagDates`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DateSource {
+    Release,
+    Date,
+    Original,
+    Recorded,
+}
+
+// The dates the albums and the tracks of a playlist can be sorted by: each
+// is the date its search finds, `released:`, `original:` or `recorded:`,
+// or else the others along `chain()`, as most libraries have only the Date
+// tag, so that a track, or an album, has all three or none. The searches
+// don't go on to the other dates, except `year:`, which is Recorded's
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SortDates {
-    // For the Released sort, see `TrackCredits::released_date()`
+    // For the Released sort
     pub(crate) date: Option<TagDate>,
     pub(crate) original: Option<TagDate>,
     pub(crate) recorded: Option<TagDate>,
@@ -151,6 +177,69 @@ pub(crate) enum DateKind {
     Released,
     OriginalRelease,
     Recorded,
+}
+
+// The dates a sort goes by, in the order it takes them: its own, then the
+// others. Past its own, the Date tag comes before the release date: a
+// file that has both most often has the year the music came out in the
+// Date tag, and the reissue's in the release date. The library's SQL
+// follows the same order, see `library::earliest_sql()`
+pub(crate) fn chain(kind: DateKind) -> [DateSource; 4] {
+    use DateSource::{Date, Original, Recorded, Release};
+    match kind {
+        DateKind::Released => [Release, Date, Original, Recorded],
+        DateKind::OriginalRelease => [Original, Date, Release, Recorded],
+        DateKind::Recorded => [Recorded, Original, Date, Release],
+    }
+}
+
+impl TagDates {
+    pub(crate) fn get(self, source: DateSource) -> Option<TagDate> {
+        match source {
+            DateSource::Release => self.release,
+            DateSource::Date => self.date,
+            DateSource::Original => self.original,
+            DateSource::Recorded => self.recorded,
+        }
+    }
+
+    // The date of `kind` of some tracks together, as of an album: the
+    // earliest they have under the kind's own tag, or else under the next
+    // tag of `chain()` that any of them has. A track that lacks a tag the
+    // others have doesn't count with another of its dates, which could be
+    // earlier, as the original date of a reissue is
+    pub(crate) fn earliest(dates: &[TagDates], kind: DateKind) -> Option<TagDate> {
+        chain(kind).into_iter().find_map(|source| {
+            dates
+                .iter()
+                .filter_map(|dates| dates.get(source))
+                .map(|date| Earliest(Some(date)))
+                .min()
+                .and_then(|earliest| earliest.0)
+        })
+    }
+
+    // The dates one track is sorted by
+    pub(crate) fn sort_dates(self) -> SortDates {
+        let date = |kind| Self::earliest(&[self], kind);
+        SortDates {
+            date: date(DateKind::Released),
+            original: date(DateKind::OriginalRelease),
+            recorded: date(DateKind::Recorded),
+        }
+    }
+
+    // The release date, the Date tag, the original date and the recording
+    // date, "" for none
+    #[cfg(test)]
+    pub(crate) fn parse(release: &str, date: &str, original: &str, recorded: &str) -> Self {
+        Self {
+            release: TagDate::parse(release),
+            date: TagDate::parse(date),
+            original: TagDate::parse(original),
+            recorded: TagDate::parse(recorded),
+        }
+    }
 }
 
 impl SortDates {
@@ -242,6 +331,62 @@ mod tests {
         assert_eq!(read("196"), None);
         assert_eq!(read("March 1965"), None);
         assert_eq!(read("19x5"), None);
+    }
+
+    #[test]
+    fn each_chain_starts_with_its_own_tag_and_has_every_tag_once() {
+        for (kind, own) in [
+            (DateKind::Released, DateSource::Release),
+            (DateKind::OriginalRelease, DateSource::Original),
+            (DateKind::Recorded, DateSource::Recorded),
+        ] {
+            let chain = chain(kind);
+            assert_eq!(chain[0], own);
+            for source in [
+                DateSource::Release,
+                DateSource::Date,
+                DateSource::Original,
+                DateSource::Recorded,
+            ] {
+                assert_eq!(chain.iter().filter(|s| **s == source).count(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn the_earliest_of_tracks_takes_a_kind_from_the_tracks_that_have_it() {
+        // A reissue whose tracks have the reissue's Date tag and the
+        // original date, but one lacks the Date tag
+        let dated = TagDates::parse("", "2015", "1965", "");
+        let undated = TagDates::parse("", "", "1965", "");
+        let text = |date: Option<TagDate>| date.map(|date| date.to_string());
+        let tracks = [dated, undated, dated];
+        assert_eq!(
+            text(TagDates::earliest(&tracks, DateKind::Released)).as_deref(),
+            Some("2015")
+        );
+        assert_eq!(
+            text(TagDates::earliest(&tracks, DateKind::OriginalRelease)).as_deref(),
+            Some("1965")
+        );
+        // With no recording date on any track, Recorded goes on to the
+        // original date; one track alone does the same
+        assert_eq!(
+            text(TagDates::earliest(&tracks, DateKind::Recorded)).as_deref(),
+            Some("1965")
+        );
+        assert_eq!(text(undated.sort_dates().date).as_deref(), Some("1965"));
+        // The earliest in the order of the sorts: a date with only a year
+        // after the months of its year
+        let tracks = [
+            TagDates::parse("", "1965", "", ""),
+            TagDates::parse("", "1965-11", "", ""),
+        ];
+        assert_eq!(
+            text(TagDates::earliest(&tracks, DateKind::Released)).as_deref(),
+            Some("1965-11")
+        );
+        assert_eq!(TagDates::earliest(&[], DateKind::Released), None);
     }
 
     #[test]

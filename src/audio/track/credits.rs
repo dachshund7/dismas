@@ -6,7 +6,7 @@
 //! and movement, the composers, the conductors and the performers
 
 use super::*;
-use crate::tag_date::{DateKind, SortDates, TagDate};
+use crate::tag_date::{self, DateKind, DateSource, SortDates, TagDate, TagDates};
 
 // The most names a credit takes from the tags, far more than a recording
 // has: the credits line looks for each name among the others, and in the
@@ -428,42 +428,35 @@ impl TrackCredits {
         first_dated([self.release_date.as_deref(), self.date.as_deref()])
     }
 
-    // The dates the albums can be sorted by: each is the date its search
-    // finds, `released:`, `original:` or `recorded:`, or else the others,
-    // as most libraries have only the Date tag, so that a track has all
-    // three or none. The searches don't go on to the other dates, except
-    // `year:`, which is Recorded's
-    pub(crate) fn sort_dates(&self) -> SortDates {
-        let date = |kind| {
-            self.dates_from(kind)
-                .into_iter()
-                .flatten()
-                .find_map(TagDate::parse)
-        };
-        SortDates {
-            date: date(DateKind::Released),
-            original: date(DateKind::OriginalRelease),
-            recorded: date(DateKind::Recorded),
+    // The dates as the tags have them, which the library keeps for each
+    // track, to take an album's from those of its tracks
+    pub(crate) fn tag_dates(&self) -> TagDates {
+        let date = |text: &Option<String>| text.as_deref().and_then(TagDate::parse);
+        TagDates {
+            release: date(&self.release_date),
+            date: date(&self.date),
+            original: date(&self.original_date),
+            recorded: date(&self.recording_date),
         }
     }
 
-    // The dates a sort goes by, in the order it takes them. Past its own,
-    // the Date tag comes before the release date: a file that has both
-    // most often has the year the music came out in the Date tag, and the
-    // reissue's in the release date
+    // The dates the track is sorted by in a playlist, see `SortDates`
+    pub(crate) fn sort_dates(&self) -> SortDates {
+        self.tag_dates().sort_dates()
+    }
+
+    // The dates a sort goes by, as the tags have them, in the order it
+    // takes them, see `tag_date::chain()`
     fn dates_from(&self, kind: DateKind) -> [Option<&str>; 4] {
-        let [recorded, original, date, release] = [
-            &self.recording_date,
-            &self.original_date,
-            &self.date,
-            &self.release_date,
-        ]
-        .map(Option::as_deref);
-        match kind {
-            DateKind::Released => [release, date, original, recorded],
-            DateKind::OriginalRelease => [original, date, release, recorded],
-            DateKind::Recorded => [recorded, original, date, release],
-        }
+        tag_date::chain(kind).map(|source| {
+            match source {
+                DateSource::Release => &self.release_date,
+                DateSource::Date => &self.date,
+                DateSource::Original => &self.original_date,
+                DateSource::Recorded => &self.recording_date,
+            }
+            .as_deref()
+        })
     }
 
     // The original release date, if it's not the same as the date, e.g.

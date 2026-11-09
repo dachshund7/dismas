@@ -63,7 +63,7 @@ use crate::{
     i18n::i18n,
     play_stats,
     search_query::{Candidate, Context, Mode, Needs, Query, tagged_span},
-    tag_date::{Earliest, SortDates, TagDate},
+    tag_date::{self, DateKind, DateSource, Earliest, SortDates, TagDate, TagDates},
     utils,
 };
 
@@ -77,11 +77,9 @@ pub(crate) struct AlbumInfo {
     // The year of its Recorded date, which is shown with it, see
     // `TrackCredits::year()`
     pub(crate) year: Option<String>,
-    // The earliest of its tracks' dates of each kind, see `SortDates`. The
-    // date of each track is the first of its chain that it has, so in an
-    // album where only some tracks have a Date tag, the others count under
-    // Released with the date they go on to, such as when they were first
-    // released
+    // The dates it's sorted by, see `SortDates`: of each kind, the earliest
+    // its tracks have under the kind's own tag, or else under the next tag
+    // of the chain that any of them has, see `earliest_sql()`
     pub(crate) dates: SortDates,
     // When the first track of the album was added, in seconds since the
     // epoch
@@ -99,6 +97,27 @@ pub(crate) fn albums(hidden: &[PathBuf]) -> Vec<AlbumInfo> {
     query_or_default("load the albums", |conn| query_albums(conn, hidden))
 }
 
+// The column of `tracks` with a track's date from `source`, see `TagDates`
+fn date_column(source: DateSource) -> &'static str {
+    match source {
+        DateSource::Release => "release_sort_date",
+        DateSource::Date => "date_tag_sort_date",
+        DateSource::Original => "original_sort_date",
+        DateSource::Recorded => "recorded_sort_date",
+    }
+}
+
+// The date of `kind` of the tracks of a group, the `t` rows, as
+// `TagDates::earliest()` works it out: the earliest under the kind's own
+// tag, which `TagDate::sort_text()` orders as the sorts do, or else under
+// the next tag of `tag_date::chain()` that any track has
+fn earliest_sql(kind: DateKind) -> String {
+    let earliest = tag_date::chain(kind)
+        .map(|source| format!("MIN(t.{})", date_column(source)))
+        .join(", ");
+    format!("COALESCE({earliest})")
+}
+
 fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<AlbumInfo>> {
     let (hidden_sql, hidden_params) = hidden_condition("t.file", hidden);
     let mut stmt = conn.prepare(&format!(
@@ -106,12 +125,15 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
                 COALESCE(MAX(t.album_artist),
                          CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
                               ELSE MAX(t.artist) END),
-                MIN(t.recorded_sort_date), c.path, MAX(t.artist_sort), MIN(t.added),
+                {recorded}, c.path, MAX(t.artist_sort), MIN(t.added),
                 COUNT(DISTINCT t.artist), MAX(t.label), MAX(t.catalog_number),
-                MIN(t.sort_date), MIN(t.original_sort_date)
+                {released}, {original}
          FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
          WHERE t.album_id IS NOT NULL{hidden_sql}
-         GROUP BY t.album_id"
+         GROUP BY t.album_id",
+        recorded = earliest_sql(DateKind::Recorded),
+        released = earliest_sql(DateKind::Released),
+        original = earliest_sql(DateKind::OriginalRelease),
     ))?;
     // Without an album artist, the albums whose tracks are by different
     // artists are by the one of most of them, as a track "feat." another
