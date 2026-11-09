@@ -4712,6 +4712,53 @@ fn albums_have_the_year_they_were_made_and_their_label() {
 }
 
 #[test]
+fn albums_have_the_earliest_date_of_each_kind() {
+    use lofty::tag::{ItemKey, Tag, TagType};
+
+    use super::ExtraComments;
+    use crate::tag_date::TagDate;
+
+    // A reissue: the Date tag is the reissue's, and the dates are kept as
+    // the album sorts compare them
+    let path = Path::new("/music/Cello Suites/01.flac");
+    let mut tag = Tag::new(TagType::VorbisComments);
+    tag.insert_text(ItemKey::RecordingDate, "2007-3-1".to_string());
+    tag.insert_text(ItemKey::OriginalReleaseDate, "1961".to_string());
+    let extra = ExtraComments::with_recording_date("1960-05-02/1960-06-30");
+    let tags = super::TrackTags::from_tag(&tag, path, Some(path), &extra, (None, None));
+    let text = |date: Option<TagDate>| date.map(|date| date.to_string());
+    assert_eq!(text(tags.sort_dates.date).as_deref(), Some("2007-03-01"));
+    assert_eq!(text(tags.sort_dates.original).as_deref(), Some("1961"));
+    assert_eq!(
+        text(tags.sort_dates.recorded).as_deref(),
+        Some("1960-05-02")
+    );
+
+    // The album has the earliest of each, whichever tracks they come from,
+    // in the order of the sorts: a date with only a year, here on the first
+    // track, goes after the months of its year, here on the second
+    let conn = test_db();
+    let kept = |date: &str| TagDate::parse(date).map(TagDate::sort_text);
+    for (path, date, original, recorded) in [
+        ("/m/A/01", "2007-03-01", "1965", "1960-05-02"),
+        ("/m/A/02", "2007-02", "1965-03", ""),
+    ] {
+        conn.execute(
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, album_id, album,
+                                 sort_date, original_sort_date, recorded_sort_date)
+             VALUES (?1, ?1, 0, 0, 0, 0, 'a', 'Cello Suites', ?2, ?3, ?4)",
+            rusqlite::params![path.as_bytes(), kept(date), kept(original), kept(recorded)],
+        )
+        .unwrap();
+    }
+    let albums = super::query_albums(&conn, &[]).unwrap();
+    let dates = albums[0].dates;
+    assert_eq!(text(dates.date).as_deref(), Some("2007-02"));
+    assert_eq!(text(dates.original).as_deref(), Some("1965-03"));
+    assert_eq!(text(dates.recorded).as_deref(), Some("1960-05-02"));
+}
+
+#[test]
 fn an_album_without_an_album_artist_is_by_most_of_its_tracks() {
     let conn = test_db();
     let add = |album: &str, n: usize, artist: Option<&str>| {

@@ -16,6 +16,8 @@
     <value nick="title" value="1"/>
     <value nick="year" value="2"/>
     <value nick="added" value="3"/>
+    <value nick="original" value="4"/>
+    <value nick="recorded" value="5"/>
   </enum>
   <enum id="io.github.dachshund7.Dismas.SortOrder">
     <value nick="ascending" value="0"/>
@@ -126,7 +128,7 @@
 	  <key name="album-sort" enum="io.github.dachshund7.Dismas.AlbumSort">
 	    <default>'artist'</default>
 	    <summary>What the albums are sorted by</summary>
-	    <description>The albums in the grid are sorted by artist, title, year, or the date they were added to the music folders</description>
+	    <description>The albums in the grid are sorted by artist, title, the date they were released (the release date, or else the Date tag; its value is year), the date they were first released, the date they were recorded, or the date they were added to the music folders. Each date goes on to the others when an album lacks it</description>
 	  </key>
 	  <key name="album-sort-order" enum="io.github.dachshund7.Dismas.SortOrder">
 	    <default>'ascending'</default>

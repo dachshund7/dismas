@@ -31,10 +31,10 @@ Features
 --------
 
 - **Album grid:** browse the albums in your music folders, sorted by artist,
-  title, year or date added. Add folders in Preferences, such as one on a
-  second drive, and leave out folders inside them. New, changed and removed
-  tracks show up by themselves, and the albums of a drive that's unplugged
-  come back with it.
+  title, release date, first release, recording date or date added. Add
+  folders in Preferences, such as one on a second drive, and leave out
+  folders inside them. New, changed and removed tracks show up by
+  themselves, and the albums of a drive that's unplugged come back with it.
 - **Search by any tag:** the album search and the queue search look in every
   tag, not just the title, artist and album, so "Karajan Brahms" finds a
   recording by its conductor and its composer. Case and accents don't matter,
@@ -60,10 +60,11 @@ Features
   the albums it's recorded on, or go there from a movement with Go to Work.
 - **Classical music:** the queue and the album view show each work above its
   movements, and the player names the composers and the performers. Albums
-  and recordings go by the year they were recorded, or else first released,
-  rather than the year of a reissue. Track Information shows the work, the
-  performers and the production credits, and Open Booklet opens any PDF in an
-  album's folder. Dismas reads the tags written by the
+  can be sorted by when they were recorded, and a work's recordings go by the
+  year they were recorded, or else first released, rather than the year of a
+  reissue. Track Information shows the work, the performers and the
+  production credits, and Open Booklet opens any PDF in an album's folder.
+  Dismas reads the tags written by the
   [Work Hierarchy](https://github.com/dachshund7/work-hierarchy) plugin for
   Picard, and the wiki lists the
   [Picard settings](https://github.com/dachshund7/dismas/wiki/Picard-settings)

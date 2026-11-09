@@ -11,10 +11,23 @@ All notable changes to this project will be documented in this file.
   RELEASE DATE (foobar2000), ORIGYEAR (MusicBee, Mp3tag), ORIGINAL YEAR
   (Jaikoz, SongKong) and ORIGINALRELEASEDATE; the library is read again
   once
+- The albums can be sorted by Original Release, when their music was
+  first released, and by Recorded, when it was recorded. Each falls back
+  to the other dates when an album lacks its own, so both work in a
+  library with only the Date tag
 
 ### Changed
 
 - Update dependencies
+- The albums' Year sort is now Released, and goes by the date that
+  `released:` finds: a release date tag where a file has one, which few
+  taggers write, or else the Date tag, which other players' year sorts go
+  by and most taggers fill with the date of the release. So a reissue
+  sorts under the year it came out; Year went by the date of the
+  recording or the first release, which the Recorded sort now does. Albums of the same year are in the order of their months and
+  days, with those dated by the year alone after them, and an artist's
+  albums are in the order they were recorded, to the day where the tags
+  say
 
 ### Fixed
 

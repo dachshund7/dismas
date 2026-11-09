@@ -9,13 +9,14 @@ use std::{
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
 use super::AlbumInfo;
+use crate::tag_date::{DateKind, SortDates, TagDate};
 
 // What the album grid is sorted by, as in the "album-sort" setting
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AlbumSort {
     Artist,
     Title,
-    Year,
+    Date(DateKind),
     Added,
 }
 
@@ -23,7 +24,10 @@ impl AlbumSort {
     pub(crate) fn from_nick(nick: &str) -> Self {
         match nick {
             "title" => Self::Title,
-            "year" => Self::Year,
+            // The sort that was called Year keeps its name in the settings
+            "year" => Self::Date(DateKind::Released),
+            "original" => Self::Date(DateKind::OriginalRelease),
+            "recorded" => Self::Date(DateKind::Recorded),
             "added" => Self::Added,
             _ => Self::Artist,
         }
@@ -32,7 +36,7 @@ impl AlbumSort {
     // The newest albums are the ones people look for first, while names
     // read best from A to Z
     pub(crate) fn default_descending(self) -> bool {
-        matches!(self, Self::Year | Self::Added)
+        matches!(self, Self::Date(_) | Self::Added)
     }
 }
 
@@ -55,6 +59,20 @@ fn cmp_present_first<T: Ord>(a: Option<&T>, b: Option<&T>, descending: bool) -> 
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
+    }
+}
+
+// Compares two dates in the given direction, by their years, then their
+// months and then their days, each missing one last either way: a date with
+// only a year goes after the others of that year, as an album without a
+// date goes after the others
+fn cmp_dates(a: Option<TagDate>, b: Option<TagDate>, descending: bool) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => cmp_present_first(Some(&a.year), Some(&b.year), descending)
+            .then_with(|| cmp_present_first(a.month.as_ref(), b.month.as_ref(), descending))
+            .then_with(|| cmp_present_first(a.day.as_ref(), b.day.as_ref(), descending)),
+        // A missing date last either way
+        _ => a.is_none().cmp(&b.is_none()),
     }
 }
 
@@ -100,6 +118,7 @@ mod imp {
         pub(crate) artist_key: OnceCell<glib::CollationKey>,
         pub(crate) title_key: OnceCell<glib::CollationKey>,
         pub(crate) added: Cell<Option<i64>>,
+        pub(crate) dates: Cell<SortDates>,
     }
 
     #[glib::object_subclass]
@@ -128,6 +147,7 @@ impl Album {
         imp.label.replace(info.label);
         imp.catalog_number.replace(info.catalog_number);
         imp.added.set(info.added);
+        imp.dates.set(info.dates);
         let _ = imp
             .artist_key
             .set(glib::CollationKey::from(info.artist_sort.as_str()));
@@ -184,24 +204,22 @@ impl Album {
             |descending| cmp_present_first(a.artist_key.get(), b.artist_key.get(), descending);
         let title =
             |descending| cmp_present_first(a.title_key.get(), b.title_key.get(), descending);
-        let year = |descending| {
-            cmp_present_first(
-                a.year.borrow().as_ref(),
-                b.year.borrow().as_ref(),
-                descending,
-            )
-        };
+        let (a_dates, b_dates) = (a.dates.get(), b.dates.get());
+        let date = |kind, descending| cmp_dates(a_dates.get(kind), b_dates.get(kind), descending);
+        // The ties of the other sorts are by when the music was made, so
+        // that an artist's albums are in the order they were recorded
+        let recorded = |descending| date(DateKind::Recorded, descending);
         let added =
             || cmp_present_first(a.added.get().as_ref(), b.added.get().as_ref(), descending);
 
         match sort {
             AlbumSort::Artist => artist(descending)
-                .then_with(|| year(false))
+                .then_with(|| recorded(false))
                 .then_with(|| title(false)),
             AlbumSort::Title => title(descending)
                 .then_with(|| artist(false))
-                .then_with(|| year(false)),
-            AlbumSort::Year => year(descending)
+                .then_with(|| recorded(false)),
+            AlbumSort::Date(kind) => date(kind, descending)
                 .then_with(|| artist(false))
                 .then_with(|| title(false)),
             AlbumSort::Added => added()
@@ -215,17 +233,37 @@ impl Album {
 mod tests {
     use super::*;
 
-    fn album(artist: &str, title: &str, year: Option<&str>, added: Option<i64>) -> Album {
-        Album::new(AlbumInfo {
+    fn info(artist: &str, title: &str, added: Option<i64>) -> AlbumInfo {
+        AlbumInfo {
             id: format!("{artist} {title}"),
             title: title.to_string(),
             artist: artist.to_string(),
             artist_sort: artist.to_string(),
-            year: year.map(str::to_string),
+            year: None,
+            dates: SortDates::default(),
             added,
             cover: None,
             label: None,
             catalog_number: None,
+        }
+    }
+
+    // An album whose three dates are the same, as in a library with only
+    // the Date tag
+    fn album(artist: &str, title: &str, year: Option<&str>, added: Option<i64>) -> Album {
+        let date = year.unwrap_or_default();
+        Album::new(AlbumInfo {
+            year: year.map(str::to_string),
+            dates: SortDates::parse(date, date, date),
+            ..info(artist, title, added)
+        })
+    }
+
+    // An album by one artist with a date of each kind, "" for none
+    fn dated(title: &str, date: &str, original: &str, recorded: &str) -> Album {
+        Album::new(AlbumInfo {
+            dates: SortDates::parse(date, original, recorded),
+            ..info("Artist", title, None)
         })
     }
 
@@ -296,12 +334,86 @@ mod tests {
     fn missing_years_are_last() {
         let albums = albums();
         assert_eq!(
-            sorted(&albums, AlbumSort::Year, true),
+            sorted(&albums, AlbumSort::Date(DateKind::Released), true),
             ["Talkie Walkie", "Moon Safari", "Post", "Debut", "Untitled"]
         );
         assert_eq!(
-            sorted(&albums, AlbumSort::Year, false),
+            sorted(&albums, AlbumSort::Date(DateKind::Released), false),
             ["Debut", "Post", "Moon Safari", "Talkie Walkie", "Untitled"]
+        );
+    }
+
+    #[test]
+    fn each_date_sort_has_its_own_order() {
+        let albums = [
+            // Recorded in 1964, first released in 1965, and reissued
+            dated("Reissue", "2015", "1965", "1964"),
+            // Recorded at a concert in 1966, first released in 1998
+            dated("Live", "1998", "1998", "1966"),
+            dated("New", "2001", "2001", "2000"),
+        ];
+        assert_eq!(
+            sorted(&albums, AlbumSort::Date(DateKind::Released), false),
+            ["Live", "New", "Reissue"]
+        );
+        assert_eq!(
+            sorted(&albums, AlbumSort::Date(DateKind::OriginalRelease), false),
+            ["Reissue", "Live", "New"]
+        );
+        assert_eq!(
+            sorted(&albums, AlbumSort::Date(DateKind::Recorded), false),
+            ["Reissue", "Live", "New"]
+        );
+        assert_eq!(
+            sorted(&albums, AlbumSort::Date(DateKind::Recorded), true),
+            ["New", "Live", "Reissue"]
+        );
+    }
+
+    #[test]
+    fn dates_without_a_month_or_day_are_last_in_their_year_or_month() {
+        let albums = [
+            dated("Year only", "1965", "", ""),
+            dated("November", "1965-11", "", ""),
+            dated("March", "1965-03", "", ""),
+            dated("Next year", "1966", "", ""),
+            dated("No date", "", "", ""),
+            dated("March 12", "1965-03-12", "", ""),
+        ];
+        assert_eq!(
+            sorted(&albums, AlbumSort::Date(DateKind::Released), false),
+            [
+                "March 12",
+                "March",
+                "November",
+                "Year only",
+                "Next year",
+                "No date"
+            ]
+        );
+        assert_eq!(
+            sorted(&albums, AlbumSort::Date(DateKind::Released), true),
+            [
+                "Next year",
+                "November",
+                "March 12",
+                "March",
+                "Year only",
+                "No date"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_artists_albums_are_in_the_order_they_were_recorded() {
+        let albums = [
+            dated("Reissue", "2015", "1965", "1964"),
+            dated("Autumn", "1964", "1964", "1964-10"),
+            dated("Spring", "1964", "1964", "1964-04"),
+        ];
+        assert_eq!(
+            sorted(&albums, AlbumSort::Artist, false),
+            ["Spring", "Autumn", "Reissue"]
         );
     }
 

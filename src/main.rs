@@ -40,6 +40,7 @@ mod search_query;
 mod search_syntax;
 mod slide_bin;
 mod square_bin;
+mod tag_date;
 mod track_cover;
 mod track_details;
 mod track_info_dialog;

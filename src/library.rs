@@ -63,6 +63,7 @@ use crate::{
     i18n::i18n,
     play_stats,
     search_query::{Candidate, Context, Mode, Needs, Query, tagged_span},
+    tag_date::{SortDates, TagDate},
     utils,
 };
 
@@ -75,6 +76,12 @@ pub(crate) struct AlbumInfo {
     pub(crate) artist_sort: String,
     // The year its tracks were made, the earliest, see `TrackCredits::year()`
     pub(crate) year: Option<String>,
+    // The earliest of its tracks' dates of each kind, see `SortDates`. The
+    // date of each track is the first of its chain that it has, so in an
+    // album where only some tracks have a Date tag, the others count under
+    // Released with the date they go on to, such as when they were first
+    // released
+    pub(crate) dates: SortDates,
     // When the first track of the album was added, in seconds since the
     // epoch
     pub(crate) added: Option<i64>,
@@ -99,7 +106,8 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
                          CASE WHEN COUNT(DISTINCT t.artist) > 1 THEN NULL
                               ELSE MAX(t.artist) END),
                 MIN(t.year), c.path, MAX(t.artist_sort), MIN(t.added),
-                COUNT(DISTINCT t.artist), MAX(t.label), MAX(t.catalog_number)
+                COUNT(DISTINCT t.artist), MAX(t.label), MAX(t.catalog_number),
+                MIN(t.sort_date), MIN(t.original_sort_date), MIN(t.recorded_sort_date)
          FROM tracks t LEFT JOIN covers c ON c.album_id = t.album_id
          WHERE t.album_id IS NOT NULL{hidden_sql}
          GROUP BY t.album_id"
@@ -123,12 +131,21 @@ fn query_albums(conn: &Connection, hidden: &[PathBuf]) -> rusqlite::Result<Vec<A
             .get::<_, Option<String>>(5)?
             .unwrap_or_else(|| artist.clone());
         let key = glib::CollationKey::from(sort_key.as_str());
+        let date = |i| {
+            row.get::<_, Option<String>>(i)
+                .map(|date| date.as_deref().and_then(TagDate::from_sort_text))
+        };
         let info = AlbumInfo {
             id: row.get(0)?,
             title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
             artist,
             artist_sort: sort_key,
             year: row.get(3)?,
+            dates: SortDates {
+                date: date(10)?,
+                original: date(11)?,
+                recorded: date(12)?,
+            },
             added: row.get(6)?,
             cover: row.get(4)?,
             label: row.get(8)?,

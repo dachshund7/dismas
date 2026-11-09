@@ -6,6 +6,7 @@
 //! and movement, the composers, the conductors and the performers
 
 use super::*;
+use crate::tag_date::{DateKind, SortDates, TagDate};
 
 // The most names a credit takes from the tags, far more than a recording
 // has: the credits line looks for each name among the others, and in the
@@ -402,10 +403,10 @@ impl TrackCredits {
         }
     }
 
-    // The year the track was made, which the albums are sorted by and
-    // which is shown with them: the year it was recorded, or else the year
-    // it was first released, as the date of a reissue says nothing of the
-    // recording, or else the year of the release
+    // The year the track was made, which is shown with its album, and which
+    // `year:` finds: the year it was recorded, or else the year it was first
+    // released, as the date of a reissue says nothing of the recording, or
+    // else the year of the release
     pub(crate) fn year(&self) -> Option<String> {
         self.year_date()
             .and_then(|date| date.get(..4))
@@ -415,19 +416,54 @@ impl TrackCredits {
     // The date `year()` takes the year from, as the tag has it, e.g.
     // "1937-11-08/1938-03-08" for a recording made over several months
     pub(crate) fn year_date(&self) -> Option<&str> {
-        [
+        first_dated(self.dates_from(DateKind::Recorded))
+    }
+
+    // The date of this release, which `released:` finds: the release date
+    // under its own tag, which few taggers write, or else the Date tag,
+    // which most write the release's date in. Where a file has both, the
+    // tag that's only for the release wins, as the Date tag is the
+    // recording's for some (ID3v2.4's TDRC is the recording time)
+    pub(crate) fn released_date(&self) -> Option<&str> {
+        first_dated([self.release_date.as_deref(), self.date.as_deref()])
+    }
+
+    // The dates the albums can be sorted by: each is the date its search
+    // finds, `released:`, `original:` or `recorded:`, or else the others,
+    // as most libraries have only the Date tag, so that a track has all
+    // three or none. The searches don't go on to the other dates, except
+    // `year:`, which is Recorded's
+    pub(crate) fn sort_dates(&self) -> SortDates {
+        let date = |kind| {
+            self.dates_from(kind)
+                .into_iter()
+                .flatten()
+                .find_map(TagDate::parse)
+        };
+        SortDates {
+            date: date(DateKind::Released),
+            original: date(DateKind::OriginalRelease),
+            recorded: date(DateKind::Recorded),
+        }
+    }
+
+    // The dates a sort goes by, in the order it takes them. Past its own,
+    // the Date tag comes before the release date: a file that has both
+    // most often has the year the music came out in the Date tag, and the
+    // reissue's in the release date
+    fn dates_from(&self, kind: DateKind) -> [Option<&str>; 4] {
+        let [recorded, original, date, release] = [
             &self.recording_date,
             &self.original_date,
             &self.date,
             &self.release_date,
         ]
-        .into_iter()
-        .flatten()
-        .map(|date| date.trim())
-        .find(|date| {
-            date.get(..4)
-                .is_some_and(|year| year.chars().all(|c| c.is_ascii_digit()))
-        })
+        .map(Option::as_deref);
+        match kind {
+            DateKind::Released => [release, date, original, recorded],
+            DateKind::OriginalRelease => [original, date, release, recorded],
+            DateKind::Recorded => [recorded, original, date, release],
+        }
     }
 
     // The original release date, if it's not the same as the date, e.g.
@@ -863,6 +899,15 @@ impl TrackCredits {
             vec![artist(name, sort)]
         }
     }
+}
+
+// The first of `dates` that begins with a year, as the tag has it
+fn first_dated<const N: usize>(dates: [Option<&str>; N]) -> Option<&str> {
+    dates
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|date| TagDate::parse(date).is_some())
 }
 
 // The conductors, then the other performers, on one line, apart

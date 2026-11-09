@@ -345,8 +345,7 @@ impl FieldParts<'_> {
         lines.push_number(FieldCode::Track, tag.track());
         lines.push(FieldCode::Recorded, credits.recording_date.as_deref());
         lines.push(FieldCode::Original, credits.original_date.as_deref());
-        let released = credits.release_date.as_ref().or(credits.date.as_ref());
-        lines.push(FieldCode::Released, released.map(String::as_str));
+        lines.push(FieldCode::Released, credits.released_date());
 
         let is_live = credits.performance_attributes.iter().any(|a| a == "live")
             || credits

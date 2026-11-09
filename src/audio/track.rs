@@ -2710,6 +2710,51 @@ mod tests {
         assert_eq!(TrackCredits::default().year(), None);
     }
 
+    #[test]
+    fn each_sort_date_goes_on_to_the_other_dates() {
+        use crate::tag_date::SortDates;
+        let sort_dates = |credits: &TrackCredits| {
+            let SortDates {
+                date,
+                original,
+                recorded,
+            } = credits.sort_dates();
+            [date, original, recorded].map(|date| date.map(|date| date.to_string()))
+        };
+        let text = |dates: [&str; 3]| dates.map(|date| Some(date.to_string()));
+        // A reissue of a recording, as MusicBrainz Picard tags it
+        let reissue = TrackCredits {
+            recording_date: Some("1964-09-23/1964-09-25".to_string()),
+            ..dates(Some("2015-04-28"), Some("1965-01"))
+        };
+        assert_eq!(
+            sort_dates(&reissue),
+            text(["2015-04-28", "1965-01", "1964-09-23"])
+        );
+        // With only the Date tag, as most taggers write, the three are the
+        // same, so the sorts agree
+        let plain = dates(Some("1965-3"), None);
+        assert_eq!(sort_dates(&plain), text(["1965-03", "1965-03", "1965-03"]));
+        // With only the original date, it's the date of the release too
+        let original = dates(None, Some("1965"));
+        assert_eq!(sort_dates(&original), text(["1965", "1965", "1965"]));
+        // A release date under its own tag stands in for the Date tag, and
+        // a date of a ripper that knows only the year is that year
+        let released = TrackCredits {
+            release_date: Some("2005-00-00".to_string()),
+            ..dates(None, Some("1972"))
+        };
+        assert_eq!(sort_dates(&released), text(["2005", "1972", "1972"]));
+        // And goes before the Date tag, as in `released:`
+        let both = TrackCredits {
+            release_date: Some("2015".to_string()),
+            ..dates(Some("1964"), None)
+        };
+        assert_eq!(sort_dates(&both), text(["2015", "1964", "1964"]));
+        assert_eq!(both.released_date(), Some("2015"));
+        assert_eq!(sort_dates(&TrackCredits::default()), [None, None, None]);
+    }
+
     // The tracks read from some files, as the queue gets them
     fn read_tracks(files: &[&std::path::Path]) -> Vec<Vec<super::TrackData>> {
         use super::{Claims, TrackData, loader::FileCache};
