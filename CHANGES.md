@@ -43,7 +43,8 @@ All notable changes to this project will be documented in this file.
   and finds a recording made over several months in each year it spans.
   A date still being typed at the end of the search, as `year:19`, is left
   out until it's whole, rather than shown as a mistake, in every date
-  field
+  field; what can't become a date, as `year:1965-13`, is a mistake at
+  once
 
 ### Fixed
 

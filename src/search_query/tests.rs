@@ -296,7 +296,11 @@ fn a_date_still_being_typed_is_left_out() {
     let candidate = track("", BACH);
     for text in [
         "year:19",
+        "year:1985-",
+        "year:1985-0",
         "year:1985-1",
+        "year:1985-01-3",
+        "released:-",
         "released:-3",
         "year:1985 bach year:2",
     ] {
@@ -305,6 +309,21 @@ fn a_date_still_being_typed_is_left_out() {
     // It doesn't narrow the search until it's whole
     assert!(finds("bach year:19", &track("bach", BACH)));
     assert!(finds("year:19", &candidate));
+    // What can't become a date is a mistake at once
+    for text in [
+        "year:19651",
+        "year:1965-13",
+        "year:2005-00",
+        "year:1965-02-3",
+        "year:1965-1965",
+        "year:1965-03-12-",
+    ] {
+        assert_eq!(
+            kinds(&search(text)),
+            [ProblemKind::NotADate(Field::Year)],
+            "{text}"
+        );
+    }
     // Not before another word, nor in a rule, which is saved as it is
     assert!(search("year:19 bach").has_errors());
     assert_eq!(kinds(&rule("year:19")), [ProblemKind::Incomplete]);

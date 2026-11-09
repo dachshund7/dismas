@@ -128,9 +128,8 @@ pub(crate) fn duration(s: &str) -> Option<i64> {
 // Whether a length at the end of the search can still become one as it's
 // typed, as "3:" on its way to "3:20", "5m" to "5min", or "5min3" to
 // "5min30s": it isn't a length yet, but going on with a digit or the rest
-// of a unit makes it one. Unlike `date_being_typed()`, this rules out what
-// can't become a length, "5x" or "3::", which is a mistake as soon as it's
-// typed
+// of a unit makes it one. What can't become a length, "5x" or "3::", is a
+// mistake as soon as it's typed, as with `date_being_typed()`
 fn duration_being_typed(s: &str) -> bool {
     !s.is_empty()
         && duration(s).is_none()
@@ -270,13 +269,10 @@ fn date_value(s: &str) -> Option<DateValue> {
     Some(DateValue::Period(start, end))
 }
 
-// A year, a month or a day as a search writes it, "2026", "2026-10" or
-// "2026-10-31", with all its digits, from its start until the start of the
-// next one, in local time. Only a date that `TagDate` writes back as it is
-// counts, so that what a tag may write loosely, "2026-1" or "2026-00",
-// isn't taken for a mistyped search
+// A year, a month or a day as a search writes it, see `whole_date()`, from
+// its start until the start of the next one, in local time
 pub(crate) fn period(s: &str) -> Option<(i64, i64)> {
-    span(TagDate::parse(s).filter(|date| date.to_string() == s)?)
+    span(whole_date(s)?)
 }
 
 // The local time zone. glib makes it again at each call when TZ isn't set,
@@ -332,11 +328,38 @@ pub(crate) fn tagged_span(value: &str) -> Option<(i64, i64)> {
 
 // Whether a value at the end of the search can still become a date as it's
 // typed, as "19" on its way to "1965", "1965-0" to "1965-03", or "-3" to
-// "-3d"
+// "-3d". A date is typed to one of three lengths, "1965", "1965-03" or
+// "1965-03-12", so the value is filled out to the next one, with the
+// dashes in their places, and it's being typed if what that gives is a
+// date. A digit of 0 and one of 1 are tried: "1965-0" needs the 1 and
+// "1965-1" the 0, and what neither makes a date, "1965-13" or "19651",
+// can't become one, and is a mistake at once rather than left out
 fn date_being_typed(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() < "2026-10-31".len()
-        && s.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+    if let Some(count) = s.strip_prefix('-') {
+        // A relative date before its unit
+        return count.bytes().all(|b| b.is_ascii_digit());
+    }
+    if s.is_empty() || whole_date(s).is_some() {
+        return false;
+    }
+    let Some(len) = [4, 7, 10].into_iter().find(|&len| len >= s.len()) else {
+        return false;
+    };
+    ['0', '1'].into_iter().any(|digit| {
+        let mut filled = s.to_string();
+        for i in s.len()..len {
+            filled.push(if i == 4 || i == 7 { '-' } else { digit });
+        }
+        whole_date(&filled).is_some()
+    })
+}
+
+// A date as a search writes it, "2026", "2026-10" or "2026-10-31", with
+// all its digits: only a date that `TagDate` writes back as it is counts,
+// so that what a tag may write loosely, "2026-1" or "2026-00", isn't taken
+// for a mistyped search
+fn whole_date(s: &str) -> Option<TagDate> {
+    TagDate::parse(s).filter(|date| date.to_string() == s)
 }
 
 // The test of a field of dates. While the date at the end of the search is
