@@ -71,6 +71,11 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- An exported playlist named the tracks of CUE sheets by a path under the
+  sheet, which only Dismas reads. It names them as Strawberry does, by
+  their audio file after a line with the track's number, which
+  Strawberry and Dismas read back as the same tracks; other players play
+  the whole file, and the export says how many tracks that is
 - Importing a playlist finds the tracks whose names it writes in another
   Unicode form than the files have, as playlists from Apple Music do with
   accented letters, and the tracks of CUE sheets that moved: a sheet

@@ -808,26 +808,41 @@ impl Window {
         let Ok(export) = export else {
             return;
         };
-        let message = match export {
+        let report = match export {
+            Ok(report) => report,
+            Err(e) => {
+                log::warn!("Unable to export the playlist '{name}' to {path:?}: {e}");
+                self.add_toast(i18n("Unable to export the playlist"));
+                return;
+            }
+        };
+        self.add_toast(match report.n_absolute {
             // Translators: `{playlist}` must be left unmodified; it is
             // expanded to the name of a playlist
-            Ok(0) => i18n_k("Exported “{playlist}”", &[("playlist", &title)]),
-            Ok(n_outside) => ni18n_k(
+            0 => i18n_k("Exported “{playlist}”", &[("playlist", &title)]),
+            n_absolute => ni18n_k(
                 // Translators: `{playlist}` and `{n}` must be left
                 // unmodified; they are expanded to the name of a playlist,
                 // and to the number of its tracks outside the folder it was
                 // exported to
                 "Exported “{playlist}”; one track isn't in its folder, so other devices won't find it",
                 "Exported “{playlist}”; {n} tracks aren't in its folder, so other devices won't find them",
-                n_outside as u32,
-                &[("playlist", &title), ("n", &n_outside.to_string())],
+                n_absolute as u32,
+                &[("playlist", &title), ("n", &n_absolute.to_string())],
             ),
-            Err(e) => {
-                log::warn!("Unable to export the playlist '{name}' to {path:?}: {e}");
-                i18n("Unable to export the playlist")
-            }
-        };
-        self.add_toast(message);
+        });
+        if report.n_cue > 0 {
+            self.add_toast(ni18n_k(
+                // Translators: `{n}` must be left unmodified; it is
+                // expanded to the number of tracks of an exported playlist
+                // that are tracks of CUE sheets, which split one audio file
+                // into tracks
+                "Most other players will play the track of a CUE sheet as its whole file",
+                "Most other players will play the {n} tracks of CUE sheets as their whole files",
+                report.n_cue as u32,
+                &[("n", &report.n_cue.to_string())],
+            ));
+        }
     }
 }
 
