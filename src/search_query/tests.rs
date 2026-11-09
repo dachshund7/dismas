@@ -207,6 +207,35 @@ fn missing_values_are_false_and_true_under_minus() {
 
 #[test]
 fn numbers_compare_and_take_ranges() {
+    let candidate = track("", "tn\t7\n");
+    for (query, found) in [
+        ("track:7", true),
+        ("track:=7", true),
+        ("track:<9", true),
+        ("track:<7", false),
+        ("track:<=7", true),
+        ("track:>6", true),
+        ("track:>=8", false),
+        ("track:5..9", true),
+        ("track:8..", false),
+        ("track:..7", true),
+    ] {
+        assert_eq!(finds(query, &candidate), found, "{query}");
+    }
+    assert!(search("track:abc").has_errors());
+    assert!(search("track:..").has_errors());
+    assert!(search("track:>5..9").has_errors());
+    // A reversed range reads as open while it's typed at the end
+    assert!(finds("track:5..1", &candidate));
+    assert_eq!(
+        kinds(&search("track:9..5 bach")),
+        [ProblemKind::ReversedRange]
+    );
+}
+
+#[test]
+fn years_compare_and_take_ranges_as_dates() {
+    // BACH is from 1985, as a number of a year was before year: took dates
     let candidate = track("", BACH);
     for (query, found) in [
         ("year:1985", true),
@@ -225,12 +254,60 @@ fn numbers_compare_and_take_ranges() {
     assert!(search("year:abc").has_errors());
     assert!(search("year:..").has_errors());
     assert!(search("year:>1980..1990").has_errors());
-    // A reversed range reads as open while it's typed at the end
+    // A reversed range, or one whose end is still being typed, reads as
+    // open at the end of the search
     assert!(finds("year:1980..1", &candidate));
+    assert!(finds("year:1980..19", &candidate));
     assert_eq!(
         kinds(&search("year:1990..1980 bach")),
         [ProblemKind::ReversedRange]
     );
+}
+
+#[test]
+fn years_find_months_and_days() {
+    let candidate = track("", "yr\t1965-03-12\n");
+    for (query, found) in [
+        ("year:1965", true),
+        ("year:1965-03", true),
+        ("year:1965-03-12", true),
+        ("year:1965-04", false),
+        ("year:1965-03-13", false),
+        ("year:<1965-03-12", false),
+        ("year:<=1965-03", true),
+        ("year:1965-03-01..1965-03-31", true),
+    ] {
+        assert_eq!(finds(query, &candidate), found, "{query}");
+    }
+    // A recording made over months is found in each of them
+    let sessions = track("", "yr\t1959-11-02/1960-02-20\n");
+    assert!(finds("year:1959", &sessions));
+    assert!(finds("year:1960", &sessions));
+    assert!(!finds("year:1961", &sessions));
+    // Dates written loosely in the tags are found by what they have
+    for loose in ["yr\t2005-00-00\n", "yr\t2005-3\n", "yr\t2005-03-12T20:00\n"] {
+        assert!(finds("year:2005", &track("", loose)), "{loose}");
+    }
+    assert!(finds("year:2005-03", &track("", "yr\t2005-3\n")));
+}
+
+#[test]
+fn a_date_still_being_typed_is_left_out() {
+    let candidate = track("", BACH);
+    for text in [
+        "year:19",
+        "year:1985-1",
+        "released:-3",
+        "year:1985 bach year:2",
+    ] {
+        assert!(search(text).problems().is_empty(), "{text}");
+    }
+    // It doesn't narrow the search until it's whole
+    assert!(finds("bach year:19", &track("bach", BACH)));
+    assert!(finds("year:19", &candidate));
+    // Not before another word, nor in a rule, which is saved as it is
+    assert!(search("year:19 bach").has_errors());
+    assert_eq!(kinds(&rule("year:19")), [ProblemKind::Incomplete]);
 }
 
 #[test]

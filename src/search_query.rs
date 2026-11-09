@@ -450,8 +450,7 @@ impl Field {
         match self {
             Self::Catalogue => Kind::Catalogue,
             Self::Path => Kind::Path,
-            Self::Year
-            | Self::Disc
+            Self::Disc
             | Self::Track
             | Self::SampleRate
             | Self::BitDepth
@@ -459,7 +458,8 @@ impl Field {
             | Self::Channels
             | Self::Plays => Kind::Number,
             Self::Length => Kind::Duration,
-            Self::Recorded
+            Self::Year
+            | Self::Recorded
             | Self::Original
             | Self::Released
             | Self::Added
@@ -528,11 +528,9 @@ impl Field {
     }
 
     // A search with a field of numbers, for the problem of one that isn't
-    // a number; the year is when a track was recorded or released, so it's
-    // never one of the 18th century
+    // a number
     fn example(self) -> &'static str {
         match self {
-            Self::Year => "year:1965 or year:1960..1969",
             Self::Disc => "disc:2",
             Self::Track => "track:1..3",
             Self::SampleRate => "samplerate:>=96000",
@@ -590,12 +588,18 @@ impl Field {
             Self::Path => {
                 i18n("The folders and the file, from the start of a name, or of the whole path")
             }
-            Self::Year => i18n("The year it was recorded, or else first released"),
+            Self::Year => i18n(
+                "When it was recorded, or else first released, or else released, as the Recorded sort goes",
+            ),
             Self::Disc => i18n("The disc number"),
             Self::Track => i18n("The track number"),
-            Self::Recorded => i18n("When it was recorded"),
-            Self::Original => i18n("When it was first released"),
-            Self::Released => i18n("When this release came out"),
+            Self::Recorded => {
+                i18n("When it was recorded, if the tags say; year: goes on to the other dates")
+            }
+            Self::Original => i18n("When it was first released, if the tags say"),
+            Self::Released => {
+                i18n("When this release came out: its release date, or else the Date tag")
+            }
             Self::Length => i18n("How long it is, e.g. >10min or 3:00..5:00"),
             Self::SampleRate => i18n("The sample rate, in Hz"),
             Self::BitDepth => i18n("The bit depth"),

@@ -28,8 +28,17 @@ All notable changes to this project will be documented in this file.
   days, with those dated by the year alone after them, and an artist's
   albums are in the order they were recorded, to the day where the tags
   say
+- `year:` in the search takes a month or a day too, as `year:1965-03`,
+  and finds a recording made over several months in each year it spans.
+  A date still being typed at the end of the search, as `year:19`, is left
+  out until it's whole, rather than shown as a mistake, in every date
+  field
 
 ### Fixed
+
+- A date that the tags wrote loosely, such as 1965-3, or with parts a
+  ripper didn't know, such as 2005-00-00, wasn't found by `recorded:`,
+  `original:` or `released:`
 
 ### Removed
 

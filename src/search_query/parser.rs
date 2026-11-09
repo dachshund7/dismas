@@ -392,6 +392,11 @@ impl Parser {
         };
         let test = match test {
             Ok(test) => test,
+            // A value still being typed is left out until it's whole
+            Err(ProblemKind::Incomplete) => {
+                self.rule_problem(span, ProblemKind::Incomplete);
+                return Node::All;
+            }
             Err(kind) => {
                 self.problem(span, kind);
                 return Node::All;

@@ -340,7 +340,8 @@ impl FieldParts<'_> {
             credits.composer_ids.iter().flatten(),
         );
 
-        lines.push(FieldCode::Year, credits.year().as_deref());
+        // The whole date, which `year:` finds by its year, month or day
+        lines.push(FieldCode::Year, credits.year_date());
         lines.push_number(FieldCode::Disc, tag.disk());
         lines.push_number(FieldCode::Track, tag.track());
         lines.push(FieldCode::Recorded, credits.recording_date.as_deref());
@@ -583,8 +584,8 @@ mod tests {
             "ft\tflac",
             "dn\t1",
             "tn\t7",
-            // DATE, which lofty takes for the recording's
-            "yr\t1986",
+            // DATE, which lofty takes for the recording's, whole
+            "yr\t1986-11",
             "re\t1986-11",
             "is\tlossless",
             "ln\t301",

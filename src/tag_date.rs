@@ -86,7 +86,8 @@ impl TagDate {
 }
 
 // Written as the parts it has, "1965", "1965-03" or "1965-03-12", as a
-// search writes a date. The library keeps the dates as `sort_text()`
+// search writes a date: the search's `period()` takes only a date that
+// reads back as it's written. The library keeps the dates as `sort_text()`
 impl fmt::Display for TagDate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:04}", self.year)?;

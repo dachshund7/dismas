@@ -5,10 +5,12 @@
 //! catalogue numbers and paths, as a search writes them and as the fields
 //! of a track keep them
 
+use std::cell::RefCell;
+
 use gtk::glib;
 
 use super::{Field, Op, ProblemKind, Test};
-use crate::{audio::normalize_search_text, catalogue};
+use crate::{audio::normalize_search_text, catalogue, tag_date::TagDate};
 
 // Numbers between two bounds, both included; a missing one is open
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -233,64 +235,103 @@ fn date_value(s: &str) -> Option<DateValue> {
     Some(DateValue::Period(start, end))
 }
 
-// A year, a month or a day, "2026", "2026-10" or "2026-10-31", from its
-// start until the start of the next one, in local time
+// A year, a month or a day as a search writes it, "2026", "2026-10" or
+// "2026-10-31", with all its digits, from its start until the start of the
+// next one, in local time. Only a date that `TagDate` writes back as it is
+// counts, so that what a tag may write loosely, "2026-1" or "2026-00",
+// isn't taken for a mistyped search
 pub(crate) fn period(s: &str) -> Option<(i64, i64)> {
-    let parts: Vec<&str> = s.split('-').collect();
-    let number = |part: &str, digits: usize| {
-        (part.len() == digits && part.bytes().all(|b| b.is_ascii_digit()))
-            .then(|| part.parse::<i32>().ok())
-            .flatten()
-    };
-    let zone = glib::TimeZone::local();
-    let date = |y, m, d| glib::DateTime::new(&zone, y, m, d, 0, 0, 0.0).ok();
-    let (start, end) = match parts.as_slice() {
-        [y] => {
-            let start = date(number(y, 4)?, 1, 1)?;
-            let end = start.add_years(1).ok()?;
-            (start, end)
-        }
-        [y, m] => {
-            let start = date(number(y, 4)?, number(m, 2)?, 1)?;
-            let end = start.add_months(1).ok()?;
-            (start, end)
-        }
-        [y, m, d] => {
-            let start = date(number(y, 4)?, number(m, 2)?, number(d, 2)?)?;
-            let end = start.add_days(1).ok()?;
-            (start, end)
-        }
-        _ => return None,
-    };
+    span(TagDate::parse(s).filter(|date| date.to_string() == s)?)
+}
+
+// The local time zone. glib makes it again at each call when TZ isn't set,
+// which took 5 µs, more than the rest of a date's test, and a search tests
+// a date of each track, so each thread keeps it for a second
+fn local_zone() -> glib::TimeZone {
+    thread_local! {
+        static ZONE: RefCell<Option<(i64, glib::TimeZone)>> = const { RefCell::new(None) };
+    }
+    let second = glib::monotonic_time() / 1_000_000;
+    ZONE.with_borrow_mut(|kept| match kept {
+        Some((at, zone)) if *at == second => zone.clone(),
+        _ => kept.insert((second, glib::TimeZone::local())).1.clone(),
+    })
+}
+
+// The times from the start of a year, a month or a day until the start of
+// the next one, in local time; None for a month or a day that doesn't exist
+fn span(date: TagDate) -> Option<(i64, i64)> {
+    let zone = local_zone();
+    let start = glib::DateTime::new(
+        &zone,
+        date.year.into(),
+        date.month.unwrap_or(1).into(),
+        date.day.unwrap_or(1).into(),
+        0,
+        0,
+        0.0,
+    )
+    .ok()?;
+    let end = match (date.month, date.day) {
+        (None, _) => start.add_years(1),
+        (Some(_), None) => start.add_months(1),
+        (Some(_), Some(_)) => start.add_days(1),
+    }
+    .ok()?;
     Some((start.to_unix(), end.to_unix()))
 }
 
 // The times a date in the tags covers, e.g. "1986", "1986-11-04", or a
-// span, "1937-11-08/1938-03-08", ignoring a time of day
+// span, "1937-11-08/1938-03-08". It's read as `TagDate` reads it, so that a
+// date written loosely, "1986-11-4", or with parts a ripper didn't know,
+// "1986-00-00", still covers what it can, and a time of day is ignored
 pub(crate) fn tagged_span(value: &str) -> Option<(i64, i64)> {
-    let day = |s: &str| -> Option<(i64, i64)> {
-        let s = s.trim();
-        period(s.get(..10.min(s.len()))?)
-    };
-    match value.split_once('/') {
-        Some((first, last)) => Some((day(first)?.0, day(last)?.1)),
-        None => day(value),
-    }
+    let covers = |s: &str| span(TagDate::parse(s)?);
+    let (start, end) = covers(value)?;
+    let end = value
+        .split_once('/')
+        .and_then(|(_, last)| covers(last))
+        .map_or(end, |(_, last_end)| last_end);
+    Some((start, end))
 }
 
+// Whether a value at the end of the search can still become a date as it's
+// typed, as "19" on its way to "1965", "1965-0" to "1965-03", or "-3" to
+// "-3d"
+fn date_being_typed(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() < "2026-10-31".len()
+        && s.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+}
+
+// The test of a field of dates. While the date at the end of the search is
+// still being typed, see `date_being_typed()`, a range's end reads as open,
+// as a reversed one does in `numbers()`, and a date on its own is
+// `Incomplete`, which leaves it out until it's whole
 pub(super) fn dates(field: Field, op: Op, value: &str, at_end: bool) -> Result<Test, ProblemKind> {
-    let error = || ProblemKind::NotADate(field);
-    if let Some((from, until)) = value.split_once("..") {
+    let typing = |s: &str| at_end && date_being_typed(s);
+    let error = |s: &str| {
+        if typing(s) {
+            ProblemKind::Incomplete
+        } else {
+            ProblemKind::NotADate(field)
+        }
+    };
+    if let Some((from, until_text)) = value.split_once("..") {
         if !matches!(op, Op::Contains | Op::Equals) {
-            return Err(error());
+            return Err(ProblemKind::NotADate(field));
         }
         let bound = |s: &str| match s {
             "" => Ok(None),
-            s => date_value(s).map(Some).ok_or_else(error),
+            s => date_value(s).map(Some).ok_or(ProblemKind::NotADate(field)),
         };
-        let (from, until) = (bound(from)?, bound(until)?);
+        let from = bound(from)?;
+        let until = match bound(until_text) {
+            Err(_) if typing(until_text) => None,
+            until => until?,
+        };
         if from.is_none() && until.is_none() {
-            return Err(error());
+            return Err(error(until_text));
         }
         let mut range = DateRange {
             from: from.as_ref().map(DateValue::start),
@@ -304,7 +345,7 @@ pub(super) fn dates(field: Field, op: Op, value: &str, at_end: bool) -> Result<T
         return Ok(Test::Dates(range));
     }
 
-    let value = date_value(value).ok_or_else(error)?;
+    let value = date_value(value).ok_or_else(|| error(value))?;
     let (start, end) = (value.start(), value.end());
     let range = match (op, &value) {
         // A relative date alone is since then, as "in the last" 30 days
