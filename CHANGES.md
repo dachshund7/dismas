@@ -15,6 +15,11 @@ All notable changes to this project will be documented in this file.
   first released, and by Recorded, when it was recorded. Each falls back
   to the other dates when an album lacks its own, so both work in a
   library with only the Date tag
+- A music folder can be given another path in exported playlists, in its
+  row in Preferences, for the tracks written with absolute paths: the
+  path that a server mounts it at, such as /music, or that a phone or
+  Windows knows it by, such as /storage/emulated/0/Music or D:\Music,
+  whose tracks are then written with backslashes
 - Playlists from Strawberry keep their tracks of CUE sheets: Strawberry
   names one by its audio file, after a line with the track's number,
   which Dismas took for the whole file

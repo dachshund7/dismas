@@ -230,6 +230,28 @@ impl PreferencesDialog {
         ));
         row.add_suffix(&remove);
 
+        // For the tracks that exported playlists give absolute paths, as
+        // a server that mounts the folder, or another device, names it
+        let mapped = library::export_mappings(self.settings())
+            .remove(&path)
+            .unwrap_or_default();
+        let mapping = adw::EntryRow::builder()
+            .title(i18n("Path in _Exported Playlists"))
+            .use_underline(true)
+            .show_apply_button(true)
+            .text(mapped)
+            .build();
+        mapping.connect_apply(clone!(
+            #[weak(rename_to = dialog)]
+            self,
+            #[weak]
+            item,
+            #[weak]
+            row,
+            move |mapping| dialog.set_export_mapping(&item, &row, mapping)
+        ));
+        row.add_row(&mapping);
+
         let leave_out = adw::ButtonRow::builder()
             .title(i18n("_Leave Out a Folder…"))
             .start_icon_name("list-add-symbolic")
@@ -300,6 +322,12 @@ impl PreferencesDialog {
         if self.imp().unavailable.borrow().contains(&folder.path) {
             lines.push(i18n("Not found or empty; its albums are hidden"));
         }
+        if let Some(mapped) = library::export_mappings(self.settings()).get(&folder.path) {
+            // Translators: `{path}` must be left unmodified; it is expanded
+            // to the path a music folder has in exported playlists, such
+            // as /music
+            lines.push(i18n_k("{path} in exported playlists", &[("path", mapped)]));
+        }
         if !folder.excluded.is_empty() {
             let n = folder.excluded.len() as u32;
             lines.push(ni18n_k(
@@ -321,16 +349,42 @@ impl PreferencesDialog {
         row: &adw::ExpanderRow,
         leave_out: &adw::ButtonRow,
     ) {
+        // The path in exported playlists stays first
         let mut child = leave_out.parent().and_then(|list| list.first_child());
         while let Some(widget) = child {
             child = widget.next_sibling();
-            row.remove(&widget);
+            if !widget.is::<adw::EntryRow>() {
+                row.remove(&widget);
+            }
         }
         let excluded = item.borrow::<MusicFolder>().excluded.clone();
         for relative in excluded {
             row.add_row(&self.exclusion_row(item, row, relative));
         }
         row.add_row(leave_out);
+    }
+
+    // Stores the path a folder has in exported playlists, or takes it away
+    // when it's emptied
+    fn set_export_mapping(
+        &self,
+        item: &glib::BoxedAnyObject,
+        row: &adw::ExpanderRow,
+        mapping: &adw::EntryRow,
+    ) {
+        let text = mapping.text();
+        let mapped = text.trim();
+        if !mapped.is_empty() && !library::is_mapped_path(mapped) {
+            mapping.add_css_class("error");
+            self.toast(&i18n(
+                "The path must start with “/”, or with a drive letter, such as “D:”",
+            ));
+            return;
+        }
+        mapping.remove_css_class("error");
+        let path = item.borrow::<MusicFolder>().path.clone();
+        library::set_export_mapping(self.settings(), &path, mapped);
+        self.update_folder_subtitle(item, row);
     }
 
     fn exclusion_row(

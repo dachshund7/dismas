@@ -72,7 +72,9 @@ Features
 - **Playlists:** save the queue as a playlist, and import and export M3U
   files. Exported into the music folder, as phones and servers such as
   Navidrome read them, a playlist names its tracks by paths relative to it;
-  for Plex and Jellyfin, a preference writes absolute paths. A click on the
+  for Plex and Jellyfin, a preference writes absolute paths, and a music
+  folder can be given the path that a server, a phone or Windows knows it
+  by. A click on the
   Playlists page shows a playlist's tracks in the pane
   while the music goes on. Each playlist resumes where it was, when you switch
   back to it and when Dismas starts, and tracks whose files are missing stay

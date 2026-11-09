@@ -157,6 +157,11 @@
 	    <summary>Write absolute paths in exported playlists</summary>
 	    <description>Whether exported playlists name every track by its absolute path, as some servers such as Plex and Jellyfin need, rather than by a path relative to the playlist when the playlist and the track are in the same music folder, as phones and other players need</description>
 	  </key>
+	  <key name="export-path-mappings" type="a{ss}">
+	    <default>{}</default>
+	    <summary>The paths of the music folders in exported playlists</summary>
+	    <description>The path each music folder has in exported playlists, by the URI of the folder, for the tracks that are written with absolute paths: as a server that mounts the folder, another device or Windows names it, such as /music, /storage/emulated/0/Music or D:\Music. A Windows path gives the tracks backslashes</description>
+	  </key>
 	  <key name="amberol-migrated" type="b">
 	    <default>false</default>
 	    <summary>Whether the data of Amberol was looked for</summary>

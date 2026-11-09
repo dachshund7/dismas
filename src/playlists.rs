@@ -554,16 +554,35 @@ pub(crate) struct ExportReport {
     pub(crate) n_cue: usize,
 }
 
+// What exports go by, from the settings
+#[derive(Debug)]
+pub(crate) struct ExportOptions {
+    pub(crate) music_folders: Vec<MusicFolder>,
+    // The path each music folder has in exported playlists, by the path
+    // it's read at, see `library::export_mappings()`
+    pub(crate) mappings: HashMap<PathBuf, String>,
+    pub(crate) absolute: bool,
+}
+
+impl ExportOptions {
+    pub(crate) fn from_settings(settings: &gio::Settings) -> Self {
+        Self {
+            music_folders: library::music_folders(settings),
+            mappings: library::export_mappings(settings),
+            absolute: settings.boolean("export-absolute-paths"),
+        }
+    }
+}
+
 // Writes a playlist for other players and devices, as an M3U8 file, see
 // `ExportPaths`. This blocks
 pub(crate) fn export(
     name: &str,
     path: &Path,
-    music_folders: &[MusicFolder],
-    absolute: bool,
+    options: &ExportOptions,
 ) -> Result<ExportReport, glib::Error> {
     let files = load(name).unwrap_or_default();
-    let mut paths = ExportPaths::new(export_dir(path), music_folders, absolute);
+    let mut paths = ExportPaths::new(export_dir(path), options);
     let (text, report) = format_export(&files, &mut paths);
     glib::file_set_contents(path, text.as_bytes())?;
     if paths.dir.is_some() {
@@ -599,10 +618,13 @@ fn export_dir(file: &Path) -> Option<PathBuf> {
 // mounted. So a track has a relative path when it's under the playlist's
 // folder, or in the same music folder; otherwise it has an absolute path,
 // outside the sandbox, as do all of them when the user asks, as Plex and
-// Jellyfin need. Paths are compared outside the sandbox and without
-// symbolic links, so that a music folder that's a link, or one from the
-// portal, compares as the folder it is
-pub(crate) struct ExportPaths {
+// Jellyfin need. An absolute path can start with the path the user gave
+// its music folder in place of its own, as the folder is mounted in a
+// server's container, or found on a phone or on Windows. Paths are
+// compared outside the sandbox and without symbolic links, so that a
+// music folder that's a link, or one from the portal, compares as the
+// folder it is
+struct ExportPaths {
     dir: Option<PathBuf>,
     folders: Vec<ExportFolder>,
     absolute: bool,
@@ -613,27 +635,30 @@ pub(crate) struct ExportPaths {
 
 struct ExportFolder {
     // As the tracks in it are read, as they're written in absolute paths,
-    // outside the sandbox, and as they're compared
+    // outside the sandbox or as the user gave it, and as they're compared
     read: PathBuf,
     written: PathBuf,
+    mapped: Option<String>,
     key: PathBuf,
 }
 
 impl ExportPaths {
     // This blocks
-    fn new(dir: Option<PathBuf>, music_folders: &[MusicFolder], absolute: bool) -> Self {
-        let folders = music_folders
+    fn new(dir: Option<PathBuf>, options: &ExportOptions) -> Self {
+        let folders = options
+            .music_folders
             .iter()
             .map(|folder| ExportFolder {
                 read: folder.path.clone(),
                 written: folder.shown_path().to_path_buf(),
+                mapped: options.mappings.get(&folder.path).cloned(),
                 key: library::folder_key(folder),
             })
             .collect();
         Self {
             dir,
             folders,
-            absolute,
+            absolute: options.absolute,
             resolved: HashMap::new(),
         }
     }
@@ -641,7 +666,16 @@ impl ExportPaths {
     // The line of a track, and whether it's relative, or None for one with
     // a line break, which would split the entry in two
     fn line(&mut self, path: &Path) -> Option<(String, bool)> {
-        let (written, key) = self.written_path(path);
+        let folder = self
+            .folders
+            .iter()
+            .filter(|folder| path.starts_with(&folder.read))
+            .max_by_key(|folder| folder.read.components().count());
+        let rest = folder.and_then(|folder| Some((folder, path.strip_prefix(&folder.read).ok()?)));
+        let key = match rest {
+            Some((folder, rest)) => folder.key.join(rest),
+            None => resolved_path(&mut self.resolved, path),
+        };
         let relative = self
             .dir
             .as_deref()
@@ -653,49 +687,72 @@ impl ExportPaths {
                         }))
             })
             .map(|dir| relative_path(dir, &key));
-        let line = match (relative.as_deref().and_then(Path::to_str), written.to_str()) {
+        let (line, relative) = match relative.as_deref().and_then(Path::to_str) {
             // Players take a line starting with "#" for a comment, and drop
             // the spaces in front of a path
-            (Some(relative), _) if relative.starts_with(['#', ' ', '\t']) => {
-                format!("./{relative}")
+            Some(relative) if relative.starts_with(['#', ' ', '\t']) => {
+                (format!("./{relative}"), true)
             }
-            (Some(relative), _) => relative.to_string(),
-            (None, Some(written)) => written.to_string(),
-            // Not UTF-8, which the playlist is
-            (None, None) => gio::File::for_path(&written).uri().to_string(),
+            Some(relative) => (relative.to_string(), true),
+            None => (absolute_line(path, rest), false),
         };
         if line.contains(['\n', '\r']) {
             warn!("Unable to save {line:?} in a playlist");
             return None;
         }
-        let relative = relative.is_some() && !line.starts_with("file://");
         Some((line, relative))
     }
+}
 
-    // A track's absolute path, as it's written, and as it's compared
-    fn written_path(&mut self, path: &Path) -> (PathBuf, PathBuf) {
-        let folder = self
-            .folders
-            .iter()
-            .filter(|folder| path.starts_with(&folder.read))
-            .max_by_key(|folder| folder.read.components().count());
-        if let Some(folder) = folder
-            && let Ok(rest) = path.strip_prefix(&folder.read)
-        {
-            return (folder.written.join(rest), folder.key.join(rest));
-        }
-        let key = match (path.parent(), path.file_name()) {
-            (Some(parent), Some(name)) => self
-                .resolved
-                .entry(parent.to_path_buf())
-                .or_insert_with(|| {
-                    std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
-                })
-                .join(name),
-            _ => path.to_path_buf(),
-        };
-        (path.to_path_buf(), key)
+// The path of a file without the symbolic links of its folder; the
+// folders resolved are kept, as the tracks of an album share one
+fn resolved_path(resolved: &mut HashMap<PathBuf, PathBuf>, path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => resolved
+            .entry(parent.to_path_buf())
+            .or_insert_with(|| {
+                std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
+            })
+            .join(name),
+        _ => path.to_path_buf(),
     }
+}
+
+// The absolute line of a track, which can be in a music folder, at `rest`
+// in it: in the path the user gave the folder, outside the sandbox, or a
+// URI for a path that isn't UTF-8, as the playlist is
+fn absolute_line(path: &Path, folder: Option<(&ExportFolder, &Path)>) -> String {
+    if let Some((folder, rest)) = folder {
+        if let (Some(mapped), Some(rest)) = (&folder.mapped, rest.to_str()) {
+            return mapped_path(mapped, rest);
+        }
+        let written = folder.written.join(rest);
+        if let Some(written) = written.to_str() {
+            return written.to_string();
+        }
+        return gio::File::for_path(&written).uri().to_string();
+    }
+    path.to_str().map_or_else(
+        || gio::File::for_path(path).uri().to_string(),
+        str::to_string,
+    )
+}
+
+// The path of a track in a music folder that the user gave the path
+// `mapped`, which is written as it's given: with backslashes on Windows,
+// as players there read them best
+fn mapped_path(mapped: &str, rest: &str) -> String {
+    let windows = mapped.as_bytes().get(1) == Some(&b':') || mapped.contains('\\');
+    let separator = if windows { '\\' } else { '/' };
+    let base = mapped.trim_end_matches(['/', '\\']);
+    if rest.is_empty() {
+        return base.to_string();
+    }
+    let rest: String = rest
+        .chars()
+        .map(|c| if c == '/' { separator } else { c })
+        .collect();
+    format!("{base}{separator}{rest}")
 }
 
 // The path of `to` relative to `dir`, both absolute and without symbolic
@@ -1119,6 +1176,7 @@ mod tests {
             folders: vec![ExportFolder {
                 read: PathBuf::from(read),
                 written: PathBuf::from(host),
+                mapped: None,
                 key: PathBuf::from(host),
             }],
             absolute,
@@ -1156,6 +1214,7 @@ mod tests {
         paths.folders.push(ExportFolder {
             read: PathBuf::from("/media/hdd/Music"),
             written: PathBuf::from("/media/hdd/Music"),
+            mapped: None,
             key: PathBuf::from("/media/hdd/Music"),
         });
         assert_eq!(
@@ -1233,7 +1292,7 @@ mod tests {
             .unwrap();
         let folders = [MusicFolder::new(real.join("data/music"))];
         let file = real.join("Playlists/Mix.m3u8");
-        let mut paths = ExportPaths::new(export_dir(&file), &folders, false);
+        let mut paths = ExportPaths::new(export_dir(&file), &options(&folders));
         let files = [gio::File::for_path(real.join("data/music/A/01.flac"))];
         assert_eq!(
             format_export(&files, &mut paths).0,
@@ -1249,7 +1308,7 @@ mod tests {
         std::os::unix::fs::symlink(real.join("data/music"), real.join("Music")).unwrap();
         let folders = [MusicFolder::new(real.join("Music"))];
         let file = real.join("Music/Playlists/Mix.m3u8");
-        let mut paths = ExportPaths::new(export_dir(&file), &folders, false);
+        let mut paths = ExportPaths::new(export_dir(&file), &options(&folders));
         let files = [gio::File::for_path(real.join("Music/A/01.flac"))];
         assert_eq!(
             format_export(&files, &mut paths).0,
@@ -1261,7 +1320,71 @@ mod tests {
     // The paths of an export to `dir`, outside the music folders
     fn export_paths(dir: &Path) -> ExportPaths {
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        ExportPaths::new(Some(dir), &[], false)
+        ExportPaths::new(Some(dir), &options(&[]))
+    }
+
+    fn options(music_folders: &[MusicFolder]) -> ExportOptions {
+        ExportOptions {
+            music_folders: music_folders.to_vec(),
+            mappings: HashMap::new(),
+            absolute: false,
+        }
+    }
+
+    #[test]
+    fn mapped_music_folders_start_the_absolute_paths() {
+        let mut paths = paths_with_folder(
+            "/home/me/Music/Playlists",
+            "/home/me/Music",
+            "/home/me/Music",
+            true,
+        );
+        paths.folders[0].mapped = Some("/music/".to_string());
+        assert_eq!(
+            paths.line(Path::new("/home/me/Music/A/01.flac")),
+            Some(("/music/A/01.flac".to_string(), false))
+        );
+        // The folder's own tracks, and those outside it
+        assert_eq!(
+            paths.line(Path::new("/home/me/Music/01.flac")),
+            Some(("/music/01.flac".to_string(), false))
+        );
+        assert_eq!(
+            paths.line(Path::new("/home/me/Other/01.flac")),
+            Some(("/home/me/Other/01.flac".to_string(), false))
+        );
+    }
+
+    #[test]
+    fn tracks_with_relative_paths_are_not_mapped() {
+        let mut paths = paths_with_folder(
+            "/home/me/Music/Playlists",
+            "/home/me/Music",
+            "/home/me/Music",
+            false,
+        );
+        paths.folders[0].mapped = Some("/storage/emulated/0/Music".to_string());
+        assert_eq!(
+            paths.line(Path::new("/home/me/Music/A/01.flac")),
+            Some(("../A/01.flac".to_string(), true))
+        );
+    }
+
+    #[test]
+    fn windows_mappings_use_backslashes() {
+        let mut paths = paths_with_folder("/elsewhere", "/home/me/Music", "/home/me/Music", false);
+        for (mapped, line) in [
+            ("D:\\Music\\", "D:\\Music\\A\\01.flac"),
+            ("D:", "D:\\A\\01.flac"),
+            ("\\\\nas\\music", "\\\\nas\\music\\A\\01.flac"),
+        ] {
+            paths.folders[0].mapped = Some(mapped.to_string());
+            assert_eq!(
+                paths.line(Path::new("/home/me/Music/A/01.flac")),
+                Some((line.to_string(), false)),
+                "{mapped}"
+            );
+        }
     }
 
     // A folder with "Album.cue", which splits "Album.flac" into two tracks

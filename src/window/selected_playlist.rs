@@ -803,11 +803,8 @@ impl Window {
         let export = {
             let name = name.to_string();
             let path = path.clone();
-            let settings = &self.imp().settings;
-            let music_folders = library::music_folders(settings);
-            let absolute = settings.boolean("export-absolute-paths");
-            gio::spawn_blocking(move || playlists::export(&name, &path, &music_folders, absolute))
-                .await
+            let options = playlists::ExportOptions::from_settings(&self.imp().settings);
+            gio::spawn_blocking(move || playlists::export(&name, &path, &options)).await
         };
         let Ok(export) = export else {
             return;

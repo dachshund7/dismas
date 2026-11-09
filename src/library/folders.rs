@@ -56,6 +56,50 @@ pub(crate) fn music_folders(settings: &gio::Settings) -> Vec<MusicFolder> {
     )
 }
 
+// The paths that exported playlists give the music folders, as a server
+// that mounts them, another device or Windows names them, by the path each
+// folder is read at. They're kept by its URI, and as they're given, as
+// they're paths on another system. One that can't be a path is left out,
+// as the settings can be changed outside Preferences
+pub(crate) fn export_mappings(settings: &gio::Settings) -> HashMap<PathBuf, String> {
+    settings
+        .get::<HashMap<String, String>>("export-path-mappings")
+        .into_iter()
+        .filter(|(_, mapped)| is_mapped_path(mapped))
+        .filter_map(|(uri, mapped)| Some((gio::File::for_uri(&uri).path()?, mapped)))
+        .collect()
+}
+
+// Whether a path the user gives a music folder for exported playlists can
+// be one: absolute, on a Unix system, or on Windows with a drive letter,
+// as in "D:\Music", or on a network share, as in "\\server\music"
+pub(crate) fn is_mapped_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    let drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    !path.contains(['\n', '\r']) && (path.starts_with('/') || drive || path.starts_with("\\\\"))
+}
+
+// Gives a music folder a path in exported playlists, or takes it away
+// with an empty one, keeping those of the other music folders that are
+// still there
+pub(crate) fn set_export_mapping(settings: &gio::Settings, folder: &Path, mapped: &str) {
+    let folders = music_folders(settings);
+    let mut mappings = export_mappings(settings);
+    mappings.retain(|path, _| folders.iter().any(|folder| folder.path == *path));
+    if mapped.is_empty() {
+        mappings.remove(folder);
+    } else {
+        mappings.insert(folder.to_path_buf(), mapped.to_string());
+    }
+    let entries: HashMap<String, String> = mappings
+        .into_iter()
+        .map(|(path, mapped)| (gio::File::for_path(path).uri().to_string(), mapped))
+        .collect();
+    if let Err(e) = settings.set("export-path-mappings", entries.to_variant()) {
+        warn!("Unable to store the paths of the music folders in exported playlists: {e}");
+    }
+}
+
 // The paths of the music folders, to look for tracks in
 pub(crate) fn music_folder_paths() -> Vec<PathBuf> {
     music_folders(&utils::settings_manager())

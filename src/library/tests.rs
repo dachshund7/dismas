@@ -4960,3 +4960,13 @@ fn an_album_without_an_album_artist_is_by_most_of_its_tracks() {
     assert_eq!(artists["one"], "A");
     assert_eq!(artists["none"], "Unknown artist");
 }
+
+#[test]
+fn mapped_paths_must_be_absolute() {
+    for path in ["/music", "D:\\Music", "d:/Music", "\\\\nas\\music"] {
+        assert!(super::is_mapped_path(path), "{path}");
+    }
+    for path in ["", "Music", "./Music", "\\Music", "/a\nb"] {
+        assert!(!super::is_mapped_path(path), "{path:?}");
+    }
+}
