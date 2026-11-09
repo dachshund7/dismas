@@ -144,14 +144,36 @@ impl FolderWatch {
 // which the scan doesn't read, like a file manager's `.directory`, or a
 // file synced under a hidden name until it's whole. A file renamed from a
 // hidden name to another, as such a file is once it's whole, does change
-// it. Files are local here, so they have paths
+// it. Nor does a playlist, which the scan doesn't read either, so that a
+// playlist exported into a music folder, as phones and servers read them
+// there, isn't followed by a scan. Files are local here, so they have paths
 fn changes_library(
     event: gio::FileMonitorEvent,
     file: Option<&Path>,
     other_file: Option<&Path>,
 ) -> bool {
+    let read = |path: &Path| is_library_entry(path) && !is_playlist_file(path);
     event != gio::FileMonitorEvent::AttributeChanged
-        && (file.is_none_or(is_library_entry) || other_file.is_some_and(is_library_entry))
+        && (file.is_none_or(read) || other_file.is_some_and(read))
+}
+
+// Whether a file is an M3U playlist, or the temporary file GLib writes one
+// to first, named like "Mix.m3u8.A1B2C3", which it then renames
+fn is_playlist_file(path: &Path) -> bool {
+    let is_playlist = |name: &Path| {
+        name.extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("m3u") || ext.eq_ignore_ascii_case("m3u8"))
+    };
+    if is_playlist(path) {
+        return true;
+    }
+    let temporary = path.extension().is_some_and(|ext| {
+        ext.len() == 6 && ext.as_encoded_bytes().iter().all(u8::is_ascii_alphanumeric)
+    });
+    temporary
+        && path
+            .file_stem()
+            .is_some_and(|stem| is_playlist(Path::new(stem)))
 }
 
 // Whether a drive mounted or unmounted at `root` can change the library:
@@ -215,6 +237,32 @@ mod tests {
 
         // Without a path, it might
         assert!(changes_library(Changed, None, None));
+    }
+
+    #[test]
+    fn playlist_files_dont_change_the_library() {
+        use gio::FileMonitorEvent::{Created, Deleted, Renamed};
+
+        let playlist = Path::new("/music/Playlists/Mix.m3u8");
+        let temporary = Path::new("/music/Playlists/Mix.m3u8.A1b2C3");
+        assert!(!changes_library(Created, Some(temporary), None));
+        assert!(!changes_library(Renamed, Some(temporary), Some(playlist)));
+        assert!(!changes_library(
+            Deleted,
+            Some(Path::new("/music/Old.M3U")),
+            None
+        ));
+
+        // Covers, sheets and tracks still do, whatever their names
+        for name in ["cover.jpg", "Album.cue", "Mix.m3u8.flac", "Mix.m3u8.bak"] {
+            let path = Path::new("/music/Album").join(name);
+            assert!(changes_library(Created, Some(&path), None), "{name}");
+        }
+        assert!(changes_library(
+            Renamed,
+            Some(temporary),
+            Some(Path::new("/music/Album/01.flac"))
+        ));
     }
 
     #[test]
