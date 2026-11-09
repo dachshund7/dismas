@@ -627,7 +627,8 @@ pub(super) fn query_track_work(
 // arrangements listed under it, `keys` being its key and theirs, see
 // `WorkInfo::keys()`, with all their tracks, see `recordings_of_works()`,
 // in the order they were recorded, as the Recorded sort of the albums,
-// those without a date last, and then by the albums' titles. The tracks in the `hidden` folders are left out
+// those without a date last, and then by the albums' titles. The tracks
+// in the `hidden` folders are left out
 pub(crate) fn work_recordings(
     keys: &[String],
     filter: &TrackFilter,

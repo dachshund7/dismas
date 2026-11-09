@@ -24,10 +24,10 @@ All notable changes to this project will be documented in this file.
   taggers write, or else the Date tag, which other players' year sorts go
   by and most taggers fill with the date of the release. So a reissue
   sorts under the year it came out; Year went by the date of the
-  recording or the first release, which the Recorded sort now does. Albums of the same year are in the order of their months and
-  days, with those dated by the year alone after them, and an artist's
-  albums are in the order they were recorded, to the day where the tags
-  say
+  recording or the first release, which the Recorded sort now does.
+  Albums of the same year are in the order of their months and days, with
+  those dated by the year alone after them, and an artist's albums are in
+  the order they were recorded, to the day where the tags say
 - The playlist's Sort menu has the album grid's three dates, Released,
   Original Release and Recorded, in place of Year, which sorted as
   Recorded does, and an artist's tracks are in the order they were
