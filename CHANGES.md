@@ -50,6 +50,9 @@ All notable changes to this project will be documented in this file.
 - A date that the tags wrote loosely, such as 1965-3, or with parts a
   ripper didn't know, such as 2005-00-00, wasn't found by `recorded:`,
   `original:` or `released:`
+- A length still being typed at the end of a search, such as `length:3:`
+  on its way to `length:3:20` or `length:5m` to `length:5min`, showed a
+  mistake until it was whole; it's left out until then, as a date is
 
 ### Removed
 

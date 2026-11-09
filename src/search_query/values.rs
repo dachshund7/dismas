@@ -5,7 +5,7 @@
 //! catalogue numbers and paths, as a search writes them and as the fields
 //! of a track keep them
 
-use std::cell::RefCell;
+use std::{borrow::Cow, cell::RefCell};
 
 use gtk::glib;
 
@@ -123,6 +123,41 @@ pub(crate) fn duration(s: &str) -> Option<i64> {
         total = total.checked_add(n.checked_mul(unit)?)?;
     }
     Some(total)
+}
+
+// Whether a length at the end of the search can still become one as it's
+// typed, as "3:" on its way to "3:20", "5m" to "5min", or "5min3" to
+// "5min30s": it isn't a length yet, but going on with a digit or the rest
+// of a unit makes it one. Unlike `date_being_typed()`, this rules out what
+// can't become a length, "5x" or "3::", which is a mistake as soon as it's
+// typed
+fn duration_being_typed(s: &str) -> bool {
+    !s.is_empty()
+        && duration(s).is_none()
+        && ["0", "in", "n", "s"]
+            .iter()
+            .any(|rest| duration(&format!("{s}{rest}")).is_some())
+}
+
+// The test of a field of lengths. While the length at the end of the
+// search is still being typed, see `duration_being_typed()`, a range's end
+// reads as open, as a reversed one does in `numbers()`, and a length on its
+// own is `Incomplete`, which leaves it out until it's whole, as `dates()`
+// does with a date
+pub(super) fn durations(
+    field: Field,
+    op: Op,
+    value: &str,
+    at_end: bool,
+) -> Result<Test, ProblemKind> {
+    let typing = |s: &str| at_end && duration_being_typed(s);
+    let value = match value.split_once("..") {
+        Some(("", hi)) if typing(hi) => return Err(ProblemKind::Incomplete),
+        Some((lo, hi)) if typing(hi) => Cow::Owned(format!("{lo}..")),
+        None if typing(value) => return Err(ProblemKind::Incomplete),
+        _ => Cow::Borrowed(value),
+    };
+    numbers(op, &value, at_end, duration, ProblemKind::NotALength(field))
 }
 
 // A time to compare dates with

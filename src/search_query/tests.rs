@@ -317,10 +317,43 @@ fn lengths_are_compared_in_seconds() {
     assert!(finds("length:4:00..5:01", &candidate));
     assert!(!finds("length:<5:01", &candidate));
     assert!(finds("length:301", &candidate));
+    // "m" isn't a unit, as it's months in dates
     assert_eq!(
-        kinds(&search("length:5m")),
+        kinds(&search("length:5m bach")),
         [ProblemKind::NotALength(Field::Length)]
     );
+}
+
+#[test]
+fn a_length_still_being_typed_is_left_out() {
+    let candidate = track("", BACH);
+    for text in [
+        "length:3:",
+        "length:1:02:",
+        "length:5m",
+        "length:5mi",
+        "length:5min3",
+        "length:>3:",
+    ] {
+        assert!(search(text).problems().is_empty(), "{text}");
+        // It doesn't narrow the search until it's whole
+        assert!(finds(text, &candidate), "{text}");
+    }
+    // A range's end still being typed reads as open
+    assert!(finds("length:3:00..4:", &candidate));
+    assert!(!finds("length:6:00..7:", &candidate));
+    assert!(finds("length:..4:", &candidate));
+    // What can't become a length is a mistake even while it's typed
+    for text in ["length:5x", "length:3::", "length:abc"] {
+        assert_eq!(
+            kinds(&search(text)),
+            [ProblemKind::NotALength(Field::Length)],
+            "{text}"
+        );
+    }
+    // Not before another word, nor in a rule, which is saved as it is
+    assert!(search("length:3: bach").has_errors());
+    assert_eq!(kinds(&rule("length:3:")), [ProblemKind::Incomplete]);
 }
 
 #[test]
