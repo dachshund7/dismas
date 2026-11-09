@@ -7,7 +7,9 @@
 use std::{borrow::Cow, collections::HashSet};
 
 use lofty::{
-    id3::v2::{Frame, SyncTextContentType, SynchronizedTextFrame, TimestampFormat},
+    id3::v2::{
+        ExtendedTextFrame, Frame, SyncTextContentType, SynchronizedTextFrame, TimestampFormat,
+    },
     properties::FileProperties,
     tag::TagType,
 };
@@ -131,15 +133,8 @@ impl ExtraComments {
         }
     }
 
-    // The descriptions of "TXXX" frames are compared as they are, and other
-    // taggers write them in capitals
     pub(super) fn from_id3v2(tag: Option<&Id3v2Tag>, lyrics: bool) -> Self {
-        let get = |name: &str| {
-            let tag = tag?;
-            tag.get_user_text(name)
-                .or_else(|| tag.get_user_text(&name.to_uppercase()))
-                .map(ToString::to_string)
-        };
+        let get = |name: &str| user_texts(tag?, name).next().map(ToString::to_string);
         ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
             recording_date: get(RECORDING_DATE),
@@ -149,13 +144,7 @@ impl ExtraComments {
     }
 
     pub(super) fn from_mp4(ilst: Option<&Ilst>) -> Self {
-        let get = |name: &str| {
-            let ilst = ilst?;
-            [name.to_string(), name.to_uppercase()]
-                .iter()
-                .find_map(|name| freeform_texts(ilst, name).next())
-                .map(ToString::to_string)
-        };
+        let get = |name: &str| freeform_texts(ilst?, name).next().map(ToString::to_string);
         ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
             recording_date: get(RECORDING_DATE),
@@ -164,15 +153,33 @@ impl ExtraComments {
     }
 }
 
-// The texts of the MP4 atom of free form "----:com.apple.iTunes:<name>",
-// whose name is compared as it is
+// The texts of the "TXXX" frames described by `name`, in any capitals.
+// lofty's `get_user_text` compares the description as it is, while the
+// programs that write these frames differ: MusicBrainz Picard writes the
+// name of a tag it has no frame for in small letters, foobar2000 in
+// capitals, and Mp3tag as its user typed the field's name
+pub(super) fn user_texts<'a>(tag: &'a Id3v2Tag, name: &str) -> impl Iterator<Item = &'a str> {
+    tag.into_iter().filter_map(move |frame| match frame {
+        Frame::UserText(ExtendedTextFrame {
+            description,
+            content,
+            ..
+        }) if description.eq_ignore_ascii_case(name) => Some(&**content),
+        _ => None,
+    })
+}
+
+// The texts of the MP4 atoms of free form "----:com.apple.iTunes:<name>",
+// whose name is compared in any capitals, as `user_texts()` does
 pub(super) fn freeform_texts<'a>(ilst: &'a Ilst, name: &str) -> impl Iterator<Item = &'a str> {
-    let ident = AtomIdent::Freeform {
-        mean: "com.apple.iTunes".into(),
-        name: name.into(),
-    };
-    ilst.get(&ident)
-        .into_iter()
+    ilst.into_iter()
+        .filter(move |atom| match atom.ident() {
+            AtomIdent::Freeform {
+                mean,
+                name: atom_name,
+            } => mean == "com.apple.iTunes" && atom_name.eq_ignore_ascii_case(name),
+            _ => false,
+        })
         .flat_map(lofty::mp4::Atom::data)
         .filter_map(|data| match data {
             AtomData::UTF8(text) => Some(text.as_str()),

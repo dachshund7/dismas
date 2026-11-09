@@ -9,8 +9,8 @@ All notable changes to this project will be documented in this file.
 - The date a recording was first released is read under the names other
   programs give it, not only as MusicBrainz Picard writes it: ORIGINAL
   RELEASE DATE (foobar2000), ORIGYEAR (MusicBee, Mp3tag), ORIGINAL YEAR
-  (Jaikoz, SongKong) and ORIGINALRELEASEDATE; the library is read again
-  once
+  (Jaikoz, SongKong) and ORIGINALRELEASEDATE, in whatever capitals a
+  program writes them; the library is read again once
 - The albums can be sorted by Original Release, when their music was
   first released, and by Recorded, when it was recorded. Each falls back
   to the other dates when an album lacks its own, so both work in a
@@ -53,6 +53,9 @@ All notable changes to this project will be documented in this file.
 - A length still being typed at the end of a search, such as `length:3:`
   on its way to `length:3:20` or `length:5m` to `length:5min`, showed a
   mistake until it was whole; it's left out until then, as a date is
+- The Work Hierarchy and recording date tags of MP3, AIFF, WAV, AAC and
+  MP4 files were only read with their names in small letters or in
+  capitals, not as other programs write them, such as "Work Hierarchy"
 
 ### Removed
 

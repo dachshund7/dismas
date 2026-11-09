@@ -20,7 +20,10 @@ use lofty::{
     tag::SplitTag,
 };
 
-use super::{tags::freeform_texts, *};
+use super::{
+    tags::{freeform_texts, user_texts},
+    *,
+};
 
 const TPUB: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TPUB"));
 const TMCL: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TMCL"));
@@ -102,9 +105,8 @@ impl Fills {
             fills.add(ItemKey::Label, labels);
         }
         fills.add(ItemKey::Performer, performers(tag));
-        // The descriptions of TXXX frames are compared as they are
         for name in ORIGINAL_DATE_NAMES {
-            fills.add(ItemKey::OriginalReleaseDate, tag.get_user_text(name));
+            fills.add(ItemKey::OriginalReleaseDate, user_texts(tag, name));
         }
         fills
     }
@@ -675,17 +677,48 @@ mod tests {
                 );
             }
         }
-        // The names of Vorbis comments and the keys of APE items are
-        // compared ignoring case
-        let [(mut vorbis, fills), (mut ape, ape_fills), ..] =
-            original_date_tags("OrigYear", "1965");
-        fills.apply(&mut vorbis);
-        ape_fills.apply(&mut ape);
+        // In other capitals, as other taggers write them: the names of
+        // Vorbis comments and the keys of APE items are compared ignoring
+        // case by lofty, those of TXXX frames and MP4 atoms by `user_texts`
+        // and `freeform_texts`
+        for (mut tag, fills) in original_date_tags("OrigYear", "1965") {
+            fills.apply(&mut tag);
+            assert_eq!(
+                tag.get_string(ItemKey::OriginalReleaseDate),
+                Some("1965"),
+                "OrigYear in {:?} tags",
+                tag.tag_type()
+            );
+        }
+    }
+
+    #[test]
+    fn still_compares_user_text_names_exactly() {
+        let mut id3v2 = Id3v2Tag::new();
+        let _ = id3v2.insert_user_text("OrigYear".to_string(), "1965".to_string());
         assert_eq!(
-            vorbis.get_string(ItemKey::OriginalReleaseDate),
-            Some("1965")
+            id3v2.get_user_text("ORIGYEAR"),
+            None,
+            "lofty now finds a TXXX frame whatever the capitals of its description: \
+             user_texts can go back to get_user_text"
         );
-        assert_eq!(ape.get_string(ItemKey::OriginalReleaseDate), Some("1965"));
+        let mut ilst = Ilst::new();
+        ilst.insert(lofty::mp4::Atom::new(
+            AtomIdent::Freeform {
+                mean: "com.apple.iTunes".into(),
+                name: "OrigYear".into(),
+            },
+            AtomData::UTF8("1965".to_string()),
+        ));
+        let ident = AtomIdent::Freeform {
+            mean: "com.apple.iTunes".into(),
+            name: "ORIGYEAR".into(),
+        };
+        assert!(
+            ilst.get(&ident).is_none(),
+            "lofty now finds a free-form atom whatever the capitals of its name: \
+             freeform_texts can go back to Ilst::get"
+        );
     }
 
     #[test]

@@ -1361,9 +1361,9 @@ mod tests {
                 .as_deref(),
             Some(date)
         );
-        // In capitals, as other taggers write it
+        // In other capitals, as other taggers write it
         let mut id3v2 = Id3v2Tag::new();
-        let _ = id3v2.insert_user_text("RECORDINGDATE".to_string(), date.to_string());
+        let _ = id3v2.insert_user_text("RecordingDate".to_string(), date.to_string());
         assert_eq!(
             ExtraComments::from_id3v2(Some(&id3v2), false)
                 .recording_date
@@ -1374,7 +1374,7 @@ mod tests {
         ilst.insert(Atom::new(
             AtomIdent::Freeform {
                 mean: "com.apple.iTunes".into(),
-                name: "recordingdate".into(),
+                name: "RECORDINGDATE".into(),
             },
             AtomData::UTF8(date.to_string()),
         ));
