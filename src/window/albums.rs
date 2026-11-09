@@ -107,75 +107,33 @@ impl Window {
 
     // Adds to the end of a section of a menu the item that goes to the work
     // of a track on the Works page, with the work open and the cover of the
-    // track's recording pointed out among its covers, and with `favorite`,
-    // the item that marks the work as a favorite after it. The work and the
-    // album are looked up while the menu opens, in a separate thread, so the
-    // item stays off until then, and for a track that isn't in the library
-    pub(super) fn add_work_items(
+    // track's recording pointed out among its covers. It stays off until
+    // the returned `GoToWork` is given the work, which the menu looks up as
+    // it opens, so it stays off for a track that isn't in the library.
+    // `path` is the track's, whose recording it points out
+    pub(super) fn add_go_to_work_item(
         &self,
         section: &gio::Menu,
         actions: &gio::SimpleActionGroup,
         prefix: &str,
-        track: &Track,
-        favorite: bool,
-    ) {
-        // The work's key, the album's id, and the track's path
-        type Found = (String, Option<String>, PathBuf);
-        let found: Rc<std::cell::OnceCell<Found>> = Rc::default();
-        let action = gio::SimpleAction::new("go-to-work", None);
-        action.set_enabled(false);
-        action.connect_activate(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[strong]
-            found,
-            move |_, _| {
-                if let Some((key, album, path)) = found.get() {
-                    win.go_to_work(key, album.as_deref(), Some(path));
+        path: Option<PathBuf>,
+    ) -> GoToWork {
+        let go_to_work = LookedUpAction::new(
+            actions,
+            "go-to-work",
+            clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |(key, album): &FoundWork| {
+                    win.go_to_work(key, album.as_deref(), path.as_deref());
                 }
-            }
-        ));
-        actions.add_action(&action);
+            ),
+        );
         section.append(
             Some(&i18n("Go to Work")),
             Some(&format!("{prefix}.go-to-work")),
         );
-        let position = section.n_items();
-
-        let Some(path) = track.file().path() else {
-            return;
-        };
-        let hidden = self.imp().library_view.hidden_folders();
-        let prefix = prefix.to_string();
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = win)]
-            self,
-            #[weak]
-            action,
-            #[weak]
-            section,
-            #[weak]
-            actions,
-            async move {
-                let looked_up = gio::spawn_blocking(move || {
-                    let work = library::track_work(&path, &hidden)?;
-                    let album = library::track_album(&path, &hidden);
-                    Some((work, album, path))
-                })
-                .await
-                .ok()
-                .flatten();
-                let Some((work, album, path)) = looked_up else {
-                    return;
-                };
-                if favorite {
-                    let item = win.favorite_work_item(&actions, &prefix, &work);
-                    section.insert_item(position, &item);
-                }
-                let _ = found.set((work, album, path));
-                action.set_enabled(true);
-            }
-        ));
+        go_to_work
     }
 
     // Goes to a work on the Works page, which opens it, gliding to the
@@ -193,13 +151,69 @@ impl Window {
         self.imp().library_view.reveal_work(key, album, track);
     }
 
-    // The menu of a work, at a point of its header in the queue or among
-    // the tracks of an album, with its first movement
-    pub(super) fn show_work_menu(&self, widget: &gtk::Widget, x: f64, y: f64, track: &Track) {
+    // The menu of a work, at a point of `widget` in its header in the queue
+    // or among the tracks of an album, with its first movement: Go to Work
+    // (see `add_go_to_work_item()`) and, after it, the item that marks the
+    // work as a favorite. The work and the album are looked up before the
+    // menu opens, in a separate thread, see `MenuLookups`
+    pub(super) fn show_work_menu(
+        &self,
+        header: &gtk::ListHeader,
+        widget: &gtk::Widget,
+        x: f64,
+        y: f64,
+        track: &Track,
+    ) {
         let actions = gio::SimpleActionGroup::new();
         let section = gio::Menu::new();
-        self.add_work_items(&section, &actions, "work", track, true);
-        popup_menu(&section, "work", &actions, widget, x, y);
+        let mut lookups = MenuLookups::new(&section);
+        let path = track.file().path();
+        let go_to_work = self.add_go_to_work_item(&section, &actions, "work", path.clone());
+        if let Some(path) = path {
+            let position = section.n_items();
+            let hidden = self.imp().library_view.hidden_folders();
+            let adder = lookups.adder();
+            lookups.spawn(clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[weak]
+                section,
+                #[weak]
+                actions,
+                async move {
+                    let looked_up = gio::spawn_blocking(move || {
+                        look_up_album_and_work(path, &hidden, false, true)
+                    })
+                    .await;
+                    let Ok((album, Some(key))) = looked_up else {
+                        return;
+                    };
+                    let item = win.favorite_work_item(&actions, "work", &key);
+                    adder.insert_item(&section, position, &item);
+                    go_to_work.set((key, album));
+                }
+            ));
+        }
+        // Unless the header shows another work by then, as the list
+        // scrolled. A track whose tags were read again is the same object,
+        // so it's still the same work
+        lookups.open_when_done(
+            self,
+            clone!(
+                #[weak]
+                header,
+                #[weak]
+                widget,
+                #[strong]
+                track,
+                move |win: &Window| {
+                    let shown = header.item().and_downcast::<Track>();
+                    if widget.is_mapped() && shown.as_ref() == Some(&track) {
+                        popup_menu(win, &section, "work", &actions, &widget, x, y);
+                    }
+                }
+            ),
+        );
     }
 
     // The menu of a work of the list of works, at a point of its row: it
@@ -225,7 +239,7 @@ impl Window {
         };
         section.append(Some(&label), Some("works-row.show"));
         section.append_item(&self.favorite_work_item(&actions, "works-row", &work.key));
-        popup_menu(&section, "works-row", &actions, widget, x, y);
+        popup_menu(self, &section, "works-row", &actions, widget, x, y);
     }
 
     // Plays tracks in place of the queue, from the one at `start`, as an
@@ -298,6 +312,7 @@ impl Window {
         self.append_adding_items(&section, "album", true, None);
         let menu = gio::Menu::new();
         menu.append_section(None, &section);
+        let mut lookups = MenuLookups::new(&menu);
         // Among the covers of the recordings of a work, an album of its own
         // can be gone to on the Albums page, and the recording marked as a
         // favorite
@@ -393,11 +408,17 @@ impl Window {
             menu.append_section(None, &section);
             let album_id = album.id();
             let hidden = library_view.hidden_folders();
-            self.add_booklet_item(&section, move || {
+            self.add_booklet_item(&section, &mut lookups, move || {
                 library::album_tracks(&album_id, &TrackFilter::default(), &hidden)
             });
         }
-        popup_menu(&menu, "album", &actions, cell.upcast_ref(), x, y);
+        // At once, as its only lookup, the booklets', adds its item at the
+        // end of the last section, which an open menu takes, see
+        // `MenuLookups`; so the cell still shows the album and the work it
+        // was asked for
+        lookups.open_now(self, |win| {
+            popup_menu(win, &menu, "album", &actions, cell.upcast_ref(), x, y);
+        });
     }
 
     // Adds the tracks of albums dragged from the grid to the queue, before
@@ -520,7 +541,7 @@ impl Window {
         album_tracks.connect_work_menu_requested(clone!(
             #[weak(rename_to = win)]
             self,
-            move |_, widget, x, y, track| win.show_work_menu(widget, x, y, track)
+            move |_, header, widget, x, y, track| win.show_work_menu(header, widget, x, y, track)
         ));
         library_view.connect_work_menu_requested(clone!(
             #[weak(rename_to = win)]
@@ -558,6 +579,16 @@ impl Window {
                     win.add_toast(msg);
                 }
             }
+        ));
+        // The playing track's album and work can be in the library now, or
+        // in a folder that's hidden, see `setup_more_button()`. Once the
+        // albums are read again, not when the scan finishes, as the folders
+        // hidden are those of the last reload, which the menu's lookups
+        // take, and a scan of a drive just plugged in can change nothing
+        library_view.connect_library_changed(clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| win.refresh_more_menu()
         ));
 
         // The search entry takes Esc, so the window doesn't get it. With
@@ -631,8 +662,139 @@ impl Window {
     }
 }
 
-// Opens a menu at a point of a widget, with its actions in a group
+// How long a menu waits for what it looks up before it opens, see
+// `MenuLookups`
+const MENU_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+
+// What a menu looks up in separate threads as it's asked for: the album,
+// work and booklets of a track or an album. A lookup that ends after the
+// menu opened still turns its item on, but only adds one at the end of
+// the menu: one added above other items would push them down, under the
+// pointer as it reaches them. So the menus that have an item to add in
+// the middle, as a track's Open Booklet is, or whose items the focus
+// should start on, as a work's Go to Work, wait for their lookups before
+// they open (`open_when_done()`), up to `MENU_WAIT` on a slow disk; one
+// whose items found later all go at its end opens at once (`open_now()`),
+// and the More menu is made before it's asked for (see
+// `Window::setup_more_button()`)
+pub(super) struct MenuLookups {
+    adder: MenuAdder,
+    tasks: Vec<glib::JoinHandle<()>>,
+}
+
+impl MenuLookups {
+    pub(super) fn new(menu: &gio::Menu) -> Self {
+        Self {
+            adder: MenuAdder {
+                menu: menu.clone(),
+                open: Rc::default(),
+                held_back: Rc::default(),
+            },
+            tasks: Vec::new(),
+        }
+    }
+
+    pub(super) fn spawn(&mut self, lookup: impl Future<Output = ()> + 'static) {
+        self.tasks.push(glib::spawn_future_local(lookup));
+    }
+
+    // What the lookups add items to the menu with
+    pub(super) fn adder(&self) -> MenuAdder {
+        self.adder.clone()
+    }
+
+    // Opens the menu with `open` once the lookups are done, or after
+    // `MENU_WAIT`, unless another menu was asked for by then. The lookups
+    // that are left go on, as dropping their handles leaves them running
+    pub(super) fn open_when_done(self, win: &Window, open: impl FnOnce(&Window) + 'static) {
+        let request = new_menu_request(win);
+        let Self { adder, tasks } = self;
+        glib::spawn_future_local(clone!(
+            #[weak]
+            win,
+            async move {
+                let done = async move {
+                    for task in tasks {
+                        let _ = task.await;
+                    }
+                };
+                let _ = glib::future_with_timeout(MENU_WAIT, done).await;
+                if win.imp().menu_requests.get() == request {
+                    adder.set_open(true);
+                    open(&win);
+                }
+            }
+        ));
+    }
+
+    // Opens the menu with `open` at once, for one whose lookups only add
+    // items at its end
+    pub(super) fn open_now(self, win: &Window, open: impl FnOnce(&Window)) {
+        self.adder.set_open(true);
+        open(win);
+    }
+}
+
+// Counts a menu asked for or opened, so that one still waiting for its
+// lookups doesn't open after it, see `MenuLookups::open_when_done()`
+pub(super) fn new_menu_request(win: &Window) -> u32 {
+    let requests = &win.imp().menu_requests;
+    let request = requests.get().wrapping_add(1);
+    requests.set(request);
+    request
+}
+
+// Adds the items that a menu's lookups find, see `MenuLookups`
+#[derive(Clone)]
+pub(super) struct MenuAdder {
+    menu: gio::Menu,
+    open: Rc<std::cell::Cell<bool>>,
+    held_back: Rc<std::cell::Cell<bool>>,
+}
+
+impl MenuAdder {
+    // Says whether the menu is open. A popover made for one opening stays
+    // open until it goes, but the More menu opens and closes again
+    pub(super) fn set_open(&self, open: bool) {
+        self.open.set(open);
+    }
+
+    // Inserts `item` into a section of the menu, or into the menu itself,
+    // unless the menu is open and the item wouldn't be its last
+    pub(super) fn insert_item(&self, section: &gio::Menu, position: i32, item: &gio::MenuItem) {
+        if !self.open.get() || self.ends_menu(section, position) {
+            section.insert_item(position, item);
+        } else {
+            self.held_back.set(true);
+        }
+    }
+
+    // Whether an item was left out as the menu was open, which the More
+    // menu, made again once it closes, gets then
+    pub(super) fn held_back(&self) -> bool {
+        self.held_back.get()
+    }
+
+    fn ends_menu(&self, section: &gio::Menu, position: i32) -> bool {
+        if position < section.n_items() {
+            return false;
+        }
+        if *section == self.menu {
+            return true;
+        }
+        let last = self.menu.n_items() - 1;
+        last >= 0
+            && self
+                .menu
+                .item_link(last, gio::MENU_LINK_SECTION)
+                .is_some_and(|link| link == *section.upcast_ref::<gio::MenuModel>())
+    }
+}
+
+// Opens a menu at a point of a widget, with its actions in a group. A
+// menu still waiting for its lookups doesn't open after it
 pub(super) fn popup_menu(
+    win: &Window,
     menu: &gio::Menu,
     group: &str,
     actions: &gio::SimpleActionGroup,
@@ -640,9 +802,147 @@ pub(super) fn popup_menu(
     x: f64,
     y: f64,
 ) {
+    new_menu_request(win);
     let point = gdk::Rectangle::new(x as i32, y as i32, 1, 1);
     let popover = utils::menu_popover(menu, parent, Some(&point));
     popover.insert_action_group(group, Some(actions));
     popover.set_halign(gtk::Align::Start);
     popover.popup();
+}
+
+// The work's key and the album's id, which Go to Work goes to
+pub(super) type FoundWork = (String, Option<String>);
+
+// Looks up in the library a track's album, if `album_wanted`, and the key
+// of its work, if `work_wanted`, with its album too, on which Go to Work
+// points out the recording. It blocks, so it runs in a separate thread
+pub(super) fn look_up_album_and_work(
+    path: PathBuf,
+    hidden: &[PathBuf],
+    album_wanted: bool,
+    work_wanted: bool,
+) -> (Option<String>, Option<String>) {
+    let work = work_wanted
+        .then(|| library::track_work(&path, hidden))
+        .flatten();
+    let album = (album_wanted || work.is_some())
+        .then(|| library::track_album(&path, hidden))
+        .flatten();
+    (album, work)
+}
+
+// The Go to Work item of a menu, which is off until its work is found
+pub(super) type GoToWork = LookedUpAction<FoundWork>;
+
+// The action of a menu's item that's off until what it acts on is looked
+// up, see `MenuLookups`
+pub(super) struct LookedUpAction<T> {
+    action: glib::WeakRef<gio::SimpleAction>,
+    found: Rc<std::cell::OnceCell<T>>,
+}
+
+impl<T: 'static> LookedUpAction<T> {
+    // Adds the action to `actions`, off; once on, it calls `activate`
+    // with what was found
+    pub(super) fn new(
+        actions: &gio::SimpleActionGroup,
+        name: &str,
+        activate: impl Fn(&T) + 'static,
+    ) -> Self {
+        let found: Rc<std::cell::OnceCell<T>> = Rc::default();
+        let action = gio::SimpleAction::new(name, None);
+        action.set_enabled(false);
+        action.connect_activate(clone!(
+            #[strong]
+            found,
+            move |_, _| {
+                if let Some(found) = found.get() {
+                    activate(found);
+                }
+            }
+        ));
+        actions.add_action(&action);
+        Self {
+            action: action.downgrade(),
+            found,
+        }
+    }
+
+    // Turns the item on, unless its menu is gone by then
+    pub(super) fn set(&self, found: T) {
+        if let Some(action) = self.action.upgrade() {
+            let _ = self.found.set(found);
+            action.set_enabled(true);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn labels(menu: &gio::Menu) -> Vec<String> {
+        (0..menu.n_items())
+            .filter_map(|i| {
+                menu.item_attribute_value(i, gio::MENU_ATTRIBUTE_LABEL, None)
+                    .and_then(|label| label.get::<String>())
+            })
+            .collect()
+    }
+
+    fn item(label: &str) -> gio::MenuItem {
+        gio::MenuItem::new(Some(label), None)
+    }
+
+    #[test]
+    fn an_open_menu_only_takes_items_at_its_end() {
+        let first = gio::Menu::new();
+        first.append(Some("Copy"), None);
+        first.append(Some("Track Information"), None);
+        let last = gio::Menu::new();
+        last.append(Some("Remove"), None);
+        let menu = gio::Menu::new();
+        menu.append_section(None, &first);
+        menu.append_section(None, &last);
+        let adder = MenuLookups::new(&menu).adder();
+
+        // Before it opens, anywhere
+        adder.insert_item(&first, 1, &item("Open Booklet"));
+        assert!(!adder.held_back());
+        assert_eq!(
+            labels(&first),
+            ["Copy", "Open Booklet", "Track Information"]
+        );
+
+        // Once it's open, not above other items, even at the end of a
+        // section that another one follows
+        adder.set_open(true);
+        adder.insert_item(&first, 1, &item("Above"));
+        adder.insert_item(&first, 3, &item("Before the next section"));
+        assert_eq!(
+            labels(&first),
+            ["Copy", "Open Booklet", "Track Information"]
+        );
+        adder.insert_item(&last, 0, &item("Above Remove"));
+        assert_eq!(labels(&last), ["Remove"]);
+        assert!(adder.held_back());
+
+        // At the end of the last section, or of a menu without sections
+        adder.insert_item(&last, 1, &item("Last"));
+        assert_eq!(labels(&last), ["Remove", "Last"]);
+
+        // Closed again, as the More menu is, anywhere again
+        adder.set_open(false);
+        adder.insert_item(&first, 0, &item("Go to Album"));
+        assert_eq!(
+            labels(&first),
+            ["Go to Album", "Copy", "Open Booklet", "Track Information"]
+        );
+        let plain = gio::Menu::new();
+        plain.append(Some("Go to Work"), None);
+        let adder = MenuLookups::new(&plain).adder();
+        adder.set_open(true);
+        adder.insert_item(&plain, 1, &item("Add Work to Favorites"));
+        assert_eq!(labels(&plain), ["Go to Work", "Add Work to Favorites"]);
+    }
 }

@@ -673,6 +673,13 @@ impl Window {
             player.current_track_changed();
             self.update_title(Some(track));
             self.update_style(Some(track));
+            // Whether it's a movement can have changed, which the More
+            // menu has an item for (see `setup_more_button()`); what
+            // else it has is looked up in the library, whose reload
+            // after the scan makes the menu again already
+            if self.imp().more_menu_with_work.get() != track.has_work() {
+                self.refresh_more_menu();
+            }
         }
     }
 

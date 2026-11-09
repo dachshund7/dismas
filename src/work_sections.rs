@@ -183,8 +183,8 @@ pub(crate) fn continues_work(previous: &Track, track: &Track) -> bool {
 // followed by the name of the work and its composer for the movements of
 // a work; a click on the name calls `on_work_clicked` with the positions of the first
 // movement and past the last one, and whether Ctrl was held, and a right
-// click or a long press calls `on_work_menu` with the name, the point of
-// it, and the first movement. In lists
+// click or a long press calls `on_work_menu` with the header, the name,
+// the point of it, and the first movement. In lists
 // whose tracks can be moved, `drop_before_work` says whether they can be
 // now, as the rows do, and a track dropped on the header of a work at the
 // top of the list is given to it with the position of the first movement;
@@ -194,7 +194,7 @@ pub(crate) fn continues_work(previous: &Track, track: &Track) -> bool {
 // the work's name; only an album's tracks have one
 pub(crate) fn work_header_factory(
     on_work_clicked: impl Fn(u32, u32, bool) + 'static,
-    on_work_menu: impl Fn(&gtk::Widget, f64, f64, &Track) + 'static,
+    on_work_menu: impl Fn(&gtk::ListHeader, &gtk::Widget, f64, f64, &Track) + 'static,
     drop_before_work: Option<(impl Fn() -> bool + 'static, impl Fn(&Track, u32) + 'static)>,
     disc_line: impl Fn(&Track, u32) -> Option<String> + 'static,
 ) -> gtk::ListItemFactory {
@@ -262,7 +262,7 @@ pub(crate) fn work_header_factory(
                 on_work_menu,
                 move |x, y| {
                     if let Some(track) = header.item().and_downcast::<Track>() {
-                        on_work_menu(title.upcast_ref(), x, y, &track);
+                        on_work_menu(&header, title.upcast_ref(), x, y, &track);
                     }
                 }
             ),

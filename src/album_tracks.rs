@@ -176,10 +176,11 @@ mod imp {
                             f64::static_type(),
                         ])
                         .build(),
-                    // The menu of a work, at a point of its header, with
-                    // its first movement
+                    // The menu of a work, at a point of a widget of its
+                    // header, with the header and its first movement
                     Signal::builder("work-menu-requested")
                         .param_types([
+                            gtk::ListHeader::static_type(),
                             gtk::Widget::static_type(),
                             f64::static_type(),
                             f64::static_type(),
@@ -262,7 +263,7 @@ impl AlbumTracks {
     }
 
     pub(crate) fn connect_work_menu_requested<
-        F: Fn(&Self, &gtk::Widget, f64, f64, &Track) + 'static,
+        F: Fn(&Self, &gtk::ListHeader, &gtk::Widget, f64, f64, &Track) + 'static,
     >(
         &self,
         f: F,
@@ -271,11 +272,12 @@ impl AlbumTracks {
             "work-menu-requested",
             false,
             glib::closure_local!(move |view: &Self,
+                                       header: &gtk::ListHeader,
                                        widget: &gtk::Widget,
                                        x: f64,
                                        y: f64,
                                        track: &Track| f(
-                view, widget, x, y, track
+                view, header, widget, x, y, track
             )),
         )
     }
@@ -355,8 +357,11 @@ impl AlbumTracks {
             clone!(
                 #[weak(rename_to = this)]
                 self,
-                move |widget: &gtk::Widget, x, y, track: &Track| {
-                    this.emit_by_name::<()>("work-menu-requested", &[widget, &x, &y, track]);
+                move |header: &gtk::ListHeader, widget: &gtk::Widget, x, y, track: &Track| {
+                    this.emit_by_name::<()>(
+                        "work-menu-requested",
+                        &[header, widget, &x, &y, track],
+                    );
                 }
             ),
             None::<(fn() -> bool, fn(&Track, u32))>,

@@ -153,24 +153,10 @@ template $DismasPlaybackControl: Widget {
           }
         }
 
-        Button track_info_button {
-          icon-name: "help-about-symbolic";
-          action-name: "win.track-info";
-          valign: center;
-          tooltip-text: _("Track Information");
-
-          styles [
-            "circular",
-          ]
-
-          accessibility {
-            label: C_("a11y", "Track information");
-          }
-        }
-
         MenuButton more_button {
           icon-name: "view-more-symbolic";
-          menu-model: more_menu;
+          // The menu is made each time another track plays, see
+          // `Window::setup_more_button()`
           valign: center;
           tooltip-text: _("More Options");
 
@@ -292,35 +278,4 @@ Popover sleep_timer_popover {
       }
     }
   }
-}
-
-menu more_menu {
-  section {
-    item {
-      label: _("Copy");
-      action: "win.copy";
-      // Not an accel, see `Window::setup_edit_shortcuts()`
-      accel: "<primary>c";
-    }
-
-    item {
-      label: _("Go to Album");
-      action: "win.go-to-album";
-    }
-
-    item {
-      label: _("Open Folder");
-      action: "win.open-directory";
-    }
-
-    // Hidden in fullscreen, where the pane doesn't show
-    item {
-      label: _("Lyrics");
-      action: "win.lyrics";
-      hidden-when: "action-disabled";
-    }
-  }
-
-  // The booklets of the album playing, filled in as the track changes
-  section booklet_section {}
 }

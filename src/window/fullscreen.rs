@@ -21,6 +21,8 @@ impl Window {
             }
             win.update_backdrop();
             win.update_lyrics_action();
+            // Its items depend on fullscreen, see `setup_more_button()`
+            win.rebuild_more_menu();
             win.tell_fullscreen();
         });
         self.connect_visible_notify(Self::tell_fullscreen);

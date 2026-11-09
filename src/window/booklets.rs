@@ -6,10 +6,10 @@
 
 use std::path::PathBuf;
 
-use gtk::{gio, glib, glib::clone, prelude::*, subclass::prelude::*};
+use gtk::{gio, glib, glib::clone, prelude::*};
 use log::debug;
 
-use super::Window;
+use super::{Window, albums::MenuLookups};
 use crate::{booklets, i18n::i18n, utils};
 
 impl Window {
@@ -38,14 +38,17 @@ impl Window {
 
     // Adds to the end of a section of a menu the item that opens the
     // booklets of the tracks `paths` gives, once they're found in a
-    // separate thread as the menu opens; without one, nothing is added
+    // separate thread before the menu opens (see `MenuLookups`); without
+    // one, nothing is added
     pub(super) fn add_booklet_item(
         &self,
         section: &gio::Menu,
+        lookups: &mut MenuLookups,
         paths: impl FnOnce() -> Vec<PathBuf> + Send + 'static,
     ) {
         let position = section.n_items();
-        glib::spawn_future_local(clone!(
+        let adder = lookups.adder();
+        lookups.spawn(clone!(
             #[weak]
             section,
             async move {
@@ -53,36 +56,7 @@ impl Window {
                     .await
                     .unwrap_or_default();
                 if let Some(item) = booklets::menu_item(&found) {
-                    section.insert_item(position, &item);
-                }
-            }
-        ));
-    }
-
-    // The booklets of the playing track, in the More menu
-    pub(super) fn update_playing_booklets(&self) {
-        let section = self.imp().playback_control.booklet_section();
-        section.remove_all();
-        let Some(track) = self.player().state().track() else {
-            return;
-        };
-        let Some(path) = track.file().path() else {
-            return;
-        };
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = win)]
-            self,
-            async move {
-                let found = gio::spawn_blocking(move || booklets::find(&[path]))
-                    .await
-                    .unwrap_or_default();
-                // Unless another track plays by then
-                if win.player().state().track().as_ref() != Some(&track) {
-                    return;
-                }
-                section.remove_all();
-                if let Some(item) = booklets::menu_item(&found) {
-                    section.append_item(&item);
+                    adder.insert_item(&section, position, &item);
                 }
             }
         ));

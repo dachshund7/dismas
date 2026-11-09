@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use adw::subclass::prelude::*;
-use gtk::{CompositeTemplate, gio, glib, prelude::*};
+use gtk::{CompositeTemplate, glib, prelude::*};
 
 use crate::{audio::RepeatMode, i18n::i18n, utils, volume_control::VolumeControl};
 
@@ -45,11 +45,7 @@ mod imp {
         #[template_child]
         pub(crate) favorite_button: TemplateChild<gtk::ToggleButton>,
         #[template_child]
-        pub(crate) track_info_button: TemplateChild<gtk::Button>,
-        #[template_child]
         pub(crate) more_button: TemplateChild<gtk::MenuButton>,
-        #[template_child]
-        pub(crate) booklet_section: TemplateChild<gio::Menu>,
 
         // What the sleep timer is waiting for, which its tooltip says
         pub(crate) sleep_timer_status: std::cell::RefCell<Option<String>>,
@@ -156,17 +152,8 @@ impl PlaybackControl {
         self.imp().sleep_timer_minutes.get()
     }
 
-    pub(crate) fn track_info_button(&self) -> gtk::Button {
-        self.imp().track_info_button.get()
-    }
-
     pub(crate) fn more_button(&self) -> gtk::MenuButton {
         self.imp().more_button.get()
-    }
-
-    // The section of the More menu with the booklets of the album playing
-    pub(crate) fn booklet_section(&self) -> gio::Menu {
-        self.imp().booklet_section.get()
     }
 
     pub(crate) fn sleep_timer_button(&self) -> gtk::MenuButton {

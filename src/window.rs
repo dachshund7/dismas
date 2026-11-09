@@ -321,6 +321,19 @@ mod imp {
 
         // The application's player, see `Window::player()`
         pub(crate) player: std::cell::OnceCell<Rc<AudioPlayer>>,
+        // Counts the menus asked for, so that one waiting for its lookups
+        // doesn't open after a later one, see `albums::MenuLookups`
+        pub(crate) menu_requests: Cell<u32>,
+        // What the lookups of the More menu add its items with, which the
+        // button tells whether the menu is open, see
+        // `Window::setup_more_button()`
+        pub(super) more_menu_adder: RefCell<Option<super::albums::MenuAdder>>,
+        // Whether a change came while the More menu was open, which makes it
+        // again once it closes, see `Window::refresh_more_menu()`
+        pub(super) more_menu_stale: Cell<bool>,
+        // Whether the More menu was made for a movement, with Go to Work,
+        // see `Window::show_updated_track()`
+        pub(super) more_menu_with_work: Cell<bool>,
 
         // The toast about the last track that failed to play, which the
         // next one takes the place of
@@ -392,10 +405,6 @@ mod imp {
                 debug!("Window::queue.repeat()");
                 win.player().toggle_repeat_mode();
             });
-            klass.install_action("win.copy", None, move |win, _, _| {
-                debug!("Window::win.copy()");
-                win.copy_track();
-            });
             klass.install_action("win.track-info", None, move |win, _, _| {
                 debug!("Window::win.track-info()");
                 win.show_track_info();
@@ -413,10 +422,6 @@ mod imp {
             klass.install_action("win.choose-music-folders", None, move |win, _, _| {
                 debug!("Window::win.choose-music-folders()");
                 win.show_preferences().focus_add_folder();
-            });
-            klass.install_action_async("win.open-directory", None, async move |win, _, _| {
-                debug!("Window::win.open-directory()");
-                win.open_playing_track_directory().await;
             });
             // The target is the URI of the booklet. The action is the
             // class's, so other programs can't open files with it over
@@ -439,10 +444,6 @@ mod imp {
             klass.install_action("win.show-playing-track", None, move |win, _, _| {
                 debug!("Window::win.show-playing-track()");
                 win.show_playing_track();
-            });
-            klass.install_action("win.go-to-album", None, move |win, _, _| {
-                debug!("Window::win.go-to-album()");
-                win.go_to_playing_album();
             });
             klass.install_action("queue.clear", None, move |win, _, _| {
                 debug!("Window::queue.clear()");
@@ -708,6 +709,10 @@ mod imp {
                 provider_css: RefCell::default(),
                 settings: utils::settings_manager(),
                 player: std::cell::OnceCell::new(),
+                menu_requests: Cell::new(0),
+                more_menu_adder: RefCell::default(),
+                more_menu_stale: Cell::new(false),
+                more_menu_with_work: Cell::new(false),
                 failed_toast: glib::WeakRef::new(),
                 undo_toast: glib::WeakRef::new(),
                 queue_undo: RefCell::default(),
@@ -1160,7 +1165,6 @@ impl Window {
         win.setup_key_shortcuts();
         win.setup_edit_shortcuts();
         win.setup_type_to_search();
-        win.setup_track_info_button();
         win.setup_more_button();
         win.setup_library();
         win.setup_playlists();

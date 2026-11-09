@@ -45,8 +45,9 @@ impl Window {
         self.update_title(state.track().as_ref());
         self.update_style(state.track().as_ref());
         self.sync_track_favorite();
-        self.update_playing_booklets();
         self.update_lyrics_action();
+        // Its menu is about the playing track, see `setup_more_button()`
+        self.rebuild_more_menu();
     }
 
     pub(super) fn update_cover(&self) {

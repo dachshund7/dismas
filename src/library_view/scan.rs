@@ -79,6 +79,9 @@ impl LibraryView {
                     this.imp()
                         .favorite_albums
                         .replace(play_stats::favorite_album_ids());
+                    // Read before `show_albums()` takes the flag
+                    let changed = this.imp().tracks_changed.get()
+                        || *this.imp().hidden_folders.borrow() != hidden;
                     this.imp().hidden_folders.replace(hidden);
                     // Before the albums, which can switch to the page and
                     // give its button the focus, and also when there were
@@ -96,6 +99,11 @@ impl LibraryView {
                     let works_generation = &this.imp().works_generation;
                     works_generation.set(works_generation.get().wrapping_add(1));
                     this.set_works_available(has_works);
+                    // Last, with the hidden folders and the albums in
+                    // place for what the handlers look up
+                    if changed {
+                        this.emit_by_name::<()>("library-changed", &[]);
+                    }
                 }
             }
         ));

@@ -33,6 +33,19 @@ All notable changes to this project will be documented in this file.
   Recorded does. The tracks go by their albums' dates, as the grid sorts
   them, so that an album's tracks stay together, and an artist's albums
   are in the order they were recorded
+- Track Information is in the player's More menu, in place of its own
+  button. The menu now has the items of a track's menu, in the same
+  order: Go to Album, Go to Work, Copy, Open Folder, Open Booklet and
+  Track Information, then Lyrics. It lacked Go to Work before, and had
+  Copy above Go to Album. In fullscreen, it leaves out the items that
+  would leave the player, as it did Lyrics: Go to Album, which was grayed
+  out, Go to Work, and Open Folder and Open Booklet, which opened another
+  app over it. The menu closes when the next track starts and when the
+  window goes in or out of fullscreen, as its items were for the track
+  and the window it opened on. The More button is off while nothing
+  plays, when its items had nothing to act on
+- The menu of a track in the preview of a playlist or a smart playlist
+  has Go to Album, as its tracks come from many albums
 - The playlist's File Name sort goes by the folders, then the file
   names, so that albums whose files have the same names, such as
   "01 …", stay together, each in the order of its folder
@@ -58,6 +71,14 @@ All notable changes to this project will be documented in this file.
 - The Work Hierarchy and recording date tags of MP3, AIFF, WAV, AAC and
   MP4 files were only read with their names in small letters or in
   capitals, not as other programs write them, such as "Work Hierarchy"
+- The menus of tracks opened before their booklets were found, and on a
+  slow disk Open Booklet came in afterwards, pushing the items below it
+  down, under the pointer. The menus of tracks and works now wait up to
+  a tenth of a second for what they look up, so that they open with Open
+  Booklet in place and Go to Album and Go to Work available, and the
+  More menu looks them up when the track starts. An item found later
+  only comes in at the end of a menu, as an album's Open Booklet does,
+  or, in the More menu, the next time it opens
 
 ### Removed
 

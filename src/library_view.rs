@@ -476,6 +476,14 @@ mod imp {
                             bool::static_type(),
                         ])
                         .build(),
+                    // The albums were read again after a scan that changed
+                    // tracks, or with other folders hidden, as when a
+                    // drive was plugged in; what looks tracks up in the
+                    // library can find them now, or no longer. It comes
+                    // after `scan-finished`, once the albums are read,
+                    // and also before a scan, which shows the folders
+                    // first
+                    Signal::builder("library-changed").build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -605,6 +613,17 @@ impl LibraryView {
                                        requested: bool| {
                 f(view, uris, uris_without_cover, n_changed, requested);
             }),
+        )
+    }
+
+    pub(crate) fn connect_library_changed<F: Fn(&Self) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_closure(
+            "library-changed",
+            false,
+            glib::closure_local!(move |view: &Self| f(view)),
         )
     }
 

@@ -102,8 +102,8 @@ impl Window {
                 clone!(
                     #[weak(rename_to = win)]
                     self,
-                    move |widget: &gtk::Widget, x, y, track: &Track| {
-                        win.show_work_menu(widget, x, y, track);
+                    move |header: &gtk::ListHeader, widget: &gtk::Widget, x, y, track: &Track| {
+                        win.show_work_menu(header, widget, x, y, track);
                     }
                 ),
                 // While a search hides tracks, they can't be moved, as with
