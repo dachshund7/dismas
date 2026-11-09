@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use adw::prelude::*;
 
 use super::*;
-use crate::{cue_sheet, play_stats};
+use crate::{cue_sheet, play_stats, tag_date::DateKind};
 
 impl Window {
     pub(super) fn setup_playlists(&self) {
@@ -850,7 +850,9 @@ fn sorted_message(key: SortKey) -> String {
         SortKey::Artist => i18n("Sorted by artist"),
         SortKey::Composer => i18n("Sorted by composer"),
         SortKey::Title => i18n("Sorted by title"),
-        SortKey::Year => i18n("Sorted by year"),
+        SortKey::Date(DateKind::Released) => i18n("Sorted by release date"),
+        SortKey::Date(DateKind::OriginalRelease) => i18n("Sorted by original release date"),
+        SortKey::Date(DateKind::Recorded) => i18n("Sorted by recording date"),
         SortKey::FileName => i18n("Sorted by file name"),
         SortKey::Reverse => i18n("Reversed the order"),
     }

@@ -9,7 +9,10 @@ use std::{
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
 use super::AlbumInfo;
-use crate::tag_date::{DateKind, SortDates, TagDate};
+use crate::{
+    tag_date::{self, DateKind, SortDates},
+    utils::cmp_present_first,
+};
 
 // What the album grid is sorted by, as in the "album-sort" setting
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,32 +51,6 @@ impl AlbumSort {
 pub(crate) struct SelectionKey {
     pub(crate) album: String,
     pub(crate) recording: Option<String>,
-}
-
-// Compares two values in the given direction, with the missing ones last
-// either way
-fn cmp_present_first<T: Ord>(a: Option<&T>, b: Option<&T>, descending: bool) -> Ordering {
-    match (a, b) {
-        (Some(a), Some(b)) if descending => b.cmp(a),
-        (Some(a), Some(b)) => a.cmp(b),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-
-// Compares two dates in the given direction, by their years, then their
-// months and then their days, each missing one last either way: a date with
-// only a year goes after the others of that year, as an album without a
-// date goes after the others
-fn cmp_dates(a: Option<TagDate>, b: Option<TagDate>, descending: bool) -> Ordering {
-    match (a, b) {
-        (Some(a), Some(b)) => cmp_present_first(Some(&a.year), Some(&b.year), descending)
-            .then_with(|| cmp_present_first(a.month.as_ref(), b.month.as_ref(), descending))
-            .then_with(|| cmp_present_first(a.day.as_ref(), b.day.as_ref(), descending)),
-        // A missing date last either way
-        _ => a.is_none().cmp(&b.is_none()),
-    }
 }
 
 mod imp {
@@ -205,7 +182,8 @@ impl Album {
         let title =
             |descending| cmp_present_first(a.title_key.get(), b.title_key.get(), descending);
         let (a_dates, b_dates) = (a.dates.get(), b.dates.get());
-        let date = |kind, descending| cmp_dates(a_dates.get(kind), b_dates.get(kind), descending);
+        let date =
+            |kind, descending| tag_date::compare(a_dates.get(kind), b_dates.get(kind), descending);
         // The ties of the other sorts are by when the music was made, so
         // that an artist's albums are in the order they were recorded
         let recorded = |descending| date(DateKind::Recorded, descending);

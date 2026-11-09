@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // The order of a sort of the tracks of a playlist, by album, artist,
-// composer, title, year or file name, or the other way round. The movements
-// of a work that are next to each other move together, in their order, as
-// in a shuffle, and go by the first of them. Tracks that go in the same
-// place are put in the order of their albums, and those still the same
-// keep the order they're in
+// composer, title, a date or file name, or the other way round. The
+// movements of a work that are next to each other move together, in their
+// order, as in a shuffle, and go by the first of them. Tracks that go in
+// the same place are put in the order of their albums, and those still the
+// same keep the order they're in
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +15,7 @@ use gtk::glib;
 use crate::{
     cue_sheet,
     library::{self, TrackOrder, WorkComposer, WorkToOrder},
+    tag_date::{DateKind, Earliest, SortDates},
     utils,
 };
 
@@ -28,7 +29,8 @@ pub(crate) enum SortKey {
     Artist,
     Composer,
     Title,
-    Year,
+    // As the album grid's sorts of those dates
+    Date(DateKind),
     FileName,
     Reverse,
 }
@@ -40,7 +42,9 @@ impl SortKey {
             "artist" => Some(Self::Artist),
             "composer" => Some(Self::Composer),
             "title" => Some(Self::Title),
-            "year" => Some(Self::Year),
+            "released" => Some(Self::Date(DateKind::Released)),
+            "original" => Some(Self::Date(DateKind::OriginalRelease)),
+            "recorded" => Some(Self::Date(DateKind::Recorded)),
             "file-name" => Some(Self::FileName),
             "reverse" => Some(Self::Reverse),
             _ => None,
@@ -84,8 +88,8 @@ pub(super) struct Entry {
 
     // The work of a movement, or else the title, as the queue shows it
     pub(crate) heading: String,
-    // See `TrackCredits::year()`
-    pub(crate) year: Option<String>,
+    // See `TrackCredits::sort_dates()`
+    pub(crate) dates: SortDates,
 }
 
 // The positions of the tracks in their sorted order. Past
@@ -105,7 +109,8 @@ pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
                     let artist = present(entry.artist_sort.as_deref())
                         .or_else(|| present(entry.artist.as_deref()))
                         .map(glib::CollationKey::from);
-                    (last(artist), last(entry.year.as_deref()))
+                    // An artist's tracks in the order they were recorded
+                    (last(artist), Earliest(entry.dates.recorded))
                 })
                 .collect();
             by_keys(&firsts, keys)
@@ -135,10 +140,10 @@ pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
                 .collect();
             by_keys(&firsts, keys)
         }
-        SortKey::Year => {
+        SortKey::Date(kind) => {
             let keys = firsts
                 .iter()
-                .map(|entry| last(entry.year.as_deref()))
+                .map(|entry| Earliest(entry.dates.get(kind)))
                 .collect();
             by_keys(&firsts, keys)
         }
@@ -284,12 +289,14 @@ mod tests {
         })
     }
 
-    const KEYS: [SortKey; 7] = [
+    const KEYS: [SortKey; 9] = [
         SortKey::Album,
         SortKey::Artist,
         SortKey::Composer,
         SortKey::Title,
-        SortKey::Year,
+        SortKey::Date(DateKind::Released),
+        SortKey::Date(DateKind::OriginalRelease),
+        SortKey::Date(DateKind::Recorded),
         SortKey::FileName,
         SortKey::Reverse,
     ];
@@ -367,24 +374,102 @@ mod tests {
 
     #[test]
     fn ties_go_by_album_and_tracks_that_tie_keep_their_order() {
-        // The same year, on two albums, and two copies of a track
-        let year = |entry: Entry| with(entry, |e| e.year = Some("1990".to_string()));
+        // The same date, on two albums, and two copies of a track
+        let year = |entry: Entry| {
+            with(entry, |e| {
+                e.dates = SortDates::parse("1990", "1990", "1990");
+            })
+        };
         let entries = [
             year(track("B", 1)),
             year(track("A", 1)),
             year(track("A", 1)),
         ];
-        assert_eq!(sorted_order(&entries, SortKey::Year), [1, 2, 0]);
+        assert_eq!(
+            sorted_order(&entries, SortKey::Date(DateKind::Released)),
+            [1, 2, 0]
+        );
+    }
+
+    #[test]
+    fn each_date_sort_has_its_own_order() {
+        let entries = [
+            // Recorded in 1964, first released in 1965, and reissued
+            with(track("Reissue", 1), |e| {
+                e.dates = SortDates::parse("2015", "1965", "1964");
+            }),
+            // Recorded at a concert in 1966, first released in 1998
+            with(track("Live", 1), |e| {
+                e.dates = SortDates::parse("1998", "1998", "1966");
+            }),
+            with(track("New", 1), |e| {
+                e.dates = SortDates::parse("2001", "2001", "2000");
+            }),
+        ];
+        assert_eq!(
+            sorted_order(&entries, SortKey::Date(DateKind::Released)),
+            [1, 2, 0]
+        );
+        assert_eq!(
+            sorted_order(&entries, SortKey::Date(DateKind::OriginalRelease)),
+            [0, 1, 2]
+        );
+        assert_eq!(
+            sorted_order(&entries, SortKey::Date(DateKind::Recorded)),
+            [0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn a_date_without_a_month_or_day_goes_after_those_of_its_year() {
+        let on = |album, date: &str| {
+            with(track(album, 1), |e| {
+                e.dates = SortDates::parse(date, date, date);
+            })
+        };
+        let entries = [
+            on("A", "1965"),
+            on("B", "1965-11"),
+            on("C", "1965-03-12"),
+            on("D", "1965-03"),
+            on("E", "1964"),
+        ];
+        assert_eq!(
+            sorted_order(&entries, SortKey::Date(DateKind::Released)),
+            [4, 2, 3, 1, 0]
+        );
+    }
+
+    #[test]
+    fn an_artists_tracks_are_in_the_order_they_were_recorded() {
+        let by = |album, recorded| {
+            with(track(album, 1), |e| {
+                e.artist = Some("Artist".to_string());
+                e.dates = SortDates::parse("2015", "2015", recorded);
+            })
+        };
+        let entries = [by("A", "1971"), by("B", "1969-10"), by("C", "1969-04")];
+        assert_eq!(sorted_order(&entries, SortKey::Artist), [2, 1, 0]);
     }
 
     #[test]
     fn missing_values_go_last() {
         let entries = [
-            with(track("A", 1), |e| e.year = None),
-            with(track("B", 1), |e| e.year = Some("2001".to_string())),
-            with(track("C", 1), |e| e.year = Some("1971".to_string())),
+            track("A", 1),
+            with(track("B", 1), |e| {
+                e.dates = SortDates::parse("2001", "2001", "2001");
+            }),
+            with(track("C", 1), |e| {
+                e.dates = SortDates::parse("1971", "1971", "1971");
+            }),
         ];
-        assert_eq!(sorted_order(&entries, SortKey::Year), [2, 1, 0]);
+        for key in [
+            SortKey::Date(DateKind::Released),
+            SortKey::Date(DateKind::OriginalRelease),
+            SortKey::Date(DateKind::Recorded),
+        ] {
+            assert_eq!(sorted_order(&entries, key), [2, 1, 0], "{key:?}");
+        }
 
         let untagged = with(track("A", 1), |e| e.album = None);
         let entries = [untagged, track("B", 1)];

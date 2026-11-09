@@ -1019,7 +1019,7 @@ impl Track {
                 .movement_work()
                 .unwrap_or_else(|| data.shown_title())
                 .to_string(),
-            year: credits.year(),
+            dates: credits.sort_dates(),
             path,
         }
     }
@@ -1280,7 +1280,7 @@ mod tests {
         let entry = Track::new(TrackData::missing(file, Missing::NotFound)).sort_entry();
         assert_eq!(entry.album, None);
         assert_eq!(entry.artist, None);
-        assert_eq!(entry.year, None);
+        assert_eq!(entry.dates, crate::tag_date::SortDates::default());
         assert!(entry.composers.is_empty());
         // The title from its file name, as it's shown
         assert!(entry.heading.contains("Song"), "{}", entry.heading);

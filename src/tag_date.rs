@@ -11,10 +11,12 @@
 //! so both read them here: a part that's missing or makes no sense is left
 //! out, and the year alone is kept rather than the date dropped.
 
-use std::fmt;
+use std::{cmp::Ordering, fmt};
 
-// No `Ord`: the order of the album sorts puts a missing month or day last
-// in both directions, which no single order of the dates does
+use crate::utils::cmp_present_first;
+
+// No `Ord`: the order of the sorts, `compare()`, puts a missing month or
+// day last in both directions, which no single order of the dates does
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TagDate {
     pub(crate) year: u16,
@@ -65,7 +67,7 @@ impl TagDate {
 
     // The text the library keeps the date as, at a fixed width with "~~"
     // for a missing month or day: "1965-03-12", "1965-03-~~", "1965-~~-~~".
-    // Its order is the order of the album sorts from the earliest, which the
+    // Its order is the order of `compare()` from the earliest, which the
     // library takes the earliest of an album's tracks in with MIN(): "~"
     // comes after the digits, so a date with only a year goes after the
     // others of that year. It isn't a digit, so it can't be read as a month
@@ -101,7 +103,38 @@ impl fmt::Display for TagDate {
     }
 }
 
-// The dates the albums can be sorted by, see `TrackCredits::sort_dates()`
+// Compares two dates in the given direction, by their years, then their
+// months and then their days, each missing one last either way: a date with
+// only a year goes after the others of that year, as a missing date goes
+// after the others
+pub(crate) fn compare(a: Option<TagDate>, b: Option<TagDate>, descending: bool) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => cmp_present_first(Some(a.year), Some(b.year), descending)
+            .then_with(|| cmp_present_first(a.month, b.month, descending))
+            .then_with(|| cmp_present_first(a.day, b.day, descending)),
+        // A missing date last either way
+        _ => a.is_none().cmp(&b.is_none()),
+    }
+}
+
+// A date as a key of a sort from the earliest, see `compare()`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Earliest(pub(crate) Option<TagDate>);
+
+impl Ord for Earliest {
+    fn cmp(&self, other: &Self) -> Ordering {
+        compare(self.0, other.0, false)
+    }
+}
+
+impl PartialOrd for Earliest {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// The dates the albums and the tracks of a playlist can be sorted by, see
+// `TrackCredits::sort_dates()`
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SortDates {
     // For the Released sort, see `TrackCredits::released_date()`
@@ -228,7 +261,10 @@ mod tests {
             "1964-12-31",
         ];
         let mut by_text = texts.map(|text| TagDate::parse(text).unwrap());
+        let mut by_dates = by_text;
         by_text.sort_by_key(|date| date.sort_text());
+        by_dates.sort_by_key(|date| Earliest(Some(*date)));
+        assert_eq!(by_text, by_dates);
         assert_eq!(
             by_text.map(|date| date.to_string()),
             [

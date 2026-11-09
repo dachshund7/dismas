@@ -273,15 +273,29 @@ menu sort_menu {
     }
 
     item {
-      label: _("Year");
-      action: "queue.sort";
-      target: "year";
-    }
-
-    item {
       label: _("File Name");
       action: "queue.sort";
       target: "file-name";
+    }
+  }
+
+  section {
+    item {
+      label: _("Released");
+      action: "queue.sort";
+      target: "released";
+    }
+
+    item {
+      label: _("Original Release");
+      action: "queue.sort";
+      target: "original";
+    }
+
+    item {
+      label: _("Recorded");
+      action: "queue.sort";
+      target: "recorded";
     }
   }
 

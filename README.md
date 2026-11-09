@@ -81,7 +81,8 @@ Features
 - **Queue:** drag tracks to reorder them, or use Alt+Up and Alt+Down. Play
   Next puts a track after the playing one, or after the last movement of the
   work that's playing. Sort the playlist once by album, artist, composer,
-  title, year or file name, and undo sorting or removing tracks with Ctrl+Z.
+  title, file name, release date, first release or recording date, and undo
+  sorting or removing tracks with Ctrl+Z.
   Drop files and albums between the tracks, where you want them.
 - **Gapless playback:** tracks play back to back, so movements and live
   recordings that run into each other aren't cut by a gap.

@@ -38,6 +38,18 @@ pub(crate) fn changed_range(
     (start, old_len - start - end, new_len - start - end)
 }
 
+// Compares two values in the given direction, with the missing ones last
+// either way
+pub(crate) fn cmp_present_first<T: Ord>(a: Option<T>, b: Option<T>, descending: bool) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) if descending => b.cmp(&a),
+        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 // A playlist name to put in a sentence, cut short with "…" if it's long,
 // e.g. in a title, where it would make several lines
 pub(crate) fn short_playlist_name(name: &str) -> String {

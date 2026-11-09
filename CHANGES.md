@@ -28,6 +28,10 @@ All notable changes to this project will be documented in this file.
   days, with those dated by the year alone after them, and an artist's
   albums are in the order they were recorded, to the day where the tags
   say
+- The playlist's Sort menu has the album grid's three dates, Released,
+  Original Release and Recorded, in place of Year, which sorted as
+  Recorded does, and an artist's tracks are in the order they were
+  recorded
 - `year:` in the search takes a month or a day too, as `year:1965-03`,
   and finds a recording made over several months in each year it spans.
   A date still being typed at the end of the search, as `year:19`, is left
