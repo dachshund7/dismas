@@ -6,7 +6,7 @@
 //! and movement, the composers, the conductors and the performers
 
 use super::*;
-use crate::tag_date::{self, DateKind, DateSource, SortDates, TagDate, TagDates};
+use crate::tag_date::{self, DateKind, DateSource, TagDate, TagDates};
 
 // The most names a credit takes from the tags, far more than a recording
 // has: the credits line looks for each name among the others, and in the
@@ -438,11 +438,6 @@ impl TrackCredits {
             original: date(&self.original_date),
             recorded: date(&self.recording_date),
         }
-    }
-
-    // The dates the track is sorted by in a playlist, see `SortDates`
-    pub(crate) fn sort_dates(&self) -> SortDates {
-        self.tag_dates().sort_dates()
     }
 
     // The dates a sort goes by, as the tags have them, in the order it

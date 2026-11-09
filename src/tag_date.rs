@@ -219,14 +219,11 @@ impl TagDates {
         })
     }
 
-    // The dates one track is sorted by
+    // The dates one track on its own is sorted by; the sorts take an
+    // album's tracks together, see `SortDates::of()`
+    #[cfg(test)]
     pub(crate) fn sort_dates(self) -> SortDates {
-        let date = |kind| Self::earliest(&[self], kind);
-        SortDates {
-            date: date(DateKind::Released),
-            original: date(DateKind::OriginalRelease),
-            recorded: date(DateKind::Recorded),
-        }
+        SortDates::of(&[self])
     }
 
     // The release date, the Date tag, the original date and the recording
@@ -243,6 +240,17 @@ impl TagDates {
 }
 
 impl SortDates {
+    // The dates some tracks together are sorted by, as an album's, see
+    // `TagDates::earliest()`
+    pub(crate) fn of(dates: &[TagDates]) -> Self {
+        let date = |kind| TagDates::earliest(dates, kind);
+        SortDates {
+            date: date(DateKind::Released),
+            original: date(DateKind::OriginalRelease),
+            recorded: date(DateKind::Recorded),
+        }
+    }
+
     pub(crate) fn get(self, kind: DateKind) -> Option<TagDate> {
         match kind {
             DateKind::Released => self.date,

@@ -1019,7 +1019,7 @@ impl Track {
                 .movement_work()
                 .unwrap_or_else(|| data.shown_title())
                 .to_string(),
-            dates: credits.sort_dates(),
+            tag_dates: credits.tag_dates(),
             path,
         }
     }
@@ -1280,7 +1280,7 @@ mod tests {
         let entry = Track::new(TrackData::missing(file, Missing::NotFound)).sort_entry();
         assert_eq!(entry.album, None);
         assert_eq!(entry.artist, None);
-        assert_eq!(entry.dates, crate::tag_date::SortDates::default());
+        assert_eq!(entry.tag_dates, crate::tag_date::TagDates::default());
         assert!(entry.composers.is_empty());
         // The title from its file name, as it's shown
         assert!(entry.heading.contains("Song"), "{}", entry.heading);
@@ -2718,7 +2718,7 @@ mod tests {
                 date,
                 original,
                 recorded,
-            } = credits.sort_dates();
+            } = credits.tag_dates().sort_dates();
             [date, original, recorded].map(|date| date.map(|date| date.to_string()))
         };
         let text = |dates: [&str; 3]| dates.map(|date| Some(date.to_string()));

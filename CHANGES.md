@@ -30,8 +30,9 @@ All notable changes to this project will be documented in this file.
   the order they were recorded, to the day where the tags say
 - The playlist's Sort menu has the album grid's three dates, Released,
   Original Release and Recorded, in place of Year, which sorted as
-  Recorded does, and an artist's tracks are in the order they were
-  recorded
+  Recorded does. The tracks go by their albums' dates, as the grid sorts
+  them, so that an album's tracks stay together, and an artist's albums
+  are in the order they were recorded
 - The playlist's File Name sort goes by the folders, then the file
   names, so that albums whose files have the same names, such as
   "01 …", stay together, each in the order of its folder

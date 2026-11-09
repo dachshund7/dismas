@@ -8,14 +8,18 @@
 // the same place are put in the order of their albums, and those still the
 // same keep the order they're in
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 use gtk::glib;
 
 use crate::{
     cue_sheet,
     library::{self, TrackOrder, WorkComposer, WorkToOrder},
-    tag_date::{DateKind, Earliest, SortDates},
+    tag_date::{DateKind, Earliest, SortDates, TagDates},
     utils,
 };
 
@@ -29,7 +33,8 @@ pub(crate) enum SortKey {
     Artist,
     Composer,
     Title,
-    // As the album grid's sorts of those dates
+    // As the album grid's sorts of those dates, by the albums' dates, see
+    // `album_dates()`
     Date(DateKind),
     FileName,
     Reverse,
@@ -88,13 +93,14 @@ pub(super) struct Entry {
 
     // The work of a movement, or else the title, as the queue shows it
     pub(crate) heading: String,
-    // See `TrackCredits::sort_dates()`
-    pub(crate) dates: SortDates,
+    // The dates as the tags have it, see `TrackCredits::tag_dates()`; the
+    // sorts go by the album's, see `album_dates()`
+    pub(crate) tag_dates: TagDates,
 }
 
 // The positions of the tracks in their sorted order. Past
-// `continues_work`, only the first entry of each unit is read, so the
-// others can be left empty
+// `continues_work` and `tag_dates`, only the first entry of each unit is
+// read, so the rest of the others can be left empty
 pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
     let units = work_units(entries.iter().map(|entry| entry.continues_work));
     let firsts: Vec<&Entry> = units.iter().map(|unit| &entries[unit.start]).collect();
@@ -103,14 +109,16 @@ pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
         SortKey::Reverse => (0..units.len()).rev().collect(),
         SortKey::Album => by_keys(&firsts, vec![(); firsts.len()]),
         SortKey::Artist => {
+            let dates = album_dates(entries, &units);
             let keys = firsts
                 .iter()
-                .map(|entry| {
+                .zip(&dates)
+                .map(|(entry, dates)| {
                     let artist = present(entry.artist_sort.as_deref())
                         .or_else(|| present(entry.artist.as_deref()))
                         .map(glib::CollationKey::from);
-                    // An artist's tracks in the order they were recorded
-                    (last(artist), Earliest(entry.dates.recorded))
+                    // An artist's albums in the order they were recorded
+                    (last(artist), Earliest(dates.recorded))
                 })
                 .collect();
             by_keys(&firsts, keys)
@@ -141,9 +149,9 @@ pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
             by_keys(&firsts, keys)
         }
         SortKey::Date(kind) => {
-            let keys = firsts
-                .iter()
-                .map(|entry| Earliest(entry.dates.get(kind)))
+            let keys = album_dates(entries, &units)
+                .into_iter()
+                .map(|dates| Earliest(dates.get(kind)))
                 .collect();
             by_keys(&firsts, keys)
         }
@@ -156,6 +164,36 @@ pub(super) fn sorted_order(entries: &[Entry], key: SortKey) -> Vec<usize> {
         .into_iter()
         .flat_map(|unit| units[unit].clone())
         .collect()
+}
+
+// The dates the album of each unit is sorted by, as in the album grid: the
+// earliest its tracks have of each kind, see `TagDates::earliest()`, so
+// that an album's tracks stay together, where a track that lacks a tag the
+// others have would go off by another of its dates, as a reissue's track
+// without the Date tag would by the original date. The albums are told
+// apart as `album_order()` tells them, so the tracks without one go by
+// their folder's dates
+fn album_dates(entries: &[Entry], units: &[Range<usize>]) -> Vec<SortDates> {
+    let mut albums: BTreeMap<AlbumIdentity, Vec<usize>> = BTreeMap::new();
+    for (i, unit) in units.iter().enumerate() {
+        albums
+            .entry(album_identity(&entries[unit.start]))
+            .or_default()
+            .push(i);
+    }
+    let mut dates = vec![SortDates::default(); units.len()];
+    for album in albums.into_values() {
+        let tag_dates: Vec<TagDates> = album
+            .iter()
+            .flat_map(|&i| units[i].clone())
+            .map(|track| entries[track].tag_dates)
+            .collect();
+        let album_dates = SortDates::of(&tag_dates);
+        for i in album {
+            dates[i] = album_dates;
+        }
+    }
+    dates
 }
 
 // The units in the order of their keys, then of their albums; a stable
@@ -171,19 +209,37 @@ fn by_keys<K: Ord>(firsts: &[&Entry], keys: Vec<K>) -> Vec<usize> {
     order
 }
 
-// Where a track goes by its album: by the album's title, a missing one
-// last, then by the album artist, then by what tells apart albums with the
-// same title and album artist, and then in the order of the album
+// Where a track goes by its album: by the album, and then in the order of
+// the album
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct AlbumOrder {
+    album: AlbumIdentity,
+    track: TrackOrder,
+}
+
+// What tells an album apart, in the order of the albums: by the album's
+// title, a missing one last, then by the album artist, then by what tells
+// apart albums with the same title and album artist
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct AlbumIdentity {
     untagged: bool,
     title: glib::FilenameCollationKey,
     album_artist: (bool, Option<glib::CollationKey>),
     identity: (Option<String>, Option<glib::FilenameCollationKey>),
-    track: TrackOrder,
 }
 
 fn album_order(entry: &Entry) -> AlbumOrder {
+    AlbumOrder {
+        album: album_identity(entry),
+        track: TrackOrder::new(
+            &entry.path,
+            entry.disc.map(i64::from),
+            entry.track.map(i64::from),
+        ),
+    }
+}
+
+fn album_identity(entry: &Entry) -> AlbumIdentity {
     let album = present(entry.album.as_deref());
     let album_artist = present(entry.album_artist.as_deref());
     // As the library tells albums apart (`album_id`): by their release, if
@@ -197,16 +253,11 @@ fn album_order(entry: &Entry) -> AlbumOrder {
         .then_some(entry.folder.as_deref())
         .flatten()
         .map(|folder| glib::FilenameCollationKey::from(folder.to_string_lossy().as_ref()));
-    AlbumOrder {
+    AlbumIdentity {
         untagged: album.is_none(),
         title: glib::FilenameCollationKey::from(entry.shown_album.as_str()),
         album_artist: last(album_artist.map(glib::CollationKey::from)),
         identity: (release.map(ToString::to_string), folder),
-        track: TrackOrder::new(
-            &entry.path,
-            entry.disc.map(i64::from),
-            entry.track.map(i64::from),
-        ),
     }
 }
 
@@ -378,7 +429,7 @@ mod tests {
         // The same date, on two albums, and two copies of a track
         let year = |entry: Entry| {
             with(entry, |e| {
-                e.dates = SortDates::parse("1990", "1990", "1990");
+                e.tag_dates = TagDates::parse("", "1990", "1990", "1990");
             })
         };
         let entries = [
@@ -397,14 +448,14 @@ mod tests {
         let entries = [
             // Recorded in 1964, first released in 1965, and reissued
             with(track("Reissue", 1), |e| {
-                e.dates = SortDates::parse("2015", "1965", "1964");
+                e.tag_dates = TagDates::parse("", "2015", "1965", "1964");
             }),
             // Recorded at a concert in 1966, first released in 1998
             with(track("Live", 1), |e| {
-                e.dates = SortDates::parse("1998", "1998", "1966");
+                e.tag_dates = TagDates::parse("", "1998", "1998", "1966");
             }),
             with(track("New", 1), |e| {
-                e.dates = SortDates::parse("2001", "2001", "2000");
+                e.tag_dates = TagDates::parse("", "2001", "2001", "2000");
             }),
         ];
         assert_eq!(
@@ -425,7 +476,7 @@ mod tests {
     fn a_date_without_a_month_or_day_goes_after_those_of_its_year() {
         let on = |album, date: &str| {
             with(track(album, 1), |e| {
-                e.dates = SortDates::parse(date, date, date);
+                e.tag_dates = TagDates::parse("", date, date, date);
             })
         };
         let entries = [
@@ -446,7 +497,7 @@ mod tests {
         let by = |album, recorded| {
             with(track(album, 1), |e| {
                 e.artist = Some("Artist".to_string());
-                e.dates = SortDates::parse("2015", "2015", recorded);
+                e.tag_dates = TagDates::parse("", "2015", "2015", recorded);
             })
         };
         let entries = [by("A", "1971"), by("B", "1969-10"), by("C", "1969-04")];
@@ -454,14 +505,47 @@ mod tests {
     }
 
     #[test]
+    fn an_albums_tracks_stay_together_under_the_date_sorts() {
+        // A reissue whose tracks have the reissue's Date tag and the
+        // original date, but one lacks the Date tag, and an album of 1990
+        let reissue = |number, date| {
+            with(track("Reissue", number), |e| {
+                e.artist = Some("Artist".to_string());
+                e.tag_dates = TagDates::parse("", date, "1965", "");
+            })
+        };
+        let entries = [
+            reissue(1, "2015"),
+            reissue(2, ""),
+            reissue(3, "2015"),
+            with(track("Other", 1), |e| {
+                e.artist = Some("Artist".to_string());
+                e.tag_dates = TagDates::parse("", "1990", "1990", "");
+            }),
+        ];
+        // The track without the Date tag goes with its album, by the
+        // album's date, not by its original date
+        assert_eq!(
+            sorted_order(&entries, SortKey::Date(DateKind::Released)),
+            [3, 0, 1, 2]
+        );
+        assert_eq!(
+            sorted_order(&entries, SortKey::Date(DateKind::OriginalRelease)),
+            [0, 1, 2, 3]
+        );
+        // An artist's albums whole, in the order they were recorded
+        assert_eq!(sorted_order(&entries, SortKey::Artist), [0, 1, 2, 3]);
+    }
+
+    #[test]
     fn missing_values_go_last() {
         let entries = [
             track("A", 1),
             with(track("B", 1), |e| {
-                e.dates = SortDates::parse("2001", "2001", "2001");
+                e.tag_dates = TagDates::parse("", "2001", "2001", "2001");
             }),
             with(track("C", 1), |e| {
-                e.dates = SortDates::parse("1971", "1971", "1971");
+                e.tag_dates = TagDates::parse("", "1971", "1971", "1971");
             }),
         ];
         for key in [
