@@ -8,8 +8,10 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::{HashMap, HashSet},
     path::PathBuf,
     rc::Rc,
+    time::Duration,
 };
 
 use adw::{prelude::*, subclass::prelude::*};
@@ -23,6 +25,7 @@ use crate::{
     i18n::{i18n, i18n_k, ni18n_f, ni18n_k},
     library::{self, Album, Disc, TrackFilter},
     library_view::PickNames,
+    list_scroll,
     queue_row::QueueRow,
     utils,
     work_sections::{WorkSectionModel, same_section_of, shares_section, work_header_factory},
@@ -53,6 +56,8 @@ mod imp {
         pub(crate) filter_bar: TemplateChild<gtk::Revealer>,
         #[template_child]
         pub(crate) filter_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub(crate) show_all_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub(crate) tracks_view: TemplateChild<gtk::ListView>,
         #[template_child]
@@ -90,6 +95,25 @@ mod imp {
         // While the search leaves out some of the tracks, which aren't
         // shown, how many it matches and how many the album has
         pub(crate) matching: Cell<Option<(u32, u32)>>,
+        // While the search leaves out some of the tracks, all the files of
+        // the album, in its order, which Show Whole Album lists
+        pub(crate) album_files: RefCell<Vec<PathBuf>>,
+        // Once Show Whole Album is pressed, where each track goes, as the
+        // tracks that weren't listed go in among the others
+        pub(crate) places: RefCell<Option<Places>>,
+        // How many loaders are still reading tracks for the list
+        pub(crate) readers: Cell<u32>,
+        // A track to reveal hasn't been read yet
+        pub(crate) reveal_pending: Cell<bool>,
+        // While the list glides to the track to reveal, which takes the
+        // focus once it gets there, the glide, stopped when other tracks are
+        // shown, as it would steer the new ones to where it was going
+        pub(crate) reveal_scroll: RefCell<Option<gtk::TickCallbackId>>,
+        // How far the filter bar has got in going away after Show Whole
+        // Album, see `hide_filter_bar()`
+        pub(crate) bar_closing: RefCell<BarClosing>,
+        // A key pressed on Show Whole Album hasn't been let go of
+        pub(crate) key_down: Cell<bool>,
         // Bumped for each album, to stop loading the tracks of the
         // previous one
         pub(crate) generation: Cell<u32>,
@@ -425,6 +449,44 @@ impl AlbumTracks {
             move |_| this.emit_by_name::<()>("play", &[&0u32, &false])
         ));
 
+        imp.show_all_button.connect_clicked(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_| this.show_whole_album()
+        ));
+        // Whether a key is held on Show Whole Album, whose bar stays until
+        // it's let go of, see `show_whole_album()`. These handlers run
+        // before the button's own, which can click it as a key is let go of
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed(clone!(
+            #[weak(rename_to = this)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, _, _, _| {
+                this.imp().key_down.set(true);
+                glib::Propagation::Proceed
+            }
+        ));
+        keys.connect_key_released(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |_, _, _, _| this.key_let_go()
+        ));
+        imp.show_all_button.add_controller(keys);
+        // A key let go of where the button no longer has the focus doesn't
+        // reach it
+        imp.show_all_button.connect_has_focus_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |button| {
+                if !button.has_focus() {
+                    this.key_let_go();
+                }
+            }
+        ));
+
         imp.select_all_button.connect_clicked(clone!(
             #[weak(rename_to = this)]
             self,
@@ -645,6 +707,152 @@ impl AlbumTracks {
         self.imp().album_id.borrow().clone()
     }
 
+    // Lists all the tracks of the album that is showing, rather than only
+    // the ones a search or a pick matched, leaving out the same folders;
+    // the page, the grid and the Tracks toggle stay as they are, as the
+    // toggle leaves the album that shows alone too, and going back goes
+    // where it went. The files are those the album was shown with, so that
+    // Play and Add take the tracks listed, whatever the library has done
+    // since. Only the tracks the search left out are read, while the ones
+    // it matched go on being read if they still are, and each goes in its
+    // place among the others, which stay as they are, with the tracks
+    // selected: the list keeps the track at its top where it is as tracks
+    // come in above it, and that track takes the focus from the bar's
+    // button, which hides, see `hide_filter_bar()`
+    fn show_whole_album(&self) {
+        let imp = self.imp();
+        // The button can be clicked again while the bar slides away, when
+        // the whole album is already being read
+        if imp.matching.get().is_none() {
+            return;
+        }
+        let all = imp.album_files.take();
+        let matched: HashSet<PathBuf> = imp
+            .files
+            .borrow()
+            .iter()
+            .filter_map(FileExt::path)
+            .collect();
+        let missing: Vec<gio::File> = all
+            .iter()
+            .filter(|path| !matched.contains(*path))
+            .map(gio::File::for_path)
+            .collect();
+        imp.places.replace(Some(Places::new(
+            &all,
+            self.tracks().iter().map(|track| track.file().path()),
+        )));
+        imp.files
+            .replace(all.iter().map(gio::File::for_path).collect());
+        imp.filter.take();
+        imp.picks.take();
+        imp.matching.set(None);
+        self.update_selection();
+        // A key held on the button, which clicks it once it has been down a
+        // moment, would play the track that takes the focus as it repeats
+        if imp.key_down.get() {
+            imp.bar_closing.replace(BarClosing::OnRelease);
+        } else {
+            self.hide_filter_bar();
+        }
+
+        // The tracks left out go in their places among the others
+        self.spawn_reader(imp.generation.get(), missing, None, false);
+    }
+
+    // Adds tracks to the list: at its end, or once Show Whole Album is
+    // pressed, each in its place on the album, those next to each other in
+    // one go
+    fn add_tracks(&self, tracks: &gio::ListStore, batch: Vec<Track>) {
+        let mut places = self.imp().places.borrow_mut();
+        let Some(album) = places.as_mut() else {
+            drop(places);
+            tracks.extend_from_slice(&batch);
+            return;
+        };
+        let mut placed: Vec<(usize, Track)> = batch
+            .into_iter()
+            .map(|track| (album.of(&track), track))
+            .collect();
+        placed.sort_by_key(|(place, _)| *place);
+        let (new, mut batch): (Vec<usize>, Vec<Track>) = placed.into_iter().unzip();
+        let runs = insert_places(&mut album.listed, &new);
+        // The places are let go of before the tracks go in, as the rows
+        // bound then read the list
+        drop(places);
+        for (start, count) in runs {
+            let run: Vec<Track> = batch.drain(..count).collect();
+            tracks.splice(start as u32, 0, &run);
+        }
+    }
+
+    // Hides the filter bar after Show Whole Album, then gives a track the
+    // focus if it went with the bar's button. The button keeps it while the
+    // bar slides away, or for as long as that would take with animations
+    // off, which hide the bar at once, so that a key pressed again soon
+    // after does nothing rather than play a track
+    fn hide_filter_bar(&self) {
+        let imp = self.imp();
+        self.update_filter_bar();
+        let wait = Duration::from_millis(imp.filter_bar.transition_duration().into());
+        let source = glib::timeout_add_local_once(
+            wait,
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                move || {
+                    let imp = this.imp();
+                    // The source is done, and isn't removed
+                    imp.bar_closing.replace(BarClosing::Gone);
+                    this.focus_wanted_track();
+                }
+            ),
+        );
+        imp.bar_closing.replace(BarClosing::Sliding(source));
+    }
+
+    // A key held on Show Whole Album was let go of, or the button lost the
+    // focus, so that its bar can go if it waits for that
+    fn key_let_go(&self) {
+        let imp = self.imp();
+        imp.key_down.set(false);
+        if matches!(*imp.bar_closing.borrow(), BarClosing::OnRelease) {
+            self.hide_filter_bar();
+        }
+    }
+
+    // Once Show Whole Album's bar has gone, gives the focus to a track if it
+    // went with the bar's button: to the one at the top of the list, or the
+    // first if none is laid out yet. A track to reveal takes it instead, as
+    // the list glides to it, or once it's read; and until a track is read
+    // the focus waits for one, and goes to Back if the album has none
+    fn focus_wanted_track(&self) {
+        let imp = self.imp();
+        if !self.focus_wanted() || imp.reveal_pending.get() {
+            return;
+        }
+        if !self.focus_lost() || imp.reveal_scroll.borrow().is_some() {
+            imp.bar_closing.replace(BarClosing::No);
+            return;
+        }
+        if self.track(0).is_none() && imp.readers.get() > 0 {
+            return;
+        }
+        imp.bar_closing.replace(BarClosing::No);
+        match list_scroll::top_item(&imp.tracks_view) {
+            Some(item) => {
+                item.grab_focus();
+            }
+            None => self.focus_first_track_if_lost(),
+        }
+    }
+
+    // Whether Show Whole Album's bar has gone, and a track is to take the
+    // focus if it went with the bar's button
+    fn focus_wanted(&self) -> bool {
+        matches!(*self.imp().bar_closing.borrow(), BarClosing::Gone)
+    }
+
     // Shows the tracks of a playlist, under its `title`, with a `caption`
     // such as what a smart playlist picks, if any; how many there are and
     // how long they last show once they're read. With `placeholders`, the
@@ -675,14 +883,7 @@ impl AlbumTracks {
             self.show_count();
             return;
         }
-        glib::spawn_future_local(clone!(
-            #[weak(rename_to = this)]
-            self,
-            async move {
-                this.read_tracks(generation, files, None, placeholders)
-                    .await;
-            }
-        ));
+        self.spawn_reader(generation, files, None, placeholders);
     }
 
     // Adds files at the end of the playlist that is showing, whose tracks
@@ -876,15 +1077,18 @@ impl AlbumTracks {
                         .as_ref()
                         .map(|matching| (matching.len() as u32, total as u32)),
                 );
-                let files: Vec<gio::File> = matching
-                    .unwrap_or(all)
-                    .into_iter()
-                    .map(gio::File::for_path)
-                    .collect();
+                let listed = match matching {
+                    Some(matching) => {
+                        imp.album_files.replace(all);
+                        matching
+                    }
+                    None => all,
+                };
+                let files: Vec<gio::File> = listed.into_iter().map(gio::File::for_path).collect();
                 imp.files.replace(files.clone());
                 this.update_selection();
                 this.update_filter_bar();
-                this.read_tracks(generation, files, reveal, false).await;
+                this.spawn_reader(generation, files, reveal, false);
             }
         ));
     }
@@ -902,9 +1106,21 @@ impl AlbumTracks {
         }
         imp.files.replace(Vec::new());
         imp.matching.set(None);
+        imp.album_files.take();
+        imp.places.take();
         imp.multi_disc.set(false);
         self.update_filter_bar();
         self.update_selection();
+        // The glide to the track to reveal would steer the list to where it
+        // was going, and the focus would go to a track of the new list
+        imp.readers.set(0);
+        imp.reveal_pending.set(false);
+        if let Some(scroll) = imp.reveal_scroll.take() {
+            scroll.remove();
+        }
+        if let BarClosing::Sliding(source) = imp.bar_closing.take() {
+            source.remove();
+        }
         let generation = imp.generation.get().wrapping_add(1);
         imp.generation.set(generation);
         generation
@@ -984,8 +1200,30 @@ impl AlbumTracks {
         }
     }
 
+    // Starts reading the tags of the tracks, counting the reader at once,
+    // as the focus waits for tracks while any are read
+    fn spawn_reader(
+        &self,
+        generation: u32,
+        files: Vec<gio::File>,
+        reveal: Option<gio::File>,
+        placeholders: bool,
+    ) {
+        let imp = self.imp();
+        imp.readers.set(imp.readers.get() + 1);
+        glib::spawn_future_local(clone!(
+            #[weak(rename_to = this)]
+            self,
+            async move {
+                this.read_tracks(generation, files, reveal, placeholders)
+                    .await;
+            }
+        ));
+    }
+
     // Reads the tags of the tracks, which are shown as they come, unless
-    // another album is shown meanwhile
+    // another album is shown meanwhile; `spawn_reader()` counted it in
+    // `readers`
     async fn read_tracks(
         &self,
         generation: u32,
@@ -997,55 +1235,217 @@ impl AlbumTracks {
         let Some(tracks) = imp.tracks.borrow().clone() else {
             return;
         };
-        // A track to reveal stays in view, rather than the top
-        let revealed = Rc::new(Cell::new(false));
+        // A track to reveal stays in view, rather than the top. Only this
+        // reader has one: the one that reads the tracks Show Whole Album
+        // adds leaves the reveal to it
+        let wants_reveal = reveal.is_some();
+        if wants_reveal {
+            imp.reveal_pending.set(true);
+        }
+        let revealed = move |imp: &imp::AlbumTracks| wants_reveal && !imp.reveal_pending.get();
         let receiver = load_tracks(files, placeholders);
-        while let Ok(data) = receiver.recv().await {
+        while let Some(batch) = next_batch(&receiver).await {
             if imp.generation.get() != generation {
                 return;
             }
 
-            // Along with the ones that are already read
-            let mut batch: Vec<Track> = data.into_iter().map(Track::new).collect();
-            while let Ok(data) = receiver.try_recv() {
-                batch.extend(data.into_iter().map(Track::new));
-            }
+            let batch: Vec<Track> = batch.into_iter().map(Track::new).collect();
             if batch.is_empty() {
                 continue;
             }
-            let start = tracks.n_items();
-            tracks.extend_from_slice(&batch);
-
             let found = reveal
                 .as_ref()
-                .filter(|_| !revealed.get())
-                .and_then(|file| {
-                    let i = batch.iter().position(|track| track.file().equal(file))?;
-                    Some((start + i as u32, &batch[i]))
-                });
-            if let Some((pos, track)) = found {
-                revealed.set(true);
-                crate::list_scroll::flash_track(&imp.tracks_view, pos, track);
-            } else if !revealed.get() {
+                .filter(|_| imp.reveal_pending.get())
+                .and_then(|file| batch.iter().find(|track| track.file().equal(file)))
+                .cloned();
+            let start = tracks.n_items();
+            self.add_tracks(&tracks, batch);
+
+            if let Some(track) = found {
+                imp.reveal_pending.set(false);
+                // Where it went, in its place once Show Whole Album is pressed
+                let pos = tracks.find(&track).unwrap_or(start);
+                let scroll = list_scroll::flash_track(
+                    &imp.tracks_view,
+                    pos,
+                    &track,
+                    // Not run once the glide is stopped, as other tracks show
+                    clone!(
+                        #[weak(rename_to = this)]
+                        self,
+                        move || {
+                            this.imp().reveal_scroll.take();
+                        }
+                    ),
+                );
+                imp.reveal_scroll.replace(Some(scroll));
+            } else if !revealed(imp) && imp.places.borrow().is_none() {
                 // The list keeps its first track at the top as tracks are
                 // added, which hides the header of its work above it, unless
-                // another album is shown by then
+                // another album is shown by then, or the tracks left out go
+                // in, when the track at the top stays there
                 let still_wanted = clone!(
                     #[weak(rename_to = this)]
                     self,
-                    #[strong]
-                    revealed,
                     #[upgrade_or]
                     false,
-                    move || this.imp().generation.get() == generation && !revealed.get()
+                    move || {
+                        let imp = this.imp();
+                        imp.generation.get() == generation
+                            && !revealed(imp)
+                            && imp.places.borrow().is_none()
+                    }
                 );
                 utils::scroll_to_top_when_laid_out(&imp.tracks_view, still_wanted);
             }
+            self.focus_wanted_track();
         }
-        if imp.generation.get() == generation {
-            self.show_count();
+        if imp.generation.get() != generation {
+            return;
+        }
+        self.show_count();
+        // The track to reveal would have taken the focus; without it, as
+        // when its file left the library meanwhile, the focus can have gone
+        // with the bar's button, which hides, and goes to the first track,
+        // unless Show Whole Album gives it to one
+        let unrevealed = wants_reveal && imp.reveal_pending.replace(false);
+        let focus_wanted = self.focus_wanted();
+        self.reader_done();
+        if unrevealed && !focus_wanted {
+            self.focus_first_track_if_lost();
         }
     }
+
+    // A loader read all its tracks; the focus can have waited for them
+    fn reader_done(&self) {
+        let imp = self.imp();
+        imp.readers.set(imp.readers.get().saturating_sub(1));
+        self.focus_wanted_track();
+    }
+
+    // Gives the focus to the first track, or to the Back button without
+    // any, if the focus is nowhere or in the filter bar, as it can have gone
+    // with the bar's button, which hides
+    fn focus_first_track_if_lost(&self) {
+        let imp = self.imp();
+        if !self.focus_lost() {
+            return;
+        }
+        if self.track(0).is_some() {
+            imp.tracks_view
+                .scroll_to(0, gtk::ListScrollFlags::FOCUS, None);
+            utils::focus_when_laid_out(&*imp.tracks_view);
+        } else {
+            imp.back_button.grab_focus();
+        }
+    }
+
+    // Whether the window's focus is nowhere, or in the filter bar, unless
+    // the bar is going after Show Whole Album, whose button keeps it until
+    // it has, see `hide_filter_bar()`
+    fn focus_lost(&self) -> bool {
+        if !matches!(
+            *self.imp().bar_closing.borrow(),
+            BarClosing::No | BarClosing::Gone
+        ) {
+            return false;
+        }
+        let focus = self.root().and_then(|root| root.focus());
+        focus.is_none_or(|focus| focus.is_ancestor(&*self.imp().filter_bar))
+    }
+}
+
+// Where the tracks of an album go once Show Whole Album is pressed, as
+// those the search left out go in among the ones listed, which stay as
+// they are
+#[derive(Debug, Default)]
+pub(crate) struct Places {
+    // The place of each file on the album
+    places: HashMap<PathBuf, usize>,
+    // The place of each track listed, in the list's order
+    listed: Vec<usize>,
+}
+
+impl Places {
+    // From the files of the album, in its order, and those of the tracks
+    // listed, in the list's order, which is the album's. A track no longer
+    // on the album, as it left the library while the album showed, stays
+    // after the track before it; at the top of the list, it stays above
+    // the second track, and the album's first track, if it wasn't listed,
+    // goes in above it
+    fn new(album: &[PathBuf], listed: impl IntoIterator<Item = Option<PathBuf>>) -> Self {
+        let places: HashMap<PathBuf, usize> = album
+            .iter()
+            .enumerate()
+            .map(|(place, path)| (path.clone(), place))
+            .collect();
+        let mut places_listed: Vec<usize> = Vec::new();
+        for path in listed {
+            let place = path
+                .and_then(|path| places.get(&path).copied())
+                .or(places_listed.last().copied())
+                .unwrap_or(0);
+            places_listed.push(place);
+        }
+        Self {
+            places,
+            listed: places_listed,
+        }
+    }
+
+    // The place of a track on the album; one that isn't on it goes last
+    fn of(&self, track: &Track) -> usize {
+        track
+            .file()
+            .path()
+            .and_then(|path| self.places.get(&path).copied())
+            .unwrap_or(usize::MAX)
+    }
+}
+
+// How the filter bar goes away after Show Whole Album, whose button keeps
+// the focus until it has, see `AlbumTracks::hide_filter_bar()`
+#[derive(Debug, Default)]
+pub(crate) enum BarClosing {
+    #[default]
+    No,
+    // A key is held on the button
+    OnRelease,
+    // The bar is sliding away, for as long as the source waits
+    Sliding(glib::SourceId),
+    // The bar has gone, and a track is to take the focus if it went with
+    // the button, see `AlbumTracks::focus_wanted_track()`
+    Gone,
+}
+
+// The next tracks a loader sends, along with those it has sent meanwhile,
+// so that tracks read together go in together; none once it's done
+async fn next_batch<T>(receiver: &async_channel::Receiver<Vec<T>>) -> Option<Vec<T>> {
+    let mut batch = receiver.recv().await.ok()?;
+    while let Ok(more) = receiver.try_recv() {
+        batch.extend(more);
+    }
+    Some(batch)
+}
+
+// Where tracks go in a list of `listed` ones, given by their places on the
+// album, sorted, as `new` ones are, which are added to it: the position
+// and the number of each run of new tracks that go in next to each other,
+// in the order to insert them, each run's position counting the runs put
+// in before it. A new track goes after the listed ones with an earlier
+// place, and before one with its own, which can only be a track no longer
+// on the album that heads the list, see `Places::new()`
+fn insert_places(listed: &mut Vec<usize>, new: &[usize]) -> Vec<(usize, usize)> {
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for &place in new {
+        let pos = listed.partition_point(|&listed| listed < place);
+        listed.insert(pos, place);
+        match runs.last_mut() {
+            Some((start, count)) if *start + *count == pos => *count += 1,
+            _ => runs.push((pos, 1)),
+        }
+    }
+    runs
 }
 
 // How many tracks a playlist has and how long they last, e.g. "12 tracks ·
@@ -1107,6 +1507,53 @@ fn tracks_caption(n_tracks: u32, seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_tracks_go_in_their_places_in_runs() {
+        // Tracks 2 and 5 of 0..8 were listed
+        let mut listed = vec![2, 5];
+        let runs = insert_places(&mut listed, &[0, 1, 3, 4, 6, 7]);
+        assert_eq!(listed, (0..8).collect::<Vec<_>>());
+        assert_eq!(runs, [(0, 2), (3, 2), (6, 2)]);
+
+        // Applying the runs in order to the listed tracks gives the album
+        let mut list = vec![2, 5];
+        let mut new = [0, 1, 3, 4, 6, 7].into_iter();
+        for (start, count) in runs {
+            let run: Vec<_> = new.by_ref().take(count).collect();
+            list.splice(start..start, run);
+        }
+        assert_eq!(list, (0..8).collect::<Vec<_>>());
+
+        // A later batch, around a track already put in
+        let mut listed = vec![0, 1, 4];
+        assert_eq!(insert_places(&mut listed, &[2, 3, 5]), [(2, 2), (5, 1)]);
+        assert_eq!(listed, [0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn a_track_off_the_album_at_the_top_goes_after_the_first_track() {
+        let album: Vec<PathBuf> = ["a", "b", "c"].iter().map(PathBuf::from).collect();
+        // The track that left the album, then the album's last one
+        let mut places = Places::new(&album, [Some("gone".into()), Some("c".into())]);
+        assert_eq!(places.listed, [0, 2]);
+        // The album's first track goes above it, its second below it
+        assert_eq!(insert_places(&mut places.listed, &[0, 1]), [(0, 1), (2, 1)]);
+        assert_eq!(places.listed, [0, 0, 1, 2]);
+
+        // Further down, it stays after the track before it
+        let places = Places::new(&album, [Some("a".into()), None, Some("c".into())]);
+        assert_eq!(places.listed, [0, 0, 2]);
+    }
+
+    #[test]
+    fn a_track_off_the_album_keeps_its_place() {
+        // The track that left the album has the place of the one before it,
+        // and stays after it
+        let mut listed = vec![3, 3];
+        assert_eq!(insert_places(&mut listed, &[1, 4]), [(0, 1), (3, 1)]);
+        assert_eq!(listed, [1, 3, 3, 4]);
+    }
 
     #[test]
     fn the_caption_counts_the_tracks_and_their_length() {

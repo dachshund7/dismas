@@ -46,72 +46,95 @@ pub(crate) fn glide_adjustment(
 // list, if it can scroll that far, and makes it flash for a moment, like
 // its CSS animation. The list only lays out the rows in its view, so the
 // glide aims at where the row should be until the row is laid out, and at
-// the row from then on. Without animations, as GTK's settings can ask, the
-// list jumps to the track. The list was usually just shown, and can only
-// scroll once it has its size, so this waits for a frame where it has it.
-// The list may still be going on from a fling, which stops
-pub(crate) fn flash_track(view: &gtk::ListView, pos: u32, track: &Track) -> gtk::TickCallbackId {
+// the row from then on; tracks can go in or out of the list meanwhile, and
+// `pos`, where the track was, is looked up again when they do. Without
+// animations, as GTK's settings can ask, the list jumps to the track. The
+// list was usually just shown, and can only scroll once it has its size,
+// so this waits for a frame where it has it. The list may still be going
+// on from a fling, which stops. `done` runs once the glide ends, whether it
+// got to the track or gave up, but not when it's stopped with its id
+pub(crate) fn flash_track(
+    view: &gtk::ListView,
+    pos: u32,
+    track: &Track,
+    done: impl FnOnce() + 'static,
+) -> gtk::TickCallbackId {
     stop_kinetic_scrolling(view);
     let waited = Cell::new(0);
     let glide = Cell::new(None::<Glide>);
+    let pos = Cell::new(pos);
     // The frames since the list was asked to scroll to the track itself,
     // when the glide ended where its row wasn't
     let fallback = Cell::new(None::<u32>);
+    let done = Cell::new(Some(done));
     view.add_tick_callback(clone!(
         #[strong]
         track,
         move |view, clock| {
-            if view.height() == 0 {
-                return wait_for_size(&waited);
-            }
-            let Some(adjustment) = view.vadjustment() else {
-                return glib::ControlFlow::Break;
-            };
-            // Only reads where the row is, as changing the rows of the
-            // list crashes GTK
-            let bounds = track_bounds(view, &track);
+            let step = || {
+                if view.height() == 0 {
+                    return wait_for_size(&waited);
+                }
+                let Some(adjustment) = view.vadjustment() else {
+                    return glib::ControlFlow::Break;
+                };
+                // Only reads where the row is, as changing the rows of the
+                // list crashes GTK
+                let bounds = track_bounds(view, &track);
+                if bounds.is_none() {
+                    pos.set(position_now(view, &track, pos.get()));
+                }
 
-            if let Some(frames) = fallback.get() {
-                if bounds.is_none() && frames < 5 {
-                    fallback.set(Some(frames + 1));
+                if let Some(frames) = fallback.get() {
+                    if bounds.is_none() && frames < 5 {
+                        fallback.set(Some(frames + 1));
+                        return glib::ControlFlow::Continue;
+                    }
+                    if let Some(bounds) = bounds {
+                        center_bounds(view, &bounds);
+                    }
+                    arrive(view, &track);
+                    return glib::ControlFlow::Break;
+                }
+
+                let target = match &bounds {
+                    Some(bounds) => centered_value(view, &adjustment, bounds),
+                    None => estimated_value(view, &adjustment, pos.get()),
+                };
+                let now = clock.frame_time();
+                let Some(mut started) = glide.get() else {
+                    // The first step goes none of the way, or all of it
+                    // without animations, and the row is only laid out from
+                    // the next
+                    let mut new = Glide::new(now, view.settings().is_gtk_enable_animations());
+                    adjustment.set_value(new.step(adjustment.value(), target, now));
+                    glide.set(Some(new));
+                    return glib::ControlFlow::Continue;
+                };
+
+                adjustment.set_value(started.step(adjustment.value(), target, now));
+                glide.set(Some(started));
+                if started.progress(now) < 1.0 {
                     return glib::ControlFlow::Continue;
                 }
-                if let Some(bounds) = bounds {
-                    center_bounds(view, &bounds);
+
+                if bounds.is_none() {
+                    // The row wasn't where it should have been; the list
+                    // knows where it is
+                    view.scroll_to(pos.get(), gtk::ListScrollFlags::NONE, None);
+                    fallback.set(Some(0));
+                    return glib::ControlFlow::Continue;
                 }
                 arrive(view, &track);
-                return glib::ControlFlow::Break;
-            }
-
-            let target = match &bounds {
-                Some(bounds) => centered_value(view, &adjustment, bounds),
-                None => estimated_value(view, &adjustment, pos),
+                glib::ControlFlow::Break
             };
-            let now = clock.frame_time();
-            let Some(mut started) = glide.get() else {
-                // The first step goes none of the way, or all of it without
-                // animations, and the row is only laid out from the next
-                let mut new = Glide::new(now, view.settings().is_gtk_enable_animations());
-                adjustment.set_value(new.step(adjustment.value(), target, now));
-                glide.set(Some(new));
-                return glib::ControlFlow::Continue;
-            };
-
-            adjustment.set_value(started.step(adjustment.value(), target, now));
-            glide.set(Some(started));
-            if started.progress(now) < 1.0 {
-                return glib::ControlFlow::Continue;
+            let flow = step();
+            if flow == glib::ControlFlow::Break
+                && let Some(done) = done.take()
+            {
+                done();
             }
-
-            if bounds.is_none() {
-                // The row wasn't where it should have been; the list knows
-                // where it is
-                view.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
-                fallback.set(Some(0));
-                return glib::ControlFlow::Continue;
-            }
-            arrive(view, &track);
-            glib::ControlFlow::Break
+            flow
         }
     ))
 }
@@ -359,6 +382,16 @@ pub(crate) fn track_position(view: &gtk::ListView, track: &Track) -> Option<u32>
     (0..model.n_items()).find(|&i| model.item(i).as_ref() == Some(track.upcast_ref()))
 }
 
+// Where a track is in a list now: at `hint`, where it was, unless tracks
+// went in or out before it since, as only then is the list searched
+fn position_now(view: &gtk::ListView, track: &Track, hint: u32) -> u32 {
+    let at_hint = view.model().and_then(|model| model.item(hint));
+    if at_hint.as_ref() == Some(track.upcast_ref()) {
+        return hint;
+    }
+    track_position(view, track).unwrap_or(hint)
+}
+
 // Where the row of a track is in the list, if it has one, with the header
 // above it if it's the first movement of a work. Right after the list is
 // filled, a row can be there without being laid out, at the top and
@@ -460,31 +493,43 @@ pub(crate) fn within_scroll(adjustment: &gtk::Adjustment, value: f64) -> f64 {
 }
 
 // The row showing a track in a list, if it has one, and the child of the
-// list holding it. The list keeps some rows out of its view, e.g. the one
-// of the item it tracks, hidden where they last were, which isn't where
-// they are now
+// list holding it
 fn track_item(view: &gtk::ListView, track: &Track) -> Option<(gtk::Widget, QueueRow)> {
-    let mut child = view.first_child();
-    while let Some(widget) = child {
-        if !widget.is_child_visible() {
-            child = widget.next_sibling();
-            continue;
-        }
-        // The rows of the queue are in a SlideBin
-        let row = widget
-            .first_child()
-            .and_then(|child| match child.downcast::<QueueRow>() {
-                Ok(row) => Some(row),
-                Err(child) => child.first_child().and_downcast(),
-            });
-        if let Some(row) = row
-            && row.track().as_ref() == Some(track)
-        {
-            return Some((widget, row));
-        }
-        child = widget.next_sibling();
+    laid_out_rows(view).find(|(_, row)| row.track().as_ref() == Some(track))
+}
+
+// The child of a list holding the top row in its view: the first whose
+// middle isn't above it, as a row cut off by more than half is mostly out
+// of sight
+pub(crate) fn top_item(view: &gtk::ListView) -> Option<gtk::Widget> {
+    laid_out_rows(view)
+        .filter_map(|(item, _)| {
+            let bounds = item
+                .compute_bounds(view)
+                .filter(|bounds| bounds.height() > 0.0)?;
+            let middle = bounds.y() + bounds.height() / 2.0;
+            (middle >= 0.0 && middle < view.height() as f32).then(|| (bounds.y(), item))
+        })
+        .min_by(|(a, _), (b, _)| a.total_cmp(b))
+        .map(|(_, item)| item)
+}
+
+// The rows a list has laid out, each with the child of the list holding
+// it, which leaves out the headers of its sections. The list keeps some
+// rows out of its view, e.g. the one of the item it tracks, hidden where
+// they last were, which isn't where they are now; those are left out too
+fn laid_out_rows(view: &gtk::ListView) -> impl Iterator<Item = (gtk::Widget, QueueRow)> {
+    std::iter::successors(view.first_child(), WidgetExt::next_sibling)
+        .filter(WidgetExt::is_child_visible)
+        .filter_map(|widget| item_row(&widget).map(|row| (widget, row)))
+}
+
+// The row in a child of a list; the rows of the queue are in a SlideBin
+fn item_row(item: &gtk::Widget) -> Option<QueueRow> {
+    match item.first_child()?.downcast::<QueueRow>() {
+        Ok(row) => Some(row),
+        Err(child) => child.first_child().and_downcast(),
     }
-    None
 }
 
 #[cfg(test)]

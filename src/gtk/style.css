@@ -303,7 +303,10 @@ queuerow.drop-above.first {
 }
 
 /* The bar over an album's tracks that a search filters, in the colors of
- * libadwaita's banner in a sidebar, as a banner can't hold a toggle */
+ * libadwaita's banner in a sidebar. It isn't an AdwBanner, which would take
+ * the window's colors, as the pane isn't a .sidebar-pane, and whose title
+ * is a bold heading, centered and cut off after three lines, where the bar
+ * says how many tracks match, with a work's name, in a wrapped line */
 .album-filter-bar {
   --banner-color: #7d7d83;
   background-color: color-mix(in srgb, var(--banner-color) 30%, var(--sidebar-bg-color));

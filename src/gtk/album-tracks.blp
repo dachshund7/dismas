@@ -94,8 +94,9 @@ template $DismasAlbumTracks: Widget {
       ]
     }
 
-    // While the search leaves out some of the album's tracks, how many it
-    // matches; the others are dimmed
+    // While a search or a pick leaves out some of the album's tracks, which
+    // aren't listed, how many it matches, and a button that lists them all
+    // in their place, see `AlbumTracks::show_whole_album()`
     [top]
     Revealer filter_bar {
       child: Box {
@@ -110,6 +111,11 @@ template $DismasAlbumTracks: Widget {
           wrap: true;
           xalign: 0;
           margin-start: 6;
+        }
+
+        Button show_all_button {
+          label: _("Show Whole Album");
+          valign: center;
         }
       };
     }

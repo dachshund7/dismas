@@ -46,6 +46,12 @@ All notable changes to this project will be documented in this file.
   plays, when its items had nothing to act on
 - The menu of a track in the preview of a playlist or a smart playlist
   has Go to Album, as its tracks come from many albums
+- While the pane lists only some of an album's tracks, those that a
+  search or a pick matches, as with the Tracks toggle on or from a work's
+  recording, the bar over them has a Show Whole Album button. It lists
+  all of them in their place, keeping the track at the top in view and
+  the tracks selected; the page, the album grid and the Tracks toggle
+  stay as they are
 - The playlist's File Name sort goes by the folders, then the file
   names, so that albums whose files have the same names, such as
   "01 …", stay together, each in the order of its folder

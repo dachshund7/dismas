@@ -571,7 +571,12 @@ impl Window {
         self.show_playlist_view();
         self.set_playlist_visible(true);
         // A track change stops the glide, and scrolls to the new track
-        self.set_queue_scroll(Some(crate::list_scroll::flash_track(&view, pos, track)));
+        self.set_queue_scroll(Some(crate::list_scroll::flash_track(
+            &view,
+            pos,
+            track,
+            || {},
+        )));
     }
 
     // Alt+Up and Alt+Down move the track with the focus up or down a place,
