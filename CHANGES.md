@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Update dependencies
+- An exported playlist names its tracks by paths relative to it, climbing
+  out of its folder with "../", whenever the playlist and the tracks are
+  in the same music folder, as phones and servers such as Navidrome need
+  for a playlist in a Playlists folder there. Only the tracks under the
+  playlist's folder had relative paths. In the Flatpak, where every path
+  was absolute, the paths are compared as they are outside the sandbox. A
+  new preference, Absolute Paths, writes every track's absolute path
+  instead, as Plex and Jellyfin need
 - The albums' Year sort is now Released, and goes by the date that
   `released:` finds: a release date tag where a file has one, which few
   taggers write, or else the Date tag, which other players' year sorts go

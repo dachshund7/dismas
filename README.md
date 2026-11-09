@@ -70,7 +70,10 @@ Features
   [Picard settings](https://github.com/dachshund7/dismas/wiki/Picard-settings)
   that give it the most to show.
 - **Playlists:** save the queue as a playlist, and import and export M3U
-  files. A click on the Playlists page shows a playlist's tracks in the pane
+  files. Exported into the music folder, as phones and servers such as
+  Navidrome read them, a playlist names its tracks by paths relative to it;
+  for Plex and Jellyfin, a preference writes absolute paths. A click on the
+  Playlists page shows a playlist's tracks in the pane
   while the music goes on. Each playlist resumes where it was, when you switch
   back to it and when Dismas starts, and tracks whose files are missing stay
   in their places, greyed out, until they're back.
@@ -292,10 +295,10 @@ Dismas installed without Flatpak can:
 - WMA Pro and WMA Lossless files aren't read, as the GNOME runtime has no
   decoder for them. Other WMA files play.
 - Importing and exporting playlists also goes through the document portal,
-  which hides the folder that the playlist file is in. So exported playlists
-  have absolute paths, which don't work once the playlist is copied with the
-  music to another device, and an imported playlist only finds the tracks
-  that it gives by absolute paths in the Music folder.
+  which hides the folder that the playlist file is in. So an imported
+  playlist only finds the tracks that it gives by absolute paths, or by the
+  ends of those paths in the music folders. An exported playlist is written
+  as outside the sandbox, as the portal tells where it saved the file.
 - Its library, playlists and settings are in
   `~/.var/app/io.github.dachshund7.Dismas/`, apart from those of Dismas
   installed without Flatpak. It can't reach Amberol's, so it doesn't copy them

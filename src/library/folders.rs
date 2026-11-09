@@ -156,8 +156,9 @@ pub(crate) fn resolve_folder(path: &Path) -> MusicFolder {
     }
 }
 
-// The path outside the sandbox of a folder of the document portal
-fn host_path(path: &Path) -> Option<PathBuf> {
+// The path outside the sandbox of a folder or a file of the document
+// portal
+pub(crate) fn host_path(path: &Path) -> Option<PathBuf> {
     if !path.starts_with(glib::user_runtime_dir().join("doc")) {
         return None;
     }

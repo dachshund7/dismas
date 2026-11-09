@@ -152,6 +152,11 @@
 	    <summary>Keep a history of the tracks played</summary>
 	    <description>Recently Played, Most Played, Not Heard Lately and the shuffle go by the history. Turned off, the history so far is kept, and the tracks played aren't added to it</description>
 	  </key>
+	  <key name="export-absolute-paths" type="b">
+	    <default>false</default>
+	    <summary>Write absolute paths in exported playlists</summary>
+	    <description>Whether exported playlists name every track by its absolute path, as some servers such as Plex and Jellyfin need, rather than by a path relative to the playlist when the playlist and the track are in the same music folder, as phones and other players need</description>
+	  </key>
 	  <key name="amberol-migrated" type="b">
 	    <default>false</default>
 	    <summary>Whether the data of Amberol was looked for</summary>

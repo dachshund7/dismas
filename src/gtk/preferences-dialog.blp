@@ -69,6 +69,16 @@ template $DismasPreferencesDialog: Adw.PreferencesDialog {
       }
     }
 
+    Adw.PreferencesGroup {
+      title: _("Exported Playlists");
+
+      Adw.SwitchRow absolute_paths_row {
+        title: _("Absol_ute Paths");
+        subtitle: _("For servers that need them, such as Plex and Jellyfin. Phones and other players need paths relative to the playlist");
+        use-underline: true;
+      }
+    }
+
     // The rows go through the window's action, which passes the mode on
     // to the player
     Adw.PreferencesGroup {

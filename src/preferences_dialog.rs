@@ -35,6 +35,8 @@ mod imp {
         #[template_child]
         pub(crate) play_history_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
+        pub(crate) absolute_paths_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub(crate) recoloring_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub(crate) waveform_row: TemplateChild<adw::SwitchRow>,
@@ -91,6 +93,7 @@ mod imp {
                 ("background-play", &self.background_play_row),
                 ("restore-playlist", &self.restore_playlist_row),
                 ("keep-play-history", &self.play_history_row),
+                ("export-absolute-paths", &self.absolute_paths_row),
                 ("enable-recoloring", &self.recoloring_row),
                 ("show-waveform", &self.waveform_row),
                 ("zen-mode", &self.zen_mode_row),

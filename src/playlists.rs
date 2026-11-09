@@ -17,7 +17,11 @@ use std::{
 use gtk::{gio, glib, prelude::*};
 use log::{debug, warn};
 
-use crate::{cue_sheet, utils};
+use crate::{
+    cue_sheet,
+    library::{self, MusicFolder},
+    utils,
+};
 
 const EXTENSION: &str = "m3u8";
 
@@ -540,24 +544,171 @@ fn free_name_among(name: &str, taken: impl Fn(&str) -> bool) -> String {
 }
 
 // What an export wrote that other players read only in part: the tracks
-// with absolute paths, outside the folder of the playlist, which other
-// devices won't find, and the tracks of CUE sheets, which most players
-// other than Strawberry play as their whole audio file
+// with absolute paths, outside the playlist's music folder, which other
+// devices won't find, unless the user asked for absolute paths, and the
+// tracks of CUE sheets, which most players other than Strawberry play as
+// their whole audio file
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ExportReport {
     pub(crate) n_absolute: usize,
     pub(crate) n_cue: usize,
 }
 
-// Writes a playlist for other players and devices, as an M3U8 file; the
-// tracks in the directory of the file, or under it, have paths relative
-// to it, so that the playlist works wherever the directory is copied
-pub(crate) fn export(name: &str, path: &Path) -> Result<ExportReport, glib::Error> {
+// Writes a playlist for other players and devices, as an M3U8 file, see
+// `ExportPaths`. This blocks
+pub(crate) fn export(
+    name: &str,
+    path: &Path,
+    music_folders: &[MusicFolder],
+    absolute: bool,
+) -> Result<ExportReport, glib::Error> {
     let files = load(name).unwrap_or_default();
-    let dir = path.parent().unwrap_or(Path::new("/"));
-    let (text, report) = format_export(&files, dir);
+    let mut paths = ExportPaths::new(export_dir(path), music_folders, absolute);
+    let (text, report) = format_export(&files, &mut paths);
+    glib::file_set_contents(path, text.as_bytes())?;
+    if paths.dir.is_some() {
+        return Ok(report);
+    }
+    // The document portal may only say where a file it saves is once
+    // the file is there
+    paths.dir = export_dir(path);
+    if paths.dir.is_none() {
+        return Ok(report);
+    }
+    let (text, report) = format_export(&files, &mut paths);
     glib::file_set_contents(path, text.as_bytes())?;
     Ok(report)
+}
+
+// The folder of an exported playlist, outside the sandbox and without
+// symbolic links, as `library::folder_key()` gives the music folders, to
+// make the paths relative to; the document portal gives its files paths of
+// their own. This blocks
+fn export_dir(file: &Path) -> Option<PathBuf> {
+    let dir = file.parent()?;
+    if dir.starts_with(glib::user_runtime_dir().join("doc")) {
+        return library::host_path(file)?.parent().map(Path::to_path_buf);
+    }
+    Some(std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf()))
+}
+
+// How an export names its tracks. Phones and servers such as Navidrome
+// read a playlist in the music folder, in a Playlists folder or with the
+// albums, by paths relative to it, which climb out of its folder with
+// "../", so that the playlist works wherever the folder is copied or
+// mounted. So a track has a relative path when it's under the playlist's
+// folder, or in the same music folder; otherwise it has an absolute path,
+// outside the sandbox, as do all of them when the user asks, as Plex and
+// Jellyfin need. Paths are compared outside the sandbox and without
+// symbolic links, so that a music folder that's a link, or one from the
+// portal, compares as the folder it is
+pub(crate) struct ExportPaths {
+    dir: Option<PathBuf>,
+    folders: Vec<ExportFolder>,
+    absolute: bool,
+    // The folders of the tracks outside the music folders, without their
+    // symbolic links, as the tracks of an album share one
+    resolved: HashMap<PathBuf, PathBuf>,
+}
+
+struct ExportFolder {
+    // As the tracks in it are read, as they're written in absolute paths,
+    // outside the sandbox, and as they're compared
+    read: PathBuf,
+    written: PathBuf,
+    key: PathBuf,
+}
+
+impl ExportPaths {
+    // This blocks
+    fn new(dir: Option<PathBuf>, music_folders: &[MusicFolder], absolute: bool) -> Self {
+        let folders = music_folders
+            .iter()
+            .map(|folder| ExportFolder {
+                read: folder.path.clone(),
+                written: folder.shown_path().to_path_buf(),
+                key: library::folder_key(folder),
+            })
+            .collect();
+        Self {
+            dir,
+            folders,
+            absolute,
+            resolved: HashMap::new(),
+        }
+    }
+
+    // The line of a track, and whether it's relative, or None for one with
+    // a line break, which would split the entry in two
+    fn line(&mut self, path: &Path) -> Option<(String, bool)> {
+        let (written, key) = self.written_path(path);
+        let relative = self
+            .dir
+            .as_deref()
+            .filter(|dir| {
+                !self.absolute
+                    && (key.starts_with(dir)
+                        || self.folders.iter().any(|folder| {
+                            dir.starts_with(&folder.key) && key.starts_with(&folder.key)
+                        }))
+            })
+            .map(|dir| relative_path(dir, &key));
+        let line = match (relative.as_deref().and_then(Path::to_str), written.to_str()) {
+            // Players take a line starting with "#" for a comment, and drop
+            // the spaces in front of a path
+            (Some(relative), _) if relative.starts_with(['#', ' ', '\t']) => {
+                format!("./{relative}")
+            }
+            (Some(relative), _) => relative.to_string(),
+            (None, Some(written)) => written.to_string(),
+            // Not UTF-8, which the playlist is
+            (None, None) => gio::File::for_path(&written).uri().to_string(),
+        };
+        if line.contains(['\n', '\r']) {
+            warn!("Unable to save {line:?} in a playlist");
+            return None;
+        }
+        let relative = relative.is_some() && !line.starts_with("file://");
+        Some((line, relative))
+    }
+
+    // A track's absolute path, as it's written, and as it's compared
+    fn written_path(&mut self, path: &Path) -> (PathBuf, PathBuf) {
+        let folder = self
+            .folders
+            .iter()
+            .filter(|folder| path.starts_with(&folder.read))
+            .max_by_key(|folder| folder.read.components().count());
+        if let Some(folder) = folder
+            && let Ok(rest) = path.strip_prefix(&folder.read)
+        {
+            return (folder.written.join(rest), folder.key.join(rest));
+        }
+        let key = match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => self
+                .resolved
+                .entry(parent.to_path_buf())
+                .or_insert_with(|| {
+                    std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
+                })
+                .join(name),
+            _ => path.to_path_buf(),
+        };
+        (path.to_path_buf(), key)
+    }
+}
+
+// The path of `to` relative to `dir`, both absolute and without symbolic
+// links, climbing out of `dir` with ".." to the folder they share
+fn relative_path(dir: &Path, to: &Path) -> PathBuf {
+    let shared = dir
+        .components()
+        .zip(to.components())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut path: PathBuf = dir.components().skip(shared).map(|_| "..").collect();
+    path.extend(to.components().skip(shared));
+    path
 }
 
 pub(crate) fn save(name: &str, files: &[gio::File]) {
@@ -588,19 +739,29 @@ fn write_path(path: &Path, files: &[gio::File]) -> Result<(), glib::Error> {
 // playlist
 fn format_m3u(files: &[gio::File]) -> String {
     let mut text = String::from("#EXTM3U\n");
-    for (line, _) in files.iter().filter_map(|file| file_line(file, None)) {
+    for file in files {
+        let path = file.path();
+        let line: Cow<str> = match path.as_deref().and_then(Path::to_str) {
+            Some(path) => path.into(),
+            None => String::from(file.uri()).into(),
+        };
+        // A line break would split the entry in two
+        if line.contains(['\n', '\r']) {
+            warn!("Unable to save {line:?} in a playlist");
+            continue;
+        }
         text.push_str(&line);
         text.push('\n');
     }
     text
 }
 
-// A playlist for other players, with the files under `dir` relative to
-// it. Other players can't read the path under its sheet that Dismas gives
-// a track of a CUE sheet, so it's named as Strawberry names one, by the
-// audio file the sheet splits, after a line with the track's number. Most
-// players play the whole file; Strawberry and Dismas find the track
-fn format_export(files: &[gio::File], dir: &Path) -> (String, ExportReport) {
+// A playlist for other players, see `ExportPaths`. Other players can't
+// read the path under its sheet that Dismas gives a track of a CUE sheet,
+// so it's named as Strawberry names one, by the audio file the sheet
+// splits, after a line with the track's number. Most players play the
+// whole file; Strawberry and Dismas find the track
+fn format_export(files: &[gio::File], paths: &mut ExportPaths) -> (String, ExportReport) {
     let mut text = String::from("#EXTM3U\n");
     let mut report = ExportReport::default();
     let mut sheets = HashMap::new();
@@ -609,17 +770,23 @@ fn format_export(files: &[gio::File], dir: &Path) -> (String, ExportReport) {
             let (sheet, number) = cue_sheet::missing_location_parts(&path)?;
             Some((cue_audio_file(sheet, number, &mut sheets), number))
         });
-        let named = cue_track
-            .as_ref()
-            .map_or_else(|| file.clone(), |(audio, _)| gio::File::for_path(audio));
-        let Some((line, relative)) = file_line(&named, Some(dir)) else {
-            continue;
+        let path = match &cue_track {
+            Some((audio, _)) => Some(audio.clone()),
+            None => file.path(),
+        };
+        let (line, relative) = match path {
+            Some(path) => match paths.line(&path) {
+                Some(line) => line,
+                None => continue,
+            },
+            // Not a local file, which other devices reach as this one does
+            None => (file.uri().to_string(), true),
         };
         if let Some((_, number)) = cue_track {
             text.push_str(&format!("{CUE_TRACK_LINE}{number}\n"));
             report.n_cue += 1;
         }
-        if !relative && named.path().is_some() {
+        if !relative && !paths.absolute {
             report.n_absolute += 1;
         }
         text.push_str(&line);
@@ -653,33 +820,6 @@ fn cue_audio_file(
         .as_ref()
         .and_then(|split| split.track(number))
         .map_or_else(|| sheet.to_path_buf(), |(_, audio)| audio.to_path_buf())
-}
-
-// The line of a file in a playlist, and whether it's relative: the path of
-// a local file, which other players read best, relative to `relative_to`
-// for a file under it, or a URI, for a file that isn't local or whose path
-// isn't UTF-8. None for a path with a line break, which would split the
-// entry in two
-fn file_line(file: &gio::File, relative_to: Option<&Path>) -> Option<(String, bool)> {
-    let path = file.path();
-    let relative = path
-        .as_deref()
-        .zip(relative_to)
-        .and_then(|(path, dir)| path.strip_prefix(dir).ok())
-        .and_then(Path::to_str);
-    let line = match (relative, path.as_deref().and_then(Path::to_str)) {
-        // Players take a line starting with "#" for a comment, and drop
-        // the spaces in front of a path
-        (Some(relative), _) if relative.starts_with(['#', ' ', '\t']) => format!("./{relative}"),
-        (Some(relative), _) => relative.to_string(),
-        (None, Some(path)) => path.to_string(),
-        (None, None) => file.uri().to_string(),
-    };
-    if line.contains(['\n', '\r']) {
-        warn!("Unable to save {line:?} in a playlist");
-        return None;
-    }
-    Some((line, relative.is_some()))
 }
 
 // The entries of an M3U playlist, which can be URIs, or paths; relative
@@ -831,7 +971,10 @@ mod tests {
     fn format_skips_line_breaks() {
         let files = [gio::File::for_path("/music/a\nb.opus")];
         assert_eq!(format_m3u(&files), "#EXTM3U\n");
-        assert_eq!(format_export(&files, Path::new("/music")).0, "#EXTM3U\n");
+        assert_eq!(
+            format_export(&files, &mut export_paths(Path::new("/music"))).0,
+            "#EXTM3U\n"
+        );
     }
 
     #[test]
@@ -840,7 +983,7 @@ mod tests {
             gio::File::for_path("/home/me/Music/Album/01 a.opus"),
             gio::File::for_path("/home/me/Other/b.flac"),
         ];
-        let (text, report) = format_export(&files, Path::new("/home/me/Music"));
+        let (text, report) = format_export(&files, &mut export_paths(Path::new("/home/me/Music")));
         assert_eq!(text, "#EXTM3U\nAlbum/01 a.opus\n/home/me/Other/b.flac\n");
         assert_eq!(report.n_absolute, 1);
     }
@@ -851,7 +994,7 @@ mod tests {
             gio::File::for_path("/music/#1 Hits/a.opus"),
             gio::File::for_path("/music/ b.opus"),
         ];
-        let (text, _) = format_export(&files, Path::new("/music"));
+        let (text, _) = format_export(&files, &mut export_paths(Path::new("/music")));
         assert_eq!(text, "#EXTM3U\n./#1 Hits/a.opus\n./ b.opus\n");
         let parsed = parse_m3u(&text, &gio::File::for_path("/music"));
         assert_eq!(paths(&parsed), paths(&files));
@@ -877,7 +1020,7 @@ mod tests {
     fn export_writes_cue_tracks_as_strawberry_does() {
         let dir = folder_with_a_sheet();
         let files = [gio::File::for_path(dir.join("Album.cue/track02"))];
-        let (text, report) = format_export(&files, &dir);
+        let (text, report) = format_export(&files, &mut export_paths(&dir));
         assert_eq!(text, "#EXTM3U\n#EXTSTRAWBERRYTRACK:2\nAlbum.flac\n");
         assert_eq!(
             report,
@@ -892,7 +1035,7 @@ mod tests {
     #[test]
     fn export_writes_the_sheet_of_a_missing_cue_track() {
         let files = [gio::File::for_path("/gone/Album.cue/track04")];
-        let (text, report) = format_export(&files, Path::new("/gone"));
+        let (text, report) = format_export(&files, &mut export_paths(Path::new("/gone")));
         assert_eq!(text, "#EXTM3U\n#EXTSTRAWBERRYTRACK:4\nAlbum.cue\n");
         assert_eq!(report.n_cue, 1);
     }
@@ -900,7 +1043,7 @@ mod tests {
     #[test]
     fn export_of_a_sheet_in_tags_names_the_audio_file() {
         let files = [gio::File::for_path("/music/Live.flac/track12")];
-        let (text, _) = format_export(&files, Path::new("/music"));
+        let (text, _) = format_export(&files, &mut export_paths(Path::new("/music")));
         assert_eq!(text, "#EXTM3U\n#EXTSTRAWBERRYTRACK:12\nLive.flac\n");
     }
 
@@ -928,7 +1071,7 @@ mod tests {
         .map(|track| gio::File::for_path(dir.join(track)))
         .collect();
         let playlist = dir.join("Mix.m3u8");
-        let (text, _) = format_export(&files, &dir);
+        let (text, _) = format_export(&files, &mut export_paths(&dir));
         assert!(
             text.contains("#EXTSTRAWBERRYTRACK:4\nSide B.flac\n"),
             "{text}"
@@ -946,7 +1089,7 @@ mod tests {
             gio::File::for_path("/music/Live.flac/track01"),
             gio::File::for_path("/elsewhere/Live.flac/track02"),
         ];
-        let (_, report) = format_export(&files, Path::new("/music"));
+        let (_, report) = format_export(&files, &mut export_paths(Path::new("/music")));
         assert_eq!(
             report,
             ExportReport {
@@ -954,6 +1097,171 @@ mod tests {
                 n_cue: 2
             }
         );
+    }
+
+    #[test]
+    fn relative_paths_climb_out_of_the_playlist_folder() {
+        let relative = |dir: &str, to: &str| relative_path(Path::new(dir), Path::new(to));
+        assert_eq!(
+            relative("/m/Playlists", "/m/A/1.flac"),
+            Path::new("../A/1.flac")
+        );
+        assert_eq!(relative("/m", "/m/A/1.flac"), Path::new("A/1.flac"));
+        assert_eq!(relative("/m/P/Q", "/m/A"), Path::new("../../A"));
+        assert_eq!(relative("/a", "/b/c"), Path::new("../b/c"));
+    }
+
+    // Paths of an export to `dir`, with one music folder, read at `read`
+    // and found outside the sandbox at `host`
+    fn paths_with_folder(dir: &str, read: &str, host: &str, absolute: bool) -> ExportPaths {
+        ExportPaths {
+            dir: Some(PathBuf::from(dir)),
+            folders: vec![ExportFolder {
+                read: PathBuf::from(read),
+                written: PathBuf::from(host),
+                key: PathBuf::from(host),
+            }],
+            absolute,
+            resolved: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn export_paths_are_relative_within_a_music_folder() {
+        let mut paths = paths_with_folder(
+            "/home/me/Music/Playlists",
+            "/home/me/Music",
+            "/home/me/Music",
+            false,
+        );
+        assert_eq!(
+            paths.line(Path::new("/home/me/Music/A/01.flac")),
+            Some(("../A/01.flac".to_string(), true))
+        );
+        // A path that climbs can't start with "#"
+        assert_eq!(
+            paths.line(Path::new("/home/me/Music/Playlists/#1.flac")),
+            Some(("./#1.flac".to_string(), true))
+        );
+    }
+
+    #[test]
+    fn export_paths_are_absolute_across_music_folders() {
+        let mut paths = paths_with_folder(
+            "/home/me/Music/Playlists",
+            "/home/me/Music",
+            "/home/me/Music",
+            false,
+        );
+        paths.folders.push(ExportFolder {
+            read: PathBuf::from("/media/hdd/Music"),
+            written: PathBuf::from("/media/hdd/Music"),
+            key: PathBuf::from("/media/hdd/Music"),
+        });
+        assert_eq!(
+            paths.line(Path::new("/media/hdd/Music/A/01.flac")),
+            Some(("/media/hdd/Music/A/01.flac".to_string(), false))
+        );
+        // Nor are the tracks outside any music folder relative
+        assert_eq!(
+            paths.line(Path::new("/home/me/Downloads/01.flac")),
+            Some(("/home/me/Downloads/01.flac".to_string(), false))
+        );
+    }
+
+    #[test]
+    fn export_maps_portal_paths_to_host_paths() {
+        let read = "/run/user/1000/doc/1a2b3c4d/Music";
+        let track = Path::new("/run/user/1000/doc/1a2b3c4d/Music/A/01.flac");
+        let mut paths = paths_with_folder("/srv/Music/Playlists", read, "/srv/Music", false);
+        assert_eq!(paths.line(track), Some(("../A/01.flac".to_string(), true)));
+        let mut paths = paths_with_folder("/srv/Music/Playlists", read, "/srv/Music", true);
+        assert_eq!(
+            paths.line(track),
+            Some(("/srv/Music/A/01.flac".to_string(), false))
+        );
+    }
+
+    #[test]
+    fn the_absolute_setting_writes_every_path_absolute() {
+        let files = [
+            gio::File::for_path("/home/me/Music/A/01.flac"),
+            gio::File::for_path("/home/me/Music/Playlists/02.flac"),
+        ];
+        let mut paths = paths_with_folder(
+            "/home/me/Music/Playlists",
+            "/home/me/Music",
+            "/home/me/Music",
+            true,
+        );
+        let (text, report) = format_export(&files, &mut paths);
+        assert_eq!(
+            text,
+            "#EXTM3U\n/home/me/Music/A/01.flac\n/home/me/Music/Playlists/02.flac\n"
+        );
+        // As asked, so nothing to warn about
+        assert_eq!(report.n_absolute, 0);
+    }
+
+    #[test]
+    fn non_utf8_paths_are_uris_and_count_as_absolute() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+        let path = Path::new(OsStr::from_bytes(b"/music/caf\xe9.flac"));
+        let files = [gio::File::for_path(path)];
+        let (text, report) = format_export(&files, &mut export_paths(Path::new("/music")));
+        assert_eq!(text, "#EXTM3U\nfile:///music/caf%E9.flac\n");
+        assert_eq!(report.n_absolute, 1);
+        let parsed = parse_m3u(&text, &gio::File::for_path("/music"));
+        assert_eq!(parsed[0].path().as_deref(), Some(path));
+    }
+
+    // A temporary folder, its path without symbolic links, as the system's
+    // temporary folder can be one, and an album in it
+    fn folder_with_an_album() -> (PathBuf, PathBuf) {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let real = std::fs::canonicalize(&dir).unwrap();
+        std::fs::create_dir_all(real.join("data/music/A")).unwrap();
+        std::fs::create_dir_all(real.join("data/music/Playlists")).unwrap();
+        std::fs::write(real.join("data/music/A/01.flac"), b"").unwrap();
+        (dir, real)
+    }
+
+    #[test]
+    fn an_export_folder_behind_a_symbolic_link_gets_relative_paths() {
+        let (dir, real) = folder_with_an_album();
+        std::os::unix::fs::symlink(real.join("data/music/Playlists"), real.join("Playlists"))
+            .unwrap();
+        let folders = [MusicFolder::new(real.join("data/music"))];
+        let file = real.join("Playlists/Mix.m3u8");
+        let mut paths = ExportPaths::new(export_dir(&file), &folders, false);
+        let files = [gio::File::for_path(real.join("data/music/A/01.flac"))];
+        assert_eq!(
+            format_export(&files, &mut paths).0,
+            "#EXTM3U\n../A/01.flac\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_music_folder_that_is_a_symbolic_link_gets_relative_paths() {
+        let (dir, real) = folder_with_an_album();
+        // As ~/Music can lead to another drive
+        std::os::unix::fs::symlink(real.join("data/music"), real.join("Music")).unwrap();
+        let folders = [MusicFolder::new(real.join("Music"))];
+        let file = real.join("Music/Playlists/Mix.m3u8");
+        let mut paths = ExportPaths::new(export_dir(&file), &folders, false);
+        let files = [gio::File::for_path(real.join("Music/A/01.flac"))];
+        assert_eq!(
+            format_export(&files, &mut paths).0,
+            "#EXTM3U\n../A/01.flac\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The paths of an export to `dir`, outside the music folders
+    fn export_paths(dir: &Path) -> ExportPaths {
+        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        ExportPaths::new(Some(dir), &[], false)
     }
 
     // A folder with "Album.cue", which splits "Album.flac" into two tracks
