@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
   first released, and by Recorded, when it was recorded. Each falls back
   to the other dates when an album lacks its own, so both work in a
   library with only the Date tag
+- Exported playlists name each track and give its length, in an #EXTINF
+  line, which other players show, also for the tracks they can't find:
+  its artist and title from the library, or from its CUE sheet, or a
+  title from the name of its file
 - A music folder can be given another path in exported playlists, in its
   row in Preferences, for the tracks written with absolute paths: the
   path that a server mounts it at, such as /music, or that a phone or

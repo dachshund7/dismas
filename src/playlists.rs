@@ -18,8 +18,9 @@ use gtk::{gio, glib, prelude::*};
 use log::{debug, warn};
 
 use crate::{
+    audio::title_from_file_name,
     cue_sheet,
-    library::{self, MusicFolder},
+    library::{self, ExportInfo, MusicFolder},
     utils,
 };
 
@@ -582,8 +583,10 @@ pub(crate) fn export(
     options: &ExportOptions,
 ) -> Result<ExportReport, glib::Error> {
     let files = load(name).unwrap_or_default();
+    let local: Vec<PathBuf> = files.iter().filter_map(gio::File::path).collect();
+    let infos = library::export_infos(&local);
     let mut paths = ExportPaths::new(export_dir(path), options);
-    let (text, report) = format_export(&files, &mut paths);
+    let (text, report) = format_export(&files, &mut paths, &infos);
     glib::file_set_contents(path, text.as_bytes())?;
     if paths.dir.is_some() {
         return Ok(report);
@@ -594,7 +597,7 @@ pub(crate) fn export(
     if paths.dir.is_none() {
         return Ok(report);
     }
-    let (text, report) = format_export(&files, &mut paths);
+    let (text, report) = format_export(&files, &mut paths, &infos);
     glib::file_set_contents(path, text.as_bytes())?;
     Ok(report)
 }
@@ -813,33 +816,66 @@ fn format_m3u(files: &[gio::File]) -> String {
     text
 }
 
-// A playlist for other players, see `ExportPaths`. Other players can't
-// read the path under its sheet that Dismas gives a track of a CUE sheet,
-// so it's named as Strawberry names one, by the audio file the sheet
-// splits, after a line with the track's number. Most players play the
-// whole file; Strawberry and Dismas find the track
-fn format_export(files: &[gio::File], paths: &mut ExportPaths) -> (String, ExportReport) {
+// A playlist for other players, see `ExportPaths`. Each track has an
+// #EXTINF line, with its length, its artist and its title, which other
+// players show, also for a track they can't find; `infos` has what the
+// library knows. Other players can't read the path under its sheet that
+// Dismas gives a track of a CUE sheet, so it's named as Strawberry names
+// one, by the audio file the sheet splits, after a line with the track's
+// number. Most players play the whole file; Strawberry and Dismas find
+// the track
+fn format_export(
+    files: &[gio::File],
+    paths: &mut ExportPaths,
+    infos: &HashMap<PathBuf, ExportInfo>,
+) -> (String, ExportReport) {
     let mut text = String::from("#EXTM3U\n");
     let mut report = ExportReport::default();
     let mut sheets = HashMap::new();
     for file in files {
-        let cue_track = file.path().and_then(|path| {
-            let (sheet, number) = cue_sheet::missing_location_parts(&path)?;
-            Some((cue_audio_file(sheet, number, &mut sheets), number))
+        let path = file.path();
+        let cue_track = path.as_deref().and_then(|path| {
+            let (sheet, number) = cue_sheet::missing_location_parts(path)?;
+            let (audio, sheet_info) = cue_track_file(sheet, number, &mut sheets);
+            Some((sheet, number, audio, sheet_info))
         });
-        let path = match &cue_track {
-            Some((audio, _)) => Some(audio.clone()),
-            None => file.path(),
+        let named = match &cue_track {
+            Some((_, _, audio, _)) => Some(audio.clone()),
+            None => path.clone(),
         };
-        let (line, relative) = match path {
-            Some(path) => match paths.line(&path) {
+        let (line, relative) = match named {
+            Some(named) => match paths.line(&named) {
                 Some(line) => line,
                 None => continue,
             },
             // Not a local file, which other devices reach as this one does
             None => (file.uri().to_string(), true),
         };
-        if let Some((_, number)) = cue_track {
+
+        let mut info = path
+            .as_ref()
+            .and_then(|path| infos.get(path))
+            .cloned()
+            .unwrap_or_default();
+        if let Some((_, _, _, Some(sheet_info))) = &cue_track {
+            info.title = info.title.or_else(|| sheet_info.title.clone());
+            info.artist = info.artist.or_else(|| sheet_info.artist.clone());
+        }
+        if info.title.is_none() {
+            info.title = Some(match (&cue_track, &path) {
+                (Some((sheet, number, ..)), _) => {
+                    format!("{} {number:02}", title_from_file_name(sheet))
+                }
+                (None, Some(path)) => title_from_file_name(path),
+                (None, None) => file
+                    .basename()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            });
+        }
+        text.push_str(&extinf_line(&info));
+        text.push('\n');
+
+        if let Some((_, number, ..)) = cue_track {
             text.push_str(&format!("{CUE_TRACK_LINE}{number}\n"));
             report.n_cue += 1;
         }
@@ -852,20 +888,55 @@ fn format_export(files: &[gio::File], paths: &mut ExportPaths) -> (String, Expor
     (text, report)
 }
 
+// The longest artist and title an #EXTINF line has; tags can hold
+// megabytes, and players show a line of text
+const MAX_EXTINF_TEXT: usize = 1024;
+
+// "#EXTINF:<length>,<artist> - <title>", which players split at the first
+// " - ". The length is in whole seconds, as Strawberry reads no other, or
+// -1 when it's unknown, as Winamp wrote it, and which other players take
+// for unknown. The artist of a classical track is its performer, as the
+// library keeps it; the composer is often in the title
+fn extinf_line(info: &ExportInfo) -> String {
+    let clean = |text: &str| -> String {
+        text.chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect::<String>()
+            .trim()
+            .to_string()
+    };
+    let title = info.title.as_deref().map(clean).unwrap_or_default();
+    let text = match info
+        .artist
+        .as_deref()
+        .map(clean)
+        .filter(|artist| !artist.is_empty())
+    {
+        Some(artist) => format!("{artist} - {title}"),
+        None => title,
+    };
+    let text = &text[..text.floor_char_boundary(MAX_EXTINF_TEXT)];
+    let length = info
+        .length
+        .map_or_else(|| "-1".to_string(), |length| length.to_string());
+    format!("#EXTINF:{length},{text}")
+}
+
 // The file that names a track of a CUE sheet in an export: the audio file
 // of the track, which a ".cue" file names, or the audio file that has the
 // sheet in its tags. A ".cue" file that isn't there, or that can't be
-// read, names its own track. The sheets read are kept, as an album's
-// tracks share one
-fn cue_audio_file(
+// read, names its own track. With the title and the performer the sheet
+// gives the track. The sheets read are kept, as an album's tracks share
+// one
+fn cue_track_file(
     sheet: &Path,
     number: u32,
     sheets: &mut HashMap<PathBuf, Option<cue_sheet::SplitSheet>>,
-) -> PathBuf {
+) -> (PathBuf, Option<ExportInfo>) {
     if !cue_sheet::is_cue_path(sheet) {
-        return sheet.to_path_buf();
+        return (sheet.to_path_buf(), None);
     }
-    sheets
+    let track = sheets
         .entry(sheet.to_path_buf())
         .or_insert_with(|| {
             utils::guarded(
@@ -875,8 +946,18 @@ fn cue_audio_file(
             )
         })
         .as_ref()
-        .and_then(|split| split.track(number))
-        .map_or_else(|| sheet.to_path_buf(), |(_, audio)| audio.to_path_buf())
+        .and_then(|split| split.track(number));
+    match track {
+        Some((track, audio)) => (
+            audio.to_path_buf(),
+            Some(ExportInfo {
+                title: track.title.clone(),
+                artist: track.performer.clone(),
+                length: None,
+            }),
+        ),
+        None => (sheet.to_path_buf(), None),
+    }
 }
 
 // The entries of an M3U playlist, which can be URIs, or paths; relative
@@ -1029,7 +1110,7 @@ mod tests {
         let files = [gio::File::for_path("/music/a\nb.opus")];
         assert_eq!(format_m3u(&files), "#EXTM3U\n");
         assert_eq!(
-            format_export(&files, &mut export_paths(Path::new("/music"))).0,
+            exported(&files, &mut export_paths(Path::new("/music"))).0,
             "#EXTM3U\n"
         );
     }
@@ -1040,7 +1121,7 @@ mod tests {
             gio::File::for_path("/home/me/Music/Album/01 a.opus"),
             gio::File::for_path("/home/me/Other/b.flac"),
         ];
-        let (text, report) = format_export(&files, &mut export_paths(Path::new("/home/me/Music")));
+        let (text, report) = exported(&files, &mut export_paths(Path::new("/home/me/Music")));
         assert_eq!(text, "#EXTM3U\nAlbum/01 a.opus\n/home/me/Other/b.flac\n");
         assert_eq!(report.n_absolute, 1);
     }
@@ -1051,7 +1132,7 @@ mod tests {
             gio::File::for_path("/music/#1 Hits/a.opus"),
             gio::File::for_path("/music/ b.opus"),
         ];
-        let (text, _) = format_export(&files, &mut export_paths(Path::new("/music")));
+        let (text, _) = exported(&files, &mut export_paths(Path::new("/music")));
         assert_eq!(text, "#EXTM3U\n./#1 Hits/a.opus\n./ b.opus\n");
         let parsed = parse_m3u(&text, &gio::File::for_path("/music"));
         assert_eq!(paths(&parsed), paths(&files));
@@ -1077,7 +1158,7 @@ mod tests {
     fn export_writes_cue_tracks_as_strawberry_does() {
         let dir = folder_with_a_sheet();
         let files = [gio::File::for_path(dir.join("Album.cue/track02"))];
-        let (text, report) = format_export(&files, &mut export_paths(&dir));
+        let (text, report) = exported(&files, &mut export_paths(&dir));
         assert_eq!(text, "#EXTM3U\n#EXTSTRAWBERRYTRACK:2\nAlbum.flac\n");
         assert_eq!(
             report,
@@ -1092,7 +1173,7 @@ mod tests {
     #[test]
     fn export_writes_the_sheet_of_a_missing_cue_track() {
         let files = [gio::File::for_path("/gone/Album.cue/track04")];
-        let (text, report) = format_export(&files, &mut export_paths(Path::new("/gone")));
+        let (text, report) = exported(&files, &mut export_paths(Path::new("/gone")));
         assert_eq!(text, "#EXTM3U\n#EXTSTRAWBERRYTRACK:4\nAlbum.cue\n");
         assert_eq!(report.n_cue, 1);
     }
@@ -1100,7 +1181,7 @@ mod tests {
     #[test]
     fn export_of_a_sheet_in_tags_names_the_audio_file() {
         let files = [gio::File::for_path("/music/Live.flac/track12")];
-        let (text, _) = format_export(&files, &mut export_paths(Path::new("/music")));
+        let (text, _) = exported(&files, &mut export_paths(Path::new("/music")));
         assert_eq!(text, "#EXTM3U\n#EXTSTRAWBERRYTRACK:12\nLive.flac\n");
     }
 
@@ -1128,7 +1209,7 @@ mod tests {
         .map(|track| gio::File::for_path(dir.join(track)))
         .collect();
         let playlist = dir.join("Mix.m3u8");
-        let (text, _) = format_export(&files, &mut export_paths(&dir));
+        let (text, _) = exported(&files, &mut export_paths(&dir));
         assert!(
             text.contains("#EXTSTRAWBERRYTRACK:4\nSide B.flac\n"),
             "{text}"
@@ -1146,7 +1227,7 @@ mod tests {
             gio::File::for_path("/music/Live.flac/track01"),
             gio::File::for_path("/elsewhere/Live.flac/track02"),
         ];
-        let (_, report) = format_export(&files, &mut export_paths(Path::new("/music")));
+        let (_, report) = exported(&files, &mut export_paths(Path::new("/music")));
         assert_eq!(
             report,
             ExportReport {
@@ -1253,7 +1334,7 @@ mod tests {
             "/home/me/Music",
             true,
         );
-        let (text, report) = format_export(&files, &mut paths);
+        let (text, report) = exported(&files, &mut paths);
         assert_eq!(
             text,
             "#EXTM3U\n/home/me/Music/A/01.flac\n/home/me/Music/Playlists/02.flac\n"
@@ -1267,7 +1348,7 @@ mod tests {
         use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
         let path = Path::new(OsStr::from_bytes(b"/music/caf\xe9.flac"));
         let files = [gio::File::for_path(path)];
-        let (text, report) = format_export(&files, &mut export_paths(Path::new("/music")));
+        let (text, report) = exported(&files, &mut export_paths(Path::new("/music")));
         assert_eq!(text, "#EXTM3U\nfile:///music/caf%E9.flac\n");
         assert_eq!(report.n_absolute, 1);
         let parsed = parse_m3u(&text, &gio::File::for_path("/music"));
@@ -1294,10 +1375,7 @@ mod tests {
         let file = real.join("Playlists/Mix.m3u8");
         let mut paths = ExportPaths::new(export_dir(&file), &options(&folders));
         let files = [gio::File::for_path(real.join("data/music/A/01.flac"))];
-        assert_eq!(
-            format_export(&files, &mut paths).0,
-            "#EXTM3U\n../A/01.flac\n"
-        );
+        assert_eq!(exported(&files, &mut paths).0, "#EXTM3U\n../A/01.flac\n");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1310,10 +1388,106 @@ mod tests {
         let file = real.join("Music/Playlists/Mix.m3u8");
         let mut paths = ExportPaths::new(export_dir(&file), &options(&folders));
         let files = [gio::File::for_path(real.join("Music/A/01.flac"))];
-        assert_eq!(
-            format_export(&files, &mut paths).0,
-            "#EXTM3U\n../A/01.flac\n"
+        assert_eq!(exported(&files, &mut paths).0, "#EXTM3U\n../A/01.flac\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // An export without the #EXTINF lines, which other tests check
+    fn exported(files: &[gio::File], paths: &mut ExportPaths) -> (String, ExportReport) {
+        let (text, report) = format_export(files, paths, &HashMap::new());
+        let text = text
+            .lines()
+            .filter(|line| !line.starts_with("#EXTINF:"))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        (text, report)
+    }
+
+    #[test]
+    fn extinf_lines_name_the_artist_and_the_title() {
+        let info = ExportInfo {
+            title: Some("Lemon Tree".to_string()),
+            artist: Some("Fools Garden".to_string()),
+            length: Some(191),
+        };
+        assert_eq!(extinf_line(&info), "#EXTINF:191,Fools Garden - Lemon Tree");
+        let info = ExportInfo {
+            artist: None,
+            ..info
+        };
+        assert_eq!(extinf_line(&info), "#EXTINF:191,Lemon Tree");
+    }
+
+    #[test]
+    fn extinf_length_is_minus_one_when_unknown() {
+        let info = ExportInfo {
+            title: Some("Intro".to_string()),
+            ..ExportInfo::default()
+        };
+        assert_eq!(extinf_line(&info), "#EXTINF:-1,Intro");
+    }
+
+    #[test]
+    fn extinf_strips_line_breaks_and_control_characters() {
+        let info = ExportInfo {
+            title: Some("One\nTwo\r\tThree\u{7}".to_string()),
+            artist: Some(" Band\n".to_string()),
+            length: Some(5),
+        };
+        assert_eq!(extinf_line(&info), "#EXTINF:5,Band - One Two  Three");
+        let long = ExportInfo {
+            title: Some("é".repeat(MAX_EXTINF_TEXT)),
+            ..ExportInfo::default()
+        };
+        let line = extinf_line(&long);
+        assert!(
+            line.len() <= "#EXTINF:-1,".len() + MAX_EXTINF_TEXT,
+            "{}",
+            line.len()
         );
+    }
+
+    #[test]
+    fn extinf_falls_back_to_the_file_name() {
+        let files = [
+            gio::File::for_path("/music/Album/03 - Coda.flac"),
+            gio::File::for_path("/music/Live.flac/track07"),
+        ];
+        let infos = HashMap::from([(
+            PathBuf::from("/music/Album/03 - Coda.flac"),
+            ExportInfo {
+                artist: Some("Band".to_string()),
+                length: Some(60),
+                ..ExportInfo::default()
+            },
+        )]);
+        let (text, _) = format_export(&files, &mut export_paths(Path::new("/music")), &infos);
+        assert_eq!(
+            text,
+            "#EXTM3U\n#EXTINF:60,Band - Coda\nAlbum/03 - Coda.flac\n\
+             #EXTINF:-1,Live 07\n#EXTSTRAWBERRYTRACK:7\nLive.flac\n"
+        );
+    }
+
+    #[test]
+    fn extinf_comes_before_the_cue_track_line() {
+        let dir = folder_with_a_sheet();
+        std::fs::write(
+            dir.join("Album.cue"),
+            "FILE \"Album.flac\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"One\"\n    \
+             PERFORMER \"Band\"\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    \
+             INDEX 01 01:00:00\n",
+        )
+        .unwrap();
+        let files = [gio::File::for_path(dir.join("Album.cue/track01"))];
+        let (text, _) = format_export(&files, &mut export_paths(&dir), &HashMap::new());
+        assert_eq!(
+            text,
+            "#EXTM3U\n#EXTINF:-1,Band - One\n#EXTSTRAWBERRYTRACK:1\nAlbum.flac\n"
+        );
+        // Strawberry's reader and Dismas's take it back
+        let parsed = parse_m3u(&text, &gio::File::for_path(&dir));
+        assert_eq!(paths(&parsed), paths(&files));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

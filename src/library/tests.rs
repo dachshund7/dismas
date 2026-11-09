@@ -4333,6 +4333,48 @@ fn works_are_listed_with_their_recordings() {
 }
 
 #[test]
+fn export_infos_read_title_artist_and_length() {
+    let conn = test_db();
+    for (path, title, artist, fields) in [
+        (
+            "/m/A/01.flac",
+            Some("Intro"),
+            Some("Band"),
+            Some("ln\t300\n"),
+        ),
+        ("/m/A/Album.cue/track02", Some("Two"), None, Some("ln\t0\n")),
+        ("/m/A/03.flac", None, None, None),
+    ] {
+        conn.execute(
+            "INSERT INTO tracks (path, file, mtime, ctime, size, added, title, artist, fields)
+                 VALUES (?1, ?1, 0, 0, 0, 0, ?2, ?3, ?4)",
+            rusqlite::params![path.as_bytes(), title, artist, fields],
+        )
+        .unwrap();
+    }
+    let paths = [
+        "/m/A/01.flac",
+        "/m/A/Album.cue/track02",
+        "/m/A/03.flac",
+        "/m/Gone.flac",
+    ]
+    .map(PathBuf::from);
+    let infos = super::query_export_infos(&conn, &paths).unwrap();
+    assert_eq!(
+        infos[&paths[0]],
+        super::ExportInfo {
+            title: Some("Intro".to_string()),
+            artist: Some("Band".to_string()),
+            length: Some(300),
+        }
+    );
+    // A length of 0 isn't known
+    assert_eq!(infos[&paths[1]].length, None);
+    assert_eq!(infos[&paths[2]], super::ExportInfo::default());
+    assert!(!infos.contains_key(&paths[3]));
+}
+
+#[test]
 fn a_recording_is_as_long_as_its_tracks() {
     let conn = test_db();
     let length = |fields: Option<&str>| -> Option<i64> {

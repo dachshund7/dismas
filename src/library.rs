@@ -381,6 +381,52 @@ fn query_matching_tracks(
     .collect()
 }
 
+// What an exported playlist says of a track, in its #EXTINF line, as the
+// library has it: the title of its tags, its first artist, and its length
+// in seconds, if it's known
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ExportInfo {
+    pub(crate) title: Option<String>,
+    pub(crate) artist: Option<String>,
+    pub(crate) length: Option<u64>,
+}
+
+// What exported playlists say of the tracks the library has, by their
+// paths, as the queue has them. This blocks
+pub(crate) fn export_infos(paths: &[PathBuf]) -> HashMap<PathBuf, ExportInfo> {
+    query_or_default("read the tracks of an exported playlist", |conn| {
+        query_export_infos(conn, paths)
+    })
+}
+
+fn query_export_infos(
+    conn: &Connection,
+    paths: &[PathBuf],
+) -> rusqlite::Result<HashMap<PathBuf, ExportInfo>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT title, artist, dismas_length(fields) FROM tracks WHERE path = ?1",
+    )?;
+    let mut infos = HashMap::new();
+    for path in paths {
+        let info = stmt
+            .query_row([path_bytes(path)], |row| {
+                Ok(ExportInfo {
+                    title: row.get(0)?,
+                    artist: row.get(1)?,
+                    length: row
+                        .get::<_, Option<i64>>(2)?
+                        .and_then(|length| u64::try_from(length).ok())
+                        .filter(|length| *length > 0),
+                })
+            })
+            .optional()?;
+        if let Some(info) = info {
+            infos.insert(path.clone(), info);
+        }
+    }
+    Ok(infos)
+}
+
 // The files of the tracks of an album, in order; with a filter, only the
 // tracks it matches, as in `search_albums()`. The tracks in the `hidden`
 // folders are left out, as in `albums()`
