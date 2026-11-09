@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The date a recording was first released is read under the names other
+  programs give it, not only as MusicBrainz Picard writes it: ORIGINAL
+  RELEASE DATE (foobar2000), ORIGYEAR (MusicBee, Mp3tag), ORIGINAL YEAR
+  (Jaikoz, SongKong) and ORIGINALRELEASEDATE; the library is read again
+  once
+
 ### Changed
 
 - Update dependencies

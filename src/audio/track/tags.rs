@@ -150,18 +150,11 @@ impl ExtraComments {
 
     pub(super) fn from_mp4(ilst: Option<&Ilst>) -> Self {
         let get = |name: &str| {
+            let ilst = ilst?;
             [name.to_string(), name.to_uppercase()]
-                .into_iter()
-                .find_map(|name| {
-                    let ident = AtomIdent::Freeform {
-                        mean: "com.apple.iTunes".into(),
-                        name: name.into(),
-                    };
-                    ilst?.get(&ident)?.data().find_map(|data| match data {
-                        AtomData::UTF8(text) => Some(text.clone()),
-                        _ => None,
-                    })
-                })
+                .iter()
+                .find_map(|name| freeform_texts(ilst, name).next())
+                .map(ToString::to_string)
         };
         ExtraComments {
             work_hierarchy: get(WORK_HIERARCHY),
@@ -169,6 +162,22 @@ impl ExtraComments {
             ..Default::default()
         }
     }
+}
+
+// The texts of the MP4 atom of free form "----:com.apple.iTunes:<name>",
+// whose name is compared as it is
+pub(super) fn freeform_texts<'a>(ilst: &'a Ilst, name: &str) -> impl Iterator<Item = &'a str> {
+    let ident = AtomIdent::Freeform {
+        mean: "com.apple.iTunes".into(),
+        name: name.into(),
+    };
+    ilst.get(&ident)
+        .into_iter()
+        .flat_map(lofty::mp4::Atom::data)
+        .filter_map(|data| match data {
+            AtomData::UTF8(text) => Some(text.as_str()),
+            _ => None,
+        })
 }
 
 // What lofty leaves out of a file's tag: the items it has no `ItemKey` for,
@@ -195,7 +204,7 @@ impl LeftOut {
     }
 
     fn mp4(ilst: Option<&Ilst>) -> Self {
-        Self(ExtraComments::from_mp4(ilst), Fills::default())
+        Self(ExtraComments::from_mp4(ilst), Fills::from_mp4(ilst))
     }
 }
 

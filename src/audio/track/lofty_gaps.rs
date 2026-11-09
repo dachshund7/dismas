@@ -20,11 +20,27 @@ use lofty::{
     tag::SplitTag,
 };
 
-use super::*;
+use super::{tags::freeform_texts, *};
 
 const TPUB: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TPUB"));
 const TMCL: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TMCL"));
 const TIPL: FrameId<'static> = FrameId::Valid(Cow::Borrowed("TIPL"));
+
+// The names other programs give the date a recording was first released.
+// lofty 0.25.4 reads it only as MusicBrainz Picard and beets write it:
+// ORIGINALDATE or ORIGINALYEAR, the ID3v2 frames TDOR and TORY, and the MP4
+// atom "----:com.apple.iTunes:ORIGINALDATE". foobar2000 writes "ORIGINAL
+// RELEASE DATE" (and in a TXXX frame when it writes ID3v2.3), MusicBee
+// and Mp3tag "ORIGYEAR", Jaikoz and SongKong "ORIGINAL YEAR", and Roon's
+// guide to tagging names "ORIGINALRELEASEDATE". Without them, those files
+// would have no original date: the Original Release sort would fall back
+// to the date of the edition, and `original:` would find nothing
+const ORIGINAL_DATE_NAMES: [&str; 4] = [
+    "ORIGINAL RELEASE DATE",
+    "ORIGYEAR",
+    "ORIGINAL YEAR",
+    "ORIGINALRELEASEDATE",
+];
 
 // The items lofty left out of a file's tag, to add to it
 #[derive(Debug, Default)]
@@ -33,11 +49,14 @@ pub(super) struct Fills(Vec<TagItem>);
 impl Fills {
     // lofty 0.25.4 maps COMPOSERSORT in neither Vorbis comments nor APE
     // tags, though it maps the ID3v2 frame TSOC and the MP4 atom "soco" to
-    // `ComposerSortOrder`
+    // `ComposerSortOrder`. Vorbis comment names are compared ignoring case
     pub(super) fn from_vorbis(comments: Option<&VorbisComments>) -> Self {
         let mut fills = Self::default();
         if let Some(comments) = comments {
             fills.add(ItemKey::ComposerSortOrder, comments.get_all("COMPOSERSORT"));
+            for name in ORIGINAL_DATE_NAMES {
+                fills.add(ItemKey::OriginalReleaseDate, comments.get_all(name));
+            }
         }
         fills
     }
@@ -46,10 +65,27 @@ impl Fills {
     // separated by nul characters
     pub(super) fn from_ape(tag: Option<&ApeTag>) -> Self {
         let mut fills = Self::default();
-        if let Some(ItemValue::Text(text)) =
-            tag.and_then(|t| t.get("ComposerSort")).map(ApeItem::value)
-        {
-            fills.add(ItemKey::ComposerSortOrder, text.split('\0'));
+        let Some(tag) = tag else {
+            return fills;
+        };
+        let mut add = |key, name| {
+            if let Some(ItemValue::Text(text)) = tag.get(name).map(ApeItem::value) {
+                fills.add(key, text.split('\0'));
+            }
+        };
+        add(ItemKey::ComposerSortOrder, "ComposerSort");
+        for name in ORIGINAL_DATE_NAMES {
+            add(ItemKey::OriginalReleaseDate, name);
+        }
+        fills
+    }
+
+    pub(super) fn from_mp4(ilst: Option<&Ilst>) -> Self {
+        let mut fills = Self::default();
+        if let Some(ilst) = ilst {
+            for name in ORIGINAL_DATE_NAMES {
+                fills.add(ItemKey::OriginalReleaseDate, freeform_texts(ilst, name));
+            }
         }
         fills
     }
@@ -66,6 +102,10 @@ impl Fills {
             fills.add(ItemKey::Label, labels);
         }
         fills.add(ItemKey::Performer, performers(tag));
+        // The descriptions of TXXX frames are compared as they are
+        for name in ORIGINAL_DATE_NAMES {
+            fills.add(ItemKey::OriginalReleaseDate, tag.get_user_text(name));
+        }
         fills
     }
 
@@ -572,6 +612,94 @@ mod tests {
             tag.get_strings(ItemKey::ComposerSortOrder)
                 .collect::<Vec<_>>(),
             ["Elgar, Edward", "Parry, Hubert"]
+        );
+    }
+
+    // A tag of each kind with an original date under `name`, read by
+    // lofty into a `Tag`, and the fills for it
+    fn original_date_tags(name: &str, date: &str) -> [(Tag, Fills); 4] {
+        let mut comments = VorbisComments::default();
+        comments.push(name.to_string(), date.to_string());
+        let vorbis_fills = Fills::from_vorbis(Some(&comments));
+
+        let mut ape = ApeTag::new();
+        ape.insert(ApeItem::new(name.to_string(), ItemValue::Text(date.to_string())).unwrap());
+        let ape_fills = Fills::from_ape(Some(&ape));
+
+        let mut id3v2 = Id3v2Tag::new();
+        let _ = id3v2.insert_user_text(name.to_string(), date.to_string());
+        let id3v2_fills = Fills::from_id3v2(Some(&id3v2));
+
+        let mut ilst = Ilst::new();
+        ilst.insert(lofty::mp4::Atom::new(
+            AtomIdent::Freeform {
+                mean: "com.apple.iTunes".into(),
+                name: name.to_string().into(),
+            },
+            AtomData::UTF8(date.to_string()),
+        ));
+        let mp4_fills = Fills::from_mp4(Some(&ilst));
+
+        [
+            (Tag::from(comments), vorbis_fills),
+            (Tag::from(ape), ape_fills),
+            (Tag::from(id3v2), id3v2_fills),
+            (Tag::from(ilst), mp4_fills),
+        ]
+    }
+
+    #[test]
+    fn still_no_original_date_under_other_names() {
+        for name in ORIGINAL_DATE_NAMES {
+            for (tag, _) in original_date_tags(name, "1965-08-06") {
+                assert!(
+                    tag.get(ItemKey::OriginalReleaseDate).is_none(),
+                    "lofty now reads {name} as OriginalReleaseDate in {:?} tags: \
+                     drop it from ORIGINAL_DATE_NAMES there",
+                    tag.tag_type()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn original_dates_are_filled_in_under_other_names() {
+        for name in ORIGINAL_DATE_NAMES {
+            for (mut tag, fills) in original_date_tags(name, "1965-08-06") {
+                fills.apply(&mut tag);
+                assert_eq!(
+                    tag.get_string(ItemKey::OriginalReleaseDate),
+                    Some("1965-08-06"),
+                    "{name} in {:?} tags",
+                    tag.tag_type()
+                );
+            }
+        }
+        // The names of Vorbis comments and the keys of APE items are
+        // compared ignoring case
+        let [(mut vorbis, fills), (mut ape, ape_fills), ..] =
+            original_date_tags("OrigYear", "1965");
+        fills.apply(&mut vorbis);
+        ape_fills.apply(&mut ape);
+        assert_eq!(
+            vorbis.get_string(ItemKey::OriginalReleaseDate),
+            Some("1965")
+        );
+        assert_eq!(ape.get_string(ItemKey::OriginalReleaseDate), Some("1965"));
+    }
+
+    #[test]
+    fn an_original_date_lofty_reads_wins_over_the_other_names() {
+        let mut comments = VorbisComments::default();
+        comments.push("ORIGINALDATE".to_string(), "1965-08-06".to_string());
+        comments.push("ORIGYEAR".to_string(), "1987".to_string());
+        let fills = Fills::from_vorbis(Some(&comments));
+        let mut tag = Tag::from(comments);
+        fills.apply(&mut tag);
+        assert_eq!(
+            tag.get_strings(ItemKey::OriginalReleaseDate)
+                .collect::<Vec<_>>(),
+            ["1965-08-06"]
         );
     }
 
