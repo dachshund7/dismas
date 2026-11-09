@@ -770,6 +770,8 @@ impl Track {
         imp.data.replace(data);
         imp.search_key.take();
 
+        // A track found where it moved has another file
+        self.notify_uri();
         self.notify_artist();
         self.notify_title();
         self.notify_album();

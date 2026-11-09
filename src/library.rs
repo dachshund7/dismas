@@ -381,6 +381,16 @@ fn query_matching_tracks(
     .collect()
 }
 
+// The paths of all the tracks of the library, to find where tracks moved,
+// see `playlists::LibraryIndex`. This blocks
+pub(crate) fn track_paths() -> Vec<PathBuf> {
+    query_or_default("read the paths of the library's tracks", |conn| {
+        conn.prepare("SELECT path FROM tracks")?
+            .query_map([], |row| Ok(path_from_bytes(row.get(0)?)))?
+            .collect()
+    })
+}
+
 // What an exported playlist says of a track, in its #EXTINF line, as the
 // library has it: the title of its tags, its first artist, and its length
 // in seconds, if it's known

@@ -83,6 +83,13 @@ fn invalid_name_error(name: &str) -> glib::Error {
     )
 }
 
+fn unreadable_error(name: &str) -> glib::Error {
+    glib::Error::new(
+        gio::IOErrorEnum::Failed,
+        &format!("Unable to read the playlist {name:?}"),
+    )
+}
+
 // The names of the saved playlists, in alphabetical order
 pub(crate) fn names() -> Vec<String> {
     let mut names = names_in(&playlists_dir());
@@ -276,14 +283,109 @@ pub(crate) fn append(name: &str, files: &[gio::File]) -> Result<(), glib::Error>
 
 fn append_in(dir: &Path, name: &str, files: &[gio::File]) -> Result<(), glib::Error> {
     let path = path_in(dir, name).ok_or_else(|| invalid_name_error(name))?;
-    let mut tracks = load_in(dir, name).ok_or_else(|| {
-        glib::Error::new(
-            gio::IOErrorEnum::Failed,
-            &format!("Unable to read the playlist {name:?}"),
-        )
-    })?;
+    let mut tracks = load_in(dir, name).ok_or_else(|| unreadable_error(name))?;
     tracks.extend_from_slice(files);
     write_path(&path, &tracks)
+}
+
+// Where the missing tracks of a playlist of Dismas's own moved, by their
+// paths: looked for in the music folders as those of an imported
+// playlist are, see `Finder`, but not in the playlist's folder, which
+// isn't the music's, and then among the library's tracks, see
+// `LibraryIndex`, which `library` makes once the Finder misses a track,
+// as it reads every track of the library. The tracks found, with the path
+// each has now. A path that isn't UTF-8 isn't looked for, as names are
+// compared as text. This blocks
+pub(crate) fn find_moved(
+    paths: &[PathBuf],
+    music_folders: &[PathBuf],
+    library: impl FnOnce() -> LibraryIndex,
+) -> Vec<(PathBuf, PathBuf)> {
+    let library = std::cell::LazyCell::new(library);
+    let mut finder = Finder::default();
+    paths
+        .iter()
+        .filter_map(|path| {
+            let found = finder
+                .find(path.to_str()?, None, music_folders)
+                .or_else(|| library.find(path))?;
+            (found != *path).then(|| (path.clone(), found))
+        })
+        .collect()
+}
+
+// The library's tracks by the names of their folder and their file, and
+// their number in a CUE sheet, to find a track whose folders above its own
+// were renamed, such as its artist's: the Finder only finds a track whose
+// path ends as it did in a music folder, as when the music moved to
+// another drive. Names are compared as the Finder compares them
+#[derive(Debug, Default)]
+pub(crate) struct LibraryIndex(HashMap<(String, String, Option<u32>), Vec<PathBuf>>);
+
+impl LibraryIndex {
+    pub(crate) fn new(paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        let mut index: HashMap<_, Vec<PathBuf>> = HashMap::new();
+        for path in paths {
+            if let Some(key) = index_key(&path) {
+                index.entry(key).or_default().push(path);
+            }
+        }
+        Self(index)
+    }
+
+    // The one track of the library that's there with the names of `path`;
+    // with two, as two albums can have the same folder and file names,
+    // neither is taken. This blocks
+    fn find(&self, path: &Path) -> Option<PathBuf> {
+        let candidates: Vec<&PathBuf> = self
+            .0
+            .get(&index_key(path)?)?
+            .iter()
+            .filter(|candidate| *candidate != path && cue_sheet::location_exists(candidate))
+            .collect();
+        match candidates[..] {
+            [found] => Some(found.clone()),
+            _ => None,
+        }
+    }
+}
+
+fn index_key(path: &Path) -> Option<(String, String, Option<u32>)> {
+    let (file, number) = match cue_sheet::missing_location_parts(path) {
+        Some((sheet, number)) => (sheet, Some(number)),
+        None => (path, None),
+    };
+    let name = folded(file.file_name()?.to_str()?);
+    let folder = folded(file.parent()?.file_name()?.to_str()?);
+    Some((folder, name, number))
+}
+
+// Puts the tracks that moved in their places in a playlist's file, and in
+// its order from before it was shuffled, by the URIs they had
+pub(crate) fn relocate(name: &str, moved: &HashMap<String, gio::File>) -> Result<(), glib::Error> {
+    let files = load(name).ok_or_else(|| unreadable_error(name))?;
+    write(name, &relocated(files, moved))?;
+    relocate_unshuffled(name, moved)
+}
+
+// Puts the tracks that moved in their places in a playlist's order from
+// before it was shuffled, if it was, as its tracks are put back in that
+// order by their URIs
+pub(crate) fn relocate_unshuffled(
+    name: &str,
+    moved: &HashMap<String, gio::File>,
+) -> Result<(), glib::Error> {
+    match load_unshuffled(name) {
+        Some(files) => save_unshuffled(name, &relocated(files, moved)),
+        None => Ok(()),
+    }
+}
+
+fn relocated(files: Vec<gio::File>, moved: &HashMap<String, gio::File>) -> Vec<gio::File> {
+    files
+        .into_iter()
+        .map(|file| moved.get(file.uri().as_str()).cloned().unwrap_or(file))
+        .collect()
 }
 
 // The tracks of an M3U playlist anywhere. Playlists written on Windows
@@ -1896,6 +1998,110 @@ mod tests {
         )
         .is_none()));
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn find_moved_looks_only_in_the_music_folders() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Artist/Album")).unwrap();
+        std::fs::write(music.join("Artist/Album/01.flac"), b"").unwrap();
+        // A bare name next to the playlists isn't one of their tracks
+        std::fs::write(dir.join("02.flac"), b"").unwrap();
+        let old = |path: &str| PathBuf::from(format!("/home/me/Old Music/{path}"));
+        let moved = find_moved(
+            &[
+                old("Artist/Album/01.flac"),
+                old("02.flac"),
+                old("Gone/03.flac"),
+            ],
+            std::slice::from_ref(&music),
+            LibraryIndex::default,
+        );
+        assert_eq!(
+            moved,
+            [(
+                old("Artist/Album/01.flac"),
+                music.join("Artist/Album/01.flac")
+            )]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn find_moved_finds_tracks_of_cue_sheets() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        std::fs::create_dir_all(music.join("Artist/Album")).unwrap();
+        std::fs::write(music.join("Artist/Album/Album.cue"), b"").unwrap();
+        let old = PathBuf::from("/old/Artist/Album/Album.cue/track03");
+        let moved = find_moved(
+            std::slice::from_ref(&old),
+            std::slice::from_ref(&music),
+            LibraryIndex::default,
+        );
+        assert_eq!(moved, [(old, music.join("Artist/Album/Album.cue/track03"))]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn relocating_puts_tracks_in_their_places() {
+        let moved = HashMap::from([(
+            gio::File::for_path("/old/b.flac").uri().to_string(),
+            gio::File::for_path("/new/b.flac"),
+        )]);
+        let files = ["/a.flac", "/old/b.flac", "/c.flac", "/old/b.flac"].map(gio::File::for_path);
+        assert_eq!(
+            paths(&relocated(files.to_vec(), &moved)),
+            ["/a.flac", "/new/b.flac", "/c.flac", "/new/b.flac"]
+        );
+    }
+
+    #[test]
+    fn find_moved_finds_tracks_whose_folders_above_were_renamed() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        let track = music.join("New Name/Quartet/02.flac");
+        let sheet = music.join("New Name/Live/Live.cue");
+        std::fs::create_dir_all(track.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(sheet.parent().unwrap()).unwrap();
+        std::fs::write(&track, b"").unwrap();
+        std::fs::write(&sheet, b"").unwrap();
+        let old_track = music.join("Old Name/Quartet/02.flac");
+        let old_sheet = music.join("Old Name/Live/Live.cue/track03");
+        // The library still has the old paths, until it's scanned again
+        let library = LibraryIndex::new([
+            track.clone(),
+            sheet.join("track03"),
+            sheet.join("track04"),
+            old_track.clone(),
+        ]);
+        let moved = find_moved(
+            &[old_track.clone(), old_sheet.clone()],
+            std::slice::from_ref(&music),
+            || library,
+        );
+        assert_eq!(
+            moved,
+            [(old_track, track), (old_sheet, sheet.join("track03"))]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn find_moved_turns_down_tracks_found_twice_in_the_library() {
+        let dir = glib::mkdtemp(std::env::temp_dir().join("dismas-test-XXXXXX")).unwrap();
+        let music = dir.join("Music");
+        let one = music.join("Artist/Disc 1/01.flac");
+        let other = music.join("Other Artist/DISC 1/01.flac");
+        for path in [&one, &other] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+        let library = LibraryIndex::new([one, other]);
+        let old = PathBuf::from("/old/Gone/Disc 1/01.flac");
+        assert!(find_moved(&[old], std::slice::from_ref(&music), || library).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

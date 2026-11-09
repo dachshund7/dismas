@@ -98,6 +98,16 @@ impl ResumePoints {
         self.0.remove(playlist);
     }
 
+    // A point at a track that moved, which Find Missing Tracks found, goes
+    // with it to its new file
+    pub(crate) fn relocate(&mut self, playlist: &str, moved: &HashMap<String, gio::File>) {
+        if let Some(point) = self.0.get_mut(playlist)
+            && let Some(file) = moved.get(&point.uri)
+        {
+            point.uri = file.uri().to_string();
+        }
+    }
+
     // The point follows the playlist to its new name
     pub(crate) fn rename(&mut self, playlist: &str, new_name: &str) {
         if let Some(point) = self.0.remove(playlist) {
@@ -123,6 +133,25 @@ impl ResumePoints {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relocating_moves_resume_points() {
+        let mut points = ResumePoints(HashMap::from([
+            ("Mix".to_string(), point("file:///old/a.flac", 3)),
+            ("Other".to_string(), point("file:///old/a.flac", 3)),
+            (String::new(), point("file:///old/b.flac", 1)),
+        ]));
+        let moved = HashMap::from([(
+            "file:///old/a.flac".to_string(),
+            gio::File::for_path("/new/a.flac"),
+        )]);
+        points.relocate("Mix", &moved);
+        points.relocate("", &moved);
+        assert_eq!(points.get("Mix"), Some(&point("file:///new/a.flac", 3)));
+        // Only the playlist whose tracks moved, and the points at them
+        assert_eq!(points.get("Other"), Some(&point("file:///old/a.flac", 3)));
+        assert_eq!(points.get(""), Some(&point("file:///old/b.flac", 1)));
+    }
 
     fn point(uri: &str, index: u32) -> ResumePoint {
         ResumePoint {

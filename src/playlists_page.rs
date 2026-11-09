@@ -155,8 +155,8 @@ fn menu_button_in(widget: &gtk::Widget) -> Option<gtk::MenuButton> {
 }
 
 // The menu of a playlist; `name` is empty for the queue, which can't be
-// renamed or deleted, only saved as a playlist or exported. One that isn't
-// `selected` can be switched to
+// renamed or deleted, only saved as a playlist, exported, or have its
+// missing tracks looked for. One that isn't `selected` can be switched to
 fn playlist_menu_button(title: &str, name: &str, selected: bool) -> gtk::MenuButton {
     let target = name.to_variant();
     let menu = gio::Menu::new();
@@ -175,6 +175,9 @@ fn playlist_menu_button(title: &str, name: &str, selected: bool) -> gtk::MenuBut
     let export = gio::MenuItem::new(Some(&i18n("_Export…")), None);
     export.set_action_and_target_value(Some("win.export-playlist"), Some(&target));
     menu.append_item(&export);
+    let find_missing = gio::MenuItem::new(Some(&i18n("Find _Missing Tracks")), None);
+    find_missing.set_action_and_target_value(Some("win.find-missing-tracks"), Some(&target));
+    menu.append_item(&find_missing);
     if !name.is_empty() {
         let delete = gio::MenuItem::new(Some(&i18n("_Delete…")), None);
         delete.set_action_and_target_value(Some("win.delete-playlist"), Some(&target));

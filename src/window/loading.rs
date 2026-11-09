@@ -69,7 +69,7 @@ impl Window {
 
     // Once a load is done, runs what waited for it, in the order asked,
     // until one of them reads tracks in turn, which the rest wait for
-    fn run_after_loads(&self) {
+    pub(super) fn run_after_loads(&self) {
         while self.imp().loads.get() == 0 {
             let Some(f) = self.imp().after_loads.borrow_mut().pop_front() else {
                 return;
@@ -157,7 +157,7 @@ impl Window {
     // The actions on the queue and on playlists are off while tracks are
     // read; what's asked for meanwhile in other ways waits, see
     // `after_loads()`
-    fn set_loading(&self, loading: bool) {
+    pub(super) fn set_loading(&self, loading: bool) {
         let imp = self.imp();
         let loads = imp.loads.get();
         let loads = if loading {
@@ -180,6 +180,7 @@ impl Window {
             "win.rename-playlist",
             "win.delete-playlist",
             "win.save-queue",
+            "win.find-missing-tracks",
         ] {
             self.action_set_enabled(action, !loading);
         }
@@ -662,7 +663,7 @@ impl Window {
 
     // Shows the tags of a track that were read again, in the lists and, if
     // it's the playing track, in the player
-    fn show_updated_track(&self, track: &Track) {
+    pub(super) fn show_updated_track(&self, track: &Track) {
         // The cover can have changed without its id, which is the album's
         self.imp().full_cover.take();
         let player = self.player();

@@ -50,6 +50,7 @@ src/window/adding.rs
 src/window/albums.rs
 src/window/booklets.rs
 src/window/favorites.rs
+src/window/find_missing.rs
 src/window/loading.rs
 src/window/now_playing.rs
 src/window/playlist.rs

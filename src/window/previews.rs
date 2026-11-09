@@ -47,7 +47,7 @@ impl Window {
     }
 
     // Whether this playlist is being read for the tracks page
-    fn reading_preview_of(&self, name: &str) -> bool {
+    pub(super) fn reading_preview_of(&self, name: &str) -> bool {
         self.imp().shown_reading.borrow().as_deref() == Some(name)
     }
 

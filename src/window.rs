@@ -7,6 +7,7 @@ mod bindings;
 mod booklets;
 mod favorites;
 mod find;
+mod find_missing;
 mod fullscreen;
 mod loading;
 mod now_playing;
@@ -535,6 +536,17 @@ mod imp {
                     debug!("Window::win.export-playlist()");
                     if let Some(name) = param.and_then(|p| p.get::<String>()) {
                         win.export_playlist(&name).await;
+                    }
+                },
+            );
+            // On the class, so that other programs can't change playlists
+            klass.install_action(
+                "win.find-missing-tracks",
+                Some(glib::VariantTy::STRING),
+                move |win, _, param| {
+                    debug!("Window::win.find-missing-tracks()");
+                    if let Some(name) = param.and_then(String::from_variant) {
+                        win.find_missing_tracks(&name);
                     }
                 },
             );

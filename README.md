@@ -78,7 +78,8 @@ Features
   Playlists page shows a playlist's tracks in the pane
   while the music goes on. Each playlist resumes where it was, when you switch
   back to it and when Dismas starts, and tracks whose files are missing stay
-  in their places, greyed out, until they're back.
+  in their places, greyed out, until they're back, or until Find Missing
+  Tracks finds where they moved in the music folders.
 - **Smart playlists and favorites:** Recently Played, Most Played and Not
   Heard Lately pick tracks from what you've listened to. Mark tracks, albums,
   works and recordings as favorites, and play a random album, track or work,

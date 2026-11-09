@@ -15,6 +15,13 @@ All notable changes to this project will be documented in this file.
   first released, and by Recorded, when it was recorded. Each falls back
   to the other dates when an album lacks its own, so both work in a
   library with only the Date tag
+- Find Missing Tracks, in a playlist's menu on the Playlists page, looks
+  for the tracks whose files are gone: in the music folders, as an
+  imported playlist's tracks are looked for, as when the music moved to
+  another drive, and among the library's tracks, by the names of their
+  folder and file, as when an artist's folder was renamed. It puts the
+  ones it finds back in their places; their play history stays with the
+  old files
 - Exported playlists name each track and give its length, in an #EXTINF
   line, which other players show, also for the tracks they can't find:
   its artist and title from the library, or from its CUE sheet, or a
