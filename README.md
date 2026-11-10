@@ -94,9 +94,9 @@ Features
   recordings that run into each other aren't cut by a gap.
 - **Shuffle:** it goes by what you've heard. Tracks heard in the last few days
   tend to go toward the end, and tracks played often but not heard for a while
-  tend to come early. The movements of a work stay together and in order, the
-  same artist doesn't come twice in a row, and turning shuffle off puts back
-  the order from before.
+  tend to come early. The movements of a work stay together and in order, and
+  the same artist doesn't come twice in a row unless most of the tracks are by
+  that artist. Turning shuffle off puts back the order from before.
 - **ReplayGain:** choose Album, Track, or Automatic, which takes the album gain
   while an album plays in order and the track gain otherwise, and set a
   pre-amp. Dismas reads ReplayGain tags and the R128 gains of Opus files. It
@@ -260,9 +260,11 @@ regular Flatpak, with its own library, playlists, play history and settings.
 Each CI run on GitHub also makes one, as `dismas-devel.flatpak` in the run's
 artifacts; install it with `flatpak install --user dismas-devel.flatpak`.
 
-Dismas can be installed next to Amberol. On its first run, it copies Amberol's
-library, queue, playlists and settings, if it finds them, and leaves Amberol's
-own copies alone.
+Dismas can be installed next to Amberol. On its first run, if Amberol is
+installed, Dismas takes the settings that both apps have and that were changed
+in Amberol: the window size, Match Cover Art, ReplayGain and background
+playback. Amberol's own settings are left alone, and the queue it saved isn't
+brought over.
 
 For a full debug log, run:
 
@@ -304,8 +306,8 @@ Dismas installed without Flatpak can:
   as outside the sandbox, as the portal tells where it saved the file.
 - Its library, playlists and settings are in
   `~/.var/app/io.github.dachshund7.Dismas/`, apart from those of Dismas
-  installed without Flatpak. It can't reach Amberol's, so it doesn't copy them
-  on its first run.
+  installed without Flatpak. It can't reach Amberol's settings, so it doesn't
+  copy them on its first run.
 
 Contributing
 ------------

@@ -5,7 +5,8 @@ QA Plan
 -------
 
 1. First run
-  - Copying Amberol's library, queue, playlists and settings
+  - Copying Amberol's changed settings (window size, Match Cover Art,
+    ReplayGain, background playback), when Amberol is installed
   - Scanning the Music folder
 2. Albums and works
   - Sorting: artist, title, year, date added

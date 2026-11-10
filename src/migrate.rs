@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026  John Hamilton
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Bringing over the data and settings of Amberol, which Dismas is a fork of
+//! Bringing over the settings of Amberol, which Dismas is a fork of, and the
+//! data of this fork's builds from before it was renamed Dismas
 
 use std::{fs, io, path::Path};
 
@@ -15,12 +16,17 @@ const AMBEROL_SCHEMA: &str = "io.bassi.Amberol";
 const MIGRATED_KEY: &str = "amberol-migrated";
 
 // The files that Dismas keeps in its data directory; the directory itself
-// can exist before the first run, when the app is installed in ~/.local
+// can exist before the first run, when the app is installed in ~/.local.
+// Amberol writes none of them: they're in its folder when they come from
+// this fork's builds from before the rename, which still went by Amberol's
+// name
 const DATA_FILES: [&str; 4] = ["library.db", "library.db-wal", "queue.m3u8", "playlists"];
 
-// On the first run, copies the library, the queue and the playlists of
-// Amberol, and the settings that were changed in it. Amberol's own copies
-// are left alone, and the caches are made again as they're needed. It's
+// On the first run, copies the settings that were changed in Amberol, and
+// the library, the queue and the playlists of this fork's builds from
+// before the rename. Amberol itself has no library or playlists, and the
+// queue it saves in its cache (current.pls) isn't read. The originals are
+// left alone, and the caches are made again as they're needed. It's
 // recorded in the settings, which outlive the data folder: once Dismas has
 // settings of its own, Amberol's must not come back over them
 pub(crate) fn migrate_from_amberol() {

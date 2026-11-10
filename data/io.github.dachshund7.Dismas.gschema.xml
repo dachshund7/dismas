@@ -174,8 +174,8 @@
 	  </key>
 	  <key name="amberol-migrated" type="b">
 	    <default>false</default>
-	    <summary>Whether the data of Amberol was looked for</summary>
-	    <description>Set once the first run has copied the library, the queue, the playlists and the changed settings of Amberol, or found none, so that they are never copied again over those of Dismas</description>
+	    <summary>Whether the settings of Amberol were looked for</summary>
+	    <description>Set once the first run has copied the changed settings of Amberol, and the library, the queue and the playlists of the builds from before the rename to Dismas, or found none, so that they are never copied again over those of Dismas</description>
 	  </key>
 	</schema>
 </schemalist>
