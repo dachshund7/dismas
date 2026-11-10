@@ -75,7 +75,6 @@
   <url type="homepage">https://github.com/dachshund7/dismas</url>
   <url type="bugtracker">https://github.com/dachshund7/dismas/issues</url>
   <url type="vcs-browser">https://github.com/dachshund7/dismas</url>
-  <developer_name>John Hamilton</developer_name>
   <developer id="io.github.dachshund7">
     <name>John Hamilton</name>
   </developer>
