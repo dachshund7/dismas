@@ -96,6 +96,21 @@
   </kudos>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="2026.11.2" date="2026-11-09">
+      <description>
+        <p>Playlists that phones and servers can read, Find Missing Tracks, and album sorts by when the music was released, first released and recorded.</p>
+        <ul>
+          <li>Keep a copy of a playlist up to date in an export folder, such as a Playlists folder in the music folder</li>
+          <li>Exported playlists name their tracks by paths relative to the playlist, as phones and servers such as Navidrome need, and give each track's name and length</li>
+          <li>Give a music folder the path that a server, a phone or Windows knows it by, for playlists with absolute paths</li>
+          <li>Find the missing tracks of a playlist where they moved</li>
+          <li>Sort the albums and the playlist by Released, Original Release or Recorded</li>
+          <li>Find Track Information and Go to Work in the player's More menu</li>
+          <li>Show the whole album when only its matching tracks are listed</li>
+          <li>Search for a month or a day with year:, as in year:1965-03</li>
+        </ul>
+      </description>
+    </release>
     <release version="2026.11.1" date="2026-11-05">
       <description>
         <p>Playlist previews, a Tracks toggle, artists in the Performers list, more for the desktop's media controls, and a sandbox for reading files.</p>

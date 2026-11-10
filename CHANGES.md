@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.11.2] - 2026-11-09
+
+### Added
+
 - The date a recording was first released is read under the names other
   programs give it, not only as MusicBrainz Picard writes it: ORIGINAL
   RELEASE DATE (foobar2000), ORIGYEAR (MusicBee, Mp3tag), ORIGINAL YEAR
@@ -129,8 +139,9 @@ All notable changes to this project will be documented in this file.
   More menu looks them up when the track starts. An item found later
   only comes in at the end of a menu, as an album's Open Booklet does,
   or, in the More menu, the next time it opens
-
-### Removed
+- Exporting a playlist into a music folder started a scan of the
+  library, which reads no playlists, as the folder watch took a change to
+  any file there for a change to the music
 
 ## [2026.11.1] - 2026-11-05
 
