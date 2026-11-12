@@ -56,8 +56,9 @@ jobs:
 
       # The bundle is built from its sources alone, without the action's
       # cache of .flatpak-builder: that cache would be restored from the
-      # runs of ci.yml on main, whose actions aren't pinned, and one whose
-      # tag was moved to other code could have saved its own build there.
+      # runs of ci.yml on main, and carries over what they built, so a
+      # crate or an action that had been changed in one of them, and was
+      # dropped or updated since, could still be in the release's bundle.
       # cache: false neither restores nor saves it, and restore-cache: false
       # turns the restoring off as well, in case the action reads it alone.
       # The action uploads the bundle in the artifacts of the run
@@ -69,11 +70,11 @@ jobs:
           restore-cache: false
 
   # The binary links the system's libraries, so it's built on Fedora, as in
-  # ci.yml; make-tarball.sh fails if it needs a newer glibc than the
-  # distributions with GNOME 49's libraries have
+  # ci.yml, in the same release of it; make-tarball.sh fails if it needs a
+  # newer glibc than the distributions with GNOME 49's libraries have
   tarball:
     runs-on: ubuntu-latest
-    container: fedora:latest
+    container: fedora:45
     steps:
       # desktop-file-utils has update-desktop-database, which Meson looks for
       # at setup (gnome.post_install in meson.build), even though it doesn't

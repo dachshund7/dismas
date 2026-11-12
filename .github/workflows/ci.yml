@@ -58,10 +58,13 @@ jobs:
 
   # The build of the app, clippy, the unit tests, and the validation of the
   # desktop file, the metainfo and the settings schema. The app needs a
-  # newer GTK and libadwaita than Ubuntu has, so these run in Fedora
+  # newer GTK and libadwaita than Ubuntu has, so these run in Fedora. Its
+  # release is named rather than latest, and moved to each new one by hand
+  # (RELEASING.md), so that a new Fedora, with a newer glibc and new clippy
+  # lints, doesn't arrive in the middle of a release
   build:
     runs-on: ubuntu-latest
-    container: fedora:latest
+    container: fedora:45
     steps:
       - name: Install dependencies
         run: >

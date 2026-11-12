@@ -127,10 +127,15 @@ next one, so that the new versions are used for a month before they ship:
   chapter frames nest itself
 - [ ] Update the actions in `.github/workflows/`, in all the files
   together, to releases at least two weeks old: pinned to the release's
-  commit, with the release in the comment
+  commit, with the release in the comment. The Advisories workflow's zizmor
+  job checks each commit against the release its comment names; to check
+  them before pushing, run `GH_TOKEN=$(gh auth token) zizmor
+  .github/workflows/`
 - [ ] When a new GNOME runtime is out (in March and September), move the
   `runtime-version` of both Flatpak manifests and the `gnome-NN` image of
   the CI and Release workflows to it, together
+- [ ] When a new Fedora is out (in April and October), move the
+  `fedora:NN` image of the CI and Release workflows to it, together
 
 When the Advisories workflow fails, read the advisory:
 
